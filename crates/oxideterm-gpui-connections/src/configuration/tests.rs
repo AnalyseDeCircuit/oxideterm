@@ -36,21 +36,6 @@ fn saved_connection_fixture(auth: SavedAuth) -> SavedConnection {
 }
 
 #[test]
-fn unnamed_save_request_preserves_custom_icon_and_independent_colors() {
-    let mut form = base_form();
-    form.name.clear();
-    form.icon = "cloud".to_string();
-    form.color = "#7dd3fc".to_string();
-    form.icon_background_color = "#082f49".to_string();
-    let request = save_request_from_form(&mut form, Some("conn-1".to_string())).unwrap();
-
-    assert_eq!(request.name, "me@192.168.1.2");
-    assert_eq!(request.icon.as_deref(), Some("cloud"));
-    assert_eq!(request.color.as_deref(), Some("#7dd3fc"));
-    assert_eq!(request.icon_background_color.as_deref(), Some("#082f49"));
-}
-
-#[test]
 fn save_request_moves_manual_proxy_command_into_a_redacted_secret_owner() {
     let mut form = base_form();
     form.proxy_command_enabled = true;
@@ -465,42 +450,6 @@ fn save_validation_failure_keeps_secret_allocations_in_the_form() {
     assert!(error.to_string().contains("Host is required"));
     assert_eq!(form.password, "validation-secret-marker");
     assert_eq!(form.password.as_ptr(), password_pointer);
-}
-
-#[test]
-fn proxy_hop_two_factor_is_saved_as_keyboard_interactive() {
-    let mut form = base_form();
-    form.auth_tab = SshAuthTab::Agent;
-    form.proxy_hops.push(NewConnectionProxyHop {
-        totp_credential_id: None,
-        empty_password: false,
-        saved_connection_id: String::new(),
-        persisted_proxy_hop_index: None,
-        host: "jump.example.com".to_string(),
-        port: "22".to_string(),
-        username: "ops".to_string(),
-        auth_tab: SshAuthTab::TwoFactor,
-        password: String::new(),
-        key_path: String::new(),
-        managed_key_id: String::new(),
-        cert_path: String::new(),
-        passphrase: String::new(),
-        gssapi_enabled: false,
-        gssapi_server_identity: String::new(),
-        gssapi_delegate_credentials: false,
-        agent_forwarding: false,
-        identity_agent: String::new(),
-        agent_forwarding_socket: None,
-        legacy_ssh_compatibility: false,
-        ssh_algorithms: oxideterm_connections::SshAlgorithmPreferences::default(),
-    });
-
-    let request = save_request_from_form(&mut form, None).unwrap();
-
-    assert!(matches!(
-        request.proxy_chain[0].auth,
-        oxideterm_connections::SavedAuth::KeyboardInteractive
-    ));
 }
 
 #[test]

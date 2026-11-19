@@ -435,7 +435,16 @@ impl Render for TerminalPane {
                 && self.command_actions_available(terminal_mode);
         let command_actions_visible = self.command_actions_available(terminal_mode);
         if self.command_marks_render_cache_dirty {
-            self.command_marks_render_cache = Arc::from(self.command_marks.clone());
+            // Keep a stable mark snapshot while only the viewport or animation changes.
+            self.command_marks_render_cache = if self.folding_active() {
+                self.command_marks
+                    .iter()
+                    .cloned()
+                    .map(|mark| self.displayed_command_mark(mark))
+                    .collect()
+            } else {
+                Arc::from(self.command_marks.clone())
+            };
             self.command_marks_render_cache_dirty = false;
         }
         let selected_command_mark_id = if command_actions_visible {
@@ -485,15 +494,7 @@ impl Render for TerminalPane {
         .selection_highlight_query(selection_highlight_query)
         .command_marks(
             if command_actions_visible {
-                if self.folding_active() {
-                    self.command_marks
-                        .iter()
-                        .cloned()
-                        .map(|mark| self.displayed_command_mark(mark))
-                        .collect()
-                } else {
-                    self.command_marks_render_cache.clone()
-                }
+                self.command_marks_render_cache.clone()
             } else {
                 Arc::from([])
             },

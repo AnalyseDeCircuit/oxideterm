@@ -43,6 +43,7 @@ oxideterm-desktop-presence = { path = "../oxideterm-desktop-presence" }
 oxideterm-editor-core = { path = "../oxideterm-editor-core" }
 oxideterm-forwarding = { path = "../oxideterm-forwarding" }
 oxideterm-gpui-cloud-sync = { path = "../oxideterm-gpui-cloud-sync" }
+oxideterm-gpui-audit = { path = "../oxideterm-gpui-audit" }
 oxideterm-gpui-connections = { path = "../oxideterm-gpui-connections" }
 oxideterm-gpui-forwards = { path = "../oxideterm-gpui-forwards" }
 oxideterm-gpui-editor = { path = "../oxideterm-gpui-editor" }
@@ -51,6 +52,7 @@ oxideterm-gpui-ide = { path = "../oxideterm-gpui-ide" }
 oxideterm-gpui-markdown = { path = "../oxideterm-gpui-markdown" }
 oxideterm-gpui-file-manager = { path = "../oxideterm-gpui-file-manager" }
 oxideterm-gpui-onboarding = { path = "../oxideterm-gpui-onboarding" }
+oxideterm-gpui-quick-commands = { path = "../oxideterm-gpui-quick-commands" }
 oxideterm-gpui-platform = { path = "../oxideterm-gpui-platform" }
 oxideterm-gpui-remote-desktop = { path = "../oxideterm-gpui-remote-desktop" }
 oxideterm-gpui-settings-view = { path = "../oxideterm-gpui-settings-view" }

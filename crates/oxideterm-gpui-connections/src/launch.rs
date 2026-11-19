@@ -107,6 +107,59 @@ pub struct MoshConnectionOptions {
     pub runtime_connection_attempt_id: Option<String>,
 }
 
+impl MoshConnectionOptions {
+    pub fn into_verified_terminal(self, ssh: SshConfig) -> VerifiedMoshTerminal {
+        let mut bootstrap = oxideterm_mosh::MoshBootstrapConfig::new("pending", ssh);
+        bootstrap.server_executable = self.server_executable;
+        bootstrap.udp_host_override = self.udp_host_override;
+        bootstrap.udp_port = match self.udp_port {
+            SavedMoshUdpPortSelection::Automatic => {
+                oxideterm_mosh::MoshUdpPortSelection::Automatic
+            }
+            SavedMoshUdpPortSelection::Fixed { port } => {
+                oxideterm_mosh::MoshUdpPortSelection::Fixed(port)
+            }
+            SavedMoshUdpPortSelection::Range { start, end } => {
+                oxideterm_mosh::MoshUdpPortSelection::Range { start, end }
+            }
+        };
+        bootstrap.ip_family = match self.ip_family {
+            SavedMoshIpFamily::Auto => oxideterm_mosh::MoshIpFamily::Auto,
+            SavedMoshIpFamily::Ipv4 => oxideterm_mosh::MoshIpFamily::Ipv4,
+            SavedMoshIpFamily::Ipv6 => oxideterm_mosh::MoshIpFamily::Ipv6,
+        };
+        bootstrap.locale_assignments = self
+            .locale
+            .filter(|locale| !locale.trim().is_empty())
+            .map(|locale| vec![("LANG".to_string(), locale)])
+            .unwrap_or_default();
+        let prediction = match self.prediction {
+            MoshPredictionMode::Adaptive => {
+                oxideterm_terminal::MoshPredictionDisplay::Adaptive
+            }
+            MoshPredictionMode::Always => {
+                oxideterm_terminal::MoshPredictionDisplay::Always
+            }
+            MoshPredictionMode::Never => {
+                oxideterm_terminal::MoshPredictionDisplay::Never
+            }
+        };
+        VerifiedMoshTerminal {
+            bootstrap,
+            prediction,
+            terminal: self.terminal,
+            saved_profile_id: self.saved_profile_id,
+        }
+    }
+}
+
+pub struct VerifiedMoshTerminal {
+    pub bootstrap: oxideterm_mosh::MoshBootstrapConfig,
+    pub prediction: oxideterm_terminal::MoshPredictionDisplay,
+    pub terminal: ConnectionTerminalOptions,
+    pub saved_profile_id: Option<String>,
+}
+
 pub enum SshConnectionWorkerResult {
     Preflight {
         config: SshConfig,

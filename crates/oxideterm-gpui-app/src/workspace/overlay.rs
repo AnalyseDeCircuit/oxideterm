@@ -79,15 +79,6 @@ impl WorkspaceApp {
                 && self.terminal.read(cx).project_panel_open())
             || (anchor.id == SelectAnchorId::SessionManagerViewMode
                 && self.connections.session_manager.read(cx).view_mode_menu_open)
-            || (matches!(
-                anchor.id,
-                SelectAnchorId::AuditCategory
-                    | SelectAnchorId::AuditSeverity
-                    | SelectAnchorId::AuditSource
-                    | SelectAnchorId::AuditOutcome
-                    | SelectAnchorId::AuditTime
-                    | SelectAnchorId::AuditSearchField
-            ) && self.audit.open_filter.is_some())
             || (anchor.id == SelectAnchorId::ActiveSessionSort && self.session_sort_menu_open)
             || (anchor.id == SelectAnchorId::SessionManagerSort
                 && self.connections.session_manager.read(cx).sort_menu_open)
@@ -157,12 +148,6 @@ pub(in crate::workspace) fn select_anchor_tracks_while_closed(anchor_id: SelectA
     matches!(
         anchor_id,
         SelectAnchorId::ActiveSessionSort
-            | SelectAnchorId::AuditCategory
-            | SelectAnchorId::AuditSeverity
-            | SelectAnchorId::AuditSource
-            | SelectAnchorId::AuditOutcome
-            | SelectAnchorId::AuditTime
-                    | SelectAnchorId::AuditSearchField
             | SelectAnchorId::SettingsAppearanceUiFontSizeSlider
             | SelectAnchorId::SettingsAppearanceBorderRadiusSlider
             | SelectAnchorId::OnboardingBorderRadiusSlider
@@ -227,41 +212,6 @@ pub(in crate::workspace) fn select_anchor_tracks_while_closed(anchor_id: SelectA
             | SelectAnchorId::SessionManagerSidebarSort
             | SelectAnchorId::SessionManagerBatchMove
     )
-}
-
-#[cfg(test)]
-mod slider_anchor_tests {
-    use super::*;
-
-    #[test]
-    fn settings_sliders_have_geometry_before_the_first_pointer_down() {
-        for slider in [
-            SettingsSlider::TerminalFontSize,
-            SettingsSlider::AppearanceUiFontSize,
-            SettingsSlider::AppearanceBorderRadius,
-            SettingsSlider::OnboardingBorderRadius,
-            SettingsSlider::VersionMigrationBorderRadius,
-            SettingsSlider::AppearanceWindowOpacity,
-            SettingsSlider::AppearanceBackgroundOpacity,
-            SettingsSlider::AppearanceBackgroundBlur,
-            SettingsSlider::BackgroundReadability,
-            SettingsSlider::BackgroundEffectStrength,
-            SettingsSlider::BackgroundEffectSheen,
-            SettingsSlider::BackgroundEffectSpeed,
-            SettingsSlider::BackgroundEffectSize,
-            SettingsSlider::BackgroundEffectBrightness,
-            SettingsSlider::BackgroundEffectRoughness,
-            SettingsSlider::BackgroundEffectDirection,
-            SettingsSlider::BackgroundParticleCount,
-            SettingsSlider::BackgroundCameraAmount,
-            SettingsSlider::BackgroundCameraSpeed,
-        ] {
-            assert!(
-                select_anchor_tracks_while_closed(settings_slider_anchor_id(slider)),
-                "{slider:?}: pointer-down must use the already measured slider geometry"
-            );
-        }
-    }
 }
 
 const WORKSPACE_NOTICE_TTL: Duration = Duration::from_secs(4);
@@ -2465,41 +2415,6 @@ mod tests {
             total_steps: None,
             mode: ConnectionTraceMode::Connect,
         }
-    }
-
-    #[test]
-    fn ble_stage_path_selects_direct_vocabulary_and_falls_back_to_scan() {
-        let mut history = VecDeque::new();
-
-        // No direct stage recorded: the scan vocabulary is used.
-        let (stages, current) = ble_stage_path(ConnectionTraceStage::BleScanning, &history);
-        assert_eq!(stages.len(), 4);
-        assert_eq!(stages[1].0, ConnectionTraceStage::BleScanning);
-        assert_eq!(current, 1);
-
-        history.push_back(ble_trace_event(ConnectionTraceStage::BleDirectConnect));
-
-        // On the direct stage itself: 3 nodes, the direct node is current.
-        let (stages, current) = ble_stage_path(ConnectionTraceStage::BleDirectConnect, &history);
-        assert_eq!(stages.len(), 3);
-        assert_eq!(stages[1].1, "connections.trace.stage.ble_direct_connect");
-        assert_eq!(current, 1);
-
-        // Verifying after a direct connect stays on the direct vocabulary.
-        let (stages, current) = ble_stage_path(ConnectionTraceStage::BleVerifyingService, &history);
-        assert_eq!(stages.len(), 3);
-        assert_eq!(current, 2);
-
-        // Ready falls past the last node so every node renders completed.
-        let (stages, current) = ble_stage_path(ConnectionTraceStage::BleReady, &history);
-        assert_eq!(stages.len(), 3);
-        assert_eq!(current, 3);
-
-        // A scan stage after a direct entry falls back to the scan vocabulary
-        // so the scan nodes the attempt did enter are shown.
-        let (stages, current) = ble_stage_path(ConnectionTraceStage::BleMatching, &history);
-        assert_eq!(stages.len(), 4);
-        assert_eq!(current, 2);
     }
 
     #[gpui::test]

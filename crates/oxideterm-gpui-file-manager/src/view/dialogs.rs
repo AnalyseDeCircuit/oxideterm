@@ -29,18 +29,6 @@ impl FileManagerView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let viewport = window.viewport_size();
-        let max_height =
-            (f32::from(viewport.height) * 0.8).clamp(180.0, FILE_MANAGER_CONTEXT_MENU_MAX_HEIGHT);
-        let placement = browser_behavior::clamp_context_menu_position(
-            menu.x,
-            menu.y,
-            f32::from(viewport.width),
-            f32::from(viewport.height),
-            FILE_MANAGER_CONTEXT_MENU_WIDTH,
-            max_height,
-            8.0,
-        );
         let (selected_count, menu_loading, has_clipboard) = {
             let file_manager = self.file_manager.read(cx);
             (
@@ -53,67 +41,58 @@ impl FileManagerView {
                 file_manager.clipboard.is_some(),
             )
         };
-        let popup = context_menu_event_boundary(
-            context_menu_content(&self.tokens)
-                .w(px(FILE_MANAGER_CONTEXT_MENU_WIDTH))
-                .min_w_0()
-                .max_h(px(max_height))
-                .when(has_background, |surface| {
-                    surface.border_color(file_manager_border(theme.border, has_background))
-                }),
-        )
-        .when_some(menu.file.clone(), |menu_el, file| {
+        let mut rows: Vec<AnyElement> = Vec::with_capacity(20);
+        let mut item_count = 0usize;
+        let mut separator_count = 0usize;
+        if let Some(file) = menu.file.clone() {
             if file.file_type == LocalFileType::Directory {
-                menu_el.child(self.render_file_manager_context_menu_item(
+                rows.push(self.render_file_manager_context_menu_item(
                     LucideIcon::FolderOpen,
                     self.i18n.t("fileManager.open"),
                     false,
                     has_background,
+                    move |this, _event, _window, cx| {
+                        this.set_file_manager_path(file.path.clone(), cx);
+                    },
+                    cx,
+                ));
+                item_count += 1;
+            } else {
+                rows.push(self.render_file_manager_context_menu_item(
+                    LucideIcon::ExternalLink,
+                    self.i18n.t("fileManager.openExternal"),
+                    false,
+                    has_background,
                     {
+                        let file = file.clone();
                         move |this, _event, _window, cx| {
-                            this.set_file_manager_path(file.path.clone(), cx);
+                            if let Err(error) = open_path_external(&file.path) {
+                                this.push_file_manager_toast(
+                                    this.i18n.t("fileManager.error"),
+                                    Some(error),
+                                    FileManagerNoticeKind::Error,
+                                    cx,
+                                );
+                            }
                         }
                     },
                     cx,
-                ))
-            } else {
-                menu_el
-                    .child(self.render_file_manager_context_menu_item(
-                        LucideIcon::ExternalLink,
-                        self.i18n.t("fileManager.openExternal"),
-                        false,
-                        has_background,
-                        {
-                            let file = file.clone();
-                            move |this, _event, _window, cx| {
-                                if let Err(error) = open_path_external(&file.path) {
-                                    this.push_file_manager_toast(
-                                        this.i18n.t("fileManager.error"),
-                                        Some(error),
-                                        FileManagerNoticeKind::Error,
-                                        cx,
-                                    );
-                                }
-                            }
-                        },
-                        cx,
-                    ))
-                    .child(self.render_file_manager_context_menu_item(
-                        LucideIcon::Eye,
-                        self.i18n.t("fileManager.preview"),
-                        false,
-                        has_background,
-                        {
-                            move |this, _event, _window, cx| {
-                                this.open_file_manager_preview(file.clone(), cx);
-                            }
-                        },
-                        cx,
-                    ))
+                ));
+                rows.push(self.render_file_manager_context_menu_item(
+                    LucideIcon::Eye,
+                    self.i18n.t("fileManager.preview"),
+                    false,
+                    has_background,
+                    move |this, _event, _window, cx| {
+                        this.open_file_manager_preview(file.clone(), cx);
+                    },
+                    cx,
+                ));
+                item_count += 2;
             }
-        })
-        .when(menu.file.is_some(), |menu_el| {
-            menu_el.child(self.render_file_manager_context_menu_item(
+        }
+        if menu.file.is_some() {
+            rows.push(self.render_file_manager_context_menu_item(
                 LucideIcon::FolderOpen,
                 self.i18n.t("fileManager.revealInFileManager"),
                 false,
@@ -134,83 +113,84 @@ impl FileManagerView {
                     }
                 },
                 cx,
-            ))
-        })
-        .when(selected_count > 0, |menu_el| {
-            menu_el
-                .child(self.render_file_manager_separator(has_background))
-                .child(self.render_file_manager_context_menu_guarded_item(
-                    LucideIcon::Copy,
-                    self.i18n.t("fileManager.copy"),
-                    false,
-                    false,
-                    menu_loading,
-                    has_background,
-                    |this, _event, _window, cx| {
-                        this.copy_file_manager_selection(false, cx);
-                    },
-                    cx,
-                ))
-                .child(self.render_file_manager_context_menu_guarded_item(
-                    LucideIcon::Pencil,
-                    self.i18n.t("fileManager.cut"),
-                    false,
-                    false,
-                    menu_loading,
-                    has_background,
-                    |this, _event, _window, cx| {
-                        this.copy_file_manager_selection(true, cx);
-                    },
-                    cx,
-                ))
-                .child(self.render_file_manager_context_menu_guarded_item(
-                    LucideIcon::Copy,
-                    self.i18n.t("fileManager.duplicate"),
-                    false,
-                    false,
-                    menu_loading,
-                    has_background,
-                    |this, _event, _window, cx| {
-                        this.duplicate_file_manager_selection(cx);
-                    },
-                    cx,
-                ))
-                .child(self.render_file_manager_context_menu_guarded_item(
-                    LucideIcon::FileArchive,
-                    self.i18n.t("fileManager.compress"),
-                    false,
-                    false,
-                    menu_loading,
-                    has_background,
-                    |this, _event, _window, cx| {
-                        this.compress_file_manager_selection(cx);
-                    },
-                    cx,
-                ))
-        })
-        .when(
-            selected_count == 1
-                && menu
-                    .file
-                    .as_ref()
-                    .is_some_and(|file| can_extract_archive(&file.name)),
-            |menu_el| {
-                menu_el.child(self.render_file_manager_context_menu_guarded_item(
-                    LucideIcon::FolderArchive,
-                    self.i18n.t("fileManager.extract"),
-                    false,
-                    false,
-                    menu_loading,
-                    has_background,
-                    |this, _event, _window, cx| {
-                        this.extract_selected_file_manager_archive(cx);
-                    },
-                    cx,
-                ))
-            },
-        )
-        .when(has_clipboard, |menu_el| {
-            menu_el.child(self.render_file_manager_context_menu_guarded_item(
+            ));
+            item_count += 1;
+        }
+        if selected_count > 0 {
+            rows.push(self.render_file_manager_separator(has_background));
+            separator_count += 1;
+            rows.push(self.render_file_manager_context_menu_guarded_item(
+                LucideIcon::Copy,
+                self.i18n.t("fileManager.copy"),
+                false,
+                false,
+                menu_loading,
+                has_background,
+                |this, _event, _window, cx| {
+                    this.copy_file_manager_selection(false, cx);
+                },
+                cx,
+            ));
+            rows.push(self.render_file_manager_context_menu_guarded_item(
+                LucideIcon::Pencil,
+                self.i18n.t("fileManager.cut"),
+                false,
+                false,
+                menu_loading,
+                has_background,
+                |this, _event, _window, cx| {
+                    this.copy_file_manager_selection(true, cx);
+                },
+                cx,
+            ));
+            rows.push(self.render_file_manager_context_menu_guarded_item(
+                LucideIcon::Copy,
+                self.i18n.t("fileManager.duplicate"),
+                false,
+                false,
+                menu_loading,
+                has_background,
+                |this, _event, _window, cx| {
+                    this.duplicate_file_manager_selection(cx);
+                },
+                cx,
+            ));
+            rows.push(self.render_file_manager_context_menu_guarded_item(
+                LucideIcon::FileArchive,
+                self.i18n.t("fileManager.compress"),
+                false,
+                false,
+                menu_loading,
+                has_background,
+                |this, _event, _window, cx| {
+                    this.compress_file_manager_selection(cx);
+                },
+                cx,
+            ));
+            item_count += 4;
+        }
+        if selected_count == 1
+            && menu
+                .file
+                .as_ref()
+                .is_some_and(|file| can_extract_archive(&file.name))
+        {
+            rows.push(self.render_file_manager_context_menu_guarded_item(
+                LucideIcon::FolderArchive,
+                self.i18n.t("fileManager.extract"),
+                false,
+                false,
+                menu_loading,
+                has_background,
+                |this, _event, _window, cx| {
+                    this.extract_selected_file_manager_archive(cx);
+                },
+                cx,
+            ));
+            item_count += 1;
+        }
+        if has_clipboard {
+            rows.push(self.render_file_manager_context_menu_guarded_item(
                 LucideIcon::Download,
                 self.i18n.t("fileManager.paste"),
                 false,
@@ -221,83 +201,85 @@ impl FileManagerView {
                     this.paste_file_manager_clipboard(cx);
                 },
                 cx,
-            ))
-        })
-        .when(selected_count == 1, |menu_el| {
-            menu_el
-                .child(self.render_file_manager_context_menu_guarded_item(
-                    LucideIcon::Pencil,
-                    self.i18n.t("fileManager.rename"),
-                    false,
-                    false,
-                    menu_loading,
-                    has_background,
-                    {
-                        let file = menu.file.clone();
-                        move |this, _event, _window, cx| {
-                            if let Some(file) = file.as_ref() {
-                                this.open_file_manager_rename_dialog(file.name.clone(), cx);
-                            }
+            ));
+            item_count += 1;
+        }
+        if selected_count == 1 {
+            rows.push(self.render_file_manager_context_menu_guarded_item(
+                LucideIcon::Pencil,
+                self.i18n.t("fileManager.rename"),
+                false,
+                false,
+                menu_loading,
+                has_background,
+                {
+                    let file = menu.file.clone();
+                    move |this, _event, _window, cx| {
+                        if let Some(file) = file.as_ref() {
+                            this.open_file_manager_rename_dialog(file.name.clone(), cx);
                         }
-                    },
-                    cx,
-                ))
-                .child(self.render_file_manager_context_menu_item(
-                    LucideIcon::Copy,
-                    self.i18n.t("fileManager.copyPath"),
-                    false,
-                    has_background,
-                    |this, _event, _window, cx| {
-                        this.copy_file_manager_path_to_clipboard(false, cx);
-                    },
-                    cx,
-                ))
-                .child(self.render_file_manager_context_menu_item(
-                    LucideIcon::FileText,
-                    self.i18n.t("fileManager.copyName"),
-                    false,
-                    has_background,
-                    |this, _event, _window, cx| {
-                        this.copy_file_manager_path_to_clipboard(true, cx);
-                    },
-                    cx,
-                ))
-        })
-        .when(selected_count > 0, |menu_el| {
-            menu_el
-                .child(self.render_file_manager_context_menu_item(
-                    LucideIcon::Info,
-                    self.i18n.t("fileManager.properties"),
-                    false,
-                    has_background,
-                    {
-                        let file = menu.file.clone();
-                        move |this, _event, _window, cx| {
-                            if let Some(file) = file
-                                .clone()
-                                .or_else(|| this.single_selected_file_manager_file(cx))
-                            {
-                                this.open_file_manager_properties(file, cx);
-                            }
+                    }
+                },
+                cx,
+            ));
+            rows.push(self.render_file_manager_context_menu_item(
+                LucideIcon::Copy,
+                self.i18n.t("fileManager.copyPath"),
+                false,
+                has_background,
+                |this, _event, _window, cx| {
+                    this.copy_file_manager_path_to_clipboard(false, cx);
+                },
+                cx,
+            ));
+            rows.push(self.render_file_manager_context_menu_item(
+                LucideIcon::FileText,
+                self.i18n.t("fileManager.copyName"),
+                false,
+                has_background,
+                |this, _event, _window, cx| {
+                    this.copy_file_manager_path_to_clipboard(true, cx);
+                },
+                cx,
+            ));
+            item_count += 3;
+        }
+        if selected_count > 0 {
+            rows.push(self.render_file_manager_context_menu_item(
+                LucideIcon::Info,
+                self.i18n.t("fileManager.properties"),
+                false,
+                has_background,
+                {
+                    let file = menu.file.clone();
+                    move |this, _event, _window, cx| {
+                        if let Some(file) = file
+                            .clone()
+                            .or_else(|| this.single_selected_file_manager_file(cx))
+                        {
+                            this.open_file_manager_properties(file, cx);
                         }
-                    },
-                    cx,
-                ))
-                .child(self.render_file_manager_context_menu_guarded_item(
-                    LucideIcon::Trash2,
-                    self.i18n.t("fileManager.delete"),
-                    true,
-                    false,
-                    menu_loading,
-                    has_background,
-                    |this, _event, _window, cx| {
-                        this.open_file_manager_delete_dialog(cx);
-                    },
-                    cx,
-                ))
-        })
-        .child(self.render_file_manager_separator(has_background))
-        .child(self.render_file_manager_context_menu_guarded_item(
+                    }
+                },
+                cx,
+            ));
+            rows.push(self.render_file_manager_context_menu_guarded_item(
+                LucideIcon::Trash2,
+                self.i18n.t("fileManager.delete"),
+                true,
+                false,
+                menu_loading,
+                has_background,
+                |this, _event, _window, cx| {
+                    this.open_file_manager_delete_dialog(cx);
+                },
+                cx,
+            ));
+            item_count += 2;
+        }
+        rows.push(self.render_file_manager_separator(has_background));
+        separator_count += 1;
+        rows.push(self.render_file_manager_context_menu_guarded_item(
             LucideIcon::FolderPlus,
             self.i18n.t("fileManager.newFolder"),
             false,
@@ -308,8 +290,8 @@ impl FileManagerView {
                 this.open_file_manager_new_folder_dialog(cx);
             },
             cx,
-        ))
-        .child(self.render_file_manager_context_menu_guarded_item(
+        ));
+        rows.push(self.render_file_manager_context_menu_guarded_item(
             LucideIcon::FilePlus,
             self.i18n.t("fileManager.newFile"),
             false,
@@ -320,8 +302,8 @@ impl FileManagerView {
                 this.open_file_manager_new_file_dialog(cx);
             },
             cx,
-        ))
-        .child(self.render_file_manager_context_menu_item(
+        ));
+        rows.push(self.render_file_manager_context_menu_item(
             LucideIcon::Check,
             self.i18n.t("fileManager.selectAll"),
             false,
@@ -330,8 +312,8 @@ impl FileManagerView {
                 this.select_all_file_manager_files(cx);
             },
             cx,
-        ))
-        .child(self.render_file_manager_context_menu_item(
+        ));
+        rows.push(self.render_file_manager_context_menu_item(
             LucideIcon::RefreshCw,
             self.i18n.t("fileManager.refresh"),
             false,
@@ -340,8 +322,8 @@ impl FileManagerView {
                 this.refresh_file_manager_with_drives(cx);
             },
             cx,
-        ))
-        .child(self.render_file_manager_context_menu_item(
+        ));
+        rows.push(self.render_file_manager_context_menu_item(
             LucideIcon::HardDrive,
             self.i18n.t("fileManager.showDrives"),
             false,
@@ -351,6 +333,50 @@ impl FileManagerView {
             },
             cx,
         ));
+        item_count += 5;
+
+        let viewport = window.viewport_size();
+        let viewport_height = f32::from(viewport.height);
+        // Clamp only to the usable viewport height instead of a 520px ceiling that clipped the bottom row.
+        let max_height = (viewport_height - FILE_MANAGER_CONTEXT_MENU_VIEWPORT_MARGIN * 2.0)
+            .max(180.0);
+        let vertical_chrome = self.tokens.metrics.ui_menu_padding * 2.0 + 2.0;
+        let estimated_height = (item_count as f32) * FILE_MANAGER_CONTEXT_MENU_ITEM_HEIGHT
+            + (separator_count as f32)
+                * oxideterm_gpui_ui::context_menu::context_menu_separator_height_estimate(
+                    &self.tokens,
+                )
+            + vertical_chrome;
+        let placement = browser_behavior::clamp_context_menu_position(
+            menu.x,
+            menu.y,
+            f32::from(viewport.width),
+            viewport_height,
+            FILE_MANAGER_CONTEXT_MENU_WIDTH,
+            estimated_height.min(max_height),
+            FILE_MANAGER_CONTEXT_MENU_VIEWPORT_MARGIN,
+        );
+        let inner_max_height = (max_height - vertical_chrome).max(120.0);
+        let popup = context_menu_event_boundary(
+            context_menu_content(&self.tokens)
+                .w(px(FILE_MANAGER_CONTEXT_MENU_WIDTH))
+                .min_w_0()
+                .max_h(px(max_height))
+                .when(has_background, |surface| {
+                    surface.border_color(file_manager_border(theme.border, has_background))
+                })
+                .flex()
+                .flex_col()
+                .child(
+                    div()
+                        .w_full()
+                        .max_h(px(inner_max_height))
+                        .overflow_y_scrollbar()
+                        .flex()
+                        .flex_col()
+                        .children(rows),
+                ),
+        );
 
         let menu_visible = self.file_manager.read(cx).context_menu_presence.phase()
             == oxideterm_gpui_ui::motion::ExitPhase::Visible;

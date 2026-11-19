@@ -889,9 +889,15 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) {
+        self.audit.update(cx, |audit, cx| audit.dismiss_transients(cx));
+        self.prepare_other_modal_interactions(cx);
+    }
+
+    pub(in crate::workspace) fn prepare_other_modal_interactions(
+        &mut self, cx: &mut Context<Self>,
+    ) {
         self.session_sort_menu_open = false;
         self.context_tools_menu = None;
-        self.audit.open_filter = None;
         // Tauri dialogs are Radix modal roots: opening one dismisses background
         // popovers and input focus before the overlay starts trapping events.
         self.release_active_remote_desktop_inputs(cx);
@@ -921,7 +927,7 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) -> bool {
-        let mut changed = self.audit.open_filter.take().is_some();
+        let mut changed = self.audit.update(cx, |audit, cx| audit.dismiss_filter(cx));
         changed |= self.close_native_plugin_select(cx);
 
         // Match browser/Radix outside-click behavior for non-modal UI only.

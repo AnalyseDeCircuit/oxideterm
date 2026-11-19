@@ -34,10 +34,9 @@ impl WorkspaceApp {
             tab_id
         };
         if self.notification_center.active_view == WorkspaceActivityView::EventLog {
-            self.refresh_audit(true, cx);
-            self.record_audit_view();
+            self.audit.update(cx, |audit, cx| audit.show_page(cx));
         } else {
-            self.hide_audit_page();
+            self.audit.update(cx, |audit, cx| audit.hide_audit_page(cx));
         }
         self.mark_active_notification_center_view_read();
         self.set_active_tab(tab_id, window, cx);
@@ -106,8 +105,9 @@ impl WorkspaceApp {
                     .child(self.render_notification_center_tab_bar(has_background, cx)),
             )
             .child(div().w_full().h(px(1.0)).bg(rgb(theme.border)))
-            .child(
-                semantic_surface(
+            .child(match self.notification_center.active_view {
+                WorkspaceActivityView::EventLog => self.audit.clone().into_any_element(),
+                WorkspaceActivityView::Notifications => semantic_surface(
                     &self.tokens,
                     SurfaceOptions::new(SurfaceKind::Inspector)
                         .padding(SurfacePadding::None)
@@ -119,15 +119,8 @@ impl WorkspaceApp {
                 .flex()
                 .flex_col()
                 .overflow_hidden()
-                .child(match self.notification_center.active_view {
-                    WorkspaceActivityView::Notifications => {
-                        self.render_notifications_center_content(cx)
-                    }
-                    WorkspaceActivityView::EventLog => self.render_audit_content(cx),
-                }),
-            )
-            .when_some(self.render_audit_filter_menu(cx), |view, menu| {
-                view.child(menu)
+                .child(self.render_notifications_center_content(cx))
+                .into_any_element(),
             })
             .into_any_element()
     }
@@ -250,14 +243,12 @@ impl WorkspaceApp {
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
                     if this.notification_center.active_view != view {
-                        this.audit.open_filter = None;
                         this.notification_center.active_view = view;
                         this.mark_active_notification_center_view_read();
                         if view == WorkspaceActivityView::EventLog {
-                            this.record_audit_view();
-                            this.refresh_audit(true, cx);
+                            this.audit.update(cx, |audit, cx| audit.show_page(cx));
                         } else {
-                            this.hide_audit_page();
+                            this.audit.update(cx, |audit, cx| audit.hide_audit_page(cx));
                         }
                         this.begin_user_segmented_control_transition(
                             selection_motion::NOTIFICATION_CENTER_SWITCHER_ID,

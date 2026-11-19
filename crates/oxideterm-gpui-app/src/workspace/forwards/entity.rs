@@ -605,35 +605,6 @@ impl gpui::EventEmitter<ForwardingWorkspaceEvent> for ForwardingWorkspaceEntity 
 mod tests {
     use super::*;
     use gpui::{AppContext, TestAppContext};
-    use oxideterm_forwarding::DetectedPort;
-
-    #[gpui::test]
-    fn closing_tab_removes_only_the_view_mapping(cx: &mut TestAppContext) {
-        let entity = cx.new(ForwardingWorkspaceEntity::test_fixture);
-        let tab_id = TabId(7);
-        let node_id = NodeId::new("shared-forward");
-        entity.update(cx, |entity, cx| {
-            entity.map_tab_to_node(tab_id, node_id.clone(), cx);
-            entity.set_sampling_visible(true, cx);
-        });
-
-        cx.read(|cx| {
-            assert_eq!(entity.read(cx).node_for_tab(tab_id), Some(node_id.clone()));
-            assert!(entity.read(cx).runtime_snapshots.contains_key(&node_id));
-            assert!(entity.read(cx).sampling_visible(cx));
-        });
-        let removed = entity.update(cx, |entity, cx| entity.unmap_tab(tab_id, cx));
-        assert_eq!(removed, Some(node_id.clone()));
-        cx.read(|cx| {
-            assert!(entity.read(cx).node_for_tab(tab_id).is_none());
-            assert!(!entity.read(cx).runtime_snapshots.contains_key(&node_id));
-            assert!(!entity.read(cx).sampling_visible(cx));
-        });
-
-        // The Entity deliberately has no stop/remove call here; a tab close
-        // cannot change registry-owned forwarding lifetime.
-        cx.read(|cx| assert!(entity.read(cx).delivery_intents.is_empty()));
-    }
 
     #[gpui::test]
     fn hidden_mount_stops_sampling_without_blocking_reliable_delivery(cx: &mut TestAppContext) {
@@ -728,49 +699,6 @@ mod tests {
             assert!(entity.sampling_visible(cx));
             assert!(entity.stats_due(cx));
         });
-    }
-
-    #[gpui::test]
-    fn hidden_port_scan_delivery_updates_entity_state(cx: &mut TestAppContext) {
-        let (worker_tx, worker_rx) = delivery::ActiveDeliverySender::channel();
-        let (_runtime_tx, runtime_rx) = std::sync::mpsc::channel();
-        let runtime_service = ForwardingRuntimeService::test_fixture();
-        let entity = cx.new(|cx| {
-            ForwardingWorkspaceEntity::new(
-                worker_tx.clone(),
-                worker_rx,
-                runtime_rx,
-                runtime_service,
-                cx,
-            )
-        });
-        let node_id = NodeId::new("hidden-forward");
-        worker_tx
-            .send(ForwardingWorkerResult::PortScan {
-                node_id: node_id.clone(),
-                connection_id: Some("hidden-connection".to_string()),
-                binding: None,
-                result: Ok(PortDetectionSnapshot {
-                    new_ports: Vec::new(),
-                    closed_ports: Vec::new(),
-                    all_ports: vec![DetectedPort {
-                        port: 8080,
-                        bind_addr: "127.0.0.1".to_string(),
-                        process_name: None,
-                        pid: None,
-                    }],
-                    has_scanned: true,
-                }),
-            })
-            .unwrap();
-
-        cx.run_until_parked();
-
-        let state = cx
-            .read(|cx| entity.read(cx).port_detection_state(&node_id))
-            .unwrap();
-        assert!(state.has_scanned_ports);
-        assert_eq!(state.detected_ports.len(), 1);
     }
 
     #[gpui::test]

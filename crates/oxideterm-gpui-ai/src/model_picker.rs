@@ -1,3 +1,4 @@
+pub mod host;
 use std::{collections::HashMap, rc::Rc};
 
 use gpui::{
@@ -128,14 +129,6 @@ impl AiModelPickerView {
         self.display().active_provider.clone()
     }
 
-    fn ai_acp_provider_id(agent_id: &str) -> String {
-        format!("acp:{agent_id}")
-    }
-
-    fn ai_acp_agent_id_from_provider_id(provider_id: &str) -> Option<&str> {
-        provider_id.strip_prefix("acp:")
-    }
-
     fn active_ai_acp_session_state(&self, agent_id: &str, cx: &App) -> Option<AiAcpSessionState> {
         ai_acp_session_state(
             self.state
@@ -149,7 +142,7 @@ impl AiModelPickerView {
     fn ai_acp_agent_model_fallback_label(&self, agent_id: &str, _: &App) -> String {
         self.display()
             .status
-            .get(&Self::ai_acp_provider_id(agent_id))
+            .get(&ai_acp_provider_id(agent_id))
             .and_then(|status| status.acp_fallback_label.clone())
             .unwrap_or_else(|| {
                 self.display()
@@ -165,14 +158,14 @@ impl AiModelPickerView {
     ) -> Option<Vec<AcpSessionConfigOption>> {
         self.display()
             .status
-            .get(&Self::ai_acp_provider_id(agent_id))
+            .get(&ai_acp_provider_id(agent_id))
             .and_then(|status| status.acp_options.clone())
     }
 
     fn ai_acp_model_discovery_is_pending(&self, agent_id: &str, _: &App) -> bool {
         self.display()
             .status
-            .get(&Self::ai_acp_provider_id(agent_id))
+            .get(&ai_acp_provider_id(agent_id))
             .is_some_and(|status| status.acp_discovery_pending)
     }
 
@@ -224,3 +217,54 @@ fn render_lucide_icon(icon: LucideIcon, size: f32, color: Rgba) -> AnyElement {
 include!("model_picker/trigger.rs");
 include!("model_picker/list.rs");
 include!("model_picker/models.rs");
+
+mod controller;
+pub use controller::AiPickerSelection;
+pub use controller::{active_model_picker_provider, ai_acp_agent_id_from_provider_id, ai_acp_provider_id};
+
+impl AiModelPickerFrame {
+    pub fn from_state(
+        ai: &AiWorkspaceEntity, settings: &oxideterm_settings::AiSettings, tokens: ThemeTokens,
+        i18n: I18n, marked: Option<String>, search_anchor: TextInputAnchorId, caret_visible: bool,
+        plugin_available: impl Fn(&str) -> bool,
+    ) -> Self {
+        let providers = ai.picker_providers(settings, &i18n);
+        let status = providers.iter().map(|provider| {
+            (provider.id.clone(), ai.picker_status(provider, settings, &i18n,
+                &plugin_available))
+        }).collect();
+        Self {
+            tokens,
+            i18n,
+            providers,
+            status,
+            active_provider: active_model_picker_provider(settings),
+            active_model: settings.active_model.clone(),
+            acp_active: settings.active_backend
+                == oxideterm_settings::AiActiveBackend::Acp,
+            active_acp_agent_id: settings.active_acp_agent_id.clone(),
+            marked,
+            search_anchor,
+            caret_visible,
+        }
+    }
+}
+
+
+impl AiModelPickerViews {
+    pub fn mount(state: &Entity<AiWorkspaceEntity>, bindings: AiModelPickerBindings, cx: &mut App) -> Self {
+        let mut mount =
+            |part| gpui::AppContext::new(cx, |_| AiModelPickerView::new(state.clone(), bindings.clone(), part));
+        Self {
+            sidebar: mount(AiModelPickerPart::Trigger(
+                AiModelSelectorScope::Sidebar,
+                SelectAnchorId::AiModelSelector,
+            )),
+            inline: mount(AiModelPickerPart::Trigger(
+                AiModelSelectorScope::TerminalInline,
+                SelectAnchorId::AiInlineModelSelector,
+            )),
+            menu: mount(AiModelPickerPart::Menu),
+        }
+    }
+}

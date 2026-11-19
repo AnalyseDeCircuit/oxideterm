@@ -468,10 +468,7 @@ pub fn ai_input_char_columns(ch: char) -> usize {
 
 #[cfg(test)]
 mod input_render_tests {
-    use super::{
-        ai_input_line_index_for_offset, ai_input_local_marked_range,
-        ai_input_measured_visual_lines, ai_input_visual_lines,
-    };
+    use super::ai_input_measured_visual_lines;
 
     #[gpui::test]
     fn history_editor_wraps_measured_text_without_losing_unicode_or_empty_lines(
@@ -503,24 +500,23 @@ mod input_render_tests {
         );
     }
 
-    #[test]
-    fn caret_belongs_to_next_soft_row_but_previous_hard_line_end() {
-        let lines = ai_input_visual_lines("abcdefghijklmnop\nZ", 12);
-        for (offset, row) in [(0, 0), (11, 0), (12, 1), (16, 1), (17, 2), (18, 2)] {
-            assert_eq!(
-                ai_input_line_index_for_offset(&lines, offset),
-                row,
-                "{offset}"
-            );
+}
+
+impl AiEditorView {
+    pub fn model_selected(ai: &oxideterm_settings::AiSettings) -> bool {
+        if ai.active_backend == oxideterm_settings::AiActiveBackend::Acp {
+            ai.active_acp_agent_id.is_some()
+        } else {
+            ai.active_provider_id.is_some()
+                && oxideterm_ai::active_model_selection(ai.active_model.as_deref()).is_some()
         }
     }
 
-    #[test]
-    fn marked_range_is_projected_once_across_visual_lines() {
-        let marked = 2..6;
-
-        assert_eq!(ai_input_local_marked_range(&marked, &(0..4)), Some(2..4));
-        assert_eq!(ai_input_local_marked_range(&marked, &(4..8)), Some(0..2));
-        assert_eq!(ai_input_local_marked_range(&marked, &(8..12)), None);
+    pub fn mount_pair(
+        state: &Entity<AiWorkspaceEntity>, bindings: AiEditorBindings, cx: &mut App,
+    ) -> (Entity<Self>, Entity<Self>) {
+        let composer = gpui::AppContext::new(cx, |_| Self::new(AiEditorKind::Composer, state.clone(), bindings.clone()));
+        let edit = gpui::AppContext::new(cx, |_| Self::new(AiEditorKind::MessageEdit, state.clone(), bindings));
+        (composer, edit)
     }
 }

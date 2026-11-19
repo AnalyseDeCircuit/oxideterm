@@ -192,6 +192,9 @@ impl Render for DetachedTabWindow {
                         }
                         return true;
                     }
+                    if session.audit.read(cx).owns_keyboard(window) {
+                        return false;
+                    }
                     if session.search_editor_focused(window, cx) {
                         return session.handle_search_editor_key(event, window, cx);
                     }

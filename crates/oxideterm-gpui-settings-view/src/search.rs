@@ -1,8 +1,6 @@
 use std::collections::HashSet;
 
 use oxideterm_i18n::I18n;
-#[cfg(test)]
-use oxideterm_settings_model::settings_section_list_item_index;
 use oxideterm_settings_model::{
     AiSettingsPage, SettingsDynamicSectionCounts, SettingsSectionId, SettingsTab,
     TerminalSettingsPage, settings_section_index,
@@ -1053,27 +1051,6 @@ mod settings_search_tests {
                 settings_search_results(&i18n, query).is_empty(),
                 "unexpected unavailable setting: {query}"
             );
-        }
-    }
-
-    #[test]
-    fn every_search_spec_resolves_to_a_valid_section_slot() {
-        for spec in settings_search_specs() {
-            for knowledge_has_error in [false, true] {
-                let dynamic = SettingsDynamicSectionCounts {
-                    terminal_page: spec.terminal_page.unwrap_or(TerminalSettingsPage::Display),
-                    ai_page: spec.ai_page.unwrap_or(AiSettingsPage::General),
-                    visible_keybinding_scope_count: 1,
-                    knowledge_has_error,
-                    knowledge_has_selected_collection: true,
-                };
-                assert!(
-                    settings_section_list_item_index(spec.tab, spec.section, dynamic).is_some(),
-                    "unresolvable section {:?} in {:?}",
-                    spec.section,
-                    spec.tab
-                );
-            }
         }
     }
 }

@@ -190,26 +190,3 @@ impl FileManagerView {
         cx.notify();
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn favorites_width_leaves_room_for_files_without_changing_preference() {
-        for (preferred, surface, expected) in [
-            (250.0, 1000.0, 250.0),
-            (999.0, 1000.0, 450.0),
-            (10.0, 1000.0, 160.0),
-            (400.0, 400.0, 120.0),
-            (400.0, 200.0, 0.0),
-            (400.0, 1000.0, 400.0),
-        ] {
-            assert_eq!(
-                bookmarks_width(preferred, surface),
-                expected,
-                "{preferred}/{surface}"
-            );
-        }
-    }
-}

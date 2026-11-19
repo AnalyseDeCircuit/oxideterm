@@ -191,7 +191,7 @@ pub(crate) fn selection_match_rects(
     rects
 }
 
-fn logical_line_overlaps_transient_output(
+pub(super) fn logical_line_overlaps_transient_output(
     snapshot: &TerminalSnapshot,
     rows: Range<usize>,
     highlight: &TransientCommandHighlight,

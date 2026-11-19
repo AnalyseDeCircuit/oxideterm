@@ -287,3 +287,198 @@ impl<Node: Clone + Eq + Hash + 'static, Terminal: Clone + 'static>
         true
     }
 }
+
+impl<Node: Clone + Eq + std::hash::Hash + 'static, Terminal: Clone + 'static>
+    AiConversationController<Node, Terminal>
+{
+    pub fn select_acp_picker_config(
+        &self, agent_id: &str, config_id: String, value_id: String, model: bool, cx: &mut App,
+    ) -> bool {
+        let state = self.state.read(cx);
+        let conversation = state.conversation_state().active_conversation().map(|c| c.id.clone());
+        if !model && conversation.is_none() { return false; }
+        let options = if model { state.picker_acp_options(agent_id) }
+            else { state.active_ai_acp_session_state(agent_id).map(|state| state.config_options)
+                    .or_else(|| state.picker_acp_options(agent_id)) };
+        let Some(options) = options else { return false; };
+        let sent = conversation.as_deref().is_some_and(|conversation| {
+            self.acp.update(cx, |acp, _| acp.set_config_selection(conversation, oxideterm_ai::AcpSessionConfigSelection {
+                config_id: config_id.clone(), value_id: value_id.clone(),
+            }))
+        });
+        self.state.update(cx, |ai, cx| {
+            let accepted = sent || if model {
+                ai.set_active_acp_model_selection(agent_id, options, &config_id, &value_id)
+            } else {
+                ai.set_active_acp_config_selection(agent_id, options, &config_id, &value_id)
+            };
+            if accepted { cx.notify(); }
+            accepted
+        })
+    }
+
+    pub fn select_acp_picker_mode(&self, agent_id: &str, mode_id: String, cx: &mut App) {
+        let Some(conversation) = self.state.read(cx).conversation_state().active_conversation().map(|c| c.id.clone()) else {
+            return;
+        };
+        let sent = self.acp.update(cx, |acp, _| acp.set_mode(&conversation, mode_id.clone()));
+        self.state.update(cx, |ai, cx| {
+            if sent || ai.set_active_acp_mode(agent_id, &mode_id) { cx.notify(); }
+        });
+    }
+}
+
+impl<Node: Clone + Eq + std::hash::Hash + 'static, Terminal: Clone + 'static>
+    AiConversationController<Node, Terminal>
+{
+    /// The controller owns ACP session policy and permission responses. Only
+    /// the global attention notification needs the host window.
+    pub fn handle_acp_session_request(
+        &self, agent_id: &str, generation: u64, conversation_id: &str, assistant_id: &str,
+        event: oxideterm_ai::AcpClientEvent, diagnostic: impl Fn(serde_json::Value) -> serde_json::Value,
+        file_review: super::acp_file_review::AcpFileReviewBindings,
+        cx: &mut App,
+    ) -> Result<bool, oxideterm_ai::AcpClientEvent> {
+        match event {
+                    oxideterm_ai::AcpClientEvent::RequestPermission {
+                        request,
+                        response_tx,
+                    } => {
+                        if !self.state.read(cx).is_chat_stream_generation(generation)
+                        {
+                            let _ = response_tx
+                                .send(Ok(oxideterm_ai::acp_permission_cancelled_response()));
+                            return Ok(false);
+                        }
+                        let projection =
+                            oxideterm_ai::acp_permission_request_projection(&request);
+                        let permission_options = projection
+                            .options
+                            .iter()
+                            .map(|option| {
+                                serde_json::json!({
+                                    "id": option.option_id,
+                                    "name": option.name,
+                                    "kind": option.kind,
+                                })
+                            })
+                            .collect::<Vec<_>>();
+                        let (choice_tx, choice_rx) = tokio::sync::oneshot::channel();
+                        self.state.update(cx, |ai, cx| {
+                            ai.apply_ai_tool_status(generation, conversation_id, assistant_id,
+                                &projection.tool_call_id, &projection.name, &projection.arguments, "pending_user_approval",
+                                Some(serde_json::json!({ "acpPermissionOptions": permission_options })),
+                                Some(projection.risk), Some(projection.summary), false,
+                                None, None, None, diagnostic, cx);
+                            ai.register_acp_permission_choice(generation, projection.tool_call_id, choice_tx);
+                        });
+                        let runtime = self.state.read(cx).task_runtime().clone();
+                        runtime.spawn(async move {
+                            let selected_option_id = choice_rx.await.ok().flatten();
+                            let response = oxideterm_ai::acp_permission_response_for_option(
+                                &request,
+                                selected_option_id.as_deref(),
+                            );
+                            let _ = response_tx.send(Ok(response));
+                        });
+                        Ok(true)
+                    }
+                    oxideterm_ai::AcpClientEvent::ReadTextFile {
+                        request,
+                        response_tx,
+                    } => {
+                        let owner_session_id = request.session_id.to_string();
+                        let Some((workspace_root, policy)) =
+                            self.acp
+                                .read(cx)
+                                .session_context(agent_id, &owner_session_id)
+                        else {
+                            let _ = response_tx.send(Err(oxideterm_ai::acp_internal_error(
+                                "ACP session context is unavailable",
+                            )));
+                            return Ok(false);
+                        };
+                        if !policy.fs_read_text_file {
+                            let _ = response_tx.send(Err(oxideterm_ai::acp_method_not_found(
+                                "fs/read_text_file",
+                            )));
+                            return Ok(false);
+                        }
+                        self.state.read(cx).task_runtime().spawn(async move {
+                            let response =
+                                oxideterm_ai::resolve_acp_read_text_file_request(
+                                    &workspace_root,
+                                    &request,
+                                )
+                                .await;
+                            let _ = response_tx.send(response);
+                        });
+                        Ok(false)
+                    }
+
+            event @ oxideterm_ai::AcpClientEvent::WriteTextFile { .. } => {
+                self.review_acp_file_write(agent_id, generation, conversation_id, assistant_id, event, file_review, cx);
+                Ok(false)
+            }
+            event => Err(event),
+        }
+    }
+}
+
+pub fn prepare_acp_chat_launch(
+    config: &oxideterm_ai::AiChatStreamConfig,
+    settings: &oxideterm_settings::AiSettings,
+    resolve_plugin: impl FnOnce(&mut oxideterm_settings::AcpAgentConfig) -> Result<(), String>,
+) -> Result<Option<AiAcpChatLaunch>, String> {
+    if config.execution_backend != oxideterm_ai::AiExecutionBackend::Acp {
+        return Ok(None);
+    }
+    let agent_id = config
+        .acp_agent_id
+        .as_deref()
+        .filter(|agent_id| !agent_id.trim().is_empty())
+        .ok_or_else(|| "No ACP agent selected for this execution profile.".to_string())?;
+    let mut agent = settings.acp_agents
+        .iter()
+        .find(|agent| agent.id == agent_id)
+        .cloned()
+        .ok_or_else(|| format!("ACP agent `{agent_id}` is not configured."))?;
+    if !agent.enabled {
+        return Err(format!("ACP agent `{}` is disabled.", agent.id));
+    }
+    resolve_plugin(&mut agent)?;
+
+    let agent_id = agent.id.clone();
+    let display_name = if agent.display_name.trim().is_empty() {
+        agent_id.clone()
+    } else {
+        agent.display_name.clone()
+    };
+    let session_cwd = std::env::current_dir().unwrap_or_else(|_| {
+        agent
+            .cwd
+            .as_deref()
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+    });
+    let host_policy = oxideterm_ai::AcpHostCapabilityPolicy {
+        fs_read_text_file: agent.capability_policy.fs_read_text_file,
+        fs_write_text_file: agent.capability_policy.fs_write_text_file,
+        terminal: agent.capability_policy.terminal,
+    };
+    // Copy token-bearing args and environment values exactly once into the
+    // zeroizing launch owner that is moved to the ACP worker.
+    let launch_config = oxideterm_ai::AcpLaunchConfig {
+        id: agent_id,
+        display_name,
+        command: agent.command,
+        args: agent.args,
+        env: agent.env,
+        cwd: agent.cwd.as_deref().map(std::path::PathBuf::from),
+    };
+    Ok(Some(AiAcpChatLaunch {
+        launch_config,
+        session_cwd,
+        host_policy,
+    }))
+}

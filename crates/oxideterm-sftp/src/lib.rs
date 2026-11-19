@@ -18,6 +18,7 @@ mod session;
 mod tar_transfer;
 mod text_diff;
 mod transfer_manager;
+mod owned_directory_transfer;
 mod types;
 
 pub use archive::{

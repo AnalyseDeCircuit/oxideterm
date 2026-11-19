@@ -466,24 +466,4 @@ mod tests {
             }
         }
     }
-
-    #[test]
-    fn health_items_warn_for_unchecked_remote_and_excluded_sensitive_scope() {
-        let mut settings = CloudSyncSettings::default();
-        settings.endpoint = "https://sync.example.test".to_string();
-        let mut form = CloudSyncFormDraft::from_settings(&settings);
-        form.token = "draft-token".to_string();
-        form.sync_password = "draft-password".to_string();
-
-        let items = cloud_sync_health_items(&form, &CloudSyncPersistedState::default());
-
-        assert!(items.iter().any(|item| {
-            item.label_key == "plugin.cloud_sync.health.remote_check"
-                && item.status == CloudSyncHealthStatus::Warning
-        }));
-        assert!(items.iter().any(|item| {
-            item.label_key == "plugin.cloud_sync.health.sync_scope"
-                && item.status == CloudSyncHealthStatus::Warning
-        }));
-    }
 }

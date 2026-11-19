@@ -7,6 +7,7 @@
 //! The workspace owns window integration and applies cross-feature effects.
 
 pub mod config;
+mod confirm_dialog;
 pub mod delivery;
 pub mod entity;
 pub mod form;
@@ -24,6 +25,7 @@ pub mod view;
 pub mod view_state;
 
 pub use config::*;
+pub use confirm_dialog::{CloudSyncConfirmFrame, CloudSyncConfirmPortal};
 pub use delivery::*;
 pub use form::*;
 pub use format::*;

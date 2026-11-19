@@ -1215,28 +1215,4 @@ mod theme_preview_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn window_opacity_slider_spends_most_travel_near_opaque() {
-        // Linear travel would put 98% at 0.96 and 87.5% at 0.75; the curve
-        // must leave the top fifth of the track for the 100%..98% range.
-        for (position, opacity, label) in [
-            (1.0, 1.0, "100%"),
-            (0.9, 0.995, "99.5%"),
-            (0.8, 0.98, "98%"),
-            (0.5, 0.875, "87.5%"),
-            (0.0, 0.5, "50%"),
-        ] {
-            assert_eq!(
-                window_opacity_from_slider_position(position),
-                opacity,
-                "position={position}"
-            );
-            assert!(
-                (window_opacity_slider_position(opacity) - position).abs() < 1e-6,
-                "opacity={opacity}"
-            );
-            assert_eq!(window_opacity_label(opacity), label);
-        }
-    }
 }

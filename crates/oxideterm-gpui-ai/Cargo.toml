@@ -22,6 +22,9 @@ oxideterm-editor-syntax = { path = "../oxideterm-editor-syntax" }
 oxideterm-gpui-editor = { path = "../oxideterm-gpui-editor" }
 oxideterm-gpui-markdown = { path = "../oxideterm-gpui-markdown" }
 oxideterm-gpui-ui = { path = "../oxideterm-gpui-ui" }
+oxideterm-gpui-terminal = { path = "../oxideterm-gpui-terminal" }
+oxideterm-terminal = { path = "../oxideterm-terminal" }
+oxideterm-gpui-connections = { path = "../oxideterm-gpui-connections" }
 oxideterm-i18n = { path = "../oxideterm-i18n" }
 oxideterm-settings = { path = "../oxideterm-settings" }
 oxideterm-settings-model = { path = "../oxideterm-settings-model" }

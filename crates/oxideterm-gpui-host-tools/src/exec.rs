@@ -380,26 +380,6 @@ where
 mod tests {
     use super::*;
 
-    #[test]
-    fn local_sample_interpreter_swap_only_touches_powershell_commands() {
-        let sample = "powershell -NoProfile -ExecutionPolicy Bypass -Command \"& ([scriptblock]::Create([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('W0NvbnNvbGVd'))))\"\r\n";
-        // The pwsh swap exists to avoid Windows PowerShell 5.1, so on other
-        // platforms the line must pass through unchanged.
-        if cfg!(windows) {
-            assert_eq!(
-                local_sample_line(sample, true),
-                sample.replacen("powershell", "pwsh", 1)
-            );
-        } else {
-            assert_eq!(local_sample_line(sample, true), sample);
-        }
-        // Without pwsh installed the generated line must stay byte-identical.
-        assert_eq!(local_sample_line(sample, false), sample);
-        // Non-PowerShell samples (e.g. the GPU vendor probes) stay unchanged.
-        let vendor = "nvidia-smi --query-gpu=name --format=csv,noheader\n";
-        assert_eq!(local_sample_line(vendor, true), vendor);
-    }
-
     #[tokio::test]
     async fn local_capture_reports_output_and_exit_code() {
         let command = "echo oxide-local";

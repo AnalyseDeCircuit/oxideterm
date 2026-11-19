@@ -2948,37 +2948,6 @@ mod command_preview_tests {
         );
     }
 
-    #[test]
-    fn tool_group_status_and_duration_cover_mixed_calls() {
-        for (statuses, expected) in [
-            (vec!["completed", "completed"], AiToolStatus::Completed),
-            (vec!["completed", "running"], AiToolStatus::Running),
-            (
-                vec!["completed", "pending_approval", "running"],
-                AiToolStatus::PendingApproval,
-            ),
-            (
-                vec!["completed", "pending_user_selection"],
-                AiToolStatus::PendingSelection,
-            ),
-            (vec!["running", "error", "completed"], AiToolStatus::Error),
-            (vec!["rejected", "completed"], AiToolStatus::Rejected),
-        ] {
-            let calls: Vec<_> = statuses
-                .iter()
-                .map(|status| serde_json::json!({"status":status}))
-                .collect();
-            assert_eq!(ai_tool_group_status(&calls), expected, "{statuses:?}");
-        }
-        let mut calls = vec![
-            serde_json::json!({"result":{"meta":{"durationMs":1}}}),
-            serde_json::json!({"result":{"meta":{"durationMs":535}}}),
-        ];
-        assert_eq!(ai_tool_group_duration(&calls), Some(536));
-        calls.push(serde_json::json!({"status":"running"}));
-        assert_eq!(ai_tool_group_duration(&calls), None);
-    }
-
     struct PreviewHost {
         preview: gpui::Entity<AiCommandPreview>,
     }

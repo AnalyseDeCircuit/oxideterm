@@ -352,11 +352,12 @@ impl KnowledgeWorkspaceView {
                 false,
                 false,
                 move |this, _, window, cx| {
-                    (this.bindings.request)(
-                        KnowledgeRequest::CreateDocument(collection_id.clone()),
-                        Some(window),
-                        cx,
-                    );
+                    let owner = window.window_handle().window_id();
+                    this.bindings.page.update(cx, |page, cx| {
+                        page.open_knowledge_document_dialog(collection_id.clone(), owner, true);
+                        cx.notify();
+                    });
+                    (this.bindings.request)(KnowledgeRequest::PresentCreationDialog, Some(window), cx);
                     cx.stop_propagation();
                 },
                 cx,
@@ -617,7 +618,11 @@ impl KnowledgeWorkspaceView {
         match action {
             KnowledgeAction::Select(id) => self.change_knowledge_notebook(id, false, cx),
             KnowledgeAction::CreateNotebook => {
-                (self.bindings.request)(KnowledgeRequest::CreateNotebook, Some(window), cx)
+                self.bindings.page.update(cx, |page, cx| {
+                    page.open_knowledge_create_dialog();
+                    cx.notify();
+                });
+                (self.bindings.request)(KnowledgeRequest::PresentCreationDialog, Some(window), cx)
             }
             KnowledgeAction::DeleteNotebook => {
                 if let Some(col) = self

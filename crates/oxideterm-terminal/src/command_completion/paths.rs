@@ -1,6 +1,9 @@
+use super::types::{TerminalPathCacheEntry, TerminalPathCompletionCache};
+use super::{
+    TerminalCommandSuggestion, TerminalCommandSuggestionKind, TerminalFigArgType,
+    TerminalPathEntry, TerminalPathParts,
+};
 use crate::{TerminalShellParseResult, TerminalShellToken, escape_terminal_path_for_shell};
-use super::{TerminalCommandSuggestion, TerminalCommandSuggestionKind, TerminalFigArgType, TerminalPathParts, TerminalPathEntry};
-use super::types::{TerminalPathCompletionCache, TerminalPathCacheEntry};
 
 pub fn should_run_terminal_path_provider(
     token: &TerminalShellToken,
@@ -66,6 +69,22 @@ fn infer_terminal_home_from_cwd(cwd: &str) -> Option<String> {
         }
     }
     cwd.starts_with("/root").then(|| "/root".to_string())
+}
+
+pub fn read_local_terminal_path_entries(
+    directory: &str,
+) -> std::io::Result<Vec<TerminalPathEntry>> {
+    Ok(std::fs::read_dir(directory)?
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let metadata = std::fs::symlink_metadata(entry.path()).ok()?;
+            Some(TerminalPathEntry {
+                name: entry.file_name().to_string_lossy().to_string(),
+                path: entry.path().to_string_lossy().to_string(),
+                is_directory: metadata.is_dir(),
+            })
+        })
+        .collect())
 }
 
 pub fn terminal_path_entries_to_suggestions(

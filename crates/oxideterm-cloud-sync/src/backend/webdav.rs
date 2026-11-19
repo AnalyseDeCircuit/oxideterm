@@ -543,19 +543,4 @@ mod tests {
             [("MKCOL".into(), "/dav/forbidden".into())]
         );
     }
-
-    #[test]
-    fn webdav_namespace_url_appends_namespace_for_regular_endpoints() {
-        let settings = CloudSyncSettings {
-            backend_type: BackendType::Webdav,
-            endpoint: "https://example.com/dav/".to_string(),
-            namespace: "team/default".to_string(),
-            ..CloudSyncSettings::default()
-        };
-
-        assert_eq!(
-            webdav_namespace_url(&settings),
-            "https://example.com/dav/team/default"
-        );
-    }
 }

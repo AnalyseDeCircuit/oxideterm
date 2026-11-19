@@ -4,15 +4,8 @@ use oxideterm_gpui_ai::state::compaction::{
 
 impl WorkspaceApp {
     pub(in crate::workspace) fn start_ai_compact_conversation(&mut self, cx: &mut Context<Self>) {
-        let id = self
-            .ai
-            .state
-            .read(cx)
-            .conversation_state()
-            .active_conversation_id
-            .clone();
-        if let Some(id) = id {
-            let _ = self.start_ai_compact_conversation_for(id, false, true, None, cx);
+        if let Some(request) = self.ai.state.read(cx).active_compaction_request(false) {
+            let _ = self.request_ai_compaction(request, cx);
         }
     }
 
@@ -21,14 +14,8 @@ impl WorkspaceApp {
         conversation_id: &str,
         cx: &mut Context<Self>,
     ) {
-        if self.ai.state.read(cx).should_auto_compact(conversation_id) {
-            let _ = self.start_ai_compact_conversation_for(
-                conversation_id.to_owned(),
-                true,
-                false,
-                None,
-                cx,
-            );
+        if let Some(request) = self.ai.state.read(cx).auto_compaction_request(conversation_id) {
+            let _ = self.request_ai_compaction(request, cx);
         }
     }
 
@@ -40,37 +27,12 @@ impl WorkspaceApp {
         resume_after: Option<AiPendingChatStream>,
         cx: &mut Context<Self>,
     ) -> Result<(), Option<Box<AiPendingChatStream>>> {
-        self.request_ai_compaction(
-            AiCompactionRequest {
-                conversation_id,
-                summarize: false,
-                silent,
-                force,
-                resume_after,
-            },
-            cx,
-        )
+        self.request_ai_compaction(AiCompactionRequest::compact(conversation_id, silent, force, resume_after), cx)
     }
 
     pub(in crate::workspace) fn start_ai_summarize_conversation(&mut self, cx: &mut Context<Self>) {
-        let id = self
-            .ai
-            .state
-            .read(cx)
-            .conversation_state()
-            .active_conversation_id
-            .clone();
-        if let Some(conversation_id) = id {
-            let _ = self.request_ai_compaction(
-                AiCompactionRequest {
-                    conversation_id,
-                    summarize: true,
-                    silent: false,
-                    force: true,
-                    resume_after: None,
-                },
-                cx,
-            );
+        if let Some(request) = self.ai.state.read(cx).active_compaction_request(true) {
+            let _ = self.request_ai_compaction(request, cx);
         }
     }
 
@@ -120,21 +82,8 @@ impl WorkspaceApp {
                 self.push_ai_settings_toast(message, TerminalNoticeVariant::Error, cx)
             }
             AiCompactionEffect::Resume(pending) => {
-                if self
-                    .ai
-                    .state
-                    .read(cx)
-                    .chat_launch_matches(&pending.conversation_id, pending.launch_id.as_deref())
-                {
-                    self.start_ai_chat_stream_after_budget_preflight(
-                        pending.conversation_id,
-                        pending.config,
-                        pending.request_content,
-                        pending.task_system_prompt,
-                        pending.rag_system_prompt,
-                        false,
-                        cx,
-                    );
+                if self.ai.state.read(cx).can_resume_compacted_turn(&pending) {
+                    self.start_ai_chat_stream_after_budget_preflight(pending, false, cx);
                 }
             }
         }

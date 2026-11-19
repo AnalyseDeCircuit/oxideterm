@@ -1,7 +1,10 @@
-use std::{collections::HashMap,time::SystemTime};
+use std::{collections::HashMap, time::SystemTime};
 
+use super::{
+    TerminalCommandSuggestion, TerminalCommandSuggestionKind, TerminalHistoryEntry,
+    TerminalHistorySource,
+};
 use crate::terminal_autosuggest_fuzzy_score;
-use super::{TerminalCommandSuggestion, TerminalCommandSuggestionKind, TerminalHistoryEntry, TerminalHistorySource};
 
 #[cfg(test)]
 mod history_tests {
@@ -157,7 +160,9 @@ pub fn terminal_history_suggestions(
                 kind: TerminalCommandSuggestionKind::History,
                 label: entry.command.clone(),
                 insert_text: entry.command.clone(),
-                description: origins.and_then(|origins| origins.get(&entry.command).map(|(_, label)| label.clone())),
+                description: origins.and_then(|origins| {
+                    origins.get(&entry.command).map(|(_, label)| label.clone())
+                }),
                 executable: true,
                 replacement: 0..input.len(),
                 group_label_key: "terminal.command_bar.group_history",
@@ -179,7 +184,7 @@ pub fn terminal_history_suggestions(
     suggestions
 }
 
-pub fn completion_provider_scope(
+pub(super) fn completion_provider_scope(
     node: Option<&str>,
     session: Option<u64>,
     pane: Option<u64>,

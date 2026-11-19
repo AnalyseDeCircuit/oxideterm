@@ -6,9 +6,8 @@ pub(super) use oxideterm_gpui_cloud_sync::entity::{
     CloudSyncUiIntent, CloudSyncWorkspaceEntity, CloudSyncWorkspaceEvent,
 };
 use oxideterm_gpui_cloud_sync::{
-    CloudSyncApplyOutcome, CloudSyncApplyUiOutcome, CloudSyncConfirmDescription,
-    CloudSyncPreviewSource, CloudSyncTab, PendingLegacyImportAudit, cloud_sync_confirm_copy_spec,
-    cloud_sync_legacy_apply_plan, cloud_sync_sidebar_empty,
+    CloudSyncApplyOutcome, CloudSyncApplyUiOutcome, CloudSyncPreviewSource, CloudSyncTab,
+    PendingLegacyImportAudit, cloud_sync_legacy_apply_plan, cloud_sync_sidebar_empty,
     panel::{
         CloudSyncInputRenderProjection, CloudSyncListRenderProjection, CloudSyncPageRenderer,
         SelectableTextRole as CloudSyncTextRole, cloud_sync_select_anchor_id, cloud_sync_tab_index,
@@ -19,13 +18,11 @@ use oxideterm_gpui_cloud_sync::{
     },
 };
 pub(super) use oxideterm_gpui_cloud_sync::{
-    CloudSyncConfirm, CloudSyncPreviewSelection, CloudSyncSelect,
+    CloudSyncConfirm, CloudSyncConfirmPortal, CloudSyncPreviewSelection, CloudSyncSelect,
 };
 use oxideterm_settings_model::cloud_sync_form_input_value_ref;
 
 mod config;
-mod confirm_dialog;
-pub(super) use confirm_dialog::CloudSyncConfirmPortal;
 mod delivery;
 mod local_file;
 mod surface;

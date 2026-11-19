@@ -15,13 +15,6 @@ impl WorkspaceApp {
         self.connections.flow.read(cx).ssh_worker_sender()
     }
 
-    pub(in crate::workspace) fn ble_worker_sender(
-        &self,
-        cx: &App,
-    ) -> ActiveDeliverySender<BleConnectionWorkerResult> {
-        self.connections.flow.read(cx).ble_worker_sender()
-    }
-
     pub(in crate::workspace) fn apply_connection_flow_worker_delivery(
         &mut self,
         window: &mut Window,
@@ -367,14 +360,7 @@ impl WorkspaceApp {
         error: String,
         cx: &mut Context<Self>,
     ) {
-        let reported_to_form = self.connections.flow.update(cx, |connection_flow, cx| {
-            connection_flow.set_form_feedback(Some(false), Some(error.clone()), cx)
-        });
-        if !reported_to_form {
-            self.connections.session_manager.update(cx, |session_manager, cx| {
-                session_manager.set_status(Some(error), cx);
-            });
-        }
+        self.connections.report_connection_error(error, cx);
         cx.notify();
     }
 
@@ -384,27 +370,14 @@ impl WorkspaceApp {
         title: String,
         cx: &mut Context<Self>,
     ) {
-        if config
-            .proxy_chain
-            .as_ref()
-            .is_some_and(|chain| !chain.is_empty())
-        {
-            prepare_proxy_chain_test_config(&mut config);
-            self.start_ssh_test(config, cx);
-            return;
+        use oxideterm_gpui_connections::preflight::SshTestRoute;
+        match self.connections.prepare_ssh_test_route(&mut config, &self.i18n, cx) {
+            SshTestRoute::Direct => self.start_ssh_test(config, cx),
+            SshTestRoute::HostKeyPreflight => {
+                self.start_ssh_preflight(config, title, SshConnectionIntent::Test, cx);
+                cx.notify();
+            }
         }
-
-        let message = self.i18n.t("ssh.form.checking_host_key");
-        let reported_to_form = self.connections.flow.update(cx, |connection_flow, cx| {
-            connection_flow.set_form_feedback(Some(true), Some(message.clone()), cx)
-        });
-        if !reported_to_form {
-            self.connections.session_manager.update(cx, |session_manager, cx| {
-                session_manager.set_status(Some(message), cx);
-            });
-        }
-        self.start_ssh_preflight(config, title, SshConnectionIntent::Test, cx);
-        cx.notify();
     }
 
     pub(in crate::workspace) fn continue_verified_ssh_flow(
@@ -427,91 +400,14 @@ impl WorkspaceApp {
                 }
             }
             SshConnectionIntent::Connect(connection_options) => {
-                let open_sftp_on_connect = connection_options.open_sftp_on_connect;
-                self.update_connection_form_state(cx, ConnectionFormState::clear);
-                self.connections.flow.update(cx, |connection_flow, cx| {
-                    connection_flow.clear_host_key_challenge(cx);
-                });
-                self.close_new_connection_select(cx);
-                if config
-                    .proxy_chain
-                    .as_ref()
-                    .is_some_and(|chain| !chain.is_empty())
-                {
-                    let expansion_id = format!("manual-{}", self.next_ssh_node_id);
-                    match self.expand_saved_connection_tree(&expansion_id, config, title.clone()) {
-                        Ok(expansion) => {
-                            if let Some(node) = self.ssh_nodes.get_mut(&expansion.target_node_id) {
-                                node.terminal_options = connection_options.terminal;
-                                node.dedicated_new_terminal_connection =
-                                    connection_options.dedicated_new_terminal_connection;
-                                node.ssh_channel_strategy = connection_options.ssh_channel_strategy;
-                            }
-                            if let Some(target_config) = self
-                                .node_router
-                                .node_runtime_snapshot(&expansion.target_node_id)
-                                .map(|snapshot| snapshot.config)
-                            {
-                                let post_connect_command =
-                                    target_config.post_connect_command.clone();
-                                let _ = self.queue_ssh_terminal_tab_for_node_with_mark_used(
-                                    expansion.target_node_id,
-                                    post_connect_command,
-                                    target_config,
-                                    title,
-                                    None,
-                                    None,
-                                    None,
-                                    open_sftp_on_connect,
-                                    window,
-                                    cx,
-                                );
-                            }
-                        }
-                        Err(error) => {
-                            let message = error.to_string();
-                            self.connections.session_manager.update(cx, |session_manager, cx| {
-                                session_manager.set_status(Some(message), cx);
-                            });
-                        }
-                    }
-                    return;
-                }
-                let node_id = self.materialize_ssh_root_node(config.clone(), title.clone(), None);
-                if let Some(node) = self.ssh_nodes.get_mut(&node_id) {
-                    node.terminal_options = connection_options.terminal;
-                    node.dedicated_new_terminal_connection =
-                        connection_options.dedicated_new_terminal_connection;
-                    node.ssh_channel_strategy = connection_options.ssh_channel_strategy;
-                }
-                let post_connect_command = config.post_connect_command.clone();
-                let _ = self.queue_ssh_terminal_tab_for_node_with_mark_used(
-                    node_id,
-                    post_connect_command,
-                    config,
-                    title,
-                    None,
-                    None,
-                    None,
-                    open_sftp_on_connect,
-                    window,
-                    cx,
-                );
+                self.open_verified_manual_ssh(config, title, connection_options, window, cx);
             }
             SshConnectionIntent::ConnectSaved {
                 id,
                 auth_save_target,
                 open_sftp_on_connect,
             } => {
-                self.connections.flow.update(cx, |connection_flow, cx| {
-                    connection_flow.clear_host_key_challenge(cx);
-                });
-                if self.connection_form_state(cx).form.is_some() {
-                    self.update_connection_form_state(cx, ConnectionFormState::clear);
-                }
-                self.connections.session_manager.update(cx, |session_manager, cx| {
-                    session_manager.set_status(None, cx);
-                });
+                self.connections.finish_verified_saved_form(cx);
                 let _ = self.open_or_create_saved_ssh_terminal_tab(
                     id,
                     config,
@@ -557,40 +453,9 @@ impl WorkspaceApp {
                     }
                     return;
                 }
-                self.connections.flow.update(cx, |connection_flow, cx| {
-                    connection_flow.clear_host_key_challenge(cx);
-                });
-                if self.connection_form_state(cx).form.is_some() {
-                    self.update_connection_form_state(cx, ConnectionFormState::clear);
-                }
-                self.connections.session_manager.update(cx, |session_manager, cx| {
-                    session_manager.set_status(None, cx);
-                });
+                self.connections.finish_verified_saved_form(cx);
 
-                let mut bootstrap = MoshBootstrapConfig::new("pending", config);
-                bootstrap.server_executable = options.server_executable;
-                bootstrap.udp_host_override = options.udp_host_override;
-                bootstrap.udp_port = match options.udp_port {
-                    SavedMoshUdpPortSelection::Automatic => {
-                        oxideterm_mosh::MoshUdpPortSelection::Automatic
-                    }
-                    SavedMoshUdpPortSelection::Fixed { port } => {
-                        oxideterm_mosh::MoshUdpPortSelection::Fixed(port)
-                    }
-                    SavedMoshUdpPortSelection::Range { start, end } => {
-                        oxideterm_mosh::MoshUdpPortSelection::Range { start, end }
-                    }
-                };
-                bootstrap.ip_family = match options.ip_family {
-                    SavedMoshIpFamily::Auto => oxideterm_mosh::MoshIpFamily::Auto,
-                    SavedMoshIpFamily::Ipv4 => oxideterm_mosh::MoshIpFamily::Ipv4,
-                    SavedMoshIpFamily::Ipv6 => oxideterm_mosh::MoshIpFamily::Ipv6,
-                };
-                bootstrap.locale_assignments = options
-                    .locale
-                    .filter(|locale| !locale.trim().is_empty())
-                    .map(|locale| vec![("LANG".to_string(), locale)])
-                    .unwrap_or_default();
+                let launch = options.into_verified_terminal(config);
                 let bootstrap_context = MoshBootstrapContext {
                     registry: self.ssh_registry.clone(),
                     prompt_handler: Some(
@@ -604,19 +469,9 @@ impl WorkspaceApp {
                     executable,
                     plugin_sessions: self.mosh_plugin_sessions.clone(),
                     title: title.clone(),
-                    bootstrap,
+                    bootstrap: launch.bootstrap,
                     bootstrap_context,
-                    prediction: match options.prediction {
-                        MoshPredictionMode::Adaptive => {
-                            oxideterm_terminal::MoshPredictionDisplay::Adaptive
-                        }
-                        MoshPredictionMode::Always => {
-                            oxideterm_terminal::MoshPredictionDisplay::Always
-                        }
-                        MoshPredictionMode::Never => {
-                            oxideterm_terminal::MoshPredictionDisplay::Never
-                        }
-                    },
+                    prediction: launch.prediction,
                     task_runtime: self.workspace_runtime.read(cx).task_runtime(),
                 };
                 let Some(runtime_connection_attempt_id) = runtime_connection_attempt_id else {
@@ -624,14 +479,14 @@ impl WorkspaceApp {
                 };
                 match self.create_mosh_terminal_tab_for_connection(
                     terminal_config,
-                    options.terminal,
+                    launch.terminal,
                     title,
                     runtime_connection_attempt_id.clone(),
                     window,
                     cx,
                 ) {
                     Ok(session_id) => {
-                        if let Some(saved_profile_id) = options.saved_profile_id {
+                        if let Some(saved_profile_id) = launch.saved_profile_id {
                             self.register_terminal_saved_connection(
                                 session_id,
                                 oxideterm_terminal_triggers::SavedConnectionKind::Mosh,
@@ -689,21 +544,7 @@ impl WorkspaceApp {
                 {
                     Ok(child_id) => child_id,
                     Err(error) => {
-                        let message = error.to_string();
-                        let reported_to_form =
-                            self.connections.flow.update(cx, |connection_flow, cx| {
-                                connection_flow.set_form_feedback(
-                                    Some(false),
-                                    Some(message.clone()),
-                                    cx,
-                                )
-                            });
-                        if !reported_to_form {
-                            self.connections.session_manager.update(cx, |session_manager, cx| {
-                                session_manager.set_status(Some(message), cx);
-                            });
-                        }
-                        cx.notify();
+                        self.report_proxy_session_tree_error(error.to_string(), cx);
                         return;
                     }
                 };
@@ -726,11 +567,7 @@ impl WorkspaceApp {
                 self.expanded_ssh_nodes.insert(parent_id);
                 self.expanded_ssh_nodes.insert(child_id.clone());
                 self.active_ssh_node_id = Some(child_id.clone());
-                self.update_connection_form_state(cx, ConnectionFormState::clear);
-                let message = self.i18n.t("ssh.drill_down.connecting");
-                self.connections.session_manager.update(cx, |session_manager, cx| {
-                    session_manager.set_status(Some(message), cx);
-                });
+                self.connections.finish_drill_down_form(&self.i18n, cx);
                 self.ensure_node_connection_started(&child_id, cx);
                 self.persist_session_tree_snapshot();
             }
@@ -739,18 +576,62 @@ impl WorkspaceApp {
         }
     }
 
-    fn start_standalone_sftp_test(&mut self, config: SshConfig, cx: &mut Context<Self>) {
-        let message = self.i18n.t("ssh.form.test_running");
-        self.connections.flow.update(cx, |connection_flow, cx| {
-            connection_flow.set_form_feedback(Some(true), Some(message), cx)
+    fn open_verified_manual_ssh(
+        &mut self,
+        config: SshConfig,
+        title: String,
+        options: SshTerminalConnectionOptions,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use oxideterm_gpui_connections::preflight::VerifiedManualSshRoute;
+        let route = self.connections.flow.update(cx, |flow, cx| {
+            flow.prepare_verified_manual_terminal(&config, cx)
         });
-        oxideterm_gpui_connections::workers::test_standalone_sftp(
-            config,
-            self.ssh_worker_sender(cx),
-            managed_key_resolver_from_store(&self.connection_store),
-            self.ssh_registry.clone(),
-            self.forwarding_runtime.as_ref(),
+        let (node_id, config) = match route {
+            VerifiedManualSshRoute::Direct => (
+                self.materialize_ssh_root_node(config.clone(), title.clone(), None),
+                config,
+            ),
+            VerifiedManualSshRoute::SessionTree => {
+                let expansion_id = format!("manual-{}", self.next_ssh_node_id);
+                match self.expand_saved_connection_tree(&expansion_id, config, title.clone()) {
+                    Ok(expansion) => {
+                        self.set_opening_node_terminal_options(&expansion.target_node_id, &options);
+                        let Some(snapshot) = self.node_router.node_runtime_snapshot(&expansion.target_node_id) else {
+                            return;
+                        };
+                        (expansion.target_node_id, snapshot.config)
+                    }
+                    Err(error) => return self.set_connection_status(Some(error.to_string()), cx),
+                }
+            }
+        };
+        if matches!(route, VerifiedManualSshRoute::Direct) {
+            self.set_opening_node_terminal_options(&node_id, &options);
+        }
+        let post_connect_command = config.post_connect_command.clone();
+        let _ = self.queue_ssh_terminal_tab_for_node_with_mark_used(
+            node_id, post_connect_command, config, title, None, None, None,
+            options.open_sftp_on_connect, window, cx,
         );
+    }
+
+    fn set_opening_node_terminal_options(&mut self, node_id: &NodeId, options: &SshTerminalConnectionOptions) {
+        if let Some(node) = self.ssh_nodes.get_mut(node_id) {
+            node.terminal_options = options.terminal.clone();
+            node.dedicated_new_terminal_connection = options.dedicated_new_terminal_connection;
+            node.ssh_channel_strategy = options.ssh_channel_strategy;
+        }
+    }
+
+    fn start_standalone_sftp_test(&mut self, config: SshConfig, cx: &mut Context<Self>) {
+        self.connections.flow.update(cx, |flow, cx| {
+            flow.start_standalone_sftp_test(
+                config, &self.connection_store, self.ssh_registry.clone(),
+                self.forwarding_runtime.as_ref(), &self.i18n, cx,
+            );
+        });
     }
 
     pub(in crate::workspace) fn start_ssh_test(

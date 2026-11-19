@@ -1,5 +1,6 @@
+use super::super::selectable_text::{selectable_document_group_id, selectable_text_id};
 use super::*;
-use oxideterm_gpui_cloud_sync::panel::CloudSyncPanelView;
+use oxideterm_gpui_cloud_sync::{CloudSyncConfirmFrame, panel::CloudSyncPanelView};
 
 impl WorkspaceApp {
     pub(in crate::workspace) fn open_cloud_sync_tab(
@@ -100,6 +101,57 @@ impl WorkspaceApp {
                 move |window, cx| {
                     let _ = owner.update(cx, |app, cx| {
                         app.dismiss_transient_workspace_overlays_from_outside_pointer(window, cx);
+                    });
+                },
+                cx,
+            )
+        })
+    }
+
+    pub(in crate::workspace) fn mount_cloud_sync_confirm(
+        sync: &Entity<CloudSyncWorkspaceEntity>,
+        cx: &mut Context<Self>,
+    ) -> Entity<CloudSyncConfirmPortal> {
+        let owner = cx.weak_entity();
+        let frame_owner = owner.clone();
+        cx.new(|cx| {
+            CloudSyncConfirmPortal::new(
+                sync,
+                move |cx| {
+                    let owner = frame_owner.upgrade()?;
+                    let app = owner.read(cx);
+                    let selection = app.selectable_text_render_state_for_entity(owner, cx);
+                    Some(CloudSyncConfirmFrame {
+                        tokens: app.tokens,
+                        i18n: app.i18n.clone(),
+                        text: Box::new(move |role, key, text, color| {
+                            let role = match role {
+                                CloudSyncTextRole::PlainDocument => {
+                                    SelectableTextRole::PlainDocument
+                                }
+                                CloudSyncTextRole::NonSelectable => {
+                                    SelectableTextRole::NonSelectable
+                                }
+                            };
+                            // Keep the same fragment identity as the workspace confirm text.
+                            let fragment_id = selectable_text_id(
+                                "cloud-sync-confirm",
+                                ((key, text.as_str()), text.as_str()),
+                            );
+                            selection.render_display_text_with_id_in_group(
+                                role,
+                                selectable_document_group_id(),
+                                fragment_id,
+                                0,
+                                text,
+                                color,
+                            )
+                        }),
+                    })
+                },
+                move |action, cx| {
+                    let _ = owner.update(cx, |app, cx| {
+                        app.apply_cloud_sync_confirm_action(action, cx)
                     });
                 },
                 cx,

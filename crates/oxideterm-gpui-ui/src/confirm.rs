@@ -411,3 +411,102 @@ pub fn confirm_dialog_with_focus_motion(
 }
 mod focus;
 pub use focus::*;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum InlineFooterInputKeyAction<T> {
+    ClearFocus,
+    FocusInput,
+    FocusFooter(T),
+    Activate(T),
+}
+
+pub fn inline_footer_input_key_action<T>(
+    key: &str,
+    shift: bool,
+    actions: &[T],
+    input_focused: bool,
+    current: Option<T>,
+    fallback: T,
+) -> Option<InlineFooterInputKeyAction<T>>
+where
+    T: Copy + Eq,
+{
+    // Inline browser controls such as the AI chat composer are not modal focus
+    // traps: Tab moves from the textarea to the footer action, then out of the
+    // control group, while Shift+Tab from the action returns to the textarea.
+    // Keep that DOM-like order shared instead of hand-writing it in each input.
+    let has_actions = !actions.is_empty();
+    match key {
+        "escape" => Some(InlineFooterInputKeyAction::ClearFocus),
+        "tab" if input_focused && !shift && has_actions => {
+            Some(InlineFooterInputKeyAction::FocusFooter(
+                next_required_modal_footer_focus(actions, None, true, fallback),
+            ))
+        }
+        "tab" if input_focused && !shift => Some(InlineFooterInputKeyAction::ClearFocus),
+        "tab" if input_focused => Some(InlineFooterInputKeyAction::ClearFocus),
+        "tab" if shift => Some(InlineFooterInputKeyAction::FocusInput),
+        "tab" => Some(InlineFooterInputKeyAction::ClearFocus),
+        "arrowleft" | "left" | "arrowright" | "right" | "home" | "end"
+            if !input_focused && has_actions =>
+        {
+            modal_footer_key_action(key, shift, actions, current, fallback).map(|action| {
+                match action {
+                    ModalFooterKeyAction::Cancel => InlineFooterInputKeyAction::ClearFocus,
+                    ModalFooterKeyAction::Focus(action) => {
+                        InlineFooterInputKeyAction::FocusFooter(action)
+                    }
+                    ModalFooterKeyAction::Activate(action) => {
+                        InlineFooterInputKeyAction::Activate(action)
+                    }
+                }
+            })
+        }
+        "enter" | "space" | " " if !input_focused && has_actions => Some(
+            InlineFooterInputKeyAction::Activate(current.unwrap_or(fallback)),
+        ),
+        _ => None,
+    }
+}
+
+
+#[cfg(test)]
+mod inline_footer_tests {
+    #[test]
+    fn inline_footer_input_key_action_matches_browser_tab_exit_order() {
+        let actions = ["submit"];
+
+        assert_eq!(
+            super::inline_footer_input_key_action("tab", false, &actions, true, None, "submit"),
+            Some(super::InlineFooterInputKeyAction::FocusFooter("submit"))
+        );
+        assert_eq!(
+            super::inline_footer_input_key_action(
+                "tab",
+                false,
+                &actions,
+                false,
+                Some("submit"),
+                "submit",
+            ),
+            Some(super::InlineFooterInputKeyAction::ClearFocus)
+        );
+        assert_eq!(
+            super::inline_footer_input_key_action(
+                "tab",
+                true,
+                &actions,
+                false,
+                Some("submit"),
+                "submit",
+            ),
+            Some(super::InlineFooterInputKeyAction::FocusInput)
+        );
+        assert_eq!(
+            super::inline_footer_input_key_action("tab", false, &[], true, None, "submit"),
+            Some(super::InlineFooterInputKeyAction::ClearFocus)
+        );
+    }
+
+
+}

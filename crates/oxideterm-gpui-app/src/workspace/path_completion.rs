@@ -269,6 +269,7 @@ mod tests {
 
     #[test]
     fn completion_selection_can_move_beyond_the_initial_viewport() {
+        const INITIAL_VIEWPORT_ROWS: usize = 8;
         let mut state = PathCompletionState::default();
         let request = remote_path_completion_request("/root/").unwrap();
         let (generation, parent_path) = state.request(request).unwrap();
@@ -280,10 +281,10 @@ mod tests {
         assert_eq!(state.suggestions().len(), 12);
         assert!(state.move_selection(1));
         assert_eq!(state.selected_index(), Some(0));
-        for _ in 0..PATH_COMPLETION_VISIBLE_ROWS {
+        for _ in 0..INITIAL_VIEWPORT_ROWS {
             assert!(state.move_selection(1));
         }
 
-        assert_eq!(state.selected_index(), Some(PATH_COMPLETION_VISIBLE_ROWS));
+        assert_eq!(state.selected_index(), Some(INITIAL_VIEWPORT_ROWS));
     }
 }

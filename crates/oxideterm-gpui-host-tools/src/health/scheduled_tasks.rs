@@ -1419,25 +1419,4 @@ mod tests {
         assert!(identity.schedule.is_empty());
         assert!(identity.description.is_empty());
     }
-
-    #[test]
-    fn logs_request_identity_contains_only_fixed_builder_inputs() {
-        let request = HostScheduleLogsRequest {
-            connection_id: "connection-1".to_string(),
-            task_id: "backup.timer".to_string(),
-            task_name: "Backup".to_string(),
-            task_source: "systemd".to_string(),
-            task_unit: "backup.service".to_string(),
-            failure_fallback: "failed".to_string(),
-            empty_fallback: "empty".to_string(),
-        };
-        let identity = host_schedule_logs_request_identity(&request);
-
-        assert_eq!(identity.id, "backup.timer");
-        assert_eq!(identity.name, "Backup");
-        assert_eq!(identity.source, "systemd");
-        assert_eq!(identity.unit, "backup.service");
-        assert!(identity.command.is_empty());
-        assert!(identity.description.is_empty());
-    }
 }

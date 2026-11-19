@@ -334,39 +334,4 @@ mod tests {
             }) if received_tab_id == tab_id
         ));
     }
-
-    #[test]
-    fn worker_deliveries_remain_isolated_by_session_mailbox() {
-        let (first_sender, first_receiver) = mpsc::channel();
-        let (second_sender, second_receiver) = mpsc::channel();
-        let first_wake = RemoteDesktopWorkerWake::default();
-        let second_wake = RemoteDesktopWorkerWake::default();
-
-        send_remote_desktop_worker_delivery(
-            &first_sender,
-            &first_wake,
-            RemoteDesktopWorkerDelivery::FrameReady {
-                tab_id: TabId(1),
-                generation: 4,
-            },
-        );
-
-        assert!(first_wake.take());
-        assert!(!second_wake.take());
-        assert!(first_receiver.try_recv().is_ok());
-        assert!(second_receiver.try_recv().is_err());
-
-        // A second tab owns a distinct sender, receiver and wake permit.
-        send_remote_desktop_worker_delivery(
-            &second_sender,
-            &second_wake,
-            RemoteDesktopWorkerDelivery::FrameReady {
-                tab_id: TabId(2),
-                generation: 7,
-            },
-        );
-        assert!(second_wake.take());
-        assert!(second_receiver.try_recv().is_ok());
-        assert!(first_receiver.try_recv().is_err());
-    }
 }

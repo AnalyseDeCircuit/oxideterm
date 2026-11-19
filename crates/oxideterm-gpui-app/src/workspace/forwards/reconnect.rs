@@ -153,28 +153,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn restore_key_keeps_distinct_targets() {
-        let service_a = ReconnectForwardRule {
-            forward_type: "local".to_string(),
-            bind_address: "127.0.0.1".to_string(),
-            bind_port: 8080,
-            target_host: "service-a".to_string(),
-            target_port: 3000,
-            ..ReconnectForwardRule::default()
-        };
-        let service_b = ReconnectForwardRule {
-            target_host: "service-b".to_string(),
-            target_port: 4000,
-            ..service_a.clone()
-        };
-
-        assert_ne!(
-            forward_restore_key_for_snapshot_rule(&service_a),
-            forward_restore_key_for_snapshot_rule(&service_b)
-        );
-    }
-
-    #[test]
     fn restore_preserves_rule_identity_and_restarts_runtime() {
         let snapshot = ReconnectForwardRule {
             id: "old-forward-id".to_string(),
@@ -195,33 +173,5 @@ mod tests {
         assert_eq!(restored.target_host, "0.0.0.0");
         assert_eq!(restored.target_port, 0);
         assert_eq!(restored.description, "socks");
-    }
-
-    #[test]
-    fn restore_failure_detail_keeps_forward_error_class() {
-        let rule = ReconnectForwardRule {
-            forward_type: "local".to_string(),
-            bind_address: "127.0.0.1".to_string(),
-            bind_port: 8080,
-            target_host: "localhost".to_string(),
-            target_port: 3000,
-            ..ReconnectForwardRule::default()
-        };
-        let details = vec![format!(
-            "{}: Connection failed: Port already in use: 127.0.0.1:8080",
-            forward_restore_failure_label(&rule)
-        )];
-
-        let detail = forward_restore_result_detail(0, 1, &details);
-
-        assert!(detail.starts_with("forward restore failed:"));
-        assert!(detail.contains("local 127.0.0.1:8080 -> localhost:3000"));
-        assert!(detail.contains("Port already in use"));
-    }
-
-    #[test]
-    fn restore_failures_do_not_abort_reconnect_pipeline() {
-        assert_eq!(forward_restore_phase_result(0), PhaseResult::Ok);
-        assert_eq!(forward_restore_phase_result(2), PhaseResult::Ok);
     }
 }

@@ -7,7 +7,7 @@ impl AiModelPickerView {
         online: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        if let Some(agent_id) = Self::ai_acp_agent_id_from_provider_id(&provider.id) {
+        if let Some(agent_id) = ai_acp_agent_id_from_provider_id(&provider.id) {
             return self.render_ai_acp_model_selector_models(
                 agent_id.to_string(),
                 visible_models,
@@ -140,7 +140,7 @@ impl AiModelPickerView {
             .as_ref()
             .and_then(|options| oxideterm_ai::acp_model_config_option(options));
         let Some(option) = model_option.filter(|option| !option.choices.is_empty()) else {
-            let provider_id = Self::ai_acp_provider_id(&agent_id);
+            let provider_id = ai_acp_provider_id(&agent_id);
             let label = self.ai_acp_agent_model_fallback_label(&agent_id, cx);
             let active = self.ai_active_model_selector_provider_id().as_deref()
                 == Some(provider_id.as_str());
@@ -211,9 +211,9 @@ impl AiModelPickerView {
                 .model_selector_highlight()
                 .as_ref()
                 .is_some_and(|(id, model)| {
-                    id == &Self::ai_acp_provider_id(&agent_id) && model == &choice.label
+                    id == &ai_acp_provider_id(&agent_id) && model == &choice.label
                 });
-            let provider_id = Self::ai_acp_provider_id(&agent_id);
+            let provider_id = ai_acp_provider_id(&agent_id);
             let choice_label = choice.label.clone();
             let choice_value_id = choice.value_id.clone();
             let config_id = option.config_id.clone();

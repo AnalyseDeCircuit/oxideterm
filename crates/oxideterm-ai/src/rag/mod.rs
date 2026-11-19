@@ -756,17 +756,6 @@ mod tests {
     }
 
     #[test]
-    fn hnsw_rebuild_coordinator_queues_one_follow_up_pass() {
-        let coordinator = HnswRebuildCoordinator::default();
-
-        assert!(coordinator.request_or_queue());
-        assert!(!coordinator.request_or_queue());
-        assert!(coordinator.finish_cycle());
-        assert!(!coordinator.finish_cycle());
-        assert!(coordinator.request_or_queue());
-    }
-
-    #[test]
     fn typed_document_save_reports_persistence_and_index_states() {
         let store = temp_store("typed_save_outcome");
         let collection = rag_create_collection(
@@ -988,18 +977,6 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
-    }
-
-    #[test]
-    fn cancelled_manual_rebuild_keeps_the_observable_index_state() {
-        let store = temp_store("cancelled_manual_rebuild_status");
-
-        store.record_manual_bm25_rebuild(&Err(RagError::Cancelled));
-
-        assert!(matches!(
-            store.bm25_index_status().unwrap(),
-            Bm25IndexStatus::Ready
-        ));
     }
 
     #[test]

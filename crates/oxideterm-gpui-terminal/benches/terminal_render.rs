@@ -880,6 +880,90 @@ fn terminal_incremental_scroll(c: &mut criterion::Criterion<gpui::BenchMeasureme
         benchmark_incremental(cx, IncrementalWorkload::Scroll)
     });
 }
+
+fn benchmark_ls_scrollback(cx: &mut BenchAppContext<'_, '_>, smooth_scroll: bool) {
+    use std::fmt::Write as _;
+
+    let mut preferences = TerminalUiPreferences::default();
+    preferences.cursor_blink = false;
+    preferences.command_marks_enabled = true;
+    preferences.semantic_coloring = true;
+    preferences.smooth_scroll = smooth_scroll;
+    let terminal = cx
+        .add_empty_window()
+        .replace_root_view(|window, cx| {
+            TerminalPane::new_recording_playback(
+                BENCHMARK_COLS,
+                BENCHMARK_ROWS,
+                preferences,
+                window,
+                cx,
+            )
+            .expect("listing benchmark terminal should initialize")
+        })
+        .expect("listing benchmark window should remain open");
+    let mut listing = String::from("\x1b]133;A\x07$ ls -l\r\n\x1b]133;C;cmdline_url=ls%20-l\x07");
+    for index in 0..256 {
+        write!(
+            listing,
+            "-rw-r--r-- 1 alice staff {} Nov 18 14:00 \x1b[34m项目-{index:04}.rs\x1b[0m\r\n",
+            1024 + index
+        )
+        .unwrap();
+    }
+    listing.push_str("\x1b]133;D;0\x07\x1b]133;A\x07$ ");
+    terminal.update(cx, |terminal, cx| {
+        terminal.enable_benchmark_performance_metrics();
+        terminal.feed_benchmark_output(listing.as_bytes(), cx);
+        assert!(
+            terminal
+                .command_marks()
+                .iter()
+                .any(|mark| mark.command.as_deref() == Some("ls -l"))
+        );
+    });
+    cx.settle();
+    std::thread::sleep(IDLE_STARTUP_SETTLE);
+    cx.settle();
+    let initial_offset = terminal.update(cx, |terminal, cx| {
+        terminal.benchmark_scroll_pixels(128., cx)
+    });
+    assert!(initial_offset > 0);
+    cx.settle();
+
+    let mut step = 0;
+    let mut previous_offset = initial_offset;
+    let mut layout = Vec::with_capacity(PROFILE_SAMPLE_CAPACITY);
+    let mut highlights = Vec::with_capacity(PROFILE_SAMPLE_CAPACITY);
+    cx.bench_renderer(terminal, |terminal, _, cx| {
+        if step > 0 {
+            let (_, _, _, layout_us, _) = terminal.benchmark_render_stage_micros();
+            let (_, highlights_us, _) = terminal.benchmark_semantic_stage_micros();
+            layout.push(Duration::from_micros(layout_us));
+            highlights.push(Duration::from_micros(highlights_us));
+        }
+        // Revisit the same listing rows, including ones that completely exited the viewport.
+        let delta = if step % 48 < 24 { 32. } else { -32. };
+        let offset = terminal.benchmark_scroll_pixels(delta, cx);
+        debug_assert_ne!(offset, previous_offset);
+        previous_offset = offset;
+        step += 1;
+    });
+    cx.record_stage_samples("line layout", layout);
+    cx.record_stage_samples("highlight cache and generation", highlights);
+}
+
+fn terminal_scroll_ls_semantic_steps(c: &mut criterion::Criterion<gpui::BenchMeasurement>) {
+    benchmark_native_text(c, "terminal_scroll_ls_semantic_steps", |cx| {
+        benchmark_ls_scrollback(cx, false)
+    });
+}
+
+fn terminal_scroll_ls_semantic_smooth(c: &mut criterion::Criterion<gpui::BenchMeasurement>) {
+    benchmark_native_text(c, "terminal_scroll_ls_semantic_smooth", |cx| {
+        benchmark_ls_scrollback(cx, true)
+    });
+}
 fn terminal_incremental_sparse(c: &mut criterion::Criterion<gpui::BenchMeasurement>) {
     benchmark_native_text(c, "terminal_incremental_sparse", |cx| {
         benchmark_incremental(cx, IncrementalWorkload::Sparse)
@@ -1009,6 +1093,8 @@ gpui::bench_group!(
     terminal_incremental_input,
     terminal_incremental_selection,
     terminal_incremental_scroll,
+    terminal_scroll_ls_semantic_steps,
+    terminal_scroll_ls_semantic_smooth,
     terminal_incremental_sparse,
     terminal_incremental_semantic_warm,
     terminal_incremental_semantic_stream,

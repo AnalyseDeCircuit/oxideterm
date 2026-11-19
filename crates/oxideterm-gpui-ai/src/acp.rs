@@ -1,11 +1,9 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use gpui::{Context, EventEmitter};
-use oxideterm_ai::ToolSessionId;
 
 use crate::{
-    state::agents::AiModelBackendServices,
-    stream::{AiStreamDelivery, AiStreamDeliveryEvent, AiStreamDeliverySender},
+    stream::{AiStreamDelivery, AiStreamDeliveryEvent},
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -16,35 +14,7 @@ pub struct AcpPluginRevision {
     pub command: std::path::PathBuf,
 }
 
-pub type AcpToolDispatch = fn(
-    oxideterm_acp_host_tools::AcpHostToolCall,
-    Option<AcpApplicationToolTurn>,
-) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>;
-
-#[derive(Clone)]
-pub struct AcpApplicationToolTurn {
-    pub services: AiModelBackendServices,
-    pub tool_policy: oxideterm_ai::AiToolUsePolicy,
-    pub safety_mode: oxideterm_ai::AiPolicySafetyMode,
-    pub profile_id: Option<String>,
-    pub ui_tx: AiStreamDeliverySender,
-    pub generation: u64,
-    pub tool_session_id: ToolSessionId,
-    pub conversation_id: String,
-    pub assistant_id: String,
-    pub cancelled: std::sync::Arc<std::sync::atomic::AtomicBool>,
-}
-
-impl AcpApplicationToolTurn {
-    pub fn cancel(&self) {
-        self.cancelled
-            .store(true, std::sync::atomic::Ordering::Release);
-    }
-
-    pub fn is_cancelled(&self) -> bool {
-        self.cancelled.load(std::sync::atomic::Ordering::Acquire)
-    }
-}
+pub use oxideterm_ai::tool_loop::AcpApplicationToolTurn;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AcpThreadRunState {
@@ -100,6 +70,20 @@ impl AcpThreadSnapshot {
     }
 }
 
+pub fn missing_acp_plugins(
+    plugins: &[AcpPluginRevision], settings: &oxideterm_settings::AiSettings,
+) -> Vec<(String, String)> {
+    plugins.iter().filter(|plugin| {
+        !settings.acp_agents.iter().any(|agent| agent.plugin_id.as_deref() == Some(&plugin.plugin_id))
+    }).map(|plugin| (plugin.plugin_id.clone(), plugin.name.clone())).collect()
+}
+
+pub fn reset_acp_plugin_agent_status(settings: &mut oxideterm_settings::AiSettings, id: &str) {
+    if let Some(agent) = settings.acp_agents.iter_mut().find(|agent| agent.id == id) {
+        agent.status = Default::default();
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct AcpTurnRoute {
     pub generation: u64,
@@ -129,7 +113,7 @@ pub enum AcpWorkspaceEvent {
 
 pub struct AcpWorkspaceEntity<Terminal: Clone + 'static> {
     shutdown_terminal: fn(&Terminal),
-    dispatch_tool: AcpToolDispatch,
+
     task_runtime: std::sync::Arc<tokio::runtime::Runtime>,
     manager: oxideterm_ai::AcpConnectionManager,
     threads: HashMap<String, AcpThreadSnapshot>,
@@ -239,7 +223,7 @@ impl<Terminal: Clone + 'static> AcpWorkspaceEntity<Terminal> {
     pub fn new(
         task_runtime: std::sync::Arc<tokio::runtime::Runtime>,
         shutdown_terminal: fn(&Terminal),
-        dispatch_tool: AcpToolDispatch,
+
         cx: &mut Context<Self>,
     ) -> Self {
         let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -281,7 +265,6 @@ impl<Terminal: Clone + 'static> AcpWorkspaceEntity<Terminal> {
         Self {
             task_runtime,
             shutdown_terminal,
-            dispatch_tool,
             manager,
             threads: HashMap::new(),
             active_connection_ids: HashMap::new(),
@@ -411,11 +394,10 @@ impl<Terminal: Clone + 'static> AcpWorkspaceEntity<Terminal> {
             };
             let active_turn = std::sync::Arc::new(parking_lot::RwLock::new(None));
             let relay_turn = active_turn.clone();
-            let dispatch_tool = self.dispatch_tool;
             let relay = self.task_runtime.spawn(async move {
                 while let Some(call) = calls.recv().await {
                     let turn = relay_turn.read().clone();
-                    dispatch_tool(call, turn).await;
+                    oxideterm_ai::tool_loop::handle_acp_application_tool_call(call, turn).await;
                 }
             });
             self.application_tool_bridges.insert(
@@ -1139,7 +1121,7 @@ mod tests {
         runtime: std::sync::Arc<tokio::runtime::Runtime>,
         cx: &mut Context<AcpWorkspaceEntity<()>>,
     ) -> AcpWorkspaceEntity<()> {
-        AcpWorkspaceEntity::new(runtime, |_| {}, |_, _| Box::pin(async {}), cx)
+        AcpWorkspaceEntity::new(runtime, |_| {}, cx)
     }
 
     #[gpui::test]
@@ -1210,57 +1192,6 @@ mod tests {
                 }
             ));
         });
-    }
-
-    #[test]
-    fn acp_application_tools_match_the_provider_catalog() {
-        let provider_tools = oxideterm_ai::orchestrator_tool_definitions();
-        let acp_tools = acp_application_tool_definitions(&provider_tools);
-
-        assert_eq!(provider_tools.len(), acp_tools.len());
-        for (provider, acp) in provider_tools.iter().zip(&acp_tools) {
-            assert_eq!(provider.name, acp.name);
-            assert_eq!(provider.description, acp.description);
-            assert_eq!(provider.parameters, acp.input_schema);
-        }
-    }
-
-    #[test]
-    fn external_mcp_tools_receive_protocol_safe_proxy_names() {
-        let provider_tools = vec![oxideterm_ai::AiToolDefinition {
-            name: "mcp::demo::ping".to_string(),
-            description: "Ping the demo MCP server.".to_string(),
-            parameters: serde_json::json!({ "type": "object" }),
-        }];
-
-        let acp_tools = acp_application_tool_definitions(&provider_tools);
-
-        assert_eq!(acp_tools.len(), 1);
-        assert_ne!(acp_tools[0].name, provider_tools[0].name);
-        assert!(
-            acp_tools[0]
-                .name
-                .chars()
-                .all(|character| character.is_ascii_alphanumeric()
-                    || matches!(character, '_' | '-' | '.'))
-        );
-    }
-
-    #[test]
-    fn session_owner_keeps_equal_agent_session_ids_isolated() {
-        let mut sessions = HashMap::new();
-        sessions.insert(AcpSessionOwner::new("agent-a", "session-1"), "chat-a");
-        sessions.insert(AcpSessionOwner::new("agent-b", "session-1"), "chat-b");
-
-        assert_eq!(sessions.len(), 2);
-        assert_eq!(
-            sessions.get(&AcpSessionOwner::new("agent-a", "session-1")),
-            Some(&"chat-a")
-        );
-        assert_eq!(
-            sessions.get(&AcpSessionOwner::new("agent-b", "session-1")),
-            Some(&"chat-b")
-        );
     }
 
     #[gpui::test]

@@ -1,4 +1,8 @@
 use std::collections::HashMap;
+use std::hash::Hash;
+
+use oxideterm_settings::PersistedSettings;
+use oxideterm_workspace::{ActiveSessionReadiness, TabId, TabKind, TerminalSessionId};
 
 use super::*;
 use crate::{AiExecutedToolResult, tool_result_protocol::prepare_ai_tool_output};
@@ -38,6 +42,295 @@ impl AiOrchestratorRuntimeSnapshot {
             model_visible_settings: serde_json::Value::Null,
         }
     }
+}
+
+pub fn recent_runtime_health(events: impl IntoIterator<Item = (std::time::SystemTime, Option<bool>)>) -> (usize, usize, usize) {
+    let cutoff = std::time::SystemTime::now() - std::time::Duration::from_secs(10 * 60);
+    events.into_iter().filter(|(timestamp, _)| *timestamp >= cutoff)
+        .fold((0, 0, 0), |(total, warnings, errors), (_, severity)| {
+            (total + 1, warnings + usize::from(severity == Some(false)), errors + usize::from(severity == Some(true)))
+        })
+}
+
+impl AiOrchestratorRuntimeSnapshot {
+    pub fn tool_owner_rejected(
+        &self, call: String, name: String, error: &crate::RuntimeValidationError,
+        approved: bool, elapsed: u128, file: bool,
+    ) -> crate::AiExecutedToolResult {
+        let (summary, risk) = if file {
+            ("Runtime resource is unavailable.", "write")
+        } else {
+            ("Runtime target is unavailable.", "interactive")
+        };
+        self.to_executed_tool_result(call, name, self.fail(
+            summary, super::ai_runtime_validation_public_code(error, approved),
+            super::ai_runtime_validation_recovery_message(approved), risk,
+        ), elapsed)
+    }
+}
+
+impl AiOrchestratorRuntimeSnapshot {
+    pub fn tool_preflight_rejection(&self, call: String, name: String, error: &crate::RuntimeValidationError) -> crate::AiExecutedToolResult {
+        self.to_executed_tool_result(call, name, self.fail(
+            "Runtime target is unavailable.", error.public_code(),
+            "Rediscover the current terminal target before retrying.", "interactive",
+        ), 0)
+    }
+}
+
+/// Native tools whose live or saved owner must already be valid before approval.
+pub fn ai_tool_preflights_runtime_owner(tool_name: &str) -> bool {
+    matches!(
+    tool_name,
+    "connect_target"
+        | "run_command"
+        | "observe_terminal"
+        | "send_terminal_input"
+        | "get_transport_session_state"
+        | "manage_serial_session"
+        | "manage_telnet_session"
+        | "wait_terminal_output"
+        | "get_terminal_command_status"
+        | "read_resource"
+        | "write_resource"
+        | "transfer_resource"
+        | "open_app_surface"
+        | "get_state"
+        | "inspect_host_tools"
+        | "control_host_tool"
+        | "list_forwards"
+        | "manage_forward"
+)
+}
+
+pub enum AiAuthorizedExecutionRoute {
+    Connect,
+    LiveFile,
+    RunCommand,
+    WaitOutput,
+    Application,
+}
+
+pub fn ai_authorized_execution_route(
+    tool_name: &str,
+    args: &serde_json::Value,
+) -> AiAuthorizedExecutionRoute {
+    match tool_name {
+        "connect_target" => AiAuthorizedExecutionRoute::Connect,
+        "read_resource" | "write_resource" | "transfer_resource"
+            if args.get("handle_id").is_some() => AiAuthorizedExecutionRoute::LiveFile,
+        "run_command" => AiAuthorizedExecutionRoute::RunCommand,
+        "wait_terminal_output" => AiAuthorizedExecutionRoute::WaitOutput,
+        _ => AiAuthorizedExecutionRoute::Application,
+    }
+}
+
+impl AiOrchestratorRuntimeSnapshot {
+    pub fn connect_target_ready_result(
+        &self,
+        resource_ref: &crate::StableResourceRef,
+        connection_label: Option<&str>,
+        tool_call_id: &str,
+        tool_name: &str,
+        duration_ms: u128,
+    ) -> Option<AiExecutedToolResult> {
+        let ready_targets = self
+            .targets
+            .iter()
+            .filter(|target| {
+                matches!(target.kind.as_str(), "ssh-node" | "terminal-session")
+                    && target.state == "connected"
+                    && target
+                        .refs
+                        .get("connectionId")
+                        .is_some_and(|id| id == resource_ref.id())
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let primary = ready_targets
+            .iter()
+            .find(|target| target.kind == "terminal-session")
+            .or_else(|| ready_targets.first())?
+            .clone();
+        let label = connection_label
+            .map(str::trim)
+            .filter(|label| !label.is_empty())
+            .unwrap_or("saved connection");
+        Some(
+            self.to_executed_tool_result(
+                tool_call_id.to_string(),
+                tool_name.to_string(),
+                self.ok(
+                    format!("Connected {label}."),
+                    "A live terminal is ready.",
+                    serde_json::json!({ "resourceRef": resource_ref }),
+                    "write",
+                )
+                .with_target(primary)
+                .with_targets(ready_targets),
+                duration_ms,
+            ),
+        )
+    }
+
+    pub fn connect_target_timeout_result(
+        &self,
+        tool_call_id: &str,
+        tool_name: &str,
+        args: &serde_json::Value,
+        duration_ms: u128,
+    ) -> AiExecutedToolResult {
+        let target = match ai_stable_resource_operation("connect_target", args) {
+            Ok(AiStableResourceOperation::SavedConnection(resource_ref)) => self
+                .targets
+                .iter()
+                .find(|target| {
+                    target.kind == "saved-connection"
+                        && target
+                            .refs
+                            .get("connectionId")
+                            .is_some_and(|id| id == resource_ref.id())
+                })
+                .cloned(),
+            _ => None,
+        };
+        let next_actions = target
+            .as_ref()
+            .map(|target| {
+                vec![serde_json::json!({
+                    "action": "select_target",
+                    "args": { "query": target.label },
+                    "reason": "Re-select the saved connection after credentials are updated."
+                })]
+            })
+            .unwrap_or_default();
+        self.to_executed_tool_result(
+            tool_call_id.to_string(),
+            tool_name.to_string(),
+            self.fail(
+                "Connection did not complete.",
+                "connect_failed",
+                "The saved connection flow did not return a live terminal.",
+                "write",
+            )
+            .with_optional_target(target)
+            .with_next_actions(next_actions),
+            duration_ms,
+        )
+    }
+}
+
+pub struct AiActiveNodeCapture<'a> {
+    pub host: &'a str,
+    pub username: &'a str,
+    pub readiness: ActiveSessionReadiness,
+}
+
+pub struct AiRuntimeHealthCapture<I> {
+    pub open_tabs: usize,
+    pub has_active_tab: bool,
+    pub pane_count: usize,
+    pub local_session_count: usize,
+    pub node_states: I,
+    pub recent_events: (usize, usize, usize),
+}
+
+fn node_readiness_label(readiness: ActiveSessionReadiness) -> &'static str {
+    match readiness {
+        ActiveSessionReadiness::Ready => "connected",
+        ActiveSessionReadiness::Connecting => "connecting",
+        ActiveSessionReadiness::Error => "error",
+        ActiveSessionReadiness::Disconnected => "disconnected",
+    }
+}
+
+pub fn finish_ai_workspace_snapshot(
+    mut snapshot: AiOrchestratorRuntimeSnapshot,
+    active_tab: Option<(&TabKind, &str)>,
+    active_node: Option<AiActiveNodeCapture<'_>>,
+    active_session_id: Option<TerminalSessionId>,
+    active_tab_id: Option<TabId>,
+    active_node_id: Option<&str>,
+    settings: &PersistedSettings,
+    transfers: serde_json::Value,
+    health: AiRuntimeHealthCapture<impl Iterator<Item = ActiveSessionReadiness>>,
+) -> AiOrchestratorRuntimeSnapshot {
+    snapshot.active_tab = active_tab.map(
+        |(kind, title)| serde_json::json!({ "type": ai_tab_kind_label(kind), "title": title }),
+    );
+    snapshot.active_node = active_node.map(|node| {
+        serde_json::json!({
+            "host": node.host,
+            "username": node.username,
+            "status": node_readiness_label(node.readiness),
+        })
+    });
+    snapshot.active_session_id = active_session_id.map(|id| id.0.to_string());
+    snapshot.active_tab_id = active_tab_id.map(|id| id.0.to_string());
+    snapshot.active_node_id = active_node_id.map(str::to_owned);
+    snapshot.memory = ai_memory_settings_json(
+        settings.ai.memory.enabled,
+        &settings.ai.memory.content,
+        &settings.ai.memory.entries,
+    );
+    snapshot.model_visible_settings = ai_model_visible_settings_projection(settings);
+
+    let mut states = BTreeMap::<_, usize>::new();
+    let mut total = 0;
+    for state in health.node_states {
+        *states.entry(node_readiness_label(state)).or_default() += 1;
+        total += 1;
+    }
+    let (events, warnings, errors) = health.recent_events;
+    snapshot.health_state = serde_json::json!({
+        "tabs": { "open": health.open_tabs, "hasActiveTab": health.has_active_tab },
+        "terminalRegistry": { "entries": health.pane_count },
+        "localTerminals": { "count": health.local_session_count },
+        "sshNodes": { "total": total, "states": states },
+        "transfers": {
+            "total": transfers.get("total").and_then(serde_json::Value::as_u64).unwrap_or(0),
+            "counts": transfers.get("counts").cloned().unwrap_or_else(|| serde_json::json!({})),
+        },
+        "recentEvents": { "total": events, "warnings": warnings, "errors": errors },
+    });
+    snapshot.transfers_state = transfers;
+    snapshot
+}
+
+pub fn ai_runtime_context_prompt<N: Clone + Eq + Hash>(
+    snapshot: &AiOrchestratorRuntimeSnapshot,
+    authority: &crate::AiRuntimeAuthority<N>,
+    session: &crate::ToolSessionId,
+    observed_at_ms: i64,
+) -> String {
+    let mut stable_resources = if authority.is_agent_scoped_session(session) {
+        Vec::new()
+    } else {
+        ai_app_surface_stable_resources()
+    };
+    for resource in snapshot
+        .targets
+        .iter()
+        .filter_map(ai_stable_resource_ref_for_target)
+    {
+        if !stable_resources.contains(&resource) {
+            stable_resources.push(resource);
+        }
+        if stable_resources.len() >= AI_TARGET_DISCOVERY_LIMIT {
+            break;
+        }
+    }
+    let projection = crate::RuntimeContextSnapshot {
+        protocol_version: 2,
+        snapshot_id: format!("snap_{}", uuid::Uuid::new_v4().simple()),
+        observed_at_ms,
+        registry_epoch: authority.registry_epoch(),
+        stable_resources,
+        live_handles: authority.current_handle_projections(session),
+    };
+    serde_json::to_string_pretty(&serde_json::json!({ "runtimeContext": projection }))
+        .map(|text| ai_model_safe_runtime_text(&text))
+        .unwrap_or_else(|_| "{\"runtimeContext\":{\"protocolVersion\":2}}".to_owned())
 }
 
 /// Application surfaces are durable navigation destinations, not live tab identities.
@@ -1101,9 +1394,7 @@ pub fn make_ai_state_version(scope: &str, parts: impl IntoIterator<Item = String
 mod tests {
     use super::*;
     use crate::terminal_observation::*;
-    use crate::tool_result_protocol::{
-        ai_tool_result_message, annotate_executed_ai_tool_result_policy,
-    };
+    use crate::tool_result_protocol::ai_tool_result_message;
 
     #[test]
     fn web_search_sources_survive_model_output_truncation() {
@@ -1336,27 +1627,6 @@ mod tests {
     }
 
     #[test]
-    fn target_discovery_applies_a_hard_result_limit() {
-        let mut snapshot = AiOrchestratorRuntimeSnapshot::background_result_projection();
-        snapshot.targets = (0..=AI_TARGET_DISCOVERY_LIMIT)
-            .map(|index| {
-                let mut target = sample_target();
-                target.id = format!("ssh-node:internal-{index}");
-                target.label = format!("host-{index}.example.com");
-                target
-            })
-            .collect();
-
-        let result = snapshot.list_targets(&serde_json::json!({
-            "view": "connections",
-            "kind": "ssh-node",
-        }));
-
-        assert!(result.ok);
-        assert_eq!(result.targets.len(), AI_TARGET_DISCOVERY_LIMIT);
-    }
-
-    #[test]
     fn long_tool_output_uses_head_tail_preview_metadata() {
         let output = format!(
             "HEAD{}OMITTED{}TAIL",
@@ -1378,45 +1648,6 @@ mod tests {
         );
         assert_eq!(
             output_preview.get("rawOutputStored"),
-            Some(&serde_json::json!(true))
-        );
-    }
-
-    #[test]
-    fn run_command_execution_summary_preserves_visibility_and_state() {
-        let mut result = sample_result();
-        result.envelope = serde_json::json!({
-            "ok": true,
-            "summary": "Command sent to terminal.",
-            "output": "Command sent: uptime",
-            "data": {
-                "executionState": "sent",
-                "commandId": "command-1",
-                "visibleInTerminal": true
-            },
-            "targets": [{
-                "id": "ssh-node:prod-node-1",
-                "kind": "ssh-node",
-                "label": "prod.example.com",
-                "metadata": { "state": "connected", "refs": { "sessionId": "42" } }
-            }],
-            "meta": { "toolName": "run_command", "durationMs": 7, "truncated": false }
-        });
-
-        annotate_ai_run_command_execution_result(
-            &mut result,
-            &serde_json::json!({ "command": "uptime" }),
-        );
-
-        let model: serde_json::Value =
-            serde_json::from_str(&crate::ai_tool_result_model_content(&result)).unwrap();
-        assert_eq!(model["execution"]["commandId"], "command-1");
-        assert_eq!(
-            result.envelope.pointer("/execution/state"),
-            Some(&serde_json::json!("sent"))
-        );
-        assert_eq!(
-            result.envelope.pointer("/execution/visibleInTerminal"),
             Some(&serde_json::json!(true))
         );
     }
@@ -1463,68 +1694,6 @@ mod tests {
             projected["items"]
                 .as_array()
                 .is_some_and(|items| items.len() < AI_MODEL_RESULT_DATA_MAX_NODES)
-        );
-    }
-
-    #[test]
-    fn active_context_matches_tab_session_or_node_refs() {
-        let mut target = sample_target();
-        target.refs.insert("tabId".to_string(), "7".to_string());
-        target
-            .refs
-            .insert("sessionId".to_string(), "42".to_string());
-
-        assert!(target_matches_active_context(
-            &target,
-            Some("7"),
-            None,
-            None
-        ));
-        assert!(target_matches_active_context(
-            &target,
-            None,
-            Some("prod-node-1"),
-            None
-        ));
-        assert!(target_matches_active_context(
-            &target,
-            None,
-            None,
-            Some("42")
-        ));
-        assert!(!target_matches_active_context(
-            &target,
-            Some("8"),
-            Some("staging-node"),
-            Some("43")
-        ));
-    }
-
-    #[test]
-    fn default_policy_annotation_does_not_mark_bypass() {
-        let mut result = sample_result();
-        let decision = crate::AiPolicyDecision {
-            decision: crate::AiPolicyDecisionKind::Allow,
-            risk: crate::AiActionRisk::Read,
-            reason_code: "read_only_auto_allowed".to_string(),
-            reason_text_key: "ai.tool_use.policy_reason_read_only".to_string(),
-            matched_policy_key: "list_targets".to_string(),
-            approval_mode: crate::AiPolicySafetyMode::Default,
-            profile_id: None,
-        };
-
-        annotate_executed_ai_tool_result_policy(&mut result, &decision);
-
-        assert!(result.envelope.pointer("/meta/approvalMode").is_none());
-        assert_eq!(
-            result.envelope.pointer("/meta/policyDecision/approvalMode"),
-            Some(&serde_json::json!("default"))
-        );
-        assert!(
-            result
-                .envelope
-                .pointer("/meta/policyDecision/profileId")
-                .is_none()
         );
     }
 

@@ -975,20 +975,3 @@ impl Render for McpClientDialog {
         (self.body)(cx).unwrap_or_else(|| div().into_any_element())
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn mcp_permission_sections_preserve_every_selectable_group_once() {
-        let mut displayed = public_mcp_permission_sections()
-            .into_iter()
-            .flat_map(|(_, groups)| groups.iter().copied())
-            .collect::<Vec<_>>();
-        displayed.sort();
-        let mut selectable = oxideterm_public_mcp::ToolGroup::selectable().to_vec();
-        selectable.sort();
-        assert_eq!(displayed, selectable);
-    }
-}

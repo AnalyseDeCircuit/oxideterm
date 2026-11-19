@@ -98,6 +98,7 @@ pub enum ConnectionsWindowRequest {
         configured_credentials_confirmed: bool,
     },
     FocusForm,
+    ToggleCatalogSidebarSearch,
     FocusSessionInput(SessionManagerInput, MouseDownEvent),
     Oxide(OxideDialogAction),
     Catalog(CatalogAction),
@@ -260,6 +261,7 @@ pub struct ConnectionsViews {
     session_manager_sidebar_rows: Entity<CatalogView>,
     session_manager_dialogs: Entity<CatalogView>,
     session_manager_sidebar_search: Entity<CatalogView>,
+    session_manager_sidebar_search_button: Entity<CatalogView>,
     authentication: Entity<AuthenticationView>,
     form_body: Entity<ConnectionFormView>,
     form_overlays: Entity<ConnectionFormView>,
@@ -314,6 +316,7 @@ impl ConnectionsViews {
         let session_manager_sidebar_rows = new_catalog(CatalogMount::Rows);
         let session_manager_dialogs = new_catalog(CatalogMount::Dialogs);
         let session_manager_sidebar_search = new_catalog(CatalogMount::SidebarSearch);
+        let session_manager_sidebar_search_button = new_catalog(CatalogMount::SidebarSearchButton);
         let batch_anchors = Rc::new(RefCell::new(Default::default()));
         let mut new_overlay = |mount| {
             cx.new(|cx| {
@@ -341,6 +344,7 @@ impl ConnectionsViews {
             session_manager_sidebar_rows,
             session_manager_dialogs,
             session_manager_sidebar_search,
+            session_manager_sidebar_search_button,
             authentication,
             form_body,
             form_overlays,
@@ -406,6 +410,10 @@ impl ConnectionsViews {
 
     pub fn session_manager_dialogs(&self) -> AnyElement {
         self.session_manager_dialogs.clone().into_any_element()
+    }
+
+    pub fn session_manager_sidebar_search_button(&self) -> AnyElement {
+        self.session_manager_sidebar_search_button.clone().into_any_element()
     }
 
     pub fn session_manager_sidebar_search(&self) -> AnyElement {

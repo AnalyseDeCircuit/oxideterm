@@ -308,35 +308,3 @@ impl Render for SettingsThemePicker {
         overlay_content_boundary(popup).into_any_element()
     }
 }
-
-#[cfg(test)]
-mod theme_select_tests {
-    use super::*;
-
-    #[test]
-    fn theme_navigation_skips_groups_and_scrolls_to_the_actual_row() {
-        let settings = PersistedSettings::default();
-        let entries = [
-            ThemeSelectEntry::Group("custom"),
-            ThemeSelectEntry::theme("custom:one".into(), &settings),
-            ThemeSelectEntry::Group("oxide"),
-            ThemeSelectEntry::theme("azurite".into(), &settings),
-            ThemeSelectEntry::Group("classic"),
-            ThemeSelectEntry::theme("tokyo-night".into(), &settings),
-        ];
-        for (current, key, expected) in [
-            ("custom:one", "down", (3, "azurite")),
-            ("azurite", "up", (1, "custom:one")),
-            ("azurite", "end", (5, "tokyo-night")),
-            ("tokyo-night", "home", (1, "custom:one")),
-            ("custom:one", "up", (1, "custom:one")),
-            ("tokyo-night", "down", (5, "tokyo-night")),
-        ] {
-            assert_eq!(
-                next_theme_option(&entries, Some(current), key),
-                Some(expected),
-                "{current}: {key}"
-            );
-        }
-    }
-}

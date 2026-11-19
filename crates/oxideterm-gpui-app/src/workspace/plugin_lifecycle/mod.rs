@@ -418,45 +418,33 @@ impl WorkspaceApp {
         };
 
         self.connection_store = core.store;
-        let mut envelope = core.envelope;
-        // Tauri applies side-car forwards, quick commands, plugin settings,
-        // app settings, and portable secrets only after the connection import
-        // has committed. Native preserves that order on the Workspace owner.
-        envelope.imported_forwards = self.apply_oxide_import_forward_records(&mut envelope);
-        let (imported_quick_commands, skipped_quick_commands, quick_commands_errors) = self
-            .apply_oxide_import_quick_commands(
-                envelope.quick_commands_json.as_deref(),
-                options.import_quick_commands,
-                native_plugin_quick_command_import_strategy(options.quick_command_strategy),
-                cx,
-            );
-        let imported_plugin_settings = self.apply_oxide_import_plugin_settings(
-            &envelope.plugin_settings,
-            options.import_plugin_settings,
-            options.selected_plugin_ids.as_ref(),
-        );
-        let skipped_plugin_settings =
-            !options.import_plugin_settings && !envelope.plugin_settings.is_empty();
-        let (imported_app_settings, skipped_app_settings) = self.apply_oxide_import_app_settings(
-            envelope.app_settings_json.as_deref(),
-            options.import_app_settings,
-            options.selected_app_settings_sections.as_ref(),
+        let (sidecars, _) = self.import_oxide_sidecars(
+            core.envelope,
+            crate::workspace::session_manager::OxideSidecarOptions {
+                forwards: true,
+                quick_commands: options.import_quick_commands.then(|| {
+                    native_plugin_quick_command_import_strategy(options.quick_command_strategy)
+                }),
+                plugin_settings: options.import_plugin_settings,
+                selected_plugin_ids: options.selected_plugin_ids.as_ref(),
+                app_settings: options.import_app_settings,
+                selected_app_settings_sections: options.selected_app_settings_sections.as_ref(),
+                portable_secrets: true,
+            },
             cx,
         );
-        self.apply_oxide_import_portable_secrets(&mut envelope, cx);
         self.queue_cloud_sync_dirty_refresh(cx);
-
         plugin_runtime::PluginResponse::ok(
             request_id,
             native_plugin_sync_import_result_value(
-                &envelope,
-                imported_app_settings,
-                skipped_app_settings,
-                imported_quick_commands,
-                skipped_quick_commands,
-                quick_commands_errors,
-                imported_plugin_settings,
-                skipped_plugin_settings,
+                &sidecars.envelope,
+                sidecars.imported_app_settings,
+                sidecars.skipped_app_settings,
+                sidecars.imported_quick_commands,
+                sidecars.skipped_quick_commands,
+                sidecars.quick_commands_errors,
+                sidecars.imported_plugin_settings,
+                sidecars.skipped_plugin_settings,
             ),
         )
     }

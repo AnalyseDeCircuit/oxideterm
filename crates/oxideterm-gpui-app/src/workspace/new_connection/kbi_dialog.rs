@@ -99,17 +99,9 @@ impl WorkspaceApp {
             &self.tokens,
             oxideterm_gpui_ui::motion::MotionDuration::Overlay,
         );
-        let cancelled = self.connections.flow.update(cx, |connection_flow, cx| {
-            connection_flow.cancel_keyboard_interactive_challenge(delay, cx)
-        });
-        if cancelled {
-            let message = self.i18n.t("ssh.kbi.cancelled");
-            self.update_connection_form_state(cx, |state| {
-                if let Some(form) = state.form.as_mut() {
-                    form.pending = false;
-                    form.error = Some(message);
-                }
-            });
+        if self.connections.flow.update(cx, |flow, cx| {
+            flow.dismiss_keyboard_interactive_challenge(delay, &self.i18n, cx)
+        }) {
             cx.notify();
         }
     }

@@ -1,34 +1,4 @@
-use oxideterm_gpui_ai::state::{detect_ai_cli_agent_kind, sanitize_ai_tool_arguments_for_approval};
-
 impl WorkspaceApp {
-    pub(in crate::workspace) fn apply_ai_acp_session_started(
-        &mut self,
-        generation: u64,
-        conversation_id: &str,
-        session_id: &str,
-        session_metadata: Option<serde_json::Value>,
-        session_config_options: Vec<oxideterm_ai::AcpSessionConfigOption>,
-        session_modes: Option<oxideterm_ai::AcpSessionModeState>,
-        agent_id: &str,
-        cx: &mut App,
-    ) -> bool {
-        let applied = self.ai.state.update(cx, |ai, _cx| {
-            ai.apply_acp_session_started_state(
-                generation,
-                conversation_id,
-                session_id,
-                session_metadata,
-                session_config_options,
-                session_modes,
-                agent_id,
-            )
-        });
-        if !applied {
-            return false;
-        }
-        true
-    }
-
     pub(in crate::workspace) fn ai_stream_error_text(&self, error: &str) -> Option<String> {
         let text = self.i18n.t(oxideterm_ai::stream_error_label(error)?);
         Some(match oxideterm_ai::stream_error_http_status(error) {
@@ -78,48 +48,15 @@ impl WorkspaceApp {
         }
     }
 
-    pub(in crate::workspace) fn apply_ai_tool_status(
-        &mut self,
-        generation: u64,
-        conversation_id: &str,
-        message_id: &str,
-        tool_call_id: &str,
-        name: &str,
-        arguments: &str,
-        status: &str,
-        result: Option<serde_json::Value>,
-        risk: Option<String>,
-        summary: Option<String>,
-        synthetic_denied: bool,
-        _raw_text: Option<String>,
-        round_id_override: Option<String>,
-        round_number_override: Option<i64>,
-        cx: &mut Context<Self>,
+    fn report_ai_tool_progress(
+        &mut self, owner: &AiToolRunContext, call: &str, name: &str,
+        status: &str, data: Option<serde_json::Value>, risk: &str, cx: &mut Context<Self>,
     ) {
-        if status == "pending_user_approval"
-            && self.ai.state.read(cx).is_chat_stream_generation(generation)
-        {
-            self.notify_ai_agent_attention(conversation_id, message_id, "ai.agents.approval", cx);
+        if status == "pending_user_approval" && self.ai.state.read(cx).is_chat_stream_generation(owner.generation) {
+            self.notify_ai_agent_attention(&owner.conversation_id, &owner.assistant_id, "ai.agents.approval", cx);
         }
-        self.ai.state.update(cx, |state, cx| {
-            state.apply_ai_tool_status(
-                generation,
-                conversation_id,
-                message_id,
-                tool_call_id,
-                name,
-                arguments,
-                status,
-                result,
-                risk,
-                summary,
-                synthetic_denied,
-                _raw_text,
-                round_id_override,
-                round_number_override,
-                |data| self.ai_diagnostic_base(data),
-                cx,
-            );
+        self.ai.state.update(cx, |ai, cx| {
+            ai.apply_owned_tool_progress(owner, call, name, status, data, risk, |value| self.ai_diagnostic_base(value), cx);
         });
     }
 }

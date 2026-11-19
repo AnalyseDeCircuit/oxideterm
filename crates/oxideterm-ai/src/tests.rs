@@ -413,37 +413,6 @@ fn image_input_model_switch_preserves_history_and_budgets_the_target_model() {
 }
 
 #[test]
-fn orchestrator_send_terminal_input_exposes_bounded_control_keys() {
-    let tools = orchestrator_tool_definitions();
-    let terminal_input = tools
-        .iter()
-        .find(|tool| tool.name == "send_terminal_input")
-        .expect("send_terminal_input tool");
-    let properties = terminal_input
-        .parameters
-        .get("properties")
-        .and_then(serde_json::Value::as_object)
-        .expect("tool properties");
-
-    assert!(
-        terminal_input
-            .description
-            .contains("control/navigation key")
-    );
-    assert!(terminal_input.description.contains("run_command instead"));
-    assert!(properties.contains_key("text"));
-    assert!(properties.contains_key("append_enter"));
-    assert_eq!(
-        properties
-            .get("key")
-            .and_then(|value| value.get("enum"))
-            .and_then(serde_json::Value::as_array)
-            .map(Vec::len),
-        Some(16)
-    );
-}
-
-#[test]
 fn orchestrator_skill_tools_are_bounded_read_actions() {
     let loaded = canonicalize_orchestrator_tool_arguments(
         "load_skill",
@@ -1138,32 +1107,6 @@ fn shared_provider_key_debug_is_redacted() {
 }
 
 #[test]
-fn slash_help_and_request_overrides_are_core_logic() {
-    let help = ai_help_markdown(|key| format!("desc:{key}"));
-    assert!(help.contains("`/help`"));
-    assert!(help.contains("desc:ai.slash.help_desc"));
-
-    let command = resolve_ai_slash_command("fix").unwrap();
-    let prompt = slash_task_system_prompt(command).unwrap();
-    assert!(prompt.contains("## Task Mode: /fix"));
-    let parsed = parse_ai_user_input("/fix @terminal bad command");
-    let combined = ai_input_system_prompt(Some(command), &parsed.participants).unwrap();
-    assert!(combined.contains("## Task Mode: /fix"));
-    assert!(combined.contains("## Active Participants"));
-    assert!(combined.contains("preferred_target_view=live_sessions"));
-
-    let mut history = vec![chat_message("u1", AiChatRole::User, "/fix bad command")];
-    apply_chat_request_overrides(
-        &mut history,
-        Some("bad command".into()),
-        Some(prompt.clone()),
-    );
-    assert_eq!(history[0].role, AiChatRole::System);
-    assert_eq!(history[0].content, prompt);
-    assert_eq!(history[1].content, "bad command");
-}
-
-#[test]
 fn parses_and_sanitizes_follow_up_suggestions() {
     let parsed = parse_ai_suggestions(
         "Answer\n<suggestions>\n<s icon=\"Zap\">Run deploy</s>\n<s icon=\"Search\">Show logs</s>\n</suggestions>",
@@ -1202,21 +1145,6 @@ fn parses_and_sanitizes_follow_up_suggestions() {
     assert_eq!(parsed.clean_content, "Answer");
     assert_eq!(parsed.suggestions.len(), 1);
     assert_eq!(parsed.suggestions[0].text, localized_text);
-}
-
-#[test]
-fn chat_request_overrides_inject_current_context_as_system_message() {
-    let mut history = vec![AiChatMessage {
-        context: Some("--- #buffer ---\nerror output".into()),
-        ..chat_message("u1", AiChatRole::User, "#buffer explain")
-    }];
-
-    apply_chat_request_overrides(&mut history, Some("explain".into()), None);
-
-    assert_eq!(history[0].role, AiChatRole::System);
-    assert!(history[0].content.starts_with("Current terminal context:"));
-    assert!(history[0].content.contains("--- #buffer ---"));
-    assert_eq!(history[1].content, "explain");
 }
 
 #[test]

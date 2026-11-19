@@ -57,10 +57,7 @@ fn terminal_ssh_identity_candidate(token: &str) -> Option<String> {
 
 #[cfg(test)]
 mod terminal_quick_command_provider_tests {
-    use super::{
-        infer_terminal_ssh_identity_from_buffer, terminal_cwd_looks_remote,
-        terminal_ssh_identity_candidate,
-    };
+    use super::{infer_terminal_ssh_identity_from_buffer, terminal_ssh_identity_candidate};
 
     #[test]
     fn infers_last_ssh_identity_from_terminal_buffer() {

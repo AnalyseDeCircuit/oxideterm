@@ -1,9 +1,5 @@
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::workspace) enum AiChatPromptKeyAction {
-    Submit,
-    Newline,
-    Complete,
-}
+pub(in crate::workspace) use oxideterm_gpui_ai::state::sidebar_keys::AiChatPromptKeyAction;
+use oxideterm_gpui_ai::state::sidebar_keys::{AiSidebarInput, AiSidebarKey};
 
 pub(in crate::workspace) fn ai_chat_prompt_key_action(
     keystroke: &gpui::Keystroke,
@@ -11,22 +7,21 @@ pub(in crate::workspace) fn ai_chat_prompt_key_action(
     composing: bool,
     autocomplete: bool,
 ) -> Option<AiChatPromptKeyAction> {
-    if composing {
-        return None;
+    oxideterm_gpui_ai::state::sidebar_keys::ai_chat_prompt_key_action(
+        keystroke,
+        crate::keybindings::keystroke_matches_action(keystroke, "terminal.aiSubmit", overrides),
+        composing,
+        autocomplete,
+    )
+}
+
+fn sidebar_input_target(input: AiSidebarInput) -> WorkspaceImeTarget {
+    match input {
+        AiSidebarInput::Composer => WorkspaceImeTarget::AiChatInput,
+        AiSidebarInput::Rename => WorkspaceImeTarget::AiConversationRename,
+        AiSidebarInput::MessageEdit => WorkspaceImeTarget::AiMessageEdit,
+        AiSidebarInput::ModelSearch => WorkspaceImeTarget::AiModelSelectorSearch,
     }
-    let modifiers = keystroke.modifiers;
-    let plain = !modifiers.platform && !modifiers.control && !modifiers.alt && !modifiers.shift;
-    // Unmodified Enter/Tab accept a visible completion before the composer can submit.
-    if autocomplete && plain && matches!(keystroke.key.as_str(), "enter" | "tab") {
-        return Some(AiChatPromptKeyAction::Complete);
-    }
-    if crate::keybindings::keystroke_matches_action(keystroke, "terminal.aiSubmit", overrides) {
-        return Some(AiChatPromptKeyAction::Submit);
-    }
-    if keystroke.key == "enter" && !modifiers.platform && !modifiers.control && !modifiers.alt {
-        return Some(AiChatPromptKeyAction::Newline);
-    }
-    None
 }
 
 impl WorkspaceApp {
@@ -35,404 +30,64 @@ impl WorkspaceApp {
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
     ) -> bool {
-        if let Some(selection) = self
-            .ai.state
-            .read(cx)
-            .chat_ui()
-            .tool_candidate_selection
-            .clone()
-        {
-            if event.keystroke.modifiers.platform {
-                return false;
-            }
-            match event.keystroke.key.as_str() {
-                "down" | "arrowdown" => {
-                    self.ai.state.update(cx, |ai, _cx| {
-                        ai.move_tool_candidate_selection(1);
-                    });
-                    cx.notify();
-                    true
-                }
-                "up" | "arrowup" => {
-                    self.ai.state.update(cx, |ai, _cx| {
-                        ai.move_tool_candidate_selection(-1);
-                    });
-                    cx.notify();
-                    true
-                }
-                "home" => {
-                    self.ai.state.update(cx, |ai, _cx| {
-                        ai.move_tool_candidate_selection(-(selection.candidate_count as isize));
-                    });
-                    cx.notify();
-                    true
-                }
-                "end" => {
-                    self.ai.state.update(cx, |ai, _cx| {
-                        ai.move_tool_candidate_selection(selection.candidate_count as isize);
-                    });
-                    cx.notify();
-                    true
-                }
-                "enter" => {
-                    self.resolve_ai_tool_candidate_selection(
-                        selection.generation,
-                        selection.tool_call_id,
-                        Some(selection.selected_index),
-                        cx,
-                    );
-                    true
-                }
-                "escape" => {
-                    self.resolve_ai_tool_candidate_selection(
-                        selection.generation,
-                        selection.tool_call_id,
-                        None,
-                        cx,
-                    );
-                    true
-                }
-                _ => true,
-            }
-        } else if self.ai.state.read(cx).model_selector_open()
-            && self.ai.state.read(cx).model_selector_search_focused()
-        {
-            if event.keystroke.modifiers.platform {
-                return false;
-            }
-            match event.keystroke.key.as_str() {
-                "escape" => {
-                    self.close_ai_model_selector(cx);
-                    cx.notify();
-                    true
-                }
-                "tab" => {
-                    // Browser focus leaves the model selector on Tab. Native
-                    // does not yet expose all footer/button targets, so close
-                    // the Radix-style dropdown rather than trapping focus.
-                    self.close_ai_model_selector(cx);
-                    cx.notify();
-                    true
-                }
-                "down" | "arrowdown" => {
-                    self.move_ai_model_selector_highlight(1, cx);
-                    self.notify_ime_target(WorkspaceImeTarget::AiModelSelectorSearch, cx);
-                    true
-                }
-                "up" | "arrowup" => {
-                    self.move_ai_model_selector_highlight(-1, cx);
-                    self.notify_ime_target(WorkspaceImeTarget::AiModelSelectorSearch, cx);
-                    true
-                }
-                "home" => {
-                    self.set_ai_model_selector_highlight_edge(false, cx);
-                    self.notify_ime_target(WorkspaceImeTarget::AiModelSelectorSearch, cx);
-                    true
-                }
-                "end" => {
-                    self.set_ai_model_selector_highlight_edge(true, cx);
-                    self.notify_ime_target(WorkspaceImeTarget::AiModelSelectorSearch, cx);
-                    true
-                }
-                "enter" => {
-                    self.select_highlighted_ai_model(cx);
-                    true
-                }
-                "backspace" => {
-                    let changed = self
-                        .ai.state
-                        .update(cx, |ai, _cx| ai.pop_model_selector_search())
-                        || self.ime_marked_text.take().is_some();
-                    if changed {
-                        // Empty Backspace should not repaint the selector when
-                        // query, highlight, and IME state are already unchanged.
-                        self.notify_ime_target(WorkspaceImeTarget::AiModelSelectorSearch, cx);
-                    }
-                    true
-                }
-                _ => true,
-            }
-        } else if self
-            .ai.state
-            .read(cx)
-            .chat_ui()
-            .renaming_conversation_id
-            .is_some()
-            && self
-                .ai.state
-                .read(cx)
-                .chat_ui()
-                .renaming_conversation_focused
-        {
-            if event.keystroke.modifiers.platform {
-                return false;
-            }
-            match event.keystroke.key.as_str() {
-                "escape" => {
-                    self.cancel_ai_conversation_rename(cx);
-                    true
-                }
-                "backspace" => {
-                    let changed = self
-                        .ai.state
-                        .update(cx, |ai, _cx| ai.pop_conversation_rename())
-                        || self.ime_marked_text.take().is_some();
-                    if changed {
-                        cx.notify();
-                    }
-                    true
-                }
-                "enter" | "tab" => {
-                    self.save_ai_conversation_rename(cx);
-                    true
-                }
-                "space" | " "
-                    if ai_text_input_space_inserts_literal(
-                        event.keystroke.modifiers.platform,
-                        event.keystroke.modifiers.control,
-                        event.keystroke.modifiers.alt,
-                    ) =>
-                {
-                    self.insert_ai_text_input_literal_space(
-                        WorkspaceImeTarget::AiConversationRename,
-                        cx,
-                    );
-                    true
-                }
-                _ => true,
-            }
-        } else if self.ai.state.read(cx).chat_ui().editing_message_id.is_some() && self.ai.state.read(cx).chat_ui().editing_message_focused
-        {
-            if event.keystroke.modifiers.platform {
-                return false;
-            }
-            match event.keystroke.key.as_str() {
-                "escape" => {
-                    self.cancel_edit_ai_message(cx);
-                    true
-                }
-                "backspace" => {
-                    let changed = self.ai.state.update(cx, |ai, _cx| {
-                        ai.pop_message_edit()
-                    }) || self.ime_marked_text.take().is_some();
-                    if changed {
-                        cx.notify();
-                    }
-                    true
-                }
-                "enter" if !event.keystroke.modifiers.shift => {
-                    self.save_ai_message_edit(cx);
-                    true
-                }
-                "enter" => {
-                    self.ai.state.update(cx, |ai, _cx| {
-                        ai.push_message_edit_newline();
-                    });
-                    self.ime_marked_text = None;
-                    cx.notify();
-                    true
-                }
-                "tab" => {
-                    // Textareas in the Tauri sidebar release focus on Tab
-                    // unless an autocomplete/menu owner consumes it first.
-                    self.ai.state.update(cx, |ai, _cx| {
-                        ai.blur_message_edit();
-                    });
-                    self.ime_marked_text = None;
-                    cx.notify();
-                    true
-                }
-                "space" | " "
-                    if ai_text_input_space_inserts_literal(
-                        event.keystroke.modifiers.platform,
-                        event.keystroke.modifiers.control,
-                        event.keystroke.modifiers.alt,
-                    ) =>
-                {
-                    self.insert_ai_text_input_literal_space(WorkspaceImeTarget::AiMessageEdit, cx);
-                    true
-                }
-                _ => true,
-            }
-        } else if let Some(action) = self.ai.state.read(cx).chat_ui().footer_focus {
-            if event.keystroke.modifiers.platform {
-                return false;
-            }
-            if let Some(action) = browser_behavior::inline_footer_input_key_action(
-                event.keystroke.key.as_str(),
-                event.keystroke.modifiers.shift,
-                &AI_CHAT_FOOTER_ACTIONS,
-                false,
-                Some(action),
-                AiChatFooterAction::Submit,
-            ) {
-                self.apply_ai_chat_inline_footer_key_action(action, cx);
-            }
-            true
-        } else if self.ai.state.read(cx).chat_ui().input_focused {
-            let autocomplete_len = self.ai_chat_autocomplete_items(cx).len();
-            let prompt_action = ai_chat_prompt_key_action(
-                &event.keystroke,
-                &self.settings_store.settings().keybindings.overrides,
-                self.marked_text_for_target(WorkspaceImeTarget::AiChatInput, cx)
-                    .is_some(),
-                autocomplete_len > 0,
-            );
-            if event.keystroke.modifiers.platform && prompt_action.is_none() {
-                return false;
-            }
-            match prompt_action {
-                Some(AiChatPromptKeyAction::Complete) => {
-                    let index = self
-                        .ai.state
-                        .read(cx)
-                        .chat_ui()
-                        .autocomplete_index
-                        .min(autocomplete_len - 1);
-                    if let Some(candidate) = self.ai_chat_autocomplete_items(cx).get(index).cloned()
-                    {
-                        self.apply_ai_chat_autocomplete_candidate(&candidate, cx);
-                    }
-                    return true;
-                }
-                Some(AiChatPromptKeyAction::Submit) => {
-                    self.send_ai_chat_draft(cx);
-                    return true;
-                }
-                Some(AiChatPromptKeyAction::Newline) => {
-                    // The shared editor path replaces the selection and preserves the caret.
-                    self.handle_active_text_input_newline(&event.keystroke, cx);
-                    return true;
-                }
-                None => {}
-            }
-            if autocomplete_len > 0 {
-                match event.keystroke.key.as_str() {
-                    "down" | "arrowdown" => {
-                        self.ai.state.update(cx, |ai, _cx| {
-                            ai.move_chat_autocomplete(1, autocomplete_len);
-                        });
-                        cx.notify();
-                        return true;
-                    }
-                    "up" | "arrowup" => {
-                        self.ai.state.update(cx, |ai, _cx| {
-                            ai.move_chat_autocomplete(-1, autocomplete_len);
-                        });
-                        cx.notify();
-                        return true;
-                    }
-                    "escape" => {
-                        self.ai.state.update(cx, |ai, _cx| {
-                            ai.suppress_chat_autocomplete();
-                        });
-                        self.ime_marked_text = None;
-                        cx.notify();
-                        return true;
-                    }
-                    _ => {}
-                }
-            }
-            let footer_actions = if self.ai_chat_footer_action_enabled(cx) {
-                &AI_CHAT_FOOTER_ACTIONS[..]
-            } else {
-                &[]
-            };
-            if let Some(action) = browser_behavior::inline_footer_input_key_action(
-                event.keystroke.key.as_str(),
-                event.keystroke.modifiers.shift,
-                footer_actions,
-                true,
-                None,
-                AiChatFooterAction::Submit,
-            ) {
-                self.apply_ai_chat_inline_footer_key_action(action, cx);
-                return true;
-            }
-            match event.keystroke.key.as_str() {
-                "backspace" => {
-                    let changed = self.ai.state.update(cx, |ai, _cx| {
-                        ai.pop_chat_draft()
-                    })
-                        || self.ime_marked_text.take().is_some();
-                    if changed {
-                        cx.notify();
-                    }
-                    true
-                }
-                "space" | " "
-                    if ai_text_input_space_inserts_literal(
-                        event.keystroke.modifiers.platform,
-                        event.keystroke.modifiers.control,
-                        event.keystroke.modifiers.alt,
-                    ) =>
-                {
-                    self.insert_ai_text_input_literal_space(WorkspaceImeTarget::AiChatInput, cx);
-                    true
-                }
-                _ => true,
-            }
+        let key = &event.keystroke;
+        let autocomplete = if self.ai.state.read(cx).chat_ui().input_focused {
+            self.ai_chat_autocomplete_items(cx)
         } else {
-            false
+            Vec::new()
+        };
+        let composing = self
+            .marked_text_for_target(WorkspaceImeTarget::AiChatInput, cx)
+            .is_some();
+        let submit = crate::keybindings::keystroke_matches_action(
+            key,
+            "terminal.aiSubmit",
+            &self.settings_store.settings().keybindings.overrides,
+        );
+        let effect = self.ai.state.update(cx, |ai, cx| {
+            ai.handle_sidebar_key(key, submit, composing, &autocomplete, cx)
+        });
+        match effect {
+            AiSidebarKey::Pass => return false,
+            AiSidebarKey::Handled => {}
+            AiSidebarKey::ClearComposition => self.ime_marked_text = None,
+            AiSidebarKey::BackspaceComposition(input) => {
+                if self.ime_marked_text.take().is_some() {
+                    self.notify_ime_target(sidebar_input_target(input), cx);
+                }
+            }
+            AiSidebarKey::LiteralSpace(input) => {
+                self.insert_ai_text_input_literal_space(sidebar_input_target(input), cx)
+            }
+            AiSidebarKey::Newline => {
+                self.handle_active_text_input_newline(key, cx);
+            }
+            AiSidebarKey::Submit => self.send_ai_chat_draft(cx),
+            AiSidebarKey::CloseModelPicker => {
+                self.close_ai_model_selector(cx);
+                cx.notify();
+            }
+            AiSidebarKey::MoveModelHighlight(delta) => {
+                self.move_ai_model_selector_highlight(delta, cx);
+                self.notify_ime_target(WorkspaceImeTarget::AiModelSelectorSearch, cx);
+            }
+            AiSidebarKey::ModelHighlightEdge(last) => {
+                self.set_ai_model_selector_highlight_edge(last, cx);
+                self.notify_ime_target(WorkspaceImeTarget::AiModelSelectorSearch, cx);
+            }
+            AiSidebarKey::SelectModel => {
+                self.select_highlighted_ai_model(cx);
+            }
+            AiSidebarKey::CancelRename => {
+                self.cancel_ai_conversation_rename(cx);
+            }
+            AiSidebarKey::SaveRename => {
+                self.save_ai_conversation_rename(cx);
+            }
+            AiSidebarKey::CancelEdit => self.cancel_edit_ai_message(cx),
+            AiSidebarKey::SaveEdit => self.save_ai_message_edit(cx),
         }
-    }
-
-    pub(in crate::workspace) fn ai_chat_footer_action_enabled(&self, cx: &App) -> bool {
-        self.ai.state.read(cx).chat_is_loading() || !self.ai.state.read(cx).chat_ui().draft.trim().is_empty()
-    }
-
-    pub(in crate::workspace) fn activate_ai_chat_footer_action(
-        &mut self,
-        action: AiChatFooterAction,
-        cx: &mut Context<Self>,
-    ) {
-        match action {
-            AiChatFooterAction::Submit if !self.ai.state.read(cx).chat_ui().draft.trim().is_empty() => {
-                self.send_ai_chat_draft(cx)
-            }
-            AiChatFooterAction::Submit => {
-                self.ai.state.update(cx, |ai, _cx| {
-                    ai.clear_chat_footer_focus();
-                });
-                cx.notify();
-            }
-        }
-    }
-
-    pub(in crate::workspace) fn apply_ai_chat_inline_footer_key_action(
-        &mut self,
-        action: browser_behavior::InlineFooterInputKeyAction<AiChatFooterAction>,
-        cx: &mut Context<Self>,
-    ) {
-        // The AI composer is an inline browser control rather than a modal
-        // dialog. Keep its focus exit/return behavior in the shared browser
-        // helper while this method performs the Workspace-specific state writes.
-        match action {
-            browser_behavior::InlineFooterInputKeyAction::ClearFocus => {
-                self.ai.state.update(cx, |ai, _cx| {
-                    ai.blur_chat_input(false);
-                });
-                self.ime_marked_text = None;
-                cx.notify();
-            }
-            browser_behavior::InlineFooterInputKeyAction::FocusInput => {
-                self.ai.state.update(cx, |ai, _cx| {
-                    ai.focus_chat_input();
-                });
-                self.ime_marked_text = None;
-                cx.notify();
-            }
-            browser_behavior::InlineFooterInputKeyAction::FocusFooter(action) => {
-                self.ai.state.update(cx, |ai, _cx| {
-                    ai.set_chat_footer_focus(Some(action));
-                });
-                self.ime_marked_text = None;
-                cx.notify();
-            }
-            browser_behavior::InlineFooterInputKeyAction::Activate(action) => {
-                self.activate_ai_chat_footer_action(action, cx);
-            }
-        }
+        true
     }
 
     pub(in crate::workspace) fn insert_ai_text_input_literal_space(
@@ -451,31 +106,6 @@ impl WorkspaceApp {
         if let Some(caret) = caret {
             self.set_ime_selection_from_anchor(target, caret, caret);
         }
-    }
-}
-
-pub(in crate::workspace) fn ai_text_input_space_inserts_literal(
-    platform: bool,
-    control: bool,
-    alt: bool,
-) -> bool {
-    !platform && !control && !alt
-}
-
-#[cfg(test)]
-mod key_tests {
-    use super::ai_text_input_space_inserts_literal;
-
-    #[test]
-    pub(in crate::workspace) fn ai_text_input_plain_space_inserts_literal() {
-        assert!(ai_text_input_space_inserts_literal(false, false, false));
-    }
-
-    #[test]
-    pub(in crate::workspace) fn ai_text_input_modified_space_falls_through() {
-        assert!(!ai_text_input_space_inserts_literal(true, false, false));
-        assert!(!ai_text_input_space_inserts_literal(false, true, false));
-        assert!(!ai_text_input_space_inserts_literal(false, false, true));
     }
 }
 

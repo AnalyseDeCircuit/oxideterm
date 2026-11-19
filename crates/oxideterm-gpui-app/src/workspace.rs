@@ -197,10 +197,8 @@ use oxideterm_settings::{
     default_settings_path, ensure_bundled_background_image, list_background_images,
 };
 use oxideterm_sftp::{
-    BackgroundTransferDirection, BackgroundTransferKind, BackgroundTransferSnapshot,
-    BackgroundTransferState, LazyProgressStore, ProgressStore, RemoteRelayDisposition,
-    SftpTransferGuard, SftpTransferManager, StoredTransferProgress, TarTransferOptions,
-    TransferStrategy, profile_local_directory, tar_download_directory, tar_upload_directory,
+    BackgroundTransferState, LazyProgressStore, ProgressStore,
+    RemoteRelayDisposition, SftpTransferManager, StoredTransferProgress,
 };
 use oxideterm_ssh::{
     AuthMethod, ConnectionConsumer, ConnectionPoolConfig, ConnectionProgressReporter,
@@ -309,9 +307,6 @@ use virtual_list::{
 };
 
 const SETTINGS_SCROLL_CARET_PAUSE_MS: u64 = 700;
-const QUICK_COMMAND_LIST_INITIAL_ITEM_COUNT: usize = 0;
-const QUICK_COMMAND_LIST_ESTIMATED_HEIGHT: f32 = 56.0;
-const QUICK_COMMAND_LIST_OVERSCAN: usize = 6;
 const DETACHED_LOCAL_TERMINAL_LIST_INITIAL_ITEM_COUNT: usize = 0;
 const DETACHED_LOCAL_TERMINAL_LIST_ESTIMATED_HEIGHT: f32 = 56.0;
 const DETACHED_LOCAL_TERMINAL_LIST_OVERSCAN: usize = 4;
@@ -319,11 +314,9 @@ const ACTIVE_SESSION_SIDEBAR_LIST_INITIAL_ITEM_COUNT: usize = 0;
 const ACTIVE_SESSION_SIDEBAR_LIST_ESTIMATED_HEIGHT: f32 = 40.0;
 const ACTIVE_SESSION_SIDEBAR_LIST_OVERSCAN: usize = 8;
 
-use oxideterm_gpui_ai::state::AiChatFooterAction;
 
 // AI composer footer uses the same explicit action list as dialog footers so
 // keyboard focus order stays centralized even though it is not a modal trap.
-const AI_CHAT_FOOTER_ACTIONS: [AiChatFooterAction; 1] = [AiChatFooterAction::Submit];
 
 const CONFIRM_DIALOG_FOOTER_ACTIONS: [ConfirmDialogAction; 2] =
     [ConfirmDialogAction::Cancel, ConfirmDialogAction::Confirm];
@@ -335,9 +328,8 @@ use oxideterm_gpui_markdown::MarkdownPreviewCache;
 // notification/event-log surfaces share the same browser virtualizer contract.
 const NOTIFICATION_SIDEBAR_ROW_HEIGHT_ESTIMATE: f32 = 72.0;
 const NOTIFICATION_SIDEBAR_VIRTUAL_OVERSCAN: usize = 10;
-use oxideterm_gpui_ai::state::AiChatMessageSignatureCache;
 
-use oxideterm_gpui_ai::state::{AiContextTokenBreakdown, AiContextTokenBreakdownKey};
+use oxideterm_gpui_ai::state::AiContextTokenBreakdown;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum ConfirmKeyboardAction {
@@ -616,8 +608,6 @@ pub(crate) struct WorkspaceApp {
     session_search_query: String,
     // Session manager sidebar search disclosure and sort menu open state.
     // These are sidebar-only flags so the tab's toolbar menus don't conflict.
-    session_manager_search_open: bool,
-    session_manager_sidebar_sort_open: bool,
     // Set only across the tabbar's "show in sidebar" handoff: it closes the
     // Session Manager tab and the sidebar form takes over, so
     // finish_tab_removal must keep the panel on Connections instead of
@@ -752,7 +742,7 @@ pub(crate) struct WorkspaceApp {
     overlay: Entity<WorkspaceOverlayEntity>,
     _overlay_observation: Subscription,
     // Producers release before the writer, so their final cancellation records can drain.
-    audit: audit::AuditState,
+    audit: Entity<oxideterm_gpui_audit::AuditView>,
 }
 
 impl Drop for WorkspaceApp {
@@ -848,67 +838,8 @@ impl WorkspaceApp {
     }
 }
 
-use oxideterm_terminal::command_completion::{TerminalCommandSuggestion, TerminalCommandSuggestionKind};
+use oxideterm_terminal::command_completion::TerminalCommandSuggestion;
 
-#[derive(Clone)]
-pub(crate) struct AiRuntimeCommandRecord {
-    pub(crate) command_id: String,
-    pub(crate) command: String,
-    pub(crate) cwd: Option<String>,
-    pub(crate) source: String,
-    pub(crate) status: String,
-    pub(crate) exit_code: Option<i64>,
-    pub(crate) started_at: i64,
-    pub(crate) finished_at: Option<i64>,
-    pub(crate) approval_mode: Option<String>,
-    pub(crate) risk: String,
-}
-
-impl std::fmt::Debug for AiRuntimeCommandRecord {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Command text and working directories can contain credentials.
-        formatter
-            .debug_struct("AiRuntimeCommandRecord")
-            .field("command_id", &self.command_id)
-            .field("command", &"[redacted]")
-            .field("cwd", &self.cwd.as_ref().map(|_| "[redacted]"))
-            .field("source", &self.source)
-            .field("status", &self.status)
-            .field("exit_code", &self.exit_code)
-            .field("started_at", &self.started_at)
-            .field("finished_at", &self.finished_at)
-            .field("approval_mode", &self.approval_mode)
-            .field("risk", &self.risk)
-            .finish()
-    }
-}
-
-#[derive(Clone)]
-pub(crate) struct AiCliAgentSession {
-    pub(crate) id: String,
-    pub(crate) kind: String,
-    pub(crate) label: String,
-    pub(crate) status: String,
-    pub(crate) live_terminal: bool,
-    pub(crate) started_at: i64,
-    pub(crate) updated_at: i64,
-}
-
-impl std::fmt::Debug for AiCliAgentSession {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Agent launch commands share the same secret-bearing boundary.
-        formatter
-            .debug_struct("AiCliAgentSession")
-            .field("id", &self.id)
-            .field("kind", &self.kind)
-            .field("label", &self.label)
-            .field("status", &self.status)
-            .field("live_terminal", &self.live_terminal)
-            .field("started_at", &self.started_at)
-            .field("updated_at", &self.updated_at)
-            .finish()
-    }
-}
 
 #[derive(Clone)]
 struct DetachedLocalTerminalSession {

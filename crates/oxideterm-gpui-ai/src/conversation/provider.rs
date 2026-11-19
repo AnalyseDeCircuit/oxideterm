@@ -25,9 +25,78 @@ pub struct AiProviderTurn {
     pub context_window: usize,
     pub budget_level: u8,
     pub budget_diagnostic_payload: serde_json::Value,
-    pub services: AiModelBackendServices,
-    pub agent_options: AgentOptions,
-    pub agent_concurrency: usize,
+}
+
+pub enum AiProviderSendPlan {
+    Compact(crate::state::AiPendingChatStream),
+    Launch(Box<AiProviderTurn>),
+}
+
+impl super::AiConversationPrompt<'_> {
+    pub fn plan_provider_turn(
+        &self,
+        pending: crate::state::AiPendingChatStream,
+        allow_pre_send_compaction: bool,
+    ) -> Option<AiProviderSendPlan> {
+        if allow_pre_send_compaction && self.should_force_ai_pre_send_compaction(
+            &pending.conversation_id, &pending.config, pending.request_content.as_deref(),
+            pending.task_system_prompt.as_deref(), pending.rag_system_prompt.as_deref(),
+        ) {
+            return Some(AiProviderSendPlan::Compact(pending));
+        }
+        let crate::state::AiPendingChatStream {
+            conversation_id, config, request_content, task_system_prompt, rag_system_prompt, ..
+        } = pending;
+        let (history, trimmed_count) = self.build_ai_stream_history(
+            &conversation_id,
+            &config,
+            request_content.clone(),
+            task_system_prompt.clone(),
+            rag_system_prompt.clone(),
+        )?;
+        let context_window = super::ai_model_context_window(self.settings, config.provider_id.as_deref(), &config.model);
+        let (budget_decision, budget_diagnostic_payload) = self.state
+            .conversation_state()
+            .conversations
+            .iter()
+            .find(|conversation| conversation.id == conversation_id)
+            .map(|conversation| {
+                let decision = self.ai_send_budget_decision(
+                    conversation,
+                    &config,
+                    request_content.as_deref(),
+                    task_system_prompt.as_deref(),
+                    rag_system_prompt.as_deref(),
+                );
+                let payload = self.ai_budget_diagnostic_payload(
+                    conversation,
+                    &config,
+                    request_content.as_deref(),
+                    task_system_prompt.as_deref(),
+                    rag_system_prompt.as_deref(),
+                    decision,
+                    trimmed_count,
+                );
+                (decision, payload)
+            })
+            .unwrap_or_else(|| {
+                let decision = None;
+                let payload = serde_json::json!({
+                    "requestKind": "chat",
+                    "budgetLevel": 0,
+                    "nextLevel": 0,
+                    "contextWindow": super::ai_model_context_window(self.settings, config.provider_id.as_deref(), &config.model),
+                    "responseReserve": config.max_response_tokens,
+                    "trimmedCount": trimmed_count,
+                });
+                (decision, payload)
+            });
+        Some(AiProviderSendPlan::Launch(Box::new(AiProviderTurn {
+            conversation_id, config, request_content, history, trimmed_count, context_window,
+            budget_level: budget_decision.map_or(0, |decision| decision.level),
+            budget_diagnostic_payload,
+        })))
+    }
 }
 
 impl<Node: Clone + Eq + Hash + 'static, Terminal: Clone + 'static>
@@ -63,6 +132,9 @@ impl<Node: Clone + Eq + Hash + 'static, Terminal: Clone + 'static>
     pub fn launch_provider_turn(
         &self,
         turn: AiProviderTurn,
+        services: AiModelBackendServices,
+        agent_options: AgentOptions,
+        agent_concurrency: usize,
         diagnostic: impl Fn(serde_json::Value) -> serde_json::Value,
         cx: &mut App,
     ) {
@@ -75,9 +147,6 @@ impl<Node: Clone + Eq + Hash + 'static, Terminal: Clone + 'static>
             context_window,
             budget_level,
             budget_diagnostic_payload,
-            services,
-            agent_options,
-            agent_concurrency,
         } = turn;
         self.state.update(cx, |ai, cx| {
             ai.history.model_contexts.remove(&conversation_id);
@@ -347,4 +416,57 @@ fn record_prompt_usage(
         model: config.model.clone(),
         breakdown,
     });
+}
+
+impl AiWorkspaceEntity {
+    pub fn model_backend_services(&self, settings: &oxideterm_settings::AiSettings) -> AiModelBackendServices {
+        AiModelBackendServices {
+            rag_store: self.rag_store(),
+            ai_mcp_registry: self.mcp_registry().clone(),
+            ai_key_store: self.key_store().clone(),
+            ai_providers: settings.providers.clone(),
+            ai_embedding_config: settings.embedding_config.clone(),
+            agent_model_limits: oxideterm_ai::provider_views(&settings.providers)
+                .into_iter()
+                .flat_map(|provider| {
+                    provider.models.into_iter().map(move |model| {
+                        let context = super::ai_model_context_window(settings, Some(&provider.id), &model);
+                        let response: Option<i64> = None;
+                        let reasoning = settings
+                            .reasoning_model_overrides
+                            .get(&provider.id)
+                            .and_then(|models| models.get(&model))
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("auto");
+                        let reasoning = oxideterm_ai::normalize_reasoning_level_for_model(
+                            &provider.provider_type,
+                            &model,
+                            reasoning,
+                        )
+                        .as_str()
+                        .to_owned();
+                        ((provider.id.clone(), model), (context, response, reasoning))
+                    })
+                })
+                .collect(),
+        }
+    }
+
+}
+
+impl AiWorkspaceEntity {
+    pub fn prepare_provider_send(
+        &mut self, mut pending: crate::state::AiPendingChatStream, cx: &mut Context<Self>,
+    ) -> Option<crate::state::AiPendingChatStream> {
+        pending.launch_id = self.chat_launches.get(&pending.conversation_id).cloned();
+        self.defer_for_unsupported_images(pending, cx)
+    }
+
+    pub fn fail_acp_launch(
+        &mut self, pending: &crate::state::AiPendingChatStream,
+        settings: &oxideterm_settings::AiSettings,
+    ) -> Option<oxideterm_settings::AcpAgentConfig> {
+        self.set_conversation_loading(&pending.conversation_id, false);
+        settings.acp_agents.iter().find(|agent| Some(&agent.id) == pending.config.acp_agent_id.as_ref()).cloned()
+    }
 }

@@ -6,7 +6,64 @@ use oxideterm_ai::{
     provider_views as ai_provider_views,
 };
 
+pub enum AiInlineKey {
+    Pass,
+    ModelSearch,
+    Close,
+    Submit,
+    Execute,
+    Insert,
+    Handled,
+}
+
 impl AiWorkspaceEntity {
+    pub fn inline_panel_key(
+        &self,
+        keystroke: &gpui::Keystroke,
+        submit: bool,
+        insert: bool,
+        composing: bool,
+    ) -> AiInlineKey {
+        use AiInlineKey::*;
+        let panel = self.terminal_inline_panel();
+        if !panel.open || !panel.prompt_focused || (keystroke.modifiers.platform && !submit && !insert) {
+            return Pass;
+        }
+        if self.model_selector_is_open(crate::state::AiModelSelectorScope::TerminalInline)
+            && self.model_selector_search_focused()
+        {
+            return ModelSearch;
+        }
+        let has_response = !panel.response.trim().is_empty();
+        match keystroke.key.as_str() {
+            "escape" => Close,
+            "enter" if composing => Handled,
+            _ if submit && !panel.loading => if has_response { Execute } else { Submit },
+            _ if !submit && insert && has_response && !panel.loading => Insert,
+            _ => Handled,
+        }
+    }
+
+    pub fn start_inline_panel(
+        &mut self,
+        target: (oxideterm_workspace::PaneId, oxideterm_workspace::TerminalSessionId),
+        selected_text: &str,
+        context_budget: usize,
+    ) {
+        self.open_terminal_inline_panel(super::truncate_ai_inline_context(
+            oxideterm_ai::sanitize_for_ai(selected_text),
+            context_budget as i64,
+        ));
+        self.terminal_inline_panel_mut().target = Some(target);
+    }
+
+    pub fn inline_response_command(&self) -> Option<zeroize::Zeroizing<String>> {
+        let command = zeroize::Zeroizing::new(super::extract_terminal_ai_inline_command(
+            &self.terminal_inline_panel().response,
+        ));
+        (!command.trim().is_empty()).then_some(command)
+    }
+
     pub fn submit_inline_prompt(
         &mut self,
         regenerate: bool,
@@ -154,4 +211,81 @@ pub fn truncate_ai_inline_context(mut context: String, max_chars: i64) -> String
         .unwrap_or_default();
     context.drain(..keep_from);
     context
+}
+
+fn terminal_ai_inline_os_context(
+    kind: oxideterm_terminal::TerminalSessionKind,
+) -> String {
+    let local_os = if cfg!(target_os = "macos") {
+        "macOS"
+    } else if cfg!(target_os = "windows") {
+        "Windows"
+    } else if cfg!(target_os = "linux") {
+        "Linux"
+    } else {
+        "Unknown"
+    };
+    match kind {
+        oxideterm_terminal::TerminalSessionKind::SshPty => {
+            format!("SSH terminal (remote OS unknown, local: {local_os})")
+        }
+        oxideterm_terminal::TerminalSessionKind::Mosh => {
+            format!("Mosh terminal (remote OS unknown, local: {local_os})")
+        }
+        oxideterm_terminal::TerminalSessionKind::LocalPty => {
+            format!("Local terminal on {local_os}")
+        }
+        oxideterm_terminal::TerminalSessionKind::Telnet => "Telnet (remote OS unknown)".into(),
+        oxideterm_terminal::TerminalSessionKind::Serial => {
+            "Serial device (command interface unknown)".into()
+        }
+        oxideterm_terminal::TerminalSessionKind::Ble => {
+            "BLE device (command interface unknown)".into()
+        }
+    }
+}
+
+impl crate::state::AiWorkspaceEntity {
+    pub fn submit_inline_for_terminal(
+        &mut self,
+        regenerate: bool,
+        kind: oxideterm_terminal::TerminalSessionKind,
+        settings: &oxideterm_settings::AiSettings,
+        i18n: &oxideterm_i18n::I18n,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        self.submit_inline_prompt(regenerate, terminal_ai_inline_os_context(kind), settings, i18n, cx);
+    }
+}
+
+pub fn apply_inline_command(
+    pane: Option<&gpui::Entity<oxideterm_gpui_terminal::TerminalPane>>,
+    command: zeroize::Zeroizing<String>,
+    execute: bool,
+    cx: &mut gpui::App,
+) {
+    let Some(pane) = pane else { return };
+    pane.update(cx, |pane, cx| {
+        if execute {
+            pane.begin_command_mark(&command, oxideterm_terminal::TerminalCommandMarkDetectionSource::Ai, cx);
+            pane.send_command_line(&command, cx);
+        } else {
+            pane.send_ai_input_bytes(command.as_bytes(), cx);
+        }
+    });
+}
+
+impl crate::state::AiWorkspaceEntity {
+    pub fn open_inline_for_pane(
+        &mut self,
+        target: (oxideterm_workspace::PaneId, oxideterm_workspace::TerminalSessionId),
+        pane: Option<&gpui::Entity<oxideterm_gpui_terminal::TerminalPane>>,
+        budget: usize,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let selection = zeroize::Zeroizing::new(
+            pane.and_then(|pane| pane.read(cx).selected_text_snapshot()).unwrap_or_default(),
+        );
+        self.start_inline_panel(target, &selection, budget);
+    }
 }

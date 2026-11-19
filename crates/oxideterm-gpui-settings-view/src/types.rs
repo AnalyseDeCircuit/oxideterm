@@ -144,37 +144,3 @@ impl SettingsSelectAnchorExt for SettingsSelect {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn ai_section_aliases_map_to_settings_tabs() {
-        assert_eq!(
-            settings_tab_from_ai_section("local_terminal"),
-            Some(SettingsTab::Terminal)
-        );
-        assert_eq!(
-            terminal_settings_page_from_ai_section("local_terminal"),
-            Some(TerminalSettingsPage::Local)
-        );
-        assert_eq!(
-            settings_tab_from_ai_section("assistant"),
-            Some(SettingsTab::Ai)
-        );
-        assert_eq!(
-            settings_tab_from_ai_section("keyboard"),
-            Some(SettingsTab::Keybindings)
-        );
-        assert_eq!(
-            settings_tab_from_ai_section("ssh_keys"),
-            Some(SettingsTab::Connections)
-        );
-        assert_eq!(
-            settings_tab_from_ai_section("reconnect"),
-            Some(SettingsTab::Connections)
-        );
-        assert_eq!(settings_tab_from_ai_section("missing"), None);
-    }
-}

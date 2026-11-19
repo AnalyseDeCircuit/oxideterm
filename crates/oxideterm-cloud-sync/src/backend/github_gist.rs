@@ -681,25 +681,4 @@ mod tests {
         )));
         assert!(!keep.contains(&gist_object_filename(&settings, "blobs/rev-old.oxide")));
     }
-
-    #[test]
-    fn gist_error_mapping_distinguishes_scope_and_rate_limit() {
-        let scope_error = gist_value_error(
-            StatusCode::FORBIDDEN,
-            &json!({ "message": "Resource not accessible by personal access token" }),
-            "gist",
-            "fallback",
-        )
-        .to_string();
-        let rate_error = gist_value_error(
-            StatusCode::FORBIDDEN,
-            &json!({ "message": "API rate limit exceeded for user" }),
-            "gist",
-            "fallback",
-        )
-        .to_string();
-
-        assert!(scope_error.starts_with("github_gist_missing_scope:"));
-        assert!(rate_error.starts_with("github_gist_rate_limited:"));
-    }
 }

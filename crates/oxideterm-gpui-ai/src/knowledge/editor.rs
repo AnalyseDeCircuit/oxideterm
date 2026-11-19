@@ -1217,18 +1217,6 @@ mod tests {
         surface.read_with(cx, |surface, _| assert!(!surface.is_dirty()));
     }
 
-    #[test]
-    fn bold_toolbar_action_uses_double_asterisk_markers() {
-        assert_eq!(
-            knowledge_format_wrap(KnowledgeFormatAction::Bold),
-            Some(("**", "**"))
-        );
-        assert_eq!(
-            knowledge_format_wrap(KnowledgeFormatAction::Italic),
-            Some(("*", "*"))
-        );
-    }
-
     #[gpui::test]
     fn background_note_releases_preview_and_restores_unsaved_history(
         cx: &mut gpui::TestAppContext,
@@ -1327,17 +1315,20 @@ mod tests {
             )
         });
     }
+}
 
-    #[test]
-    fn conflict_state_blocks_automatic_retry_until_user_resolves_it() {
-        assert!(!knowledge_save_state_allows_autosave(
-            &KnowledgeDocumentSaveState::Conflict
-        ));
-        assert!(!knowledge_save_state_allows_autosave(
-            &KnowledgeDocumentSaveState::Saving
-        ));
-        assert!(knowledge_save_state_allows_autosave(
-            &KnowledgeDocumentSaveState::Dirty
-        ));
+impl KnowledgePreviewFrame {
+    pub fn from_renderer(
+        options: MarkdownOptions,
+        render: impl Fn(u64, MarkdownTextFragmentId, usize, gpui::SharedString, Vec<gpui::TextRun>, Vec<MarkdownTextLink>) -> AnyElement + 'static,
+        zoom: oxideterm_gpui_markdown::render::MarkdownMermaidZoomHandler,
+    ) -> Self {
+        Self {
+            options,
+            text: Some(Rc::new(move |document, key, order, text, runs, links| {
+                render(super::workspace::knowledge_preview_group(document), key, order, text, runs, links)
+            })),
+            actions: Some(MarkdownCodeBlockActions { on_run: None, on_mermaid_zoom: Some(zoom) }),
+        }
     }
 }

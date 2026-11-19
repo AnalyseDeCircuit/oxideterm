@@ -163,28 +163,22 @@ impl WorkspaceApp {
             }),
             request: Rc::new(move |request, window, cx| {
                 let owner = owner.clone();
-                if let Some(window) = window {
-                    window.defer(cx, move |window, cx| {
-                        let _ = owner.update(cx, |app, cx| match request {
-                            KnowledgeRequest::CreateDocument(id) => {
-                                app.open_knowledge_document_dialog(id, true, window, cx)
-                            }
-                            KnowledgeRequest::CreateNotebook => {
-                                app.open_knowledge_create_dialog(cx)
-                            }
-                            KnowledgeRequest::Settings => app.open_knowledge_settings(window, cx),
-                            KnowledgeRequest::Import(id) => {
-                                app.knowledge_import_files(id, window, cx)
-                            }
-                            KnowledgeRequest::FocusDeleteConfirmation => {
-                                app.reset_standard_confirm_focus();
-                                cx.notify();
-                            }
-                            _ => {}
-                        });
+                request.deliver(window, cx, move |request, window, cx| {
+                    if let Some(window) = window {
+                    let _ = owner.update(cx, |app, cx| match request {
+                        KnowledgeRequest::PresentCreationDialog => cx.notify(),
+                        KnowledgeRequest::Settings => app.open_knowledge_settings(window, cx),
+                        KnowledgeRequest::Import(id) => {
+                            app.knowledge_import_files(id, window, cx)
+                        }
+                        KnowledgeRequest::FocusDeleteConfirmation => {
+                            app.reset_standard_confirm_focus();
+                            cx.notify();
+                        }
+                        _ => {}
                     });
-                } else {
-                    cx.defer(move |cx| match request {
+                    } else {
+                        match request {
                         KnowledgeRequest::Quit => super::request_app_quit(cx),
                         KnowledgeRequest::Close(tab, window) => {
                             let _ = window.update(cx, |_, window, cx| {
@@ -202,8 +196,9 @@ impl WorkspaceApp {
                             });
                         }
                         _ => {}
-                    });
-                }
+                        }
+                    }
+                });
             }),
         }
     }
@@ -224,14 +219,9 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn sync_knowledge_cache_visibility(&self, cx: &mut App) {
-        let view = self.knowledge_workspace.view.clone();
-        let visible = !self.app_lock.locked
-            && self
-                .knowledge_state()
-                .read(cx)
-                .tab_id()
-                .is_some_and(|id| self.tab_host.read(cx).surface_is_visible(id));
-        view.update(cx, |view, cx| view.set_cache_visible(visible, cx));
+        let locked = self.app_lock.locked;
+        let host = self.tab_host.clone();
+        self.knowledge_workspace.sync_visibility(|id, cx| !locked && host.read(cx).surface_is_visible(id), cx);
     }
 
     pub(in crate::workspace) fn handle_knowledge_workspace_key(
@@ -240,12 +230,9 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        self.keyboard_content_tab(cx)
-            .is_some_and(|tab| tab.kind == TabKind::Knowledge)
-            && !self.knowledge_text_editor_focused(window, cx)
-            && self.knowledge_workspace.view.update(cx, |view, cx| {
-                view.handle_knowledge_workspace_key(event, window, cx)
-            })
+        let owned = self.keyboard_content_tab(cx).is_some_and(|tab| tab.kind == TabKind::Knowledge);
+        let ime = self.active_ime_target_for_window(window.window_handle().window_id(), cx).and_then(knowledge_input);
+        self.knowledge_workspace.handle_key(owned, ime, event, window, cx)
     }
 
     pub(in crate::workspace) fn knowledge_text_editor_focused(
@@ -299,36 +286,22 @@ impl WorkspaceApp {
     }
 
     pub(super) fn notify_knowledge_preview_selection(&self, group: u64, cx: &mut App) -> bool {
-        let Some(editor) = self.knowledge_workspace.state.read(cx).editor.clone() else {
-            return false;
-        };
-        if super::selectable_text::selectable_text_id(
-            "notes-preview",
-            editor.read(cx).document_id.as_str(),
-        ) != group
-        {
-            return false;
-        }
-        cx.notify(editor.entity_id());
-        true
+        self.knowledge_workspace.notify_preview_selection(group, cx)
     }
     pub(in crate::workspace) fn open_knowledge_workspace_tab(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(tab_id) = self.knowledge_state().read(cx).tab_id()
-            && self.tabs(cx).iter().any(|tab| tab.id == tab_id)
-        {
+        let views = self.knowledge_workspace.clone();
+        let new = views.open_tab(|id| self.tabs(cx).iter().any(|tab| tab.id == id), cx);
+        if let Some(tab_id) = new {
             self.set_active_tab(tab_id, window, cx);
-            self.knowledge_workspace
-                .view
-                .update(cx, |view, cx| view.refresh_knowledge_navigator(true, cx));
+            views.refresh(cx);
             return;
         }
         let tab_id = self.alloc_tab_id(cx);
-        self.knowledge_state()
-            .update(cx, |workspace, _cx| workspace.register_tab(tab_id));
+        views.register_tab(tab_id, cx);
         self.insert_tab(
             Tab {
                 id: tab_id,
@@ -345,9 +318,7 @@ impl WorkspaceApp {
         self.needs_active_pane_focus = false;
         window.focus(&self.focus_handle, cx);
         self.reveal_active_tab(window, cx);
-        self.knowledge_workspace
-            .view
-            .update(cx, |view, cx| view.refresh_knowledge_navigator(true, cx));
+        views.refresh(cx);
         cx.notify();
     }
 
@@ -357,19 +328,10 @@ impl WorkspaceApp {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(knowledge_tab) = self.knowledge_state().read(cx).tab_id() else {
-            return false;
-        };
-        if tab_id != knowledge_tab
-            && self.tab_host.read(cx).container_tab_id(knowledge_tab) != tab_id
-        {
-            return false;
-        }
-        if !self.knowledge_state().update(cx, |knowledge, cx| {
-            knowledge.request_close_if_dirty(tab_id, window.window_handle(), cx)
-        }) {
-            return false;
-        }
+        let host = self.tab_host.clone();
+        let Some(knowledge_tab) = self.knowledge_workspace.guard_tab_close(
+            tab_id, window.window_handle(), |id, cx| host.read(cx).container_tab_id(id), cx,
+        ) else { return false };
         if self.tab_host.read(cx).is_detached(knowledge_tab) {
             self.tab_host
                 .update(cx, |host, _| host.focus_content_page(knowledge_tab));
@@ -431,27 +393,14 @@ impl WorkspaceApp {
             let workspace = entity.read(cx);
             let options = workspace.localized_markdown_options();
             let state = workspace.selectable_text_render_state_for_entity(entity.clone(), cx);
-            Some(KnowledgePreviewFrame {
+            Some(KnowledgePreviewFrame::from_renderer(
                 options,
-                text: Some(Rc::new(move |document, key, order, text, runs, links| {
-                    let group = selectable_text_id("notes-preview", document);
-                    let join_previous = key.join_previous;
-                    state.render_styled_text_in_group(
-                        SelectableTextRole::PlainDocument,
-                        group,
-                        selectable_text_id("notes-preview-fragment", (group, key)),
-                        order,
-                        text,
-                        runs,
-                        links,
-                        join_previous,
-                    )
-                })),
-                actions: Some(oxideterm_gpui_markdown::MarkdownCodeBlockActions {
-                    on_run: None,
-                    on_mermaid_zoom: Some(Self::mermaid_zoom_handler_for_workspace(entity)),
-                }),
-            })
+                move |group, key, order, text, runs, links| state.render_styled_text_in_group(
+                    SelectableTextRole::PlainDocument, group, selectable_text_id("notes-preview-fragment", (group, &key)),
+                    order, text, runs, links, key.join_previous,
+                ),
+                Self::mermaid_zoom_handler_for_workspace(entity),
+            ))
         })
     }
 }
@@ -486,7 +435,7 @@ pub(in crate::workspace) mod tests {
         cx.update(|window, cx| {
             workspace.update(cx, |workspace, cx| {
                 workspace.open_knowledge_workspace_tab(window, cx);
-                workspace.select_knowledge_document(document.id.clone(), cx);
+                workspace.knowledge_workspace.view.update(cx, |view, cx| view.select_knowledge_document(document.id.clone(), cx));
             })
         });
         cx.run_until_parked();

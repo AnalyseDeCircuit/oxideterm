@@ -1,11 +1,8 @@
 use std::collections::HashMap;
 
 use gpui::{App, Context, Window};
-use oxideterm_connections::{
-    MoshIpFamily as SavedMoshIpFamily, MoshPredictionMode, MoshUdpPortSelection as SavedMoshUdpPortSelection,
-    SaveConnectionRequest,
-};
-use oxideterm_mosh::{MoshBootstrapConfig, MoshBootstrapContext};
+use oxideterm_connections::SaveConnectionRequest;
+use oxideterm_mosh::MoshBootstrapContext;
 use oxideterm_remote_desktop::RemoteDesktopSecret;
 use oxideterm_session_adapter::{managed_key_resolver_from_store, ssh_config_from_saved_connection};
 use oxideterm_ssh::{
@@ -16,16 +13,12 @@ use oxideterm_terminal::MoshTerminalConfig;
 
 use super::{
     ConnectionFormState, NativeProxyConnectRun,
-    form_state::{
-        NewConnectionProxyHop, NewConnectionSubmitAction,
-        NewConnectionTransport, SavedConnectionPromptAction,
-    },
+    form_state::{NewConnectionSubmitAction, NewConnectionTransport, SavedConnectionPromptAction},
     ssh_connection_display_title,
 };
 use crate::workspace::{WorkspaceApp, WorkspaceSshNode, delivery::ActiveDeliverySender};
-use oxideterm_gpui_connections::{
-    conversion::{prepare_proxy_chain_test_config, prepare_tree_connect_config, x11_forward_policy},
-    submission::SavedConnectionRuntimeHandoff,
+use oxideterm_gpui_connections::conversion::{
+    prepare_tree_connect_config, x11_forward_policy,
 };
 
 pub(in crate::workspace) use oxideterm_gpui_connections::{

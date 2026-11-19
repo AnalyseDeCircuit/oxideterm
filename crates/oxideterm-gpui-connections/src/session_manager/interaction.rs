@@ -1,5 +1,18 @@
 use super::{SessionManagerSelectionTarget, SessionManagerState};
-use gpui::Context;
+use gpui::{Context, KeyDownEvent};
+
+use super::{SessionManagerInput, session_manager_input_is_active};
+
+pub enum CatalogInputAction {
+    Pass,
+    Handled,
+    ClearComposition,
+    CloseSidebarSearch,
+    PruneSelection,
+    SubmitGroup,
+    CommitTemplateName,
+    CancelTemplateName,
+}
 
 /// How a row click combines with the current selection.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -126,5 +139,173 @@ impl SessionManagerState {
         self.selected_items.clear();
         self.selection_anchor = None;
         cx.notify();
+    }
+}
+
+impl SessionManagerState {
+    pub fn open_sidebar_search(&mut self, cx: &mut Context<Self>) {
+        self.sidebar_search_open = true;
+        self.focused_input = Some(SessionManagerInput::Search);
+        cx.notify();
+    }
+
+    pub fn close_sidebar_search(&mut self, cx: &mut Context<Self>) -> bool {
+        if !self.sidebar_search_open {
+            return false;
+        }
+        self.sidebar_search_open = false;
+        self.search_query.clear();
+        if self.focused_input == Some(SessionManagerInput::Search) {
+            self.focused_input = None;
+        }
+        cx.notify();
+        true
+    }
+
+    pub fn set_sidebar_sort_open(&mut self, open: bool, cx: &mut Context<Self>) -> bool {
+        if self.sidebar_sort_open == open {
+            return false;
+        }
+        self.sidebar_sort_open = open;
+        cx.notify();
+        true
+    }
+
+    pub fn active_input(
+        &self,
+        tab_active: bool,
+        sidebar_visible: bool,
+    ) -> Option<SessionManagerInput> {
+        let input = self.focused_input?;
+        let sidebar_input = sidebar_visible
+            && match input {
+                SessionManagerInput::Search => self.sidebar_search_open && !self.sidebar_sort_open,
+                SessionManagerInput::GroupName => self.show_group_manager,
+                _ => false,
+            };
+        (sidebar_input
+            || session_manager_input_is_active(
+                input,
+                tab_active,
+                self.oxide_import_dialog.as_ref(),
+                self.oxide_export_dialog.as_ref(),
+            ))
+        .then_some(input)
+    }
+
+    pub fn handle_input_key(
+        &mut self,
+        event: &KeyDownEvent,
+        tab_active: bool,
+        cx: &mut Context<Self>,
+    ) -> CatalogInputAction {
+        use CatalogInputAction::*;
+        let Some(input) = self.focused_input else {
+            return Pass;
+        };
+        if event.keystroke.modifiers.platform || event.keystroke.modifiers.control {
+            return Pass;
+        }
+        match (event.keystroke.key.as_str(), input) {
+            ("escape", SessionManagerInput::BatchTemplateName) => CancelTemplateName,
+            ("escape", SessionManagerInput::Search) if self.sidebar_search_open && !tab_active => {
+                CloseSidebarSearch
+            }
+            ("escape", _) => {
+                self.focused_input = None;
+                cx.notify();
+                ClearComposition
+            }
+            ("enter", SessionManagerInput::GroupName) => SubmitGroup,
+            ("enter", SessionManagerInput::BatchTemplateName) => CommitTemplateName,
+            ("backspace", _) => {
+                let changed = match input {
+                    SessionManagerInput::Search => {
+                        self.search_query.pop().is_some()
+                    }
+                    SessionManagerInput::GroupName => {
+                        self.group_name_draft.pop().is_some()
+                    }
+                    SessionManagerInput::OxideImportPassword => self
+                        .oxide_import_dialog
+                        .as_mut()
+                        .is_some_and(|dialog| {
+                            dialog.password.pop().is_some() || dialog.error.take().is_some()
+                        }),
+                    SessionManagerInput::OxideExportPassword => self
+                        .oxide_export_dialog
+                        .as_mut()
+                        .is_some_and(|dialog| {
+                            dialog.password.pop().is_some() || dialog.error.take().is_some()
+                        }),
+                    SessionManagerInput::OxideExportConfirmPassword => self
+                        .oxide_export_dialog
+                        .as_mut()
+                        .is_some_and(|dialog| {
+                            dialog.confirm_password.pop().is_some()
+                                || dialog.error.take().is_some()
+                        }),
+                    SessionManagerInput::OxideExportDescription => self
+                        .oxide_export_dialog
+                        .as_mut()
+                        .is_some_and(|dialog| {
+                            dialog.description.pop().is_some()
+                                || dialog.error.take().is_some()
+                        }),
+                    SessionManagerInput::BatchPassword => {
+                        self.batch_add.as_mut().is_some_and(|dialog| {
+                            dialog.password.pop().is_some() || dialog.error.take().is_some()
+                        })
+                    }
+                    SessionManagerInput::BatchKeyPath => {
+                        self.batch_add.as_mut().is_some_and(|dialog| {
+                            dialog.key_path.pop().is_some() || dialog.error.take().is_some()
+                        })
+                    }
+                    SessionManagerInput::BatchTemplateName => self
+                        .batch_add
+                        .as_mut()
+                        .is_some_and(|dialog| dialog.rename_draft.pop().is_some()),
+                };
+                if changed {
+                    cx.notify();
+                    if input == SessionManagerInput::Search {
+                        return PruneSelection;
+                    }
+                }
+                Handled
+            }
+            _ => Pass,
+        }
+    }
+}
+
+impl SessionManagerState {
+    pub fn retain_visible_selection(
+        &mut self,
+        items: Vec<super::SessionManagerDisplayItem>,
+        cx: &mut Context<Self>,
+    ) {
+        let visible_items = items
+            .into_iter()
+            .filter_map(|item| item.selection_target())
+            .collect::<std::collections::HashSet<_>>();
+        let previous_count = self.selected_items.len();
+        self
+            .selected_items
+            .retain(|target| visible_items.contains(target));
+        // A hidden anchor row would make the next Shift+click degrade or
+        // span across rows the user cannot see; keep anchors that are
+        // still visible.
+        if self
+            .selection_anchor
+            .as_ref()
+            .is_some_and(|anchor| !visible_items.contains(anchor))
+        {
+            self.selection_anchor = None;
+        }
+        if self.selected_items.len() != previous_count {
+            cx.notify();
+        }
     }
 }

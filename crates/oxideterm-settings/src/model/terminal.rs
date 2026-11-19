@@ -556,6 +556,8 @@ pub const MAX_TERMINAL_FONT_WEIGHT: i64 = 900;
 pub const DEFAULT_TERMINAL_CHARACTER_SPACING: f64 = 1.0;
 pub const MIN_TERMINAL_CHARACTER_SPACING: f64 = 0.8;
 pub const MAX_TERMINAL_CHARACTER_SPACING: f64 = 2.0;
+/// `characterSpacing == 1.0` renders at 93% of the font's raw `m` advance width.
+pub const TERMINAL_CHARACTER_SPACING_BASELINE_SCALE: f64 = 0.93;
 pub const DEFAULT_TERMINAL_LINE_HEIGHT: f64 = 0.9;
 pub const MIN_TERMINAL_LINE_HEIGHT: f64 = 0.7;
 pub const MAX_TERMINAL_LINE_HEIGHT: f64 = 3.0;

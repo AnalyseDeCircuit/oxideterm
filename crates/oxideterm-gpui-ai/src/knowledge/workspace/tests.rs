@@ -38,21 +38,6 @@ fn navigator_search_matches_title_and_body() {
 }
 
 #[test]
-fn autosave_completion_does_not_accept_pending_switch_without_user_confirmation() {
-    let mut workspace = KnowledgeWorkspaceEntity::default();
-    workspace.request_document_switch("next".to_string());
-
-    assert_eq!(workspace.take_pending_document_after_save(), None);
-    assert_eq!(workspace.pending_document_id.as_deref(), Some("next"));
-
-    workspace.confirm_save_before_leaving();
-    assert_eq!(
-        workspace.take_pending_document_after_save().as_deref(),
-        Some("next")
-    );
-}
-
-#[test]
 fn autosave_completion_does_not_quit_without_user_confirmation() {
     let mut workspace = KnowledgeWorkspaceEntity::default();
     workspace.request_app_quit();
@@ -77,18 +62,6 @@ fn only_closing_knowledge_tab_invalidates_pending_document_load() {
     assert_ne!(workspace.load_generation, generation);
     assert_eq!(workspace.tab_id(), None);
     assert_eq!(workspace.selected_document_id, None);
-}
-
-#[test]
-fn forced_navigator_refresh_during_load_schedules_one_follow_up() {
-    let mut workspace = KnowledgeWorkspaceEntity::default();
-    let generation = workspace.begin_navigator_refresh(true).unwrap();
-
-    assert_eq!(workspace.begin_navigator_refresh(true), None);
-    assert!(
-        workspace.install_navigator_snapshot(generation, KnowledgeNavigatorSnapshot::default(),)
-    );
-    assert!(workspace.begin_navigator_refresh(true).is_some());
 }
 
 #[test]

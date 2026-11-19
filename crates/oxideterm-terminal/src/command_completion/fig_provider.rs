@@ -1,5 +1,8 @@
+use super::{
+    TerminalCommandSuggestion, TerminalCommandSuggestionKind, TerminalFigArgType, TerminalFigSpec,
+    TerminalFigSubcommandSpec,
+};
 use crate::TerminalShellParseResult;
-use super::{TerminalCommandSuggestion, TerminalCommandSuggestionKind, TerminalFigArgType, TerminalFigSpec, TerminalFigSubcommandSpec};
 
 pub fn terminal_command_fig_suggestions(
     parsed: &TerminalShellParseResult,

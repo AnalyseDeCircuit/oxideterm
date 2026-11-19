@@ -1,21 +1,31 @@
+use oxideterm_gpui_ai::conversation::context::{
+    AiEnvironmentSnapshot, AiIdeContext, AiRuntimeCommandRecord, AiTerminalPaneContext, AiTerminalReferenceSource,
+    build_environment_prompt, build_ide_code_context, build_reference_context, build_single_terminal_context,
+    build_split_terminal_context, capture_command_records, ai_local_os_label, ai_terminal_environment,
+};
+
 impl WorkspaceApp {
-    pub(in crate::workspace) fn ai_help_markdown(&self) -> String {
-        ai_help_markdown_core(|key| self.i18n.t(key))
-    }
+
 
     pub(in crate::workspace) fn resolve_ai_reference_context(
         &self,
         references: &[AiReferenceMatch],
         cx: &mut Context<Self>,
     ) -> Option<String> {
-        let blocks = references
-            .iter()
-            .filter_map(|reference| {
-                self.resolve_ai_reference_content(reference, cx)
-                    .and_then(|content| ai_reference_context_block(reference, &content))
-            })
-            .collect::<Vec<_>>();
-        (!blocks.is_empty()).then(|| blocks.join("\n\n"))
+        build_reference_context(references, |source| {
+            let pane = match source {
+                AiTerminalReferenceSource::Pane(index) => {
+                    let mut panes = Vec::new();
+                    self.active_tab(cx)?.root_pane.as_ref()?.collect_pane_ids(&mut panes);
+                    *panes.get(index)?
+                }
+                AiTerminalReferenceSource::ActiveBuffer | AiTerminalReferenceSource::ActiveSelection => self.active_pane_id(cx)?,
+            };
+            match source {
+                AiTerminalReferenceSource::ActiveSelection => self.ai_terminal_pane_selection(pane, cx),
+                _ => self.ai_terminal_pane_text(pane, cx),
+            }
+        })
     }
 
     pub(in crate::workspace) fn resolve_ai_selected_terminal_context(
@@ -35,268 +45,49 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> Option<String> {
-        let mut blocks = Vec::new();
-        // Terminal output is controlled by the per-message Context chip and
-        // assembled separately. Keep auxiliary sources independent so enabling
-        // terminal context cannot replace the IDE code snapshot.
-        if let Some(ide) = self.ai_active_ide_context(cx)
-            && let (Some(active_file), Some(snippet)) = (ide.active_file, ide.code_snippet)
-        {
-            let language = ide.active_language.unwrap_or_else(|| "text".to_string());
-            blocks.push(format!(
-                "=== Code: {active_file} ({language}, lines {}+) ===\n{snippet}",
-                ide.snippet_start_line
-            ));
-        }
-        (!blocks.is_empty()).then(|| blocks.join("\n\n"))
+        let ide = self.ai_active_ide_context(cx)?;
+        build_ide_code_context(ide.active_file.as_deref(), ide.active_language.as_deref(),
+            ide.code_snippet.as_deref(), ide.snippet_start_line)
     }
 
     pub(in crate::workspace) fn resolve_ai_sidebar_system_prompt_segment(
         &self,
         cx: &mut Context<Self>,
     ) -> Option<String> {
-        let mut parts = Vec::new();
-        parts.push("## Environment".to_string());
-        parts.push(format!(
-            "- OxideTerm host OS (local application only): {}",
-            ai_local_os_label()
-        ));
-        if let Some(tab) = self.active_content_tab(cx) {
-            parts.push(format!("- Active page: {}", ai_tab_kind_label(&tab.kind)));
-        }
-        if let Some(cwd) = self.ai_active_cwd(cx) {
-            parts.push(format!(
-                "- Active terminal CWD (inferred; verify on the selected target): {cwd}"
-            ));
-        }
+        let active_tab = self.active_content_tab(cx).map(|tab| ai_tab_kind_label(&tab.kind));
         let terminal_kind = self.active_pane_id(cx).and_then(|pane_id| {
-            self.tab_host.read(cx).panes().get(&pane_id)
-                .map(|pane| pane.read(cx).session_kind())
+            self.tab_host.read(cx).panes().get(&pane_id).map(|pane| pane.read(cx).session_kind())
         });
-        if let Some(kind) = terminal_kind {
-            parts.push(format!(
-                "- Active terminal: {}",
-                ai_terminal_environment(kind, ai_local_os_label())
-            ));
-            if kind == oxideterm_terminal::TerminalSessionKind::SshPty
-                && let Some((_, node_id)) = self.ai_active_ssh_session(cx)
-                && let Some(node) = self.ssh_nodes.get(&node_id)
-            {
-                parts.push(format!(
-                    "- Active SSH endpoint: {}@{}:{}",
-                    node.endpoint.username, node.endpoint.host, node.endpoint.port
-                ));
-            }
-        } else {
-            parts.push("- Terminal: No active terminal".to_string());
-        }
-        parts.push(String::new());
-        parts.push("## Runtime State".to_string());
-        parts.push(format!("- Open tabs: {}", self.tabs(cx).iter().filter(|tab| self.tab_host.read(cx).container_tab_id(tab.id) == tab.id).count()));
-        parts.push(format!(
-            "- Runtime terminal sessions: {}",
-            self.tab_host.read(cx).panes().len()
-        ));
-        parts.push(
-            "- Tabs, pane ids, and terminal session ids are memory-only and do not survive an app restart/reload."
-                .to_string(),
-        );
-
-        if let Some(ide) = self.ai_active_ide_context(cx) {
-            parts.push(String::new());
-            parts.push("## IDE Context".to_string());
-            parts.push(format!(
-                "- Project: {} ({})",
-                ide.project_name, ide.project_root
-            ));
-            if let Some(branch) = ide.git_branch {
-                parts.push(format!("- Git: {branch}"));
-            }
-            if let Some(active_file) = ide.active_file {
-                let language = ide.active_language.unwrap_or_else(|| "unknown".to_string());
-                let dirty = if ide.is_dirty { " [unsaved]" } else { "" };
-                parts.push(format!("- Editing: {active_file} ({language}){dirty}"));
-            }
-            if ide.open_tab_count > 1 {
-                parts.push(format!(
-                    "- Open tabs ({}): {}",
-                    ide.open_tab_count,
-                    ide.open_tab_paths.join(", ")
-                ));
-            }
-        }
-
-        if let Some((_, remote_path, selected_files)) = self.ai_active_sftp_context(cx) {
-            parts.push(String::new());
-            parts.push("## File Browser Context".to_string());
-            parts.push(format!("- CWD: {remote_path}"));
-            if !selected_files.is_empty() {
-                let shown = selected_files.iter().take(20).cloned().collect::<Vec<_>>();
-                let suffix = if selected_files.len() > 20 {
-                    format!(" ... +{} more", selected_files.len() - 20)
-                } else {
-                    String::new()
-                };
-                parts.push(format!(
-                    "- Selected ({}): [{}{}]",
-                    selected_files.len(),
-                    shown.join(", "),
-                    suffix
-                ));
-            }
-        }
-
-        if let Some(context_chips) = self.resolve_ai_runtime_context_chips_prompt(cx) {
-            parts.push(String::new());
-            parts.push(context_chips);
-        }
-
-        (!parts.is_empty()).then(|| parts.join("\n"))
-    }
-
-    pub(in crate::workspace) fn resolve_ai_runtime_context_chips_prompt(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> Option<String> {
-        let mut chips = Vec::new();
-        let mut command_records = self.ai_runtime_command_records(cx);
-        command_records.sort_by(|left, right| {
-            right
-                .finished_at
-                .unwrap_or(right.started_at)
-                .cmp(&left.finished_at.unwrap_or(left.started_at))
-        });
-        for record in command_records.iter().take(5) {
-            let kind = if record.status == "error" {
-                "recent_error"
-            } else {
-                "recent_command"
-            };
-            let exit_suffix = record
-                .exit_code
-                .map(|code| format!(" (exit {code})"))
-                .unwrap_or_default();
-            chips.push(format!(
-                "- {kind}:{} {}",
-                exit_suffix,
-                serde_json::json!({
-                    "status": record.status,
-                    "approvalMode": record.approval_mode,
-                    "source": record.source,
-                    "risk": record.risk,
-                    "commandChars": record.command.chars().count(),
-                    "hasCwd": record.cwd.is_some(),
-                })
-            ));
-            if chips.len() >= 8 {
-                break;
-            }
-        }
-        if chips.len() < 8 {
-            let mut sessions = self.ai_runtime_cli_agent_sessions(&command_records, cx);
-            sessions.sort_by_key(|session| std::cmp::Reverse(session.updated_at));
-            for session in sessions.into_iter().take(3) {
-                chips.push(format!(
-                    "- cli_agent: {} is {}{} {}",
-                    session.kind,
-                    session.status,
-                    session
-                        .live_terminal
-                        .then(|| " in a live terminal".to_string())
-                        .unwrap_or_default(),
-                    serde_json::json!({
-                        "kind": session.kind,
-                        "status": session.status,
-                        "label": session.label,
-                    })
-                ));
-                if chips.len() >= 8 {
-                    break;
-                }
-            }
-        }
-        if chips.is_empty() {
-            return None;
-        }
-        Some(
-            [
-                "## Runtime Context Chips".to_string(),
-                "These are non-authoritative runtime hints. Rediscover a current handle before acting on a live target.".to_string(),
-            ]
-            .into_iter()
-            .chain(chips)
-            .collect::<Vec<_>>()
-            .join("\n"),
-        )
+        let ssh_endpoint = terminal_kind.filter(|kind| *kind == oxideterm_terminal::TerminalSessionKind::SshPty)
+            .and_then(|_| self.ai_active_ssh_session(cx))
+            .and_then(|(_, node_id)| self.ssh_nodes.get(&node_id))
+            .map(|node| (node.endpoint.username.as_str(), node.endpoint.host.as_str(), node.endpoint.port));
+        let context = AiEnvironmentSnapshot {
+            local_os: ai_local_os_label(),
+            active_tab,
+            cwd: self.ai_active_cwd(cx),
+            terminal: terminal_kind.map(|kind| ai_terminal_environment(kind, ai_local_os_label())),
+            ssh_endpoint,
+            tab_count: self.tabs(cx).iter().filter(|tab| self.tab_host.read(cx).container_tab_id(tab.id) == tab.id).count(),
+            terminal_count: self.tab_host.read(cx).panes().len(),
+            ide: self.ai_active_ide_context(cx).map(|ide| AiIdeContext {
+                project_root: ide.project_root, project_name: ide.project_name, git_branch: ide.git_branch,
+                active_file: ide.active_file, active_language: ide.active_language, is_dirty: ide.is_dirty,
+                open_tab_count: ide.open_tab_count, open_tab_paths: ide.open_tab_paths,
+            }),
+            sftp: self.ai_active_sftp_context(cx).map(|(_, path, files)| (path, files)),
+        };
+        Some(build_environment_prompt(context, self.ai_runtime_command_records(cx)))
     }
 
     pub(in crate::workspace) fn ai_runtime_command_records(
         &self,
         cx: &mut Context<Self>,
     ) -> Vec<AiRuntimeCommandRecord> {
-        // Command history remains owned by terminal panes and is never copied
-        // from secret-capable AI tool arguments.
-        let mut records = Vec::new();
-        let mut seen = HashSet::new();
-        let tab_host = self.tab_host.read(cx);
-        for (pane_id, pane) in tab_host.panes() {
-            if self.session_id_for_pane(*pane_id, cx).is_none() {
-                continue;
-            }
-            for record in pane.read(cx).ai_command_records() {
-                if !seen.insert(record.command_id.clone()) {
-                    continue;
-                }
-                let source = ai_ledger_source_from_terminal_source(record.source);
-                let status = ai_ledger_status_from_terminal_status(record.status);
-                records.push(AiRuntimeCommandRecord {
-                    command_id: record.command_id,
-                    command: record.command,
-                    cwd: None,
-                    source,
-                    status,
-                    exit_code: record.exit_code.map(i64::from),
-                    started_at: record.started_at as i64,
-                    finished_at: record.finished_at.map(|value| value as i64),
-                    approval_mode: None,
-                    risk: "execute".to_string(),
-                });
-            }
-        }
-        records
-    }
-
-    pub(in crate::workspace) fn ai_runtime_cli_agent_sessions(
-        &self,
-        records: &[AiRuntimeCommandRecord],
-        _cx: &mut Context<Self>,
-    ) -> Vec<AiCliAgentSession> {
-        let mut sessions = Vec::new();
-        let mut seen = HashSet::new();
-        for record in records {
-            let Some(kind) = detect_ai_cli_agent_kind(&record.command) else {
-                continue;
-            };
-            let id = format!("cli-agent:{kind}:live-terminal");
-            if !seen.insert(id.clone()) {
-                continue;
-            }
-            let status = match record.status.as_str() {
-                "waiting_for_input" => "waiting_for_input",
-                "error" => "failed",
-                _ => "running",
-            };
-            sessions.push(AiCliAgentSession {
-                id,
-                kind: kind.clone(),
-                label: format!("{kind} agent"),
-                status: status.to_string(),
-                live_terminal: true,
-                started_at: record.started_at,
-                updated_at: record.finished_at.unwrap_or(record.started_at),
-            });
-        }
-        sessions
+        let tabs = self.tab_host.read(cx);
+        capture_command_records(tabs.panes().iter().filter_map(|(id, pane)| {
+            self.session_id_for_pane(*id, cx).map(|_| pane.read(cx).ai_command_records())
+        }).flatten())
     }
 
     pub(in crate::workspace) fn session_id_for_pane(
@@ -314,24 +105,11 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> Option<String> {
         let pane_id = self.active_pane_id(cx)?;
-        let mut parts = Vec::new();
-        if let Some(selection) = self.ai_terminal_pane_selection(pane_id, cx) {
-            parts.push("=== SELECTED TEXT (Focus Area) ===".to_string());
-            parts.push(selection);
-            parts.push(String::new());
-        }
-        if let Some(buffer) = self.ai_terminal_pane_text(pane_id, cx) {
-            let (buffer, line_count) = self.ai_limited_terminal_buffer(
-                &buffer,
-                usize::MAX,
-                self.ai_ambient_context_budget(),
-            );
-            if !buffer.trim().is_empty() {
-                parts.push(format!("=== Terminal Output (last {line_count} lines) ==="));
-                parts.push(buffer);
-            }
-        }
-        (!parts.is_empty()).then(|| parts.join("\n"))
+        build_single_terminal_context(
+            self.ai_terminal_pane_selection(pane_id, cx),
+            self.ai_terminal_pane_text(pane_id, cx).as_deref(),
+            self.ai_ambient_context_budget(),
+        )
     }
 
     pub(in crate::workspace) fn ai_all_panes_terminal_context(
@@ -349,60 +127,18 @@ impl WorkspaceApp {
             return self.ai_single_pane_terminal_context(cx);
         }
 
-        let mut parts = Vec::new();
-        if let Some(active_pane_id) = active_pane_id
-            && let Some(selection) = self.ai_terminal_pane_selection(active_pane_id, cx)
-        {
-            parts.push("=== SELECTED TEXT (Focus Area) ===".to_string());
-            parts.push(selection);
-            parts.push(String::new());
-        }
-        for pane_id in pane_ids {
-            let Some(buffer) = self.ai_terminal_pane_text(pane_id, cx) else {
-                continue;
-            };
-            let (buffer, line_count) = self.ai_limited_terminal_buffer(&buffer, 30, 4000);
-            if buffer.trim().is_empty() {
-                continue;
-            }
-            let label = if Some(pane_id) == active_pane_id {
-                "Active Pane"
-            } else {
-                "Pane"
-            };
-            let session_id = root.session_id_for_pane(pane_id)?;
-            let environment = self
-                .terminal_kind_for_pane(pane_id, cx)
-                .map(|kind| ai_terminal_environment(kind, ai_local_os_label()))
-                .unwrap_or_default();
-            let target = oxideterm_ai::sanitize_for_ai(&self.terminal_pane_label(pane_id, cx));
-            parts.push(format!("=== {label} #{} / session {} ({environment}; {target}) — last {line_count} lines ===", pane_id.0, session_id.0));
-            parts.push(buffer);
-            parts.push(String::new());
-        }
-        (!parts.is_empty()).then(|| parts.join("\n"))
-    }
-
-    pub(in crate::workspace) fn ai_limited_terminal_buffer(
-        &self,
-        buffer: &str,
-        max_lines: usize,
-        max_chars: usize,
-    ) -> (String, usize) {
-        let max_lines = max_lines.max(1);
-        let mut lines = buffer.lines().rev().take(max_lines).collect::<Vec<_>>();
-        lines.reverse();
-        let mut text = lines.join("\n");
-        if max_chars > 0 && text.len() > max_chars {
-            let start = text
-                .char_indices()
-                .map(|(index, _)| index)
-                .find(|index| text.len().saturating_sub(*index) <= max_chars)
-                .unwrap_or(0);
-            text = text[start..].to_string();
-        }
-        let line_count = text.lines().count();
-        (text, line_count)
+        let selection = active_pane_id.and_then(|pane| self.ai_terminal_pane_selection(pane, cx));
+        build_split_terminal_context(selection, pane_ids.into_iter().filter_map(|pane_id| {
+            Some(AiTerminalPaneContext {
+                pane: pane_id,
+                session: root.session_id_for_pane(pane_id),
+                active: Some(pane_id) == active_pane_id,
+                buffer: self.ai_terminal_pane_text(pane_id, cx)?,
+                environment: self.terminal_kind_for_pane(pane_id, cx)
+                    .map(|kind| ai_terminal_environment(kind, ai_local_os_label())).unwrap_or_default(),
+                label: self.terminal_pane_label(pane_id, cx),
+            })
+        }))
     }
 
     pub(in crate::workspace) fn ai_active_cwd(&self, cx: &mut Context<Self>) -> Option<String> {
@@ -498,50 +234,6 @@ impl WorkspaceApp {
         self.ai_active_sftp_context(cx).is_some()
     }
 
-    pub(in crate::workspace) fn resolve_ai_reference_content(
-        &self,
-        reference: &AiReferenceMatch,
-        cx: &mut Context<Self>,
-    ) -> Option<String> {
-        match reference.reference_type.as_str() {
-            "buffer" => self
-                .active_pane_id(cx)
-                .and_then(|pane_id| self.ai_terminal_pane_text(pane_id, cx)),
-            "selection" => self
-                .active_pane_id(cx)
-                .and_then(|pane_id| self.ai_terminal_pane_selection(pane_id, cx)),
-            "error" => self
-                .active_pane_id(cx)
-                .and_then(|pane_id| self.ai_terminal_pane_text(pane_id, cx))
-                .and_then(|text| extract_ai_error_context(&text)),
-            "pane" => self
-                .ai_pane_reference_id(reference, cx)
-                .and_then(|pane_id| self.ai_terminal_pane_text(pane_id, cx)),
-            "cwd" => self
-                .active_pane_id(cx)
-                .and_then(|pane_id| self.ai_terminal_pane_text(pane_id, cx))
-                .and_then(|text| infer_ai_cwd(&text)),
-            _ => None,
-        }
-    }
-
-    pub(in crate::workspace) fn ai_pane_reference_id(
-        &self,
-        reference: &AiReferenceMatch,
-        cx: &App,
-    ) -> Option<PaneId> {
-        let index = reference.value.as_deref()?.parse::<usize>().ok()?;
-        if index == 0 {
-            return None;
-        }
-        let mut pane_ids = Vec::new();
-        self.active_tab(cx)?
-            .root_pane
-            .as_ref()?
-            .collect_pane_ids(&mut pane_ids);
-        pane_ids.get(index - 1).copied()
-    }
-
     pub(in crate::workspace) fn ai_terminal_pane_text(
         &self,
         pane_id: PaneId,
@@ -569,60 +261,7 @@ impl WorkspaceApp {
     }
 }
 
-pub(in crate::workspace) fn ai_local_os_label() -> &'static str {
-    if cfg!(target_os = "macos") {
-        "macOS"
-    } else if cfg!(target_os = "windows") {
-        "Windows"
-    } else {
-        "Linux"
-    }
-}
-
-fn ai_terminal_environment(kind: oxideterm_terminal::TerminalSessionKind, local_os: &str) -> String {
-    use oxideterm_terminal::TerminalSessionKind;
-    // Telnet and serial panes share the local tab kind but run on another target.
-    match kind {
-        TerminalSessionKind::LocalPty => format!("Local ({local_os}; shell unverified)"),
-        TerminalSessionKind::SshPty => "SSH (remote OS and shell unverified)".to_string(),
-        TerminalSessionKind::Mosh => "Mosh (remote OS and shell unverified)".to_string(),
-        TerminalSessionKind::Telnet => "Telnet (remote OS and shell unverified)".to_string(),
-        TerminalSessionKind::Serial => {
-            "Serial device (OS and command interface unverified)".to_string()
-        }
-        TerminalSessionKind::Ble => {
-            "BLE device (OS and command interface unverified)".to_string()
-        }
-    }
-}
-
 pub(in crate::workspace) use oxideterm_ai::tool_resources::ai_tab_kind_label;
-
-pub(in crate::workspace) fn ai_ledger_source_from_terminal_source(
-    source: TerminalCommandMarkDetectionSource,
-) -> String {
-    match source {
-        TerminalCommandMarkDetectionSource::Ai => "ai.terminal_input",
-        TerminalCommandMarkDetectionSource::Broadcast => "broadcast",
-        TerminalCommandMarkDetectionSource::ShellIntegration => "shell_integration",
-        TerminalCommandMarkDetectionSource::CommandBar => "command_bar",
-        TerminalCommandMarkDetectionSource::QuickCommand => "quick_command",
-        TerminalCommandMarkDetectionSource::UserInputObserved => "user.terminal_input",
-        TerminalCommandMarkDetectionSource::Heuristic => "user_promoted",
-    }
-    .to_string()
-}
-
-pub(in crate::workspace) fn ai_ledger_status_from_terminal_status(
-    status: oxideterm_gpui_terminal::TerminalCommandFactStatus,
-) -> String {
-    match status {
-        oxideterm_gpui_terminal::TerminalCommandFactStatus::Open => "running",
-        oxideterm_gpui_terminal::TerminalCommandFactStatus::Closed => "completed",
-        oxideterm_gpui_terminal::TerminalCommandFactStatus::Stale => "stale",
-    }
-    .to_string()
-}
 
 impl WorkspaceApp {
     pub(in crate::workspace) fn ai_ambient_context_budget(&self) -> usize {
@@ -630,25 +269,5 @@ impl WorkspaceApp {
         let window = oxideterm_ai::model_context_window(settings.active_model.as_deref().unwrap_or_default(),
             &settings.model_context_windows, settings.active_provider_id.as_deref(), &settings.user_context_windows);
         oxideterm_ai::agent::ambient_context_budget(window.max(1) as usize)
-    }
-}
-
-#[cfg(test)]
-mod terminal_environment_tests {
-    use super::ai_terminal_environment;
-    use oxideterm_terminal::TerminalSessionKind;
-
-    #[test]
-    fn only_local_pty_inherits_the_application_host_os() {
-        for (kind, expected) in [
-            (TerminalSessionKind::LocalPty, "Local (macOS; shell unverified)"),
-            (TerminalSessionKind::SshPty, "SSH (remote OS and shell unverified)"),
-            (TerminalSessionKind::Mosh, "Mosh (remote OS and shell unverified)"),
-            (TerminalSessionKind::Telnet, "Telnet (remote OS and shell unverified)"),
-            (TerminalSessionKind::Serial, "Serial device (OS and command interface unverified)"),
-            (TerminalSessionKind::Ble, "BLE device (OS and command interface unverified)"),
-        ] {
-            assert_eq!(ai_terminal_environment(kind, "macOS"), expected);
-        }
     }
 }

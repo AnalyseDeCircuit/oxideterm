@@ -131,8 +131,6 @@ pub(super) enum WorkspaceImeTarget {
     CommandPalette,
     ShortcutsModalSearch,
     ActiveSessionSearch,
-    AuditSearch,
-    AuditPolicy(super::audit::AuditPolicyInput),
     KnowledgeSearch,
     KnowledgeRename,
     TerminalCommandSenderCompact,
@@ -458,9 +456,6 @@ impl WorkspaceImeTarget {
             Self::CommandPalette => 4,
             Self::ShortcutsModalSearch => 5,
             Self::ActiveSessionSearch => 22,
-            Self::AuditSearch => 25,
-            Self::AuditPolicy(super::audit::AuditPolicyInput::Retention) => 26,
-            Self::AuditPolicy(super::audit::AuditPolicyInput::Capacity) => 27,
             Self::KnowledgeSearch => 23,
             Self::KnowledgeRename => 24,
             Self::TerminalCommandSenderCompact => 2,
@@ -1285,27 +1280,6 @@ impl WorkspaceApp {
             return Some(WorkspaceImeTarget::KnowledgeSearch);
         }
 
-        if self.notification_center.active_view == super::WorkspaceActivityView::EventLog
-            && self.audit.settings_open
-            && self.audit.open_filter.is_none()
-            && let Some(target @ WorkspaceImeTarget::AuditPolicy(_)) = self
-                .selected_ime_range
-                .as_ref()
-                .map(|selection| selection.target)
-                .or(self.selected_ime_target)
-        {
-            return Some(target);
-        }
-        if self.notification_center.active_view == super::WorkspaceActivityView::EventLog
-            && self.audit.open_filter.is_none()
-            && (self.selected_ime_target == Some(WorkspaceImeTarget::AuditSearch)
-                || self
-                    .selected_ime_range
-                    .as_ref()
-                    .is_some_and(|selection| selection.target == WorkspaceImeTarget::AuditSearch))
-        {
-            return Some(WorkspaceImeTarget::AuditSearch);
-        }
         if self.session_search_open
             && !self.sidebar_collapsed
             && !self.session_sort_menu_open
@@ -2364,8 +2338,6 @@ impl WorkspaceApp {
             }
             WorkspaceImeTarget::ShortcutsModalSearch => Some(self.shortcuts_modal.query.clone()),
             WorkspaceImeTarget::ActiveSessionSearch => Some(self.session_search_query.clone()),
-            WorkspaceImeTarget::AuditSearch => Some(self.audit.search.clone()),
-            WorkspaceImeTarget::AuditPolicy(input) => Some(self.audit_policy_input_value(input)),
             WorkspaceImeTarget::KnowledgeSearch | WorkspaceImeTarget::KnowledgeRename => {
                 self.knowledge_input_text(target, cx)
             }
@@ -3299,14 +3271,6 @@ impl WorkspaceApp {
                 }
                 self.show_active_input_caret(cx);
             }
-            WorkspaceImeTarget::AuditSearch => {
-                replace_utf16(&mut self.audit.search, replacement_range, text);
-                self.show_active_input_caret(cx);
-                cx.notify();
-            }
-            WorkspaceImeTarget::AuditPolicy(input) => {
-                self.replace_audit_policy_input(input, replacement_range, text, cx);
-            }
             WorkspaceImeTarget::ActiveSessionSearch => {
                 replace_utf16(&mut self.session_search_query, replacement_range, text);
                 self.show_active_input_caret(cx);
@@ -3492,7 +3456,7 @@ impl WorkspaceApp {
                         .replace_input(input, replacement_range, text)
                 }) {
                     self.show_active_input_caret(cx);
-                    cx.notify();
+                    self.notify_quick_commands_views(cx);
                 }
             }
             WorkspaceImeTarget::Settings(input) => {
@@ -4057,24 +4021,11 @@ mod tests {
         active_ime_should_defer_input_key, copy_shortcut_owner_for_target,
         effective_platform_text_replacement_range, host_tools_dialog_input,
         ime_geometry_uses_secret_mask, ime_target_is_secret, ime_text_snapshot,
-        keystroke_platform_text, keystroke_uses_text_edit_modifier, multiline_ime_line_ranges,
+        keystroke_platform_text,
         normalize_clipboard_text_for_ime_target, path_completion_owns_vertical_navigation,
-        platform_text_commit_is_duplicate, secret_ime_proxy, soft_wrapped_line_ranges_utf16,
+        platform_text_commit_is_duplicate, secret_ime_proxy,
         utf16_offset_for_char_index, workspace_ime_target_for_plain_host_tools_input,
     };
-
-    #[test]
-    fn ai_chat_hit_testing_uses_soft_wrapped_visual_lines() {
-        let bounds = gpui::Bounds {
-            origin: gpui::point(gpui::px(0.0), gpui::px(0.0)),
-            size: gpui::size(gpui::px(120.0), gpui::px(60.0)),
-        };
-        let text = "abcdefghij😀klmn\nZ";
-        assert_eq!(
-            multiline_ime_line_ranges(WorkspaceImeTarget::AiChatInput, text, bounds, Some(12)),
-            vec![0..12, 12..16, 17..18],
-        );
-    }
 
     #[test]
     fn history_editor_vertical_navigation_follows_soft_rows() {
@@ -4228,33 +4179,6 @@ mod tests {
     }
 
     #[test]
-    fn platform_edit_shortcut_uses_expected_modifier_for_target_os() {
-        let platform_v = key(
-            "v",
-            None,
-            Modifiers {
-                platform: true,
-                ..Modifiers::default()
-            },
-        );
-        let control_v = key(
-            "v",
-            None,
-            Modifiers {
-                control: true,
-                ..Modifiers::default()
-            },
-        );
-
-        assert!(keystroke_uses_text_edit_modifier(&platform_v));
-        if cfg!(target_os = "macos") {
-            assert!(!keystroke_uses_text_edit_modifier(&control_v));
-        } else {
-            assert!(keystroke_uses_text_edit_modifier(&control_v));
-        }
-    }
-
-    #[test]
     fn active_ime_defers_only_platform_owned_text_and_composition_keys() {
         let printable = key("a", Some("a"), Modifiers::default());
         let shortcut = key(
@@ -4380,21 +4304,6 @@ mod tests {
         );
 
         assert_eq!(range, Some(2..2));
-    }
-
-    #[test]
-    fn read_only_soft_wrap_ranges_follow_visual_line_count() {
-        let text = "你好！我是 OxideSens，你的终端助手。我可以帮助你处理终端命令、SSH 连接、文件操作、脚本调试等等。";
-        let ranges = soft_wrapped_line_ranges_utf16(text, 260.0, 112.0);
-        assert!(ranges.len() >= 3, "{ranges:?}");
-        assert_eq!(ranges.first().map(|range| range.start), Some(0));
-        assert_eq!(
-            ranges.last().map(|range| range.end),
-            Some(text.encode_utf16().count())
-        );
-        for pair in ranges.windows(2) {
-            assert_eq!(pair[0].end, pair[1].start);
-        }
     }
 
     #[test]

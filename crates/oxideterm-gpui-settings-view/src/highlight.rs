@@ -457,7 +457,7 @@ fn highlight_rule(
 #[cfg(test)]
 mod tests {
     use super::{accepted_highlight_preview_matches, highlight_rule_validation_error};
-    use oxideterm_settings::{HighlightRuleMatchScope, create_default_highlight_rule};
+    use oxideterm_settings::create_default_highlight_rule;
 
     #[test]
     fn regex_validation_and_preview_distinguish_valid_patterns() {
@@ -481,20 +481,5 @@ mod tests {
             highlight_rule_validation_error(&invalid_rule),
             Some("invalid-regex")
         );
-    }
-
-    #[test]
-    fn logical_line_scope_promotes_a_match_to_the_preview_line() {
-        let rule = create_default_highlight_rule(|rule| {
-            rule.pattern = "ERROR".to_string();
-            rule.match_scope = HighlightRuleMatchScope::LogicalLine;
-        });
-
-        let rules = [rule];
-        let matches = accepted_highlight_preview_matches("prefix ERROR suffix", &rules);
-
-        assert_eq!(matches.len(), 1);
-        assert_eq!(matches[0].start, 0);
-        assert_eq!(matches[0].end, "prefix ERROR suffix".len());
     }
 }

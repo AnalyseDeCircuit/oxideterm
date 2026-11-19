@@ -135,6 +135,20 @@ pub struct OxideDialogEnvironment {
     pub ble_count: usize,
 }
 
+impl OxideDialogEnvironment {
+    pub fn from_store(store: &oxideterm_connections::ConnectionStore) -> Self {
+        Self {
+            saved_ids: store.connections().iter().map(|record| record.id.clone())
+                .chain(store.plugin_profiles().iter().map(|profile| profile.id.clone())).collect(),
+            serial_count: store.serial_profiles().len(),
+            telnet_count: store.telnet_profiles().len(),
+            mosh_count: store.mosh_profiles().len(),
+            remote_desktop_count: store.remote_desktop_profiles().len(),
+            ble_count: store.ble_profiles().len(),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct SessionManagerViewBindings {
     pub catalog: Rc<dyn Fn(bool, &App) -> Option<CatalogEnvironment>>,

@@ -2,7 +2,17 @@
 
 use std::collections::BTreeMap;
 
+mod application;
+pub use application::*;
 mod discovery;
+mod terminal;
+pub use terminal::*;
+mod live_executor;
+pub use live_executor::{AiLiveFileOwner, AiLiveToolServices, capture_live_transfers};
+mod live_files;
+mod local_command;
+pub use local_command::{ai_command_with_cwd, run_local_ai_command};
+pub use live_files::*;
 pub use discovery::*;
 mod memory;
 pub use memory::*;

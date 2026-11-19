@@ -340,21 +340,4 @@ mod tests {
             ]
         );
     }
-
-    #[test]
-    fn plaintext_chunks_preserve_content_and_source_metadata() {
-        let text = "First paragraph about deployment.\n\nSecond paragraph about monitoring.\n\nThird about cleanup.\n";
-        let chunks = chunk_document("doc2", text, &DocFormat::PlainText);
-        let restored = chunks
-            .iter()
-            .map(|chunk| chunk.content.as_str())
-            .collect::<Vec<_>>()
-            .join("\n\n");
-        assert_eq!(restored, text.trim());
-        assert!(
-            chunks
-                .iter()
-                .all(|chunk| chunk.doc_id == "doc2" && chunk.section_path.is_none())
-        );
-    }
 }

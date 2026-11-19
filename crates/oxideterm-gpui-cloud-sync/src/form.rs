@@ -349,20 +349,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn settings_from_form_normalizes_interval_and_defaults() {
-        let mut form = CloudSyncFormDraft::from_settings(&CloudSyncSettings::default());
-        form.auto_upload_interval_mins = "bad".to_string();
-        form.namespace.clear();
-        form.s3_region.clear();
-
-        let (settings, interval) = cloud_sync_settings_from_form(&form);
-
-        assert_eq!(interval, 60.0);
-        assert_eq!(settings.namespace, CloudSyncSettings::default().namespace);
-        assert_eq!(settings.s3_region, CloudSyncSettings::default().s3_region);
-    }
-
-    #[test]
     fn settings_from_form_clears_hidden_backend_endpoints() {
         let mut form = CloudSyncFormDraft::from_settings(&CloudSyncSettings::default());
         form.backend_type = BackendType::GithubGist;

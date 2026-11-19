@@ -190,6 +190,27 @@ pub struct ConnectionFormEnvironment {
     pub panel_glass: bool,
 }
 
+impl ConnectionFormEnvironment {
+    pub fn from_store(
+        store: &oxideterm_connections::ConnectionStore,
+        settings: &oxideterm_settings::PersistedSettings,
+    ) -> Self {
+        Self {
+            connections: store.connection_infos(),
+            groups: store.groups().to_vec(),
+            totp: store.totp_credentials().iter().map(|entry| FormTotpCredential {
+                id: entry.id.clone(),
+                name: entry.name.clone(),
+            }).collect(),
+            keys: store.managed_ssh_keys(),
+            terminal: settings.terminal.clone(),
+            ui_font: settings.appearance.ui_font_family.clone(),
+            default_shell_id: settings.local_terminal.default_shell_id.clone(),
+            ..Self::default()
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub(super) enum FormMount {
     Body,

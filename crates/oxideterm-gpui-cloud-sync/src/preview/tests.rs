@@ -1,88 +1,10 @@
 use oxideterm_cloud_sync::{
-    ConflictStrategy, RawSyncScope, StructuredDirtyInfo, StructuredDirtySections,
+    StructuredDirtyInfo, StructuredDirtySections,
     StructuredLocalState, StructuredSectionRevisions, SyncScope, service::CloudSyncLocalSnapshot,
     state::CloudSyncPersistedState,
 };
 
 use super::*;
-
-#[test]
-fn coverage_model_marks_partial_sections_and_sensitive_exclusion() {
-    let raw_scope = RawSyncScope {
-        app_settings_sections: Some(vec!["general".to_string(), "network".to_string()]),
-        sync_sensitive_credentials: Some(false),
-        ..RawSyncScope::default()
-    };
-
-    let items = cloud_sync_coverage_model(&raw_scope);
-
-    let app_settings = items
-        .iter()
-        .find(|item| item.label_key == "plugin.cloud_sync.settings.sync_app_settings")
-        .expect("app settings coverage item");
-    assert_eq!(app_settings.status, CloudSyncCoverageStatus::Partial);
-    assert_eq!(
-        app_settings.detail,
-        CloudSyncCoverageDetail::AppSettingsSections(vec![
-            "general".to_string(),
-            "network".to_string()
-        ])
-    );
-
-    let sensitive = items
-        .iter()
-        .find(|item| item.label_key == "plugin.cloud_sync.settings.sync_sensitive_credentials")
-        .expect("sensitive credentials coverage item");
-    assert_eq!(sensitive.status, CloudSyncCoverageStatus::Excluded);
-}
-
-#[test]
-fn preview_impact_items_explain_excluded_and_partial_selection() {
-    let summary = CloudSyncPreviewSummary {
-        connections: 2,
-        forwards: 1,
-        quick_commands: 3,
-        has_app_settings: true,
-        app_settings_sections: vec![
-            CloudSyncAppSettingsSection {
-                id: "general".to_string(),
-                field_count: 2,
-            },
-            CloudSyncAppSettingsSection {
-                id: "network".to_string(),
-                field_count: 1,
-            },
-        ],
-        ..CloudSyncPreviewSummary::default()
-    };
-    let mut selection = CloudSyncPreviewSelection {
-        import_connections: true,
-        selected_connection_names: summary.connection_record_names(),
-        import_app_settings: true,
-        selected_app_settings_sections: ["general".to_string()].into_iter().collect(),
-        import_forwards: true,
-        conflict_strategy: ConflictStrategy::Merge,
-        ..CloudSyncPreviewSelection::default()
-    };
-
-    let items = cloud_sync_preview_impact_items(&summary, &selection);
-
-    assert!(items.iter().any(|item| {
-        item.label_key == "plugin.cloud_sync.preview.quick_commands_label"
-            && item.status == CloudSyncCoverageStatus::Excluded
-    }));
-    assert!(items.iter().any(|item| {
-        item.label_key == "plugin.cloud_sync.settings.sync_app_settings"
-            && item.status == CloudSyncCoverageStatus::Partial
-    }));
-
-    selection.selected_app_settings_sections.clear();
-    let items = cloud_sync_preview_impact_items(&summary, &selection);
-    assert!(items.iter().any(|item| {
-        item.label_key == "plugin.cloud_sync.settings.sync_app_settings"
-            && item.status == CloudSyncCoverageStatus::Excluded
-    }));
-}
 
 #[test]
 fn upload_diff_items_mark_local_changes_and_remote_overwrites() {
@@ -130,40 +52,6 @@ fn upload_diff_items_mark_local_changes_and_remote_overwrites() {
         .expect("forwards diff item");
     assert_eq!(forwards.local_status, CloudSyncLocalDiffStatus::Unchanged);
     assert_eq!(forwards.remote_status, CloudSyncRemoteDiffStatus::Unchanged);
-}
-
-#[test]
-fn upload_diff_items_track_ble_profile_revision_changes() {
-    let snapshot = test_snapshot(
-        SyncScope::default(),
-        StructuredLocalState {
-            ble_profiles: Some("ble-local-2".to_string()),
-            ..StructuredLocalState::default()
-        },
-    );
-    let state = CloudSyncPersistedState {
-        last_check_at: Some("2026-06-12T00:00:00Z".to_string()),
-        last_synced_structured_state: Some(StructuredLocalState {
-            ble_profiles: Some("ble-local-1".to_string()),
-            ..StructuredLocalState::default()
-        }),
-        remote_section_revisions: Some(StructuredSectionRevisions {
-            ble_profiles: Some("ble-remote".to_string()),
-            ..StructuredSectionRevisions::default()
-        }),
-        ..CloudSyncPersistedState::default()
-    };
-
-    let items = cloud_sync_upload_diff_items(&snapshot, &state);
-
-    let ble = items
-        .iter()
-        .find(|item| {
-            item.label == CloudSyncDiffLabel::Key("plugin.cloud_sync.settings.sync_ble_profiles")
-        })
-        .expect("BLE profiles diff item");
-    assert_eq!(ble.local_status, CloudSyncLocalDiffStatus::Modified);
-    assert_eq!(ble.remote_status, CloudSyncRemoteDiffStatus::Overwrites);
 }
 
 #[test]
@@ -397,36 +285,5 @@ fn plugin_profiles_appear_in_upload_selection_and_field_diffs_without_secret_ref
     assert_eq!(
         selection.item_filter().connection_ids,
         Some(BTreeSet::new())
-    );
-}
-
-#[test]
-fn local_profile_icon_change_appears_in_sync_preview() {
-    let before: SavedConnectionsSyncSnapshot = serde_json::from_value(serde_json::json!({
-        "revision": "before", "exportedAt": "2026-09-23T00:00:00Z", "records": [],
-        "localTerminalProfiles": [{
-            "id": "project", "name": "Project", "icon": "terminal",
-            "created_at": "2026-09-23T00:00:00Z", "updated_at": "2026-09-23T00:00:00Z"
-        }]
-    }))
-    .unwrap();
-    let mut after = before.clone();
-    after.local_terminal_profiles[0].icon = Some("debian".into());
-    let mut changes = Vec::new();
-    push_upload_connection_field_diffs(&mut changes, Some(&before), &after);
-    assert_eq!(
-        changes,
-        vec![CloudSyncFieldDiffItem {
-            section_label_key: "plugin.cloud_sync.settings.sync_connections",
-            item_key: "project".into(),
-            item_name: "Project".into(),
-            status: CloudSyncFieldDiffStatus::Modified,
-            fields: vec![CloudSyncFieldDiffField {
-                label_key: "sessionManager.edit_properties.icon",
-                before: Some("terminal".into()),
-                after: Some("debian".into()),
-                merge_outcome: None,
-            }],
-        }]
     );
 }

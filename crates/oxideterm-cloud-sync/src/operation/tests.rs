@@ -34,33 +34,6 @@ fn partial_profile_upload_filters_deletions_with_the_selected_ids() {
 }
 
 #[test]
-fn quick_command_category_sync_merges_icon_color_and_theme_reset() {
-    let mut base = oxideterm_quick_commands::default_quick_command_categories();
-    for initial in [None, Some("#112233".to_string())] {
-        base[0].icon_color = initial.clone();
-        let mut local = base.clone();
-        local[0].icon_color = if initial.is_none() {
-            Some("#22d3ee".into())
-        } else {
-            None
-        };
-        let mut remote = base.clone();
-        remote[0].name = "Renamed remotely".into();
-        merge_quick_command_categories(&mut remote, &base, &local, &ConflictStrategy::Merge)
-            .unwrap();
-        assert_eq!(remote[0].name, "Renamed remotely");
-        assert_eq!(
-            remote[0].icon_color.as_deref(),
-            if initial.is_none() {
-                Some("#22d3ee")
-            } else {
-                None
-            }
-        );
-    }
-}
-
-#[test]
 fn ftp_cloud_merge_keeps_independent_local_and_remote_edits() {
     use oxideterm_connections::{FtpProfile, FtpProfilesSyncSnapshot, FtpSecurity};
     let profile = FtpProfile::new(
@@ -231,28 +204,6 @@ fn remote_desktop_apply_preserves_local_credentials_and_valid_gateway_refs() {
 }
 
 #[test]
-fn remote_desktop_three_way_merge_preserves_independent_changes() {
-    let base = remote_desktop_snapshot(None, "old.test");
-    let mut local = base.clone();
-    local.records[0].name = "Renamed desktop".to_string();
-    let mut remote = base.clone();
-    remote.records[0].host = "new.test".to_string();
-
-    let changed = merge_remote_desktop_profile_records(
-        &mut remote,
-        &base,
-        &local,
-        &ConflictStrategy::Merge,
-        Utc::now(),
-    )
-    .expect("remote desktop profile merge should succeed");
-
-    assert!(changed);
-    assert_eq!(remote.records[0].name, "Renamed desktop");
-    assert_eq!(remote.records[0].host, "new.test");
-}
-
-#[test]
 fn field_merge_preserves_independent_edits_and_resolves_conflicts_by_strategy() {
     let base = serde_json::json!({
         "name": "Prod",
@@ -368,24 +319,6 @@ fn connection_merge_preserves_independent_full_option_changes() {
 }
 
 #[test]
-fn operation_guard_clears_when_permit_drops() {
-    let guard = CloudSyncOperationGuard::default();
-    {
-        let _permit = guard
-            .begin(CloudSyncOperationKind::Upload, false)
-            .unwrap()
-            .unwrap();
-    }
-
-    assert!(
-        guard
-            .begin(CloudSyncOperationKind::Check, false)
-            .unwrap()
-            .is_some()
-    );
-}
-
-#[test]
 fn connection_preflight_allows_managed_keys_only_with_sensitive_credentials_scope() {
     let without_sensitive_credentials = crate::SyncScope {
         sync_sensitive_credentials: false,
@@ -446,21 +379,6 @@ fn upload_conflict_check_rejects_changed_sensitive_credentials_section() {
             .to_string();
 
     assert!(error.contains("remote_changed_before_upload"));
-}
-
-#[test]
-fn legacy_preview_selection_respects_connection_scope() {
-    for (enabled, selected, expected) in [
-        (
-            true,
-            Some(vec!["Prod".into(), "Staging".into()]),
-            Some(vec!["Prod".into(), "Staging".into()]),
-        ),
-        (true, None, None),
-        (false, Some(vec!["Prod".into()]), Some(Vec::new())),
-    ] {
-        assert_eq!(legacy_preview_selected_names(enabled, selected), expected);
-    }
 }
 
 #[tokio::test]

@@ -2,7 +2,9 @@ use oxideterm_ai::stream_state::AiCompactionPlan;
 
 use crate::state::AiPendingChatStream;
 
-pub use oxideterm_ai::tool_loop::{AiStreamDelivery, AiStreamDeliveryEvent, AiStreamDeliverySender};
+pub use oxideterm_ai::tool_loop::{
+    AiStreamDelivery, AiStreamDeliveryEvent, AiStreamDeliverySender,
+};
 
 pub struct AiCompactionDelivery {
     pub generation: u64,
@@ -25,9 +27,58 @@ pub enum AiCompactionDeliveryKind {
 }
 
 mod batch;
-pub use batch::{AiChatDeliveryBatch, AiStreamTextKind, ai_context_token_breakdown_from_prompt};
+pub(crate) use batch::AiChatDeliveryBatch;
+pub use batch::{AiChatWindowDelivery, ai_context_token_breakdown_from_prompt};
 
-/// Published after the window adapter has applied and acknowledged a chat batch.
-pub struct AiChatBatchApplied;
+pub type AiChatStreamFrameSource = dyn Fn(&gpui::App) -> Option<AiChatStreamFrame>;
 
-impl gpui::EventEmitter<AiChatBatchApplied> for crate::state::AiWorkspaceEntity {}
+#[derive(Default)]
+pub struct AiChatStreamFrame {
+    pub i18n: oxideterm_i18n::I18n,
+    pub tool_use_enabled: bool,
+    pub provider_id: Option<String>,
+    pub model: Option<String>,
+}
+
+impl AiChatStreamFrame {
+    pub fn from_settings(ai: &oxideterm_settings::AiSettings, i18n: oxideterm_i18n::I18n) -> Self {
+        Self { i18n, tool_use_enabled: ai.tool_use.enabled, provider_id: ai.active_provider_id.clone(), model: ai.active_model.clone() }
+    }
+
+    pub fn diagnostic(&self, data: serde_json::Value) -> serde_json::Value {
+        ai_stream_diagnostic(
+            data,
+            self.tool_use_enabled,
+            self.provider_id.as_deref(),
+            self.model.as_deref(),
+        )
+    }
+}
+
+pub fn ai_stream_diagnostic(
+    data: serde_json::Value,
+    tool_use_enabled: bool,
+    provider_id: Option<&str>,
+    model: Option<&str>,
+) -> serde_json::Value {
+    let mut object = match data {
+        serde_json::Value::Object(object) => object,
+        other => {
+            let mut object = serde_json::Map::new();
+            object.insert("value".to_owned(), other);
+            object
+        }
+    };
+    object.insert("source".to_owned(), serde_json::json!("sidebar"));
+    object.insert(
+        "toolUseEnabled".to_owned(),
+        serde_json::json!(tool_use_enabled),
+    );
+    if let Some(provider_id) = provider_id {
+        object.insert("providerId".to_owned(), serde_json::json!(provider_id));
+    }
+    if let Some(model) = model {
+        object.insert("model".to_owned(), serde_json::json!(model));
+    }
+    serde_json::Value::Object(object)
+}

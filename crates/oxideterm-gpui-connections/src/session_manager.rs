@@ -10,6 +10,7 @@ mod groups;
 mod interaction;
 mod labels;
 mod mutations;
+mod oxide_assets;
 mod oxide_delivery;
 pub(crate) mod oxide_dialogs;
 mod oxide_keys;
@@ -24,7 +25,8 @@ pub use catalog_view::{CatalogAction, CatalogEnvironment};
 pub use groups::*;
 pub use interaction::*;
 pub use labels::*;
-pub use mutations::delete_catalog_profile;
+pub use mutations::{CatalogDeletion, delete_catalog_profile, delete_catalog_selection};
+pub use oxide_assets::*;
 pub use oxide_delivery::*;
 pub use oxide_dialogs::{
     BatchWindowAction, ManagerTextRole, OxideDialogAction, OxideDialogEnvironment,
@@ -32,10 +34,7 @@ pub use oxide_dialogs::{
 };
 pub use oxide_keys::OxideKeyScope;
 pub use oxide_models::*;
-pub use oxide_transfer::{
-    OxideTransfer, oxide_export_draft, oxide_export_options, oxide_export_preflight,
-    oxide_export_target_ids, oxide_export_validation_error,
-};
+pub use oxide_transfer::OxideTransfer;
 pub use state::*;
 
 pub const BG_ACTIVE_THEME_ALPHA: u32 = 0x99; // Nested fills share the tab's sidebar-bounded tint budget.

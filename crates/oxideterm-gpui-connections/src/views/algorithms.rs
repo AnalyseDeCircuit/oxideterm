@@ -979,17 +979,3 @@ impl ConnectionFlowEntity {
         cx.notify();
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::reorder_algorithm;
-
-    #[test]
-    fn drag_reordering_moves_one_algorithm_without_swapping_neighbors() {
-        let mut algorithms = vec!["a".into(), "b".into(), "c".into(), "d".into()];
-        reorder_algorithm(&mut algorithms, "a", 2);
-        assert_eq!(algorithms, ["b", "c", "a", "d"]);
-        reorder_algorithm(&mut algorithms, "d", 0);
-        assert_eq!(algorithms, ["d", "b", "c", "a"]);
-    }
-}

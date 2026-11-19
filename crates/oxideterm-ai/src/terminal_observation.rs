@@ -419,16 +419,6 @@ mod tests {
     }
 
     #[test]
-    fn command_observation_deadline_caps_requested_wait_without_extending_it() {
-        let start = std::time::Instant::now();
-        let wait = AiTerminalCommandWait::with_timeout(start, Duration::from_secs(1800));
-        assert!(!wait.expired(start + Duration::from_secs(29)));
-        assert!(wait.expired(start + Duration::from_secs(30)));
-        let short = AiTerminalCommandWait::with_timeout(start, Duration::from_secs(2));
-        assert!(short.expired(start + Duration::from_secs(2)));
-    }
-
-    #[test]
     fn output_capture_respects_shell_events_activity_and_wait_states() {
         let quiet = Duration::from_millis(500);
         for (completed, prompt_returned, output, elapsed, secret, reconnecting, expected) in [

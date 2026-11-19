@@ -64,6 +64,67 @@ impl Language {
             Self::ZhTw => "zh-TW",
         }
     }
+
+    /// Maps a single BCP 47 or POSIX locale tag (e.g. `pt-PT`, `fr-CA`, `zh_TW.UTF-8`)
+    /// to the closest supported UI language, returning `None` when unsupported.
+    pub fn from_locale_tag(tag: &str) -> Option<Self> {
+        let base = tag.split('.').next()?.split('@').next()?.trim();
+        if base.is_empty() {
+            return None;
+        }
+        let normalized = base.to_ascii_lowercase();
+        let mut subtags = normalized
+            .split(['-', '_'])
+            .filter(|segment| !segment.is_empty());
+        let primary = subtags.next()?;
+        let rest: Vec<&str> = subtags.collect();
+
+        match primary {
+            "zh" | "cmn" => {
+                if rest.contains(&"hant") {
+                    Some(Self::ZhTw)
+                } else if rest.contains(&"hans") {
+                    Some(Self::ZhCn)
+                } else if rest.iter().any(|tag| matches!(*tag, "tw" | "hk" | "mo")) {
+                    Some(Self::ZhTw)
+                } else {
+                    Some(Self::ZhCn)
+                }
+            }
+            "yue" => {
+                if rest.iter().any(|tag| matches!(*tag, "hans" | "cn")) {
+                    Some(Self::ZhCn)
+                } else {
+                    Some(Self::ZhTw)
+                }
+            }
+            "en" => Some(Self::En),
+            "fr" => Some(Self::FrFr),
+            "pt" => Some(Self::PtBr),
+            "es" => Some(Self::EsEs),
+            "ja" => Some(Self::Ja),
+            "ko" => Some(Self::Ko),
+            "vi" => Some(Self::Vi),
+            "de" => Some(Self::De),
+            "it" => Some(Self::It),
+            _ => None,
+        }
+    }
+
+    /// Resolves the first supported UI language from an ordered list of preferred
+    /// locale tags, falling back to English when none match.
+    pub fn from_locale_tags<'a>(tags: impl IntoIterator<Item = &'a str>) -> Self {
+        tags.into_iter()
+            .find_map(Self::from_locale_tag)
+            .unwrap_or(Self::En)
+    }
+}
+
+/// Detects the initial UI language from the OS preferred locale list,
+/// falling back to related regional variants and ultimately English.
+pub fn detect_system_language() -> Language {
+    let locales: Vec<String> = sys_locale::get_locales().collect();
+    Language::from_locale_tags(locales.iter().map(String::as_str))
 }
 
 pub fn is_prerelease_version(version: &str) -> bool {
@@ -382,4 +443,56 @@ pub enum HighlightRuleMatchScope {
     #[default]
     Match,
     LogicalLine,
+}
+
+#[cfg(test)]
+mod locale_tests {
+    use super::Language;
+
+    #[test]
+    fn system_locale_fallback_resolves_regional_variants_and_defaults_to_english() {
+        for (tag, expected) in [
+            ("pt-PT", Some(Language::PtBr)),
+            ("pt-BR", Some(Language::PtBr)),
+            ("pt", Some(Language::PtBr)),
+            ("fr-CA", Some(Language::FrFr)),
+            ("fr-CH", Some(Language::FrFr)),
+            ("fr-FR", Some(Language::FrFr)),
+            ("es-MX", Some(Language::EsEs)),
+            ("es-419", Some(Language::EsEs)),
+            ("de-AT", Some(Language::De)),
+            ("it-CH", Some(Language::It)),
+            ("ja-JP", Some(Language::Ja)),
+            ("ko-KR", Some(Language::Ko)),
+            ("vi-VN", Some(Language::Vi)),
+            ("en-GB", Some(Language::En)),
+            ("zh-CN", Some(Language::ZhCn)),
+            ("zh-Hans-SG", Some(Language::ZhCn)),
+            ("zh_CN.UTF-8", Some(Language::ZhCn)),
+            ("zh-TW", Some(Language::ZhTw)),
+            ("zh-Hant-HK", Some(Language::ZhTw)),
+            ("zh-MO", Some(Language::ZhTw)),
+            ("yue-HK", Some(Language::ZhTw)),
+            ("ru-RU", None),
+            ("C", None),
+            ("POSIX", None),
+            ("", None),
+        ] {
+            assert_eq!(
+                Language::from_locale_tag(tag),
+                expected,
+                "locale tag {tag:?}"
+            );
+        }
+
+        assert_eq!(
+            Language::from_locale_tags(["ru-RU", "fr-CA", "en-US"]),
+            Language::FrFr
+        );
+        assert_eq!(
+            Language::from_locale_tags(["ru-RU", "ar-SA"]),
+            Language::En
+        );
+        assert_eq!(Language::from_locale_tags([]), Language::En);
+    }
 }

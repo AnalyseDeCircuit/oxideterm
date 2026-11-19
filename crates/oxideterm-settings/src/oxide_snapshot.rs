@@ -268,6 +268,7 @@ pub fn merge_oxide_settings_snapshot(
             &mut snapshot_settings,
             current.terminal.font_family,
         );
+        crate::normalize::migrate_legacy_terminal_character_spacing(&mut snapshot_settings);
     }
 
     let requested = selected_sections

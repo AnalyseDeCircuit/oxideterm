@@ -56,9 +56,37 @@ pub struct CatalogEnvironment {
     pub has_background: bool,
     pub ui_font: SharedString,
     pub sidebar_background: Rgba,
-    pub sidebar_sort_open: bool,
     pub sidebar_sort_anchor: Option<OverlayAnchor>,
     pub stored_groups: Vec<String>,
+}
+
+impl CatalogEnvironment {
+    pub fn from_store(
+        manager: &SessionManagerState,
+        store: &oxideterm_connections::ConnectionStore,
+        tunnels: Vec<oxideterm_forwarding::PersistedForward>,
+        include_items: bool,
+    ) -> Self {
+        let group_counts = manager
+            .row_action_menu
+            .as_ref()
+            .and_then(|menu| match &menu.target {
+                SessionManagerRowActionTarget::Group(group) => {
+                    Some((group.clone(), connection_count_for_group(group, store, &tunnels)))
+                }
+                _ => None,
+            })
+            .into_iter()
+            .collect();
+        let groups = session_group_tree(store, &tunnels);
+        Self {
+            items: if include_items { manager.display_catalog(store, tunnels) } else { Vec::new() },
+            group_counts,
+            groups,
+            stored_groups: store.groups().to_vec(),
+            ..Self::default()
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -101,6 +129,7 @@ pub(crate) enum CatalogMount {
     Rows,
     Dialogs,
     SidebarSearch,
+    SidebarSearchButton,
 }
 
 pub(crate) struct CatalogView {
@@ -633,11 +662,44 @@ impl CatalogView {
     }
 }
 
+impl CatalogView {
+    fn render_sidebar_search_button(&self, cx: &mut Context<Self>) -> AnyElement {
+        let open = self.session_manager.read(cx).sidebar_search_open;
+        let theme = self.tokens.ui;
+        self.workspace_tooltip_icon_button(
+            LucideIcon::Search,
+            self.tokens.metrics.sidebar_action_icon_size,
+            rgb(if open { theme.text } else { theme.text_muted }),
+            IconButtonOptions {
+                has_background: open,
+                background: open.then_some(rgb(theme.bg_active)),
+                hover_background: Some(rgb(theme.bg_hover)),
+                ..IconButtonOptions::opaque_toolbar(
+                    self.tokens.metrics.sidebar_action_size,
+                    ButtonRadius::Md,
+                )
+            },
+            self.i18n.t("sidebar.search.title"),
+            "sidebar-session-manager-search",
+            false,
+            cx.listener(|this, _event, window, cx| {
+                (this.dispatch)(Request::ToggleCatalogSidebarSearch, Some(window), cx);
+            }),
+            cx.entity(),
+        )
+    }
+}
+
 impl Render for CatalogView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let Some(theme) = (self.theme)(cx) else {
             return div().into_any_element();
         };
+        self.tokens = theme.tokens;
+        self.i18n = theme.i18n;
+        if matches!(self.mount, CatalogMount::SidebarSearchButton) {
+            return self.render_sidebar_search_button(cx);
+        }
         let (groups, delete) = {
             let state = self.session_manager.read(cx);
             (state.show_group_manager, state.delete_confirm.is_some())
@@ -649,8 +711,6 @@ impl Render for CatalogView {
         let Some(environment) = (self.query)(include_items, cx) else {
             return div().into_any_element();
         };
-        self.tokens = theme.tokens;
-        self.i18n = theme.i18n;
         self.environment = environment;
         match self.mount {
             CatalogMount::Main => self.render_session_manager_surface(window, cx),
@@ -661,6 +721,7 @@ impl Render for CatalogView {
                 .children(groups.then(|| self.render_group_manager_dialog(window, cx)))
                 .children(delete.then(|| self.render_session_manager_delete_confirm(cx)))
                 .into_any_element(),
+            CatalogMount::SidebarSearchButton => unreachable!(),
             CatalogMount::SidebarSearch => self.render_session_text_input(
                 SessionManagerInput::Search,
                 &self.session_manager.read(cx).search_query,

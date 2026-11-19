@@ -64,13 +64,10 @@ impl WorkspaceApp {
                 cx.notify();
             }
             ai_state::AiWorkspaceEvent::ChatStreamDeliveryReady => {
-                // The window registry has already acquired a live window here. Drain only now so
-                // a failed nested window update cannot discard terminal tool or completion events.
-                let deliveries = self
-                    .ai.state
-                    .update(cx, |ai, _cx| ai.take_chat_stream_deliveries());
-                if !deliveries.is_empty() {
-                    self.apply_ai_chat_stream_deliveries(deliveries, window, cx);
+                let request = self.ai.state.update(cx, |ai, cx| ai.take_chat_window_request(cx));
+                if let Some((ticket, request)) = request {
+                    self.apply_ai_chat_window_request(request, window, cx);
+                    self.ai.state.update(cx, |ai, cx| ai.acknowledge_chat_window_request(ticket, cx));
                 }
             }
             ai_state::AiWorkspaceEvent::CompactionDeliveryReady => {

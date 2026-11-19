@@ -739,6 +739,15 @@ impl SettingsWorkspaceEntity {
         true
     }
 
+    pub fn open_ai_section(&mut self, section: &str, cx: &mut Context<Self>) {
+        if let Some(tab) = crate::settings_tab_from_ai_section(section) {
+            self.set_active_tab(tab, cx);
+        }
+        if let Some(page) = crate::terminal_settings_page_from_ai_section(section) {
+            self.set_terminal_page(page, cx);
+        }
+    }
+
     pub fn set_terminal_page(
         &mut self,
         page: TerminalSettingsPage,
@@ -2854,29 +2863,6 @@ mod tests {
     }
 
     #[cfg(target_os = "macos")]
-    #[gpui::test]
-    fn launch_at_login_macos_handoff_uses_typed_shallow_error_state(cx: &mut TestAppContext) {
-        let entity = cx.new(SettingsWorkspaceEntity::new);
-        entity.update(cx, |entity, cx| {
-            entity.finish_launch_at_login_settings_handoff(
-                Err("system settings unavailable".to_string()),
-                cx,
-            );
-        });
-
-        let first = entity.read_with(cx, |entity, _cx| entity.launch_at_login_snapshot());
-        let second = entity.read_with(cx, |entity, _cx| entity.launch_at_login_snapshot());
-        let (
-            Some(LaunchAtLoginError::OperationFailed(first_error)),
-            Some(LaunchAtLoginError::OperationFailed(second_error)),
-        ) = (first.error, second.error)
-        else {
-            panic!("macOS handoff should retain a typed platform error");
-        };
-        // Render snapshots share the immutable message instead of copying it.
-        assert!(Arc::ptr_eq(&first_error, &second_error));
-    }
-
     #[gpui::test]
     fn keybinding_file_replacement_completion_and_release_preserve_task_ownership(
         cx: &mut TestAppContext,

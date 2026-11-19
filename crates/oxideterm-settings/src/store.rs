@@ -594,6 +594,7 @@ pub fn load_settings_from_path(path: &Path) -> Result<SettingsLoadResult> {
             let mut settings = PersistedSettings::default();
             // Only a new profile starts in system mode; older files may omit the preference.
             settings.appearance.follow_system_appearance = true;
+            settings.general.language = crate::detect_system_language();
             (settings.to_value(), now_ms(), true)
         }
         Err(err) => {

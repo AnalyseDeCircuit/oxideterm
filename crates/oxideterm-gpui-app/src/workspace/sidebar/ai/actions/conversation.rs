@@ -1,143 +1,81 @@
-use crate::workspace::ai_state::{AiQueuedChatTurn, AiStandardConfirmKind};
+use crate::workspace::ai_state::AiStandardConfirmKind;
+use oxideterm_gpui_ai::conversation::actions::AiChatActions;
+use oxideterm_gpui_ai::state::conversation_queue::AiDraftContext;
+
+impl AiChatActions for WorkspaceApp {
+    type Cx<'a> = Context<'a, Self>;
+
+    fn chat_state(&self) -> &Entity<crate::workspace::ai_state::AiWorkspaceEntity> { &self.ai.state }
+    fn chat_settings(&self) -> &oxideterm_settings::AiSettings { &self.settings_store.settings().ai }
+    fn chat_i18n(&self) -> &I18n { &self.i18n }
+    fn chat_skills(&self) -> &oxideterm_gpui_ai::state::skills::AiSkillCatalog { &self.ai.skills }
+    fn capture_chat_context(&self, references: &[AiReferenceMatch], cx: &mut Context<Self>) -> AiDraftContext {
+        AiDraftContext {
+            sidebar: self.resolve_ai_sidebar_context_block(cx),
+            terminal: self.resolve_ai_selected_terminal_context(cx),
+            references: self.resolve_ai_reference_context(references, cx),
+        }
+    }
+    fn resolve_ai_sidebar_system_prompt_segment(&mut self, cx: &mut Self::Cx<'_>) -> Option<String> {
+        WorkspaceApp::resolve_ai_sidebar_system_prompt_segment(self, cx)
+    }
+    fn resolve_ai_stream_config(&self, cx: &App) -> Result<AiChatStreamConfig, String> {
+        WorkspaceApp::resolve_ai_stream_config(self, cx)
+    }
+    fn ensure_ai_chat_initialized(&mut self, cx: &mut App) { WorkspaceApp::ensure_ai_chat_initialized(self, cx); }
+    fn clear_chat_composition(&mut self) { self.ime_marked_text = None; }
+    fn chat_notice(&mut self, message: String, error: bool, cx: &mut Self::Cx<'_>) {
+        self.push_ai_settings_toast(message, if error { TerminalNoticeVariant::Error } else { TerminalNoticeVariant::Warning }, cx);
+    }
+    fn redraw_chat_chrome(&mut self, cx: &mut Self::Cx<'_>) { cx.notify(); }
+    fn start_ai_compact_conversation(&mut self, cx: &mut Self::Cx<'_>) { WorkspaceApp::start_ai_compact_conversation(self, cx); }
+    fn reset_ai_chat_input_after_submit(&mut self, cx: &mut App) { WorkspaceApp::reset_ai_chat_input_after_submit(self, cx); }
+    fn cancel_ai_chat_stream(&mut self, cx: &mut Self::Cx<'_>) { WorkspaceApp::cancel_ai_chat_stream(self, cx); }
+    fn launch_prepared_queued_turn(&mut self, pending: AiPendingChatStream, cx: &mut Self::Cx<'_>) {
+        WorkspaceApp::launch_prepared_queued_turn(self, pending, cx);
+    }
+    fn launch_chat_turn(&mut self, turn: AiPendingChatStream, cx: &mut Self::Cx<'_>) {
+        self.start_ai_chat_stream_after_api_key_lookup(
+            turn.conversation_id, turn.config, turn.request_content, turn.task_system_prompt, cx,
+        );
+    }
+    fn chat_launcher(&self, cx: &Self::Cx<'_>) -> impl FnOnce(AiPendingChatStream, &mut App) + 'static {
+        let workspace = cx.weak_entity();
+        move |pending, cx| { let _ = workspace.update(cx, |app, cx| app.launch_chat_turn(pending, cx)); }
+    }
+    fn record_ai_memory_usage(&mut self, ids: &[String], cx: &mut Self::Cx<'_>) {
+        WorkspaceApp::record_ai_memory_usage(self, ids, cx);
+    }
+}
 
 impl WorkspaceApp {
-    pub(in crate::workspace) fn copy_ai_message(
-        &mut self,
-        message_id: String,
-        cx: &mut Context<Self>,
-    ) {
-        let ai = self.ai.state.read(cx);
-        let Some(conversation) = ai.conversation_state().active_conversation() else {
-            return;
-        };
-        let stored = ai.history.store.clone().zip(
-            ai.history
-                .pages
-                .get(&conversation.id)
-                .and_then(|page| page.descriptions.get(&message_id))
-                .cloned(),
-        );
-        let Some((store, description)) = stored else {
-            if let Some(message) = conversation
-                .messages
-                .iter()
-                .find(|message| message.id == message_id)
-            {
-                cx.write_to_clipboard(ClipboardItem::new_string(message.content.clone()));
-            }
-            return;
-        };
-        let conversation = conversation.id.clone();
-        let runtime = self.forwarding_runtime.clone();
-        let task = cx.spawn(async move |weak, cx| {
-            let result = runtime
-                .spawn_blocking(move || {
-                    store.message_content(
-                        &conversation,
-                        &description.storage_id,
-                        description.revision,
-                    )
-                })
-                .await;
-            let _ = weak.update(cx, |this, cx| {
-                this.ai.state.update(cx, |ai, _| {
-                    ai.history.copy_load.take();
-                });
-                match result {
-                    Ok(Ok(content)) => cx.write_to_clipboard(ClipboardItem::new_string(content)),
-                    _ => this.push_ai_settings_toast(
-                        this.i18n.t("ai.chat.load_failed_generic"),
-                        TerminalNoticeVariant::Error,
-                        cx,
-                    ),
-                }
-            });
-        });
-        self.ai.state.update(cx, |ai, _| {
-            ai.history.copy_load = Some(task);
-        });
+    fn open_chat_confirm(&mut self, kind: AiStandardConfirmKind, keyboard: bool, cx: &mut Context<Self>) {
+        self.ai.state.update(cx, |ai, _| ai.open_standard_chat_confirm(kind));
+        if keyboard { self.reset_standard_confirm_focus(); } else { self.clear_standard_confirm_focus(); }
+        cx.notify();
+    }
+
+    fn close_chat_confirm(&mut self, kind: AiStandardConfirmKind, cx: &mut Context<Self>) -> bool {
+        let delay = oxideterm_gpui_ui::motion::duration(&self.tokens, oxideterm_gpui_ui::motion::MotionDuration::Control);
+        let closing = self.ai.state.update(cx, |ai, cx| ai.close_chat_confirm(kind, delay, cx));
+        if closing { self.clear_standard_confirm_focus(); }
+        closing
     }
 
     pub(in crate::workspace) fn open_ai_safety_confirm(&mut self, cx: &mut Context<Self>) {
-        self.ai.state.update(cx, |ai, _cx| {
-            ai.open_standard_chat_confirm(AiStandardConfirmKind::Safety);
-        });
-        // Pointer-opened confirmations do not show keyboard focus until navigation starts.
-        self.clear_standard_confirm_focus();
-        cx.notify();
-    }
-
-    pub(in crate::workspace) fn begin_ai_safety_confirm_exit(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        let Some(generation) = self.ai.state.update(cx, |ai, _cx| {
-            ai.begin_standard_chat_confirm_exit(AiStandardConfirmKind::Safety)
-        }) else {
-            return false;
-        };
-        self.clear_standard_confirm_focus();
-        self.schedule_ai_standard_confirm_exit(AiStandardConfirmKind::Safety, generation, cx);
-        true
+        self.open_chat_confirm(AiStandardConfirmKind::Safety, false, cx);
     }
 
     pub(in crate::workspace) fn open_ai_summarize_confirm(&mut self, cx: &mut Context<Self>) {
-        self.ai.state.update(cx, |ai, _cx| {
-            ai.open_standard_chat_confirm(AiStandardConfirmKind::Summarize);
-        });
-        self.reset_standard_confirm_focus();
-        cx.notify();
+        self.open_chat_confirm(AiStandardConfirmKind::Summarize, true, cx);
     }
 
-    pub(in crate::workspace) fn begin_ai_summarize_confirm_exit(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        let Some(generation) = self.ai.state.update(cx, |ai, _cx| {
-            ai.begin_standard_chat_confirm_exit(AiStandardConfirmKind::Summarize)
-        }) else {
-            return false;
-        };
-        self.clear_standard_confirm_focus();
-        self.schedule_ai_standard_confirm_exit(AiStandardConfirmKind::Summarize, generation, cx);
-        true
+    pub(in crate::workspace) fn begin_ai_safety_confirm_exit(&mut self, cx: &mut Context<Self>) -> bool {
+        self.close_chat_confirm(AiStandardConfirmKind::Safety, cx)
     }
 
-    fn schedule_ai_standard_confirm_exit(
-        &mut self,
-        kind: AiStandardConfirmKind,
-        generation: u64,
-        cx: &mut Context<Self>,
-    ) {
-        let delay = oxideterm_gpui_ui::motion::duration(
-            &self.tokens,
-            oxideterm_gpui_ui::motion::MotionDuration::Control,
-        );
-        if delay.is_zero() {
-            self.finish_ai_standard_confirm_exit(kind, generation, cx);
-            return;
-        }
-        // The open flag remains set until this generation's exit frame completes.
-        cx.spawn(async move |weak, cx| {
-            Timer::after(delay).await;
-            let _ = weak.update(cx, |this, cx| {
-                if this.finish_ai_standard_confirm_exit(kind, generation, cx) {
-                    cx.notify();
-                }
-            });
-        })
-        .detach();
-    }
-
-    fn finish_ai_standard_confirm_exit(
-        &mut self,
-        kind: AiStandardConfirmKind,
-        generation: u64,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        self.ai.state.update(cx, |ai, _cx| {
-            ai.finish_standard_chat_confirm_exit(kind, generation)
-        })
+    pub(in crate::workspace) fn begin_ai_summarize_confirm_exit(&mut self, cx: &mut Context<Self>) -> bool {
+        self.close_chat_confirm(AiStandardConfirmKind::Summarize, cx)
     }
 
     pub(in crate::workspace) fn create_ai_sidebar_conversation(
@@ -146,363 +84,12 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> Option<String> {
         self.ensure_ai_chat_initialized(cx);
-        if !self.ai.state.read(cx).history_ready() {
-            return None;
-        }
-        let now = ai_now_ms();
-        let id = self.next_ai_chat_id(now, cx);
-        let id = self
-            .ai
-            .state
-            .update(cx, |ai, _cx| ai.create_chat_conversation(id, title, now));
-        self.ai.state.update(cx, |ai, _cx| {
-            ai.reset_chat_for_new_conversation();
-        });
-        cx.notify();
-        Some(id)
+        self.ai.state.update(cx, |ai, cx| ai.create_sidebar_conversation(title, cx))
     }
 
-    pub(in crate::workspace) fn steer_ai_chat_draft(&mut self, cx: &mut Context<Self>) {
-        if let Err(key) = self.ai.state.update(cx, |ai, cx| ai.steer_chat_draft(cx)) {
-            self.push_ai_settings_toast(self.i18n.t(key), TerminalNoticeVariant::Warning, cx);
-        }
-    }
-
-    pub(in crate::workspace) fn send_ai_chat_draft(&mut self, cx: &mut Context<Self>) {
-        self.ensure_ai_chat_initialized(cx);
-        if !self.ai.state.read(cx).history_ready() {
-            return;
-        }
-        let content = self.ai.state.read(cx).chat_ui().draft.trim().to_string();
-        let images = self.ai.state.read(cx).chat_ui().images.clone();
-        if images.iter().map(|image| image.bytes).sum::<usize>()
-            > oxideterm_ai::AI_IMAGE_REQUEST_BYTES
-        {
-            self.push_ai_settings_toast(
-                self.i18n.t("ai.images.request_limit"),
-                TerminalNoticeVariant::Warning,
-                cx,
-            );
-            return;
-        }
-        if self.ai.state.read(cx).chat_ui().image_import.is_some() {
-            return;
-        }
-        if content.is_empty() && images.is_empty() {
-            cx.notify();
-            return;
-        }
-        if !self.settings_store.settings().ai.enabled {
-            self.push_ai_settings_toast(
-                self.i18n.t("ai.chat.disabled_message"),
-                TerminalNoticeVariant::Warning,
-                cx,
-            );
-            cx.notify();
-            return;
-        }
-        let question = self.ai.state.read(cx).active_user_question();
-        if !images.is_empty() && question.is_some() {
-            self.push_ai_settings_toast(
-                self.i18n.t("ai.images.queue_only"),
-                TerminalNoticeVariant::Warning,
-                cx,
-            );
-            return;
-        }
-        if let Some((generation, id)) = question {
-            if self.ai.state.update(cx, |ai, _| {
-                ai.resolve_user_question(generation, &id, zeroize::Zeroizing::new(content))
-            }) {
-                self.reset_ai_chat_input_after_submit(cx);
-            }
-            cx.notify();
-            return;
-        }
-        self.bootstrap_ai_mcp_registry(cx);
-
-        let parsed_input = parse_ai_user_input(&content);
-        let detected_intent = detect_ai_intent(&parsed_input);
-        let sidebar_context = self.resolve_ai_sidebar_context_block(cx);
-        let selected_context = self.resolve_ai_selected_terminal_context(cx);
-        let reference_context = self.resolve_ai_reference_context(&parsed_input.references, cx);
-        let context_sources = [
-            selected_context.as_ref().map(|_| "terminal"),
-            sidebar_context.as_ref().map(|_| "sidebar"),
-            reference_context.as_ref().map(|_| "reference"),
-        ]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>();
-        let context =
-            ai_chat_message_context([selected_context, sidebar_context, reference_context]);
-        let slash_command = parsed_input
-            .slash_command
-            .as_deref()
-            .and_then(resolve_ai_slash_command);
-        let explicit_skill =
-            if slash_command.is_none() && self.settings_store.settings().ai.skills.enabled {
-                parsed_input.slash_command.as_deref().and_then(|skill_id| {
-                    let registry = self.ai.skills.read();
-                    let record = registry.enabled_record(skill_id)?;
-                    let instructions = registry.load(skill_id).ok()?;
-                    Some((
-                        skill_id.to_string(),
-                        record.content_hash.clone(),
-                        instructions,
-                    ))
-                })
-            } else {
-                None
-            };
-        if let Some(command) = slash_command.filter(|command| command.client_only) {
-            if !images.is_empty() {
-                self.push_ai_settings_toast(
-                    self.i18n.t("ai.images.queue_only"),
-                    TerminalNoticeVariant::Warning,
-                    cx,
-                );
-                return;
-            }
-            if self.ai.state.read(cx).chat_is_loading() {
-                self.push_ai_settings_toast(
-                    self.i18n.t("ai.queue.client_command_busy"),
-                    TerminalNoticeVariant::Warning,
-                    cx,
-                );
-                return;
-            }
-            match command.name {
-                "clear" => {
-                    self.create_ai_sidebar_conversation(None, cx);
-                    self.reset_ai_chat_input_after_submit(cx);
-                    cx.notify();
-                    return;
-                }
-                "help" => {
-                    self.add_ai_help_response(content, cx);
-                    return;
-                }
-                "compact" => {
-                    self.start_ai_compact_conversation(cx);
-                    self.reset_ai_chat_input_after_submit(cx);
-                    cx.notify();
-                    return;
-                }
-                _ => return,
-            }
-        }
-
-        let stream_config = match self.resolve_ai_stream_config(cx) {
-            Ok(config) => config,
-            Err(error) => {
-                self.push_ai_settings_toast(error, TerminalNoticeVariant::Error, cx);
-                cx.notify();
-                return;
-            }
-        };
-        if !images.is_empty()
-            && stream_config.execution_backend != AiExecutionBackend::Acp
-            && oxideterm_ai::model_image_input(
-                &stream_config.provider_type,
-                &stream_config.model,
-                stream_config.image_input,
-            ) == Some(false)
-        {
-            self.push_ai_settings_toast(
-                self.i18n.t("ai.images.model_unavailable"),
-                TerminalNoticeVariant::Warning,
-                cx,
-            );
-            return;
-        }
-        if let Some(context_block) = context.as_ref() {
-            if let Some(mut audit_context) = oxideterm_audit::AuditContext::current_request()
-                .or_else(oxideterm_audit::AuditContext::current)
-            {
-                if audit_context.source == oxideterm_audit::AuditSource::Application {
-                    audit_context.source = oxideterm_audit::AuditSource::User;
-                }
-                audit_context.observe(
-                    oxideterm_audit::AuditCategory::Automation,
-                    "ai_context_provided",
-                    Some(&format!(
-                        "provider={} model={} sources={} bytes={}",
-                        stream_config.provider_id.as_deref().unwrap_or("unknown"),
-                        stream_config.model,
-                        context_sources.join(","),
-                        context_block.len()
-                    )),
-                    oxideterm_audit::AuditOutcome::Sent,
-                    oxideterm_audit::AuditEvidence::Dispatch,
-                    oxideterm_audit::AuditAuthorization::NotRequired,
-                );
-            }
-        }
-        let now = ai_now_ms();
-        let title = generate_chat_title(&content);
-        let id = self.next_ai_chat_id(now, cx);
-        let message = AiChatMessage {
-            id: self.next_ai_chat_id(now, cx),
-            role: AiChatRole::User,
-            content: content.clone(),
-            timestamp_ms: now,
-            model: Some(stream_config.model.clone()),
-            context,
-            is_streaming: false,
-            thinking_content: None,
-            metadata: None,
-            tool_call_id: None,
-            tool_calls: Vec::new(),
-            turn: None,
-            transcript_ref: None,
-            summary_ref: None,
-            branches: None,
-            suggestions: Vec::new(),
-        };
-        let runtime_system_prompt = self.resolve_ai_sidebar_system_prompt_segment(cx);
-        let explicit_skill_prompt = explicit_skill.as_ref().map(
-            |(skill_id, _content_hash, instructions)| {
-                format!(
-                    "## Explicit Agent Skill\nThe user explicitly selected `{skill_id}`. Follow these instructions for this request, subject to the current tool permissions and safety mode.\n\n<skill_instructions id=\"{skill_id}\">\n{}\n</skill_instructions>",
-                    oxideterm_ai::sanitize_for_ai(instructions)
-                )
-            },
-        );
-        let task_system_prompt = ai_chat_message_context([
-            ai_input_system_prompt(slash_command, &parsed_input.participants),
-            explicit_skill_prompt,
-            runtime_system_prompt,
-            ai_detected_intent_system_prompt(&detected_intent),
-        ]);
-        let active_participant = parsed_input
-            .participants
-            .first()
-            .map(|participant| participant.name.clone());
-        let request_text = if stream_config.execution_backend == AiExecutionBackend::Acp
-            && parsed_input.slash_command.is_some()
-            && slash_command.is_none()
-            && explicit_skill.is_none()
-        {
-            // Agent-advertised ACP commands are protocol input, not OxideTerm
-            // system prompts. Preserve the slash prefix for the agent.
-            content
-        } else {
-            parsed_input.clean_text
-        };
-        let request_content = if request_text.is_empty() && explicit_skill.is_some() {
-            Some("Apply the explicitly selected Agent Skill to the current task.".to_string())
-        } else {
-            (!request_text.is_empty()).then_some(request_text)
-        };
-        let conversation_id = self.ai.state.update(cx, |ai, _cx| {
-            ai.ensure_conversation(id, Some(title), now, None)
-        });
-        let turn = AiQueuedChatTurn {
-            images,
-            id: message.id,
-            content: zeroize::Zeroizing::new(message.content),
-            context: message.context.map(zeroize::Zeroizing::new),
-            config: stream_config,
-            request_content: request_content.map(zeroize::Zeroizing::new),
-            task_system_prompt: task_system_prompt.map(zeroize::Zeroizing::new),
-            participant: active_participant,
-            skill: explicit_skill.map(|(id, hash, _)| (id, hash)),
-        };
-        let busy = self.ai.state.read(cx).chat_is_loading();
-        self.ai.state.update(cx, |ai, _| {
-            ai.queued_chat_turns
-                .entry(conversation_id.clone())
-                .or_default()
-                .push_back(turn)
-        });
-        self.reset_ai_chat_input_after_submit(cx);
-        if !busy {
-            self.send_next_queued_ai_message(&conversation_id, cx);
-        }
-        cx.notify();
-    }
-
-    pub(in crate::workspace) fn send_next_queued_ai_message(
-        &mut self,
-        conversation_id: &str,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        let enabled = self.settings_store.settings().ai.enabled;
-        let Some(pending) = self.ai.state.update(cx, |ai, _| {
-            ai.prepare_next_queued_turn(conversation_id, enabled)
-        }) else {
-            return false;
-        };
-        self.launch_prepared_queued_turn(pending, cx);
-        true
-    }
-
-    fn launch_prepared_queued_turn(
-        &mut self,
-        pending: AiPendingChatStream,
-        cx: &mut Context<Self>,
-    ) {
+    fn launch_prepared_queued_turn(&mut self, pending: AiPendingChatStream, cx: &mut Context<Self>) {
         self.record_ai_memory_usage(&pending.config.memory_entry_ids, cx);
-        self.start_ai_chat_stream_after_api_key_lookup(
-            pending.conversation_id,
-            pending.config,
-            pending.request_content,
-            pending.task_system_prompt,
-            cx,
-        );
-    }
-
-    pub(in crate::workspace) fn apply_ai_queue_action(
-        &mut self,
-        conversation: &str,
-        id: &str,
-        action: &str,
-        cx: &mut Context<Self>,
-    ) {
-        match self.ai.state.update(cx, |ai, cx| {
-            ai.apply_ai_queue_action(conversation, id, action, cx)
-        }) {
-            Ok(true) => {
-                self.send_next_queued_ai_message(conversation, cx);
-            }
-            Ok(false) => {}
-            Err(key) => {
-                self.push_ai_settings_toast(self.i18n.t(key), TerminalNoticeVariant::Warning, cx)
-            }
-        }
-    }
-
-    pub(in crate::workspace) fn interrupt_and_send_ai_chat_draft(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) {
-        if self.ai.state.read(cx).chat_ui().draft.trim().is_empty()
-            && self.ai.state.read(cx).chat_ui().images.is_empty()
-        {
-            self.cancel_ai_chat_stream(cx);
-            return;
-        }
-        self.cancel_ai_chat_stream(cx);
-        // The replacement takes precedence over queued follow-ups without deleting them.
-        let id = self
-            .ai
-            .state
-            .read(cx)
-            .conversation_state()
-            .active_conversation_id
-            .clone();
-        let queued = id.as_ref().and_then(|id| {
-            self.ai
-                .state
-                .update(cx, |ai, _| ai.queued_chat_turns.remove(id))
-        });
-        self.send_ai_chat_draft(cx);
-        if let (Some(id), Some(queued)) = (id, queued) {
-            self.ai.state.update(cx, |ai, _| {
-                ai.queued_chat_turns.entry(id).or_default().extend(queued)
-            });
-        }
+        self.launch_chat_turn(pending, cx);
     }
 
     pub(in crate::workspace) fn start_ai_chat_stream_after_api_key_lookup(
@@ -513,634 +100,66 @@ impl WorkspaceApp {
         task_system_prompt: Option<String>,
         cx: &mut Context<Self>,
     ) {
-        use oxideterm_gpui_ai::state::launch::{AiLaunchBindings, AiLaunchEffect};
+        use oxideterm_gpui_ai::state::launch::{IntentReady, start_chat_launch};
+        let host = cx.weak_entity();
+        let notice = host.clone();
+        let backend = host.clone();
         let context_window = self.ai_active_model_context_window(&config);
-        let owner = cx.weak_entity();
-        let services_owner = owner.clone();
-        let bindings = AiLaunchBindings {
-            i18n: self.i18n.clone(),
-            backend_services: Rc::new(move |cx| {
-                Some(
-                    services_owner
-                        .upgrade()?
-                        .read(cx)
-                        .ai_model_backend_services(cx),
-                )
-            }),
-            dispatch: Rc::new(move |effect, cx| {
-                let _ = owner.update(cx, |app, cx| match effect {
-                    AiLaunchEffect::Error(message) => {
-                        app.push_ai_settings_toast(message, TerminalNoticeVariant::Error, cx)
-                    }
-                    AiLaunchEffect::Ready(pending) => {
-                        if !app.ai.state.read(cx).chat_launch_matches(
-                            &pending.conversation_id,
-                            pending.launch_id.as_deref(),
-                        ) {
-                            return;
-                        }
-                        if pending.config.execution_backend == AiExecutionBackend::Acp {
-                            app.start_acp_chat_thread(
-                                pending.conversation_id,
-                                pending.config,
-                                pending.request_content,
-                                pending.task_system_prompt,
-                                cx,
-                            );
-                        } else {
-                            app.start_ai_chat_stream_after_budget_preflight(
-                                pending.conversation_id,
-                                pending.config,
-                                pending.request_content,
-                                pending.task_system_prompt,
-                                pending.rag_system_prompt,
-                                true,
-                                cx,
-                            );
-                        }
-                    }
+        let pending = AiPendingChatStream {
+            launch_id: None, conversation_id, config, request_content,
+            task_system_prompt, rag_system_prompt: None,
+        };
+        start_chat_launch(&self.ai.state, pending, context_window, self.i18n.clone(),
+            move |cx| Some(backend.upgrade()?.read(cx).ai_model_backend_services(cx)),
+            move |ready, cx| {
+                let _ = host.update(cx, |app, cx| match ready {
+                    IntentReady::Acp(turn) => app.start_acp_chat_thread(turn, cx),
+                    IntentReady::Provider(turn) => app.start_ai_chat_stream_after_budget_preflight(turn, true, cx),
                 });
-            }),
-        };
-        self.ai.state.update(cx, |ai, cx| {
-            ai.prepare_chat_launch(
-                AiPendingChatStream {
-                    launch_id: None,
-                    conversation_id,
-                    config,
-                    request_content,
-                    task_system_prompt,
-                    rag_system_prompt: None,
-                },
-                context_window,
-                bindings,
-                cx,
-            )
-        });
+            },
+            move |error, cx| { let _ = notice.update(cx, |app, cx| app.chat_notice(error, true, cx)); },
+            cx,
+        );
     }
 
-    pub(in crate::workspace) fn add_ai_help_response(
-        &mut self,
-        content: String,
-        cx: &mut Context<Self>,
-    ) {
-        let now = ai_now_ms();
-        let title = generate_chat_title(&content);
-        let id = self.next_ai_chat_id(now, cx);
-        let user_message = AiChatMessage {
-            id: self.next_ai_chat_id(now, cx),
-            role: AiChatRole::User,
-            content,
-            timestamp_ms: now,
-            model: None,
-            context: None,
-            is_streaming: false,
-            thinking_content: None,
-            metadata: None,
-            tool_call_id: None,
-            tool_calls: Vec::new(),
-            turn: None,
-            transcript_ref: None,
-            summary_ref: None,
-            branches: None,
-            suggestions: Vec::new(),
-        };
-        let assistant_message = AiChatMessage {
-            id: self.next_ai_chat_id(now, cx),
-            role: AiChatRole::Assistant,
-            content: self.ai_help_markdown(),
-            timestamp_ms: now,
-            model: None,
-            context: None,
-            is_streaming: false,
-            thinking_content: None,
-            metadata: None,
-            tool_call_id: None,
-            tool_calls: Vec::new(),
-            turn: None,
-            transcript_ref: None,
-            summary_ref: None,
-            branches: None,
-            suggestions: Vec::new(),
-        };
-        self.ai.state.update(cx, |ai, _cx| {
-            ai.add_help_exchange(id, title, now, user_message, assistant_message);
-        });
-        self.reset_ai_chat_input_after_submit(cx);
-        cx.notify();
-    }
-
-    pub(in crate::workspace) fn send_ai_follow_up_suggestion(
-        &mut self,
-        text: String,
-        cx: &mut Context<Self>,
-    ) {
-        self.ai.state.update(cx, |ai, _cx| {
-            ai.set_chat_draft(text);
-        });
-        self.send_ai_chat_draft(cx);
-    }
-
-    pub(in crate::workspace) fn regenerate_ai_last_response(&mut self, cx: &mut Context<Self>) {
-        if self.ai.state.read(cx).chat_is_loading() {
-            cx.notify();
-            return;
-        }
-        let stream_config = match self.resolve_ai_stream_config(cx) {
-            Ok(config) => config,
-            Err(error) => {
-                self.push_ai_settings_toast(error, TerminalNoticeVariant::Error, cx);
-                cx.notify();
-                return;
-            }
-        };
-        self.record_ai_memory_usage(&stream_config.memory_entry_ids, cx);
-        let ai = self.ai.state.read(cx);
-        let Some(conversation_id) = ai.conversation_state().active_conversation_id.clone() else {
-            return;
-        };
-        let Some(store) = ai.history.store.clone() else {
-            return;
-        };
-        let branch = ai
-            .history
-            .branches
-            .get(&conversation_id)
-            .cloned()
-            .unwrap_or_else(|| "main".into());
-        let launch_id = self.next_ai_chat_id(ai_now_ms(), cx);
-        let runtime = self.forwarding_runtime.clone();
-        let (sender, receiver) = tokio::sync::oneshot::channel();
-        self.ai.state.update(cx, |ai, _| {
-            ai.chat_launches
-                .insert(conversation_id.clone(), launch_id.clone());
-            ai.set_conversation_loading(&conversation_id, true);
-            ai.persist_chat_state();
-            ai.history_barrier(sender);
-        });
-        let target = conversation_id.clone();
-        let task = cx.spawn(async move |weak, cx| {
-            if receiver.await != Ok(true) {
-                return;
-            }
-            let id = conversation_id.clone();
-            let source_branch = branch.clone();
-            let result = runtime
-                .spawn_blocking(move || store.retry_messages(&id, &source_branch))
-                .await;
-            let _ = weak.update(cx, |this, cx| {
-                let ai = this.ai.state.read(cx);
-                if ai.history.quitting
-                    || !ai.chat_launch_matches(&conversation_id, Some(&launch_id))
-                    || ai
-                        .history
-                        .branches
-                        .get(&conversation_id)
-                        .is_some_and(|current| current != &branch)
-                {
-                    return;
-                }
-                this.ai.state.update(cx, |ai, _| {
-                    ai.history.launches.remove(&conversation_id);
-                    ai.set_conversation_loading(&conversation_id, false);
-                });
-                let Ok(Ok(messages)) = result else {
-                    this.ai.state.update(cx, |ai, _| ai.history_load_failed());
-                    cx.notify();
-                    return;
-                };
-                let recovery = messages
-                    .last()
-                    .and_then(oxideterm_ai::agent::recoverable_checkpoint)
-                    .map(|checkpoint| checkpoint.resume_prompt());
-                if recovery.is_none() {
-                    let Some(user) = messages
-                        .into_iter()
-                        .find(|message| message.role == AiChatRole::User)
-                    else {
-                        return;
-                    };
-                    this.ai.state.update(cx, |ai, _| {
-                        ai.capture_history_before_edit(&conversation_id);
-                        if let Some(conversation) = ai
-                            .conversation_state_mut()
-                            .conversations
-                            .iter_mut()
-                            .find(|conversation| conversation.id == conversation_id)
-                        {
-                            if let Some(index) = conversation
-                                .messages
-                                .iter()
-                                .position(|message| message.id == user.id)
-                            {
-                                conversation.messages.truncate(index);
-                            } else {
-                                conversation.messages.clear();
-                            }
-                            conversation.messages.push(user);
-                        }
-                        ai.truncate_conversation_after_last_user(&conversation_id, ai_now_ms());
-                    });
-                }
-                this.start_ai_chat_stream_after_api_key_lookup(
-                    conversation_id,
-                    stream_config,
-                    None,
-                    recovery,
-                    cx,
-                );
-                cx.notify();
-            });
-        });
-        self.ai.state.update(cx, |ai, _| {
-            ai.history.launches.insert(target, task);
-        });
-        cx.notify();
-    }
-
-    pub(in crate::workspace) fn request_delete_ai_message(
-        &mut self,
-        message_id: String,
-        cx: &mut Context<Self>,
-    ) {
-        if self.ai.state.read(cx).chat_is_loading() {
-            cx.notify();
-            return;
-        }
-        self.ai.state.update(cx, |ai, cx| {
-            ai.open_chat_confirm(
-                ai_state::AiChatConfirmKind::DeleteMessage {
-                    message_id: Arc::from(message_id),
-                },
-                cx,
-            );
-        });
-    }
-
-    pub(in crate::workspace) fn delete_ai_message(
-        &mut self,
-        message_id: &str,
-        cx: &mut Context<Self>,
-    ) {
-        let deleted = self.ai.state.update(cx, |ai, _cx| {
-            ai.delete_active_message(message_id, ai_now_ms())
-        });
-        if !deleted {
-            return;
-        }
-        self.ai.state.update(cx, |ai, _cx| {
-            ai.remove_thinking_expansion(message_id);
-        });
-        cx.notify();
+    pub(in crate::workspace) fn delete_ai_message(&mut self, message_id: &str, cx: &mut Context<Self>) {
+        self.ai.state.update(cx, |ai, cx| ai.delete_ai_message(message_id, cx));
     }
 
     pub(in crate::workspace) fn set_ai_safety_mode_default(&mut self, cx: &mut Context<Self>) {
-        self.ai.state.update(cx, |ai, _cx| {
-            ai.set_active_conversation_safety_mode(AiSafetyMode::Default);
-        });
-        self.close_ai_safety_mode_menu(cx);
+        self.set_ai_safety_mode(AiSafetyMode::Default, cx);
     }
 
     pub(in crate::workspace) fn set_ai_safety_mode_read_only(&mut self, cx: &mut Context<Self>) {
-        self.ai.state.update(cx, |ai, _cx| {
-            ai.set_active_conversation_safety_mode(AiSafetyMode::ReadOnly);
-        });
-        self.close_ai_safety_mode_menu(cx);
-    }
-
-    fn close_ai_safety_mode_menu(&mut self, cx: &mut Context<Self>) {
-        self.ai.state.update(cx, |ai, _cx| {
-            ai.set_chat_popover_open(AiChatPopover::Safety, false);
-        });
-        self.restore_ai_chat_input_focus_after_safety_mode_change(cx);
-        cx.notify();
+        self.set_ai_safety_mode(AiSafetyMode::ReadOnly, cx);
     }
 
     pub(in crate::workspace) fn confirm_ai_safety_bypass(&mut self, cx: &mut Context<Self>) {
-        self.ai.state.update(cx, |ai, _cx| {
-            ai.set_active_conversation_safety_mode(AiSafetyMode::Bypass);
-        });
-        self.close_ai_safety_mode_menu(cx);
+        self.set_ai_safety_mode(AiSafetyMode::Bypass, cx);
     }
 
-    pub(in crate::workspace) fn restore_ai_chat_input_focus_after_safety_mode_change(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) {
-        // Closing the safety menu returns keyboard ownership to the composer so
-        // Enter/Space continue the conversation instead of falling through.
-        self.ai.state.update(cx, |ai, _cx| {
-            ai.focus_chat_input();
-        });
-        self.ai.state.update(cx, |ai, _cx| {
-            ai.set_model_selector_search_focused(false);
-        });
+    fn set_ai_safety_mode(&mut self, mode: AiSafetyMode, cx: &mut Context<Self>) {
+        self.ai.state.update(cx, |ai, cx| ai.select_chat_safety_mode(mode, cx));
         self.ime_marked_text = None;
     }
 
-    pub(in crate::workspace) fn start_edit_ai_message(
-        &mut self,
-        message_id: String,
-        cx: &mut Context<Self>,
-    ) {
-        if self.ai.state.read(cx).chat_is_loading() {
-            cx.notify();
-            return;
-        }
-        let ai = self.ai.state.read(cx);
-        let Some(conversation_id) = ai.conversation_state().active_conversation_id.clone() else {
-            return;
-        };
-        let Some(store) = ai.history.store.clone() else {
-            return;
-        };
-        let branch = ai
-            .history
-            .branches
-            .get(&conversation_id)
-            .cloned()
-            .unwrap_or_else(|| "main".into());
-        let runtime = self.forwarding_runtime.clone();
-        let (sender, receiver) = tokio::sync::oneshot::channel();
-        self.ai.state.update(cx, |ai, _| {
-            ai.set_conversation_loading(&conversation_id, true);
-            ai.persist_chat_state();
-            ai.history_barrier(sender);
-        });
-        let task = cx.spawn(async move |weak, cx| {
-            if receiver.await != Ok(true) {
-                return;
-            }
-            let id = conversation_id.clone();
-            let source_branch = branch.clone();
-            let message = message_id.clone();
-            let result = runtime
-                .spawn_blocking(move || store.message_by_id(&id, &source_branch, &message))
-                .await;
-            let _ = weak.update(cx, |this, cx| {
-                this.ai.state.update(cx, |ai, _| {
-                    ai.history.edit_load.take();
-                    ai.set_conversation_loading(&conversation_id, false);
-                    if ai.history.quitting
-                        || ai.conversation_state().active_conversation_id.as_deref()
-                            != Some(&conversation_id)
-                        || ai
-                            .history
-                            .branches
-                            .get(&conversation_id)
-                            .is_some_and(|current| current != &branch)
-                    {
-                        return;
-                    }
-                    match result {
-                        Ok(Ok(message)) if message.role == AiChatRole::User => {
-                            let content = message.content.clone();
-                            if let Some(slot) = ai
-                                .conversation_state_mut()
-                                .active_conversation_mut()
-                                .and_then(|conversation| {
-                                    conversation
-                                        .messages
-                                        .iter_mut()
-                                        .find(|item| item.id == message_id)
-                                })
-                            {
-                                *slot = message;
-                            }
-                            ai.begin_message_edit(message_id, content);
-                            ai.set_model_selector_search_focused(false);
-                        }
-                        _ => ai.history_load_failed(),
-                    }
-                });
-                this.ime_marked_text = None;
-                cx.notify();
-            });
-        });
-        self.ai.state.update(cx, |ai, _| {
-            ai.history.edit_load = Some(task);
-        });
-        cx.notify();
+    pub(in crate::workspace) fn start_edit_ai_message(&mut self, message_id: String, cx: &mut Context<Self>) {
+        let workspace = cx.weak_entity();
+        self.ai.state.update(cx, |ai, cx| ai.load_message_edit(message_id, move |cx| {
+            let _ = workspace.update(cx, |app, _| app.ime_marked_text = None);
+        }, cx));
     }
 
     pub(in crate::workspace) fn cancel_edit_ai_message(&mut self, cx: &mut Context<Self>) {
-        self.ai.state.update(cx, |ai, _cx| {
-            if ai.history.edit_load.take().is_some() {
-                if let Some(id) = ai.conversation_state().active_conversation_id.clone() {
-                    ai.set_conversation_loading(&id, false);
-                }
-            }
-            ai.clear_message_edit();
-        });
+        self.ai.state.update(cx, |ai, cx| ai.cancel_message_edit(cx));
         self.ime_marked_text = None;
-        cx.notify();
-    }
-
-    pub(in crate::workspace) fn save_ai_message_edit(&mut self, cx: &mut Context<Self>) {
-        if self.ai.state.read(cx).chat_is_loading() {
-            cx.notify();
-            return;
-        }
-        let edited_content = self
-            .ai
-            .state
-            .read(cx)
-            .chat_ui()
-            .editing_message_draft
-            .trim()
-            .to_string();
-        if edited_content.is_empty() {
-            cx.notify();
-            return;
-        }
-        let Some(message_id) = self.ai.state.read(cx).chat_ui().editing_message_id.clone() else {
-            return;
-        };
-        let editable = self
-            .ai
-            .state
-            .read(cx)
-            .conversation_state()
-            .active_conversation()
-            .and_then(|conversation| {
-                conversation
-                    .messages
-                    .iter()
-                    .find(|message| message.id == message_id)
-            })
-            .is_some_and(|message| message.role == AiChatRole::User);
-        if !editable {
-            return;
-        }
-        let stream_config = match self.resolve_ai_stream_config(cx) {
-            Ok(config) => config,
-            Err(error) => {
-                self.push_ai_settings_toast(error, TerminalNoticeVariant::Error, cx);
-                cx.notify();
-                return;
-            }
-        };
-        self.record_ai_memory_usage(&stream_config.memory_entry_ids, cx);
-
-        let now = ai_now_ms();
-        let new_user_id = self.next_ai_chat_id(now, cx);
-        let request_content = Some(edited_content.clone());
-        let backend = ai_message_backend_for_stream(&stream_config);
-        let conversation_id = self.ai.state.update(cx, |ai, _cx| {
-            ai.replace_active_user_message(
-                &message_id,
-                new_user_id,
-                edited_content,
-                stream_config.model.clone(),
-                backend,
-                now,
-            )
-        });
-        let Some(conversation_id) = conversation_id else {
-            return;
-        };
-        self.ai.state.update(cx, |ai, _cx| {
-            ai.clear_message_edit();
-        });
-        self.ime_marked_text = None;
-        self.start_ai_chat_stream_after_api_key_lookup(
-            conversation_id,
-            stream_config,
-            request_content,
-            None,
-            cx,
-        );
-        cx.notify();
-    }
-
-    pub(in crate::workspace) fn switch_ai_message_branch(
-        &mut self,
-        message_id: String,
-        branch_index: usize,
-        cx: &mut Context<Self>,
-    ) {
-        if self.ai.state.read(cx).chat_is_loading() {
-            cx.notify();
-            return;
-        }
-        let reference = self
-            .ai
-            .state
-            .read(cx)
-            .conversation_state()
-            .active_conversation()
-            .and_then(|conversation| {
-                let message = conversation
-                    .messages
-                    .iter()
-                    .find(|message| message.id == message_id)?;
-                let range = message.branches.as_ref()?.refs.get(&branch_index)?.clone();
-                Some((conversation.id.clone(), range))
-            });
-        if let Some((conversation, range)) = reference {
-            let Some(store) = self.ai.state.read(cx).history.store.clone() else {
-                return;
-            };
-            let launch = self.next_ai_chat_id(ai_now_ms(), cx);
-            let (sender, receiver) = tokio::sync::oneshot::channel();
-            self.ai.state.update(cx, |ai, _| {
-                ai.chat_launches
-                    .insert(conversation.clone(), launch.clone());
-                ai.set_conversation_loading(&conversation, true);
-                ai.history_barrier(sender);
-            });
-            let runtime = self.forwarding_runtime.clone();
-            let owner = conversation.clone();
-            let task = cx.spawn(async move |weak, cx| {
-                if receiver.await != Ok(true) {
-                    return;
-                }
-                let id = conversation.clone();
-                let result = runtime
-                    .spawn_blocking(move || {
-                        let mut cursor = None;
-                        let mut pages = Vec::new();
-                        loop {
-                            let page = store.range_messages(&id, &range, cursor.as_ref(), 50)?;
-                            pages.push(page.messages);
-                            cursor = page.before;
-                            if cursor.is_none() {
-                                break;
-                            }
-                        }
-                        Ok::<_, anyhow::Error>(
-                            pages.into_iter().rev().flatten().collect::<Vec<_>>(),
-                        )
-                    })
-                    .await;
-                let _ = weak.update(cx, |this, cx| {
-                    this.ai.state.update(cx, |ai, _| {
-                        ai.history.launches.remove(&conversation);
-                        if !ai.chat_launch_matches(&conversation, Some(&launch)) {
-                            return;
-                        }
-                        ai.set_conversation_loading(&conversation, false);
-                        if ai.conversation_state().active_conversation_id.as_deref()
-                            != Some(&conversation)
-                        {
-                            return;
-                        }
-                        if let Ok(Ok(tail)) = result {
-                            if let Some(branches) = ai
-                                .conversation_state_mut()
-                                .active_conversation_mut()
-                                .and_then(|conversation| {
-                                    conversation
-                                        .messages
-                                        .iter_mut()
-                                        .find(|message| message.id == message_id)
-                                })
-                                .and_then(|message| message.branches.as_mut())
-                            {
-                                branches.tails.insert(branch_index, tail);
-                            }
-                            ai.switch_active_message_branch(&message_id, branch_index, ai_now_ms());
-                            ai.clear_message_edit();
-                        } else {
-                            ai.history_load_failed();
-                        }
-                    });
-                    cx.notify();
-                });
-            });
-            self.ai.state.update(cx, |ai, _| {
-                ai.history.launches.insert(owner, task);
-            });
-            return;
-        }
-        let switched = self.ai.state.update(cx, |ai, _cx| {
-            ai.switch_active_message_branch(&message_id, branch_index, ai_now_ms())
-        });
-        if !switched {
-            return;
-        }
-        self.ai.state.update(cx, |ai, _cx| {
-            ai.clear_message_edit();
-        });
-        cx.notify();
     }
 
     pub(in crate::workspace) fn reset_ai_chat_input_after_submit(&mut self, cx: &mut App) {
-        self.ai.state.update(cx, |ai, _cx| {
+        self.ai.state.update(cx, |ai, cx| {
             ai.clear_chat_input_after_submit();
+            cx.notify();
         });
         self.ime_marked_text = None;
     }
-}
-
-pub(in crate::workspace) fn ai_chat_message_context(
-    contexts: impl IntoIterator<Item = Option<String>>,
-) -> Option<String> {
-    let blocks = contexts
-        .into_iter()
-        .flatten()
-        .map(|context| context.trim().to_string())
-        .filter(|context| !context.is_empty())
-        .collect::<Vec<_>>();
-    (!blocks.is_empty()).then(|| blocks.join("\n\n"))
 }

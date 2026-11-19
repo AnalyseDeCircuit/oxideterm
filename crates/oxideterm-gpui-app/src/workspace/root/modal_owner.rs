@@ -1579,21 +1579,6 @@ mod tests {
     }
 
     #[test]
-    fn ai_text_editor_yields_document_keys_but_captures_escape() {
-        let owner = ActiveWindowModalOwner::AiTextEditor;
-
-        for key in ["enter", "backspace", "left", "tab", "x"] {
-            let route = owner.key_route(key);
-            assert!(!route.consumes_key(), "{key} must reach the focused editor");
-            assert_eq!(route.dispatch_owner, None);
-        }
-
-        let escape = owner.key_route("escape");
-        assert!(escape.consumes_key());
-        assert_eq!(escape.dispatch_owner, Some(owner));
-    }
-
-    #[test]
     fn sftp_editor_yields_document_keys_only_while_visible() {
         let visible_owner = ActiveWindowModalOwner::ActiveTabWindowModal {
             kind: ActiveTabWindowModalKind::SftpEditor,

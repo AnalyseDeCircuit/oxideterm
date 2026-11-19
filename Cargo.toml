@@ -22,6 +22,7 @@ members = [
   "crates/oxideterm-gpui-forwards",
   "crates/oxideterm-gpui-host-tools",
   "crates/oxideterm-gpui-onboarding",
+  "crates/oxideterm-gpui-quick-commands",
   "crates/oxideterm-gpui-file-manager",
   "crates/oxideterm-gpui-remote-desktop",
   "crates/oxideterm-gpui-platform",
@@ -66,6 +67,7 @@ members = [
   "crates/oxideterm-modem-transfer",
   "crates/oxideterm-wsl-graphics",
   "crates/oxideterm-gpui-app",
+  "crates/oxideterm-gpui-audit",
   "crates/oxideterm-render-policy",
   "crates/oxideterm-remote-desktop",
   "crates/oxideterm-settings",
@@ -246,6 +248,7 @@ stacksafe = "1.0"
 strum = { version = "0.27.2", features = ["derive"] }
 subtle = "2.5"
 syn = { version = "2.0.101", features = ["full", "extra-traits", "visit-mut"] }
+sys-locale = "0.3"
 sysinfo = { version = "0.33", default-features = false, features = ["disk", "system"] }
 thiserror = "2.0"
 libgssapi = "0.11"

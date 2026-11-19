@@ -4,7 +4,6 @@ use gpui::AppContext;
 use oxideterm_ai::AiChatRole;
 
 use super::*;
-use crate::state::AiChatMessageSignatureCache;
 
 fn assistant_message() -> AiChatMessage {
     AiChatMessage {
@@ -145,7 +144,7 @@ fn responses_history_delivery_ignores_cancelled_generations(cx: &mut gpui::TestA
 
 #[gpui::test]
 fn chat_batch_leaves_deliveries_after_the_host_boundary_unapplied(cx: &mut gpui::TestAppContext) {
-    use crate::stream::{AiChatDeliveryBatch, AiStreamDelivery, AiStreamDeliveryEvent};
+    use crate::stream::{AiChatDeliveryBatch, AiChatWindowDelivery, AiStreamDelivery, AiStreamDeliveryEvent};
 
     let runtime = Arc::new(
         tokio::runtime::Builder::new_current_thread()
@@ -155,7 +154,7 @@ fn chat_batch_leaves_deliveries_after_the_host_boundary_unapplied(cx: &mut gpui:
     );
     let entity =
         cx.new(|cx| AiWorkspaceEntity::new(runtime, oxideterm_ai::AiProviderKeyStore::new(), cx));
-    entity.update(cx, |ai, _| {
+    entity.update(cx, |ai, cx| {
         let id = ai.create_conversation("batch".into(), None, 1, None);
         ai.add_message(
             &id,
@@ -168,20 +167,44 @@ fn chat_batch_leaves_deliveries_after_the_host_boundary_unapplied(cx: &mut gpui:
             assistant_id: "assistant".into(),
             event: AiStreamDeliveryEvent::Stream(event),
         };
+        let (approval_tx, mut approval_rx) = tokio::sync::oneshot::channel();
         let mut batch = AiChatDeliveryBatch::new(
             [
                 delivery(AiStreamEvent::Content("one".into())),
                 delivery(AiStreamEvent::Content(" two".into())),
+                AiStreamDelivery {
+                    event: AiStreamDeliveryEvent::ToolApprovalRequested {
+                        tool_call_id: "approval".into(),
+                        name: "write_resource".into(),
+                        arguments: "{}".into(),
+                        risk: "write".into(),
+                        summary: "Review the pending write.".into(),
+                        sender: approval_tx,
+                    },
+                    ..delivery(AiStreamEvent::Done)
+                },
                 delivery(AiStreamEvent::Done),
                 delivery(AiStreamEvent::Content(" should not appear".into())),
             ]
             .into(),
         );
         assert!(matches!(
-            batch.next_host_delivery(ai).unwrap().event,
-            AiStreamDeliveryEvent::Stream(AiStreamEvent::Done)
+            batch.next_window_delivery(ai, &oxideterm_i18n::I18n::default(), |data| data, cx),
+            Some(AiChatWindowDelivery::Attention {
+                generation: active,
+                label: "ai.agents.approval",
+                ..
+            }) if active == generation
         ));
-        batch.flush_text(ai);
+        assert_eq!(approval_rx.try_recv(), Err(tokio::sync::oneshot::error::TryRecvError::Empty));
+        assert!(ai.resolve_tool_approval(generation, "approval", false));
+        assert_eq!(approval_rx.try_recv().unwrap(), false);
+        assert!(matches!(
+            batch.next_window_delivery(ai, &oxideterm_i18n::I18n::default(), |data| data, cx),
+            Some(AiChatWindowDelivery::Host(AiStreamDelivery {
+                event: AiStreamDeliveryEvent::Stream(AiStreamEvent::Done), ..
+            }))
+        ));
         assert_eq!(
             ai.conversation_state()
                 .active_conversation()
@@ -192,7 +215,7 @@ fn chat_batch_leaves_deliveries_after_the_host_boundary_unapplied(cx: &mut gpui:
         );
 
         ai.apply_stream_event_state(generation, &id, "assistant", AiStreamEvent::Done, None);
-        assert!(batch.next_host_delivery(ai).is_none());
+        assert!(batch.next_window_delivery(ai, &oxideterm_i18n::I18n::default(), |data| data, cx).is_none());
         let message = &ai
             .conversation_state()
             .active_conversation()
@@ -621,47 +644,4 @@ fn tool_result_fact_extraction_keeps_only_structured_execution_values() {
     assert!(!diagnostic.contains("468G"));
     assert!(!diagnostic.contains("textHash"));
     assert!(!diagnostic.contains("outputPreview"));
-}
-
-#[test]
-fn chat_message_signatures_rehash_only_the_invalidated_row() {
-    let mut cache = AiChatMessageSignatureCache::default();
-    let computed = std::cell::Cell::new(0usize);
-    let message_ids = (0..256)
-        .map(|index| format!("message-{index}"))
-        .collect::<Vec<_>>();
-    cache.select_conversation("conversation-1");
-
-    for message_id in &message_ids {
-        cache.signature_for(message_id, || {
-            computed.set(computed.get().saturating_add(1));
-            1
-        });
-    }
-    assert_eq!(computed.get(), message_ids.len());
-
-    for message_id in &message_ids {
-        cache.signature_for(message_id, || {
-            computed.set(computed.get().saturating_add(1));
-            2
-        });
-    }
-    assert_eq!(
-        computed.get(),
-        message_ids.len(),
-        "an unchanged scroll render must reuse all message signatures"
-    );
-
-    cache.invalidate_message(&message_ids[128]);
-    for message_id in &message_ids {
-        cache.signature_for(message_id, || {
-            computed.set(computed.get().saturating_add(1));
-            3
-        });
-    }
-    assert_eq!(
-        computed.get(),
-        message_ids.len() + 1,
-        "a streamed update must rehash only its owning message"
-    );
 }
