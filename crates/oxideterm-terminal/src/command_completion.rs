@@ -15,9 +15,10 @@ pub use common::{
 pub use context::{TerminalCommandContext, TerminalCommandContextType};
 pub use fig_provider::{active_fig_arg_type, terminal_command_fig_suggestions};
 pub use fig_specs::{
-    built_in_terminal_fig_specs, normalize_terminal_command_specs_json,
-    terminal_command_specs_editor_initial_json, terminal_command_specs_example_json,
-    terminal_command_specs_path, terminal_fig_specs, user_terminal_fig_specs_count,
+    built_in_terminal_fig_specs, invalidate_user_terminal_fig_specs,
+    normalize_terminal_command_specs_json, terminal_command_specs_editor_initial_json,
+    terminal_command_specs_example_json, terminal_command_specs_path, terminal_fig_specs,
+    user_terminal_fig_specs_count,
 };
 pub use paths::{
     clear_terminal_path_request_pending, get_cached_terminal_path_entries,

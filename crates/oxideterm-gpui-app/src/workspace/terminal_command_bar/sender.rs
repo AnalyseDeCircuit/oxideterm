@@ -6,10 +6,11 @@
 
 use super::*;
 use crate::workspace::terminal_command_sender::{
-    TERMINAL_SENDER_MIN_HEIGHT, TERMINAL_SENDER_RESIZE_HOTZONE_HEIGHT,
+    CompactSuggestionMode, TERMINAL_SENDER_MIN_HEIGHT, TERMINAL_SENDER_RESIZE_HOTZONE_HEIGHT,
     TerminalCommandSenderDocumentSnapshot, TerminalCommandSenderFailure, TerminalCommandSenderId,
     TerminalCommandSenderStatus, TerminalCommandSenderTarget, TerminalCommandSenderTargetScope,
 };
+use oxideterm_editor_core::utf16::byte_index_for_utf16;
 use oxideterm_terminal::{TerminalSenderInputMode, TerminalSenderPacing};
 use zeroize::Zeroizing;
 
@@ -245,22 +246,20 @@ impl WorkspaceApp {
         );
         let viewport = sender.active_compact_viewport().unwrap_or_default();
         let placeholder = sender.compact_placeholder().to_string();
-        let suggestions_open = sender.compact_suggestions_open();
+        let suggestion_mode = sender.compact_suggestion_mode();
         let suggestion_highlighted = sender.compact_suggestion_highlighted();
-        let suggestions = if focused
-            && suggestions_open
-            && snapshot.input_mode == TerminalSenderInputMode::Text
-            && snapshot.target_scope == TerminalCommandSenderTargetScope::Current
-            && snapshot.status != TerminalCommandSenderStatus::Running
-        {
-            self.terminal_command_sender_visible_history_suggestions(&draft, cx)
+        let suggestions = if focused {
+            self.terminal_command_sender_compact_suggestions(snapshot, suggestion_mode, cx)
         } else {
             Vec::new()
         };
+        let show_history = suggestion_mode == CompactSuggestionMode::History
+            && Self::terminal_command_sender_supports_suggestions(snapshot);
+        let show_suggestions = focused && (show_history || !suggestions.is_empty());
         let selected_range = self.ime_selected_range_for_target(target, cx);
         let marked_text = self.marked_text_for_target(target, cx);
         let active_offset = self.ime_active_offset_for_target(target, cx);
-        let ghost_text = (focused && !suggestions_open)
+        let ghost_text = (focused && !show_history && suggestion_highlighted.is_none())
             .then(|| self.terminal_command_sender_compact_ghost_text(snapshot, &draft, cx))
             .flatten();
         let quick_commands_enabled = self
@@ -336,10 +335,11 @@ impl WorkspaceApp {
                     | TERMINAL_SENDER_COMPACT_BORDER_ALPHA,
             ))
             .bg(background)
-            .when(focused && suggestions_open, |row| {
+            .when(show_suggestions, |row| {
                 row.child(self.render_terminal_command_sender_suggestions(
                     &suggestions,
                     suggestion_highlighted,
+                    show_history,
                     cx,
                 ))
             })
@@ -447,32 +447,52 @@ impl WorkspaceApp {
             })
     }
 
-    fn terminal_command_sender_compact_history_suggestions(
+    fn terminal_command_sender_supports_suggestions(
+        snapshot: &TerminalCommandSenderDocumentSnapshot,
+    ) -> bool {
+        snapshot.input_mode == TerminalSenderInputMode::Text
+            && snapshot.target_scope == TerminalCommandSenderTargetScope::Current
+            && snapshot.status != TerminalCommandSenderStatus::Running
+    }
+
+    fn terminal_command_sender_compact_suggestions(
         &self,
         snapshot: &TerminalCommandSenderDocumentSnapshot,
+        mode: CompactSuggestionMode,
         cx: &mut Context<Self>,
     ) -> Vec<TerminalCommandSuggestion> {
-        if snapshot.input_mode != TerminalSenderInputMode::Text
-            || snapshot.target_scope != TerminalCommandSenderTargetScope::Current
-            || snapshot.status == TerminalCommandSenderStatus::Running
-        {
+        if !Self::terminal_command_sender_supports_suggestions(snapshot) {
             return Vec::new();
         }
-        let draft = Zeroizing::new(
-            self.terminal_command_sender
-                .read(cx)
-                .active_compact_draft()
-                .unwrap_or_default()
-                .to_string(),
-        );
-        self.terminal_command_sender_visible_history_suggestions(&draft, cx)
+        let draft = self
+            .terminal_command_sender
+            .read(cx)
+            .active_compact_draft()
+            .unwrap_or_default();
+        match mode {
+            CompactSuggestionMode::Automatic => {
+                let target = WorkspaceImeTarget::TerminalCommandSenderCompact;
+                if self.marked_text_for_target(target, cx).is_some() {
+                    return Vec::new();
+                }
+                let cursor = self
+                    .ime_active_selection_offset(target)
+                    .map_or(draft.len(), |offset| byte_index_for_utf16(draft, offset));
+                self.terminal_command_sender_spec_suggestions(draft, cursor)
+            }
+            CompactSuggestionMode::History => {
+                let draft = Zeroizing::new(draft.to_string());
+                self.terminal_command_sender_visible_history_suggestions(&draft, cx)
+            }
+            CompactSuggestionMode::Dismissed => Vec::new(),
+        }
     }
 
     pub(in crate::workspace) fn accept_terminal_command_sender_suggestion(
         &mut self,
         suggestion: &TerminalCommandSuggestion,
         cx: &mut Context<Self>,
-    ) -> TerminalCommandSenderId {
+    ) {
         let mut draft = Zeroizing::new(
             self.terminal_command_sender
                 .read(cx)
@@ -480,19 +500,21 @@ impl WorkspaceApp {
                 .unwrap_or_default()
                 .to_string(),
         );
-        let start = suggestion.replacement.start.min(draft.len());
-        let end = suggestion.replacement.end.min(draft.len()).max(start);
-        draft.replace_range(start..end, &suggestion.insert_text);
-        let caret = draft.encode_utf16().count();
-        let sender_id = self.terminal_command_sender.update(cx, |sender, cx| {
-            sender.replace_active_compact_text(std::mem::take(&mut *draft), cx)
+        let replacement = suggestion.replacement.clone();
+        if draft.get(replacement.clone()).is_none() {
+            return;
+        }
+        let end = replacement.start + suggestion.insert_text.len();
+        draft.replace_range(replacement, &suggestion.insert_text);
+        let caret = draft[..end].encode_utf16().count();
+        self.terminal_command_sender.update(cx, |sender, cx| {
+            sender.replace_active_compact_text(std::mem::take(&mut *draft), cx);
         });
         let target = WorkspaceImeTarget::TerminalCommandSenderCompact;
         self.set_ime_selection_from_anchor(target, caret, caret);
         self.ime_marked_text = None;
         self.show_active_input_caret(cx);
         cx.notify();
-        sender_id
     }
 
     fn render_terminal_command_sender_tabs(
@@ -1468,17 +1490,19 @@ impl WorkspaceApp {
         if !sender.compact_focused() {
             return false;
         }
-        let suggestions_open = sender.compact_suggestions_open();
+        let mode = sender.compact_suggestion_mode();
         let suggestion_highlighted = sender.compact_suggestion_highlighted();
 
         let modifiers = event.keystroke.modifiers;
         match event.keystroke.key.as_str() {
             "escape" if !modifiers.platform => {
-                if suggestions_open {
+                if mode == CompactSuggestionMode::History
+                    || !self
+                        .terminal_command_sender_compact_suggestions(&document, mode, cx)
+                        .is_empty()
+                {
                     self.terminal_command_sender.update(cx, |sender, cx| {
-                        if sender.dismiss_compact_suggestions() {
-                            cx.notify();
-                        }
+                        sender.hide_compact_suggestions(cx);
                     });
                     return true;
                 }
@@ -1490,15 +1514,15 @@ impl WorkspaceApp {
                 true
             }
             "enter" if !modifiers.platform && !modifiers.shift && !modifiers.alt => {
-                if suggestions_open {
+                if let Some(index) = suggestion_highlighted {
                     let suggestions =
-                        self.terminal_command_sender_compact_history_suggestions(&document, cx);
-                    if let Some(suggestion) =
-                        suggestion_highlighted.and_then(|index| suggestions.get(index))
-                    {
+                        self.terminal_command_sender_compact_suggestions(&document, mode, cx);
+                    if let Some(suggestion) = suggestions.get(index) {
                         self.accept_terminal_command_sender_suggestion(suggestion, cx);
-                        return true;
                     }
+                    // The candidate list may have changed since it was highlighted.
+                    // Never send a command in place of the missing candidate.
+                    return true;
                 }
                 let sender_id = document.id;
                 if self.start_terminal_command_sender(sender_id, cx) {
@@ -1521,14 +1545,32 @@ impl WorkspaceApp {
                         )
                         .is_none() =>
             {
-                let suggestions =
-                    self.terminal_command_sender_compact_history_suggestions(&document, cx);
+                let move_down = matches!(event.keystroke.key.as_str(), "down" | "arrowdown");
+                // Up still opens history until the user selects a Spec candidate.
+                let mut mode = if mode == CompactSuggestionMode::Dismissed
+                    || (!move_down && suggestion_highlighted.is_none())
+                {
+                    CompactSuggestionMode::History
+                } else {
+                    mode
+                };
+                let mut suggestions =
+                    self.terminal_command_sender_compact_suggestions(&document, mode, cx);
+                if suggestions.is_empty() && mode == CompactSuggestionMode::Automatic {
+                    mode = CompactSuggestionMode::History;
+                    suggestions =
+                        self.terminal_command_sender_compact_suggestions(&document, mode, cx);
+                }
                 if suggestions.is_empty() {
                     return false;
                 }
-                let move_down = matches!(event.keystroke.key.as_str(), "down" | "arrowdown");
                 self.terminal_command_sender.update(cx, |sender, cx| {
-                    sender.move_compact_suggestion_selection(suggestions.len(), move_down, cx);
+                    sender.move_compact_suggestion_selection(
+                        suggestions.len(),
+                        move_down,
+                        mode,
+                        cx,
+                    );
                 });
                 true
             }
@@ -1538,17 +1580,26 @@ impl WorkspaceApp {
                     && !modifiers.alt
                     && !modifiers.shift =>
             {
-                if suggestions_open {
-                    let suggestions =
-                        self.terminal_command_sender_compact_history_suggestions(&document, cx);
-                    if let Some(suggestion) =
-                        suggestion_highlighted.and_then(|index| suggestions.get(index))
-                    {
-                        self.accept_terminal_command_sender_suggestion(suggestion, cx);
-                        return true;
-                    }
+                if let Some(index) = suggestion_highlighted
+                    && let Some(suggestion) = self
+                        .terminal_command_sender_compact_suggestions(&document, mode, cx)
+                        .get(index)
+                {
+                    self.accept_terminal_command_sender_suggestion(suggestion, cx);
+                    return true;
                 }
-                self.accept_terminal_command_sender_ghost_text(&document, cx)
+                if self.accept_terminal_command_sender_ghost_text(&document, cx) {
+                    return true;
+                }
+                if mode == CompactSuggestionMode::Automatic
+                    && let Some(suggestion) = self
+                        .terminal_command_sender_compact_suggestions(&document, mode, cx)
+                        .first()
+                {
+                    self.accept_terminal_command_sender_suggestion(suggestion, cx);
+                    return true;
+                }
+                false
             }
             "right" | "arrowright"
                 if !modifiers.platform

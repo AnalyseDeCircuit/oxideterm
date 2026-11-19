@@ -153,7 +153,7 @@ Le voci segnate *(plugin)* si installano dal marketplace dei plugin nell’app.
 - Ricerca con regex, maiuscole/minuscole e query multilinea, indipendente per pannello
 - Integrazione Bash, Zsh, Fish, Nushell e PowerShell: cartelle, codici di uscita e marcatori comandi, installabile sui server dall’app
 - Comprimi l’output dei comandi terminati conservandone lo stato di uscita
-- Barra comandi con input multilinea, cronologia, suggerimenti di percorsi, completamento e comandi rapidi
+- Barra comandi con inserimento su più righe, cronologia, completamento dei comandi integrato e personalizzato e comandi rapidi
 - Suggerimenti approssimati dalla cronologia e cronologia persistente per connessione opzionale
 - Modalità di digitazione libera per modificare il comando attuale con il mouse
 - Modifica gli incolli multilinea prima dell’invio, con annullamento e rimozione dei delimitatori dei blocchi di codice

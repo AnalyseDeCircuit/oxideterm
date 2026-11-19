@@ -1,10 +1,38 @@
 use super::*;
+use crate::workspace::terminal_command_sender::CompactSuggestionMode;
+use oxideterm_terminal::{
+    command_completion::{terminal_command_fig_suggestions, terminal_fig_specs},
+    tokenize_terminal_command_line,
+};
 
 impl WorkspaceApp {
-    pub(in crate::workspace) fn terminal_command_sender_history_suggestions(
+    pub(in crate::workspace) fn terminal_command_sender_spec_suggestions(
         &self,
         input: &str,
-        allow_empty_history: bool,
+        cursor: usize,
+    ) -> Vec<TerminalCommandSuggestion> {
+        if !self
+            .settings_store
+            .settings()
+            .terminal
+            .command_bar
+            .smart_completion
+            || input.trim().is_empty()
+            || input.contains(['\n', '\r'])
+        {
+            return Vec::new();
+        }
+        let parsed = tokenize_terminal_command_line(input, cursor);
+        if !parsed.reliable {
+            return Vec::new();
+        }
+        let specs = terminal_fig_specs(self.settings_store.path());
+        terminal_command_fig_suggestions(&parsed, &specs)
+    }
+
+    pub(in crate::workspace) fn terminal_command_sender_visible_history_suggestions(
+        &self,
+        input: &str,
         cx: &mut Context<Self>,
     ) -> Vec<TerminalCommandSuggestion> {
         if !self
@@ -13,25 +41,18 @@ impl WorkspaceApp {
             .terminal
             .command_bar
             .smart_completion
-            && !self
+            && self
                 .terminal_command_sender
                 .read(cx)
-                .compact_suggestions_open()
+                .compact_suggestion_mode()
+                != CompactSuggestionMode::History
         {
             return Vec::new();
         }
         let context = self.terminal_command_context(cx);
-        self.terminal_command_history_suggestions(input, allow_empty_history, &context, cx)
-    }
-
-    pub(in crate::workspace) fn terminal_command_sender_visible_history_suggestions(
-        &self,
-        input: &str,
-        cx: &mut Context<Self>,
-    ) -> Vec<TerminalCommandSuggestion> {
-        let suggestions = self.terminal_command_sender_history_suggestions(input, false, cx);
+        let suggestions = self.terminal_command_history_suggestions(input, false, &context, cx);
         if suggestions.is_empty() {
-            self.terminal_command_sender_history_suggestions(input, true, cx)
+            self.terminal_command_history_suggestions(input, true, &context, cx)
         } else {
             suggestions
         }

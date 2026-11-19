@@ -153,7 +153,7 @@ Items marked *(plugin)* are installed from the Plugin Marketplace inside the app
 - Search with regular expressions, case matching and multi-line queries, kept separately in every pane
 - Shell integration for Bash, Zsh, Fish, Nushell and PowerShell that tracks working directories, exit codes and command marks, and installs on remote servers from the app
 - Command folding that collapses finished output and keeps its exit status
-- Command bar with multi-line input, history, path suggestions, completions and Quick Commands
+- Bottom command bar with multi-line input, history, built-in and custom command completions, and Quick Commands
 - Fuzzy history suggestions, plus optional per-connection history that survives restarts
 - Free Type Mode for editing the current command with the mouse
 - Edit multi-line pastes before they're sent, with undo and code-fence removal

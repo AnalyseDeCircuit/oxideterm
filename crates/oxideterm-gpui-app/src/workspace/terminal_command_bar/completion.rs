@@ -1,6 +1,3 @@
-// Compact Rich Input consumes history here; the remaining providers still back settings data.
-#![allow(dead_code, unused_imports)]
-
 use super::actions::classify_command_risk;
 use super::*;
 use oxideterm_ai::infer_ai_cwd;
@@ -17,6 +14,8 @@ use oxideterm_terminal::command_completion::{
 
 mod engine;
 mod history_provider;
+// Remote path lookup remains separate from the compact sender's Spec suggestions.
+#[allow(dead_code)]
 mod path_provider;
 mod render;
 

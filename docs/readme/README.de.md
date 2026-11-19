@@ -153,7 +153,7 @@ Mit *(Plugin)* markierte Funktionen werden über den Plugin-Marktplatz der App i
 - Suche mit regulären Ausdrücken, Groß-/Kleinschreibung und mehrzeiligen Abfragen, getrennt je Bereich
 - Shell-Integration für Bash, Zsh, Fish, Nushell und PowerShell: Arbeitsverzeichnisse, Exitcodes, Befehlsmarkierungen und Remote-Installation aus der App
 - Abgeschlossene Befehlsausgaben einklappen und Exitstatus behalten
-- Befehlsleiste mit mehrzeiliger Eingabe, Verlauf, Pfadvorschlägen, Vervollständigung und Schnellbefehlen
+- Befehlsleiste mit mehrzeiliger Eingabe, Verlauf, integrierter und benutzerdefinierter Befehlsvervollständigung sowie Schnellbefehlen
 - Unscharfe Verlaufsvorschläge und optionaler, neustartfester Verlauf pro Verbindung
 - Freier Eingabemodus zum Bearbeiten des aktuellen Befehls mit der Maus
 - Mehrzeiliges Einfügen vor dem Senden bearbeiten, mit Rückgängig und Entfernen von Codeblock-Begrenzungen

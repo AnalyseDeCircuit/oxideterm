@@ -153,7 +153,7 @@ Las funciones marcadas como *(plugin)* se instalan desde el mercado de plugins d
 - Búsqueda con expresiones regulares, distinción de mayúsculas y consultas multilínea, independiente por panel
 - Integración de Bash, Zsh, Fish, Nushell y PowerShell: directorios, códigos de salida y marcas de comandos; instalación remota desde la aplicación
 - Plegado de la salida de comandos terminados, conservando su estado de salida
-- Barra de comandos con entrada multilínea, historial, sugerencias de rutas, autocompletado y comandos rápidos
+- Barra de comandos con entrada multilínea, historial, autocompletado de comandos integrado y personalizado, y comandos rápidos
 - Sugerencias aproximadas del historial y, opcionalmente, historial persistente por conexión
 - Modo de escritura libre para editar el comando actual con el ratón
 - Edición de pegados multilínea antes de enviarlos, con deshacer y retirada de delimitadores de bloques de código

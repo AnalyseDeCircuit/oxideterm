@@ -14,6 +14,7 @@ impl WorkspaceApp {
         &self,
         suggestions: &[TerminalCommandSuggestion],
         highlighted: Option<usize>,
+        show_history: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         const SUGGESTIONS_BG_ALPHA: u32 = 0xf2;
@@ -38,131 +39,133 @@ impl WorkspaceApp {
             .on_scroll(|_, _, cx| cx.stop_propagation())
             .font_family(settings_mono_font_family(self.settings_store.settings()));
 
-        let active_scope = usize::from(self.terminal_history_all_connections);
-        let control_id = "command-history-scope";
-        let previous_scope = self
-            .segmented_control_user_previous_index(control_id, active_scope)
-            .unwrap_or(active_scope);
-        let transition_active =
-            self.segmented_control_user_transition_active(control_id, active_scope);
-        let scope_items = [
-            (false, "terminal.history.current"),
-            (true, "terminal.history.all"),
-        ]
-        .into_iter()
-        .enumerate()
-        .map(|(index, (all, label))| {
-            oxideterm_gpui_ui::segmented_control_item(
-                &self.tokens,
-                self.i18n.t(label),
-                index == active_scope,
-            )
-            .rounded_none()
-            .px(px(8.0))
-            .py(px(4.0))
-            .text_size(px(self.tokens.metrics.ui_text_xs))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _, _, cx| {
-                    if index != active_scope {
-                        this.begin_user_segmented_control_transition_from(
-                            control_id,
-                            active_scope,
-                            index,
-                            cx,
-                        );
-                    }
-                    this.terminal_history_all_connections = all;
-                    this.terminal_command_sender
-                        .update(cx, |sender, cx| sender.show_compact_history(cx));
-                    cx.stop_propagation();
-                    cx.notify();
-                }),
-            )
-            .into_any_element()
-        })
-        .collect::<Vec<_>>();
-        let paused = self
-            .active_command_history(cx)
-            .is_some_and(|history| history.is_paused());
-        menu = menu
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .gap_2()
-                    .px_2()
-                    .py_1()
-                    .child(oxideterm_gpui_ui::segmented_control(
-                        &self.tokens,
-                        control_id,
-                        oxideterm_gpui_ui::SegmentedControlOptions::new(
-                            active_scope,
-                            previous_scope,
-                            2,
-                        )
-                        .user_transition_active(transition_active)
-                        .underline(240.0),
-                        scope_items,
-                    ))
-                    .child(self.command_history_icon_button(
-                        if paused {
-                            LucideIcon::Play
-                        } else {
-                            LucideIcon::Pause
-                        },
-                        14.0,
-                        if paused {
-                            "terminal.history.resume"
-                        } else {
-                            "terminal.history.pause"
-                        },
-                        cx.listener(|this, _, _, cx| {
-                            if let Some(history) = this.active_command_history(cx) {
-                                history.set_paused(!history.is_paused());
-                            }
-                            cx.stop_propagation();
-                            cx.notify();
-                        }),
-                        cx,
-                    ))
-                    .child(self.command_history_icon_button(
-                        LucideIcon::Trash2,
-                        14.0,
-                        if self.terminal_history_all_connections {
-                            "terminal.history.clear_all"
-                        } else {
-                            "terminal.history.clear_current"
-                        },
-                        cx.listener(|this, _, _, cx| {
-                            this.open_command_history_clear_confirm(
-                                this.terminal_history_all_connections,
+        if show_history {
+            let active_scope = usize::from(self.terminal_history_all_connections);
+            let control_id = "command-history-scope";
+            let previous_scope = self
+                .segmented_control_user_previous_index(control_id, active_scope)
+                .unwrap_or(active_scope);
+            let transition_active =
+                self.segmented_control_user_transition_active(control_id, active_scope);
+            let scope_items = [
+                (false, "terminal.history.current"),
+                (true, "terminal.history.all"),
+            ]
+            .into_iter()
+            .enumerate()
+            .map(|(index, (all, label))| {
+                oxideterm_gpui_ui::segmented_control_item(
+                    &self.tokens,
+                    self.i18n.t(label),
+                    index == active_scope,
+                )
+                .rounded_none()
+                .px(px(8.0))
+                .py(px(4.0))
+                .text_size(px(self.tokens.metrics.ui_text_xs))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _, _, cx| {
+                        if index != active_scope {
+                            this.begin_user_segmented_control_transition_from(
+                                control_id,
+                                active_scope,
+                                index,
                                 cx,
                             );
-                            cx.stop_propagation();
-                        }),
-                        cx,
-                    )),
-            )
-            .when(suggestions.is_empty(), |menu| {
-                menu.child(
-                    div()
-                        .px_3()
-                        .py_2()
-                        .text_color(rgb(theme.text_muted))
-                        .child(self.i18n.t("terminal.history.empty")),
+                        }
+                        this.terminal_history_all_connections = all;
+                        this.terminal_command_sender
+                            .update(cx, |sender, cx| sender.show_compact_history(cx));
+                        cx.stop_propagation();
+                        cx.notify();
+                    }),
                 )
+                .into_any_element()
             })
-            .when(self.terminal_history_store.failed(), |menu| {
-                menu.child(
+            .collect::<Vec<_>>();
+            let paused = self
+                .active_command_history(cx)
+                .is_some_and(|history| history.is_paused());
+            menu = menu
+                .child(
                     div()
-                        .px_3()
-                        .py_2()
-                        .text_color(rgb(theme.error))
-                        .child(self.i18n.t("terminal.history.error")),
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap_2()
+                        .px_2()
+                        .py_1()
+                        .child(oxideterm_gpui_ui::segmented_control(
+                            &self.tokens,
+                            control_id,
+                            oxideterm_gpui_ui::SegmentedControlOptions::new(
+                                active_scope,
+                                previous_scope,
+                                2,
+                            )
+                            .user_transition_active(transition_active)
+                            .underline(240.0),
+                            scope_items,
+                        ))
+                        .child(self.command_history_icon_button(
+                            if paused {
+                                LucideIcon::Play
+                            } else {
+                                LucideIcon::Pause
+                            },
+                            14.0,
+                            if paused {
+                                "terminal.history.resume"
+                            } else {
+                                "terminal.history.pause"
+                            },
+                            cx.listener(|this, _, _, cx| {
+                                if let Some(history) = this.active_command_history(cx) {
+                                    history.set_paused(!history.is_paused());
+                                }
+                                cx.stop_propagation();
+                                cx.notify();
+                            }),
+                            cx,
+                        ))
+                        .child(self.command_history_icon_button(
+                            LucideIcon::Trash2,
+                            14.0,
+                            if self.terminal_history_all_connections {
+                                "terminal.history.clear_all"
+                            } else {
+                                "terminal.history.clear_current"
+                            },
+                            cx.listener(|this, _, _, cx| {
+                                this.open_command_history_clear_confirm(
+                                    this.terminal_history_all_connections,
+                                    cx,
+                                );
+                                cx.stop_propagation();
+                            }),
+                            cx,
+                        )),
                 )
-            });
+                .when(suggestions.is_empty(), |menu| {
+                    menu.child(
+                        div()
+                            .px_3()
+                            .py_2()
+                            .text_color(rgb(theme.text_muted))
+                            .child(self.i18n.t("terminal.history.empty")),
+                    )
+                })
+                .when(self.terminal_history_store.failed(), |menu| {
+                    menu.child(
+                        div()
+                            .px_3()
+                            .py_2()
+                            .text_color(rgb(theme.error))
+                            .child(self.i18n.t("terminal.history.error")),
+                    )
+                });
+        }
 
         let mut group_cursor = None;
         for (index, suggestion) in suggestions.iter().enumerate() {
@@ -186,7 +189,6 @@ impl WorkspaceApp {
             }
 
             let suggestion_for_click = suggestion.clone();
-            let command_to_remove = zeroize::Zeroizing::new(suggestion.insert_text.clone());
             let active = highlighted == Some(index);
             menu = menu.child(
                 div()
@@ -255,16 +257,20 @@ impl WorkspaceApp {
                         self.i18n.t(suggestion.source_label_key),
                         StatusPillOptions::new(StatusTone::Neutral).compact(),
                     ))
-                    .child(self.command_history_icon_button(
-                        LucideIcon::X,
-                        12.0,
-                        "terminal.history.delete",
-                        cx.listener(move |this, _, _, cx| {
-                            this.remove_history_suggestion(&command_to_remove, cx);
-                            cx.stop_propagation();
-                        }),
-                        cx,
-                    )),
+                    .when(show_history, |row| {
+                        let command_to_remove =
+                            zeroize::Zeroizing::new(suggestion.insert_text.clone());
+                        row.child(self.command_history_icon_button(
+                            LucideIcon::X,
+                            12.0,
+                            "terminal.history.delete",
+                            cx.listener(move |this, _, _, cx| {
+                                this.remove_history_suggestion(&command_to_remove, cx);
+                                cx.stop_propagation();
+                            }),
+                            cx,
+                        ))
+                    }),
             );
         }
         menu.into_any_element()

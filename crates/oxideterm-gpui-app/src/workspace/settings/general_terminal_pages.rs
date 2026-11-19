@@ -291,7 +291,12 @@ impl WorkspaceApp {
                 &path,
                 terminal_command_specs_example_json,
                 normalize_terminal_command_specs_json,
-                || self.terminal_command_specs_summary(),
+                || {
+                    oxideterm_terminal::command_completion::invalidate_user_terminal_fig_specs(
+                        self.settings_store.path(),
+                    );
+                    self.terminal_command_specs_summary()
+                },
                 &self.i18n,
                 cx,
             )

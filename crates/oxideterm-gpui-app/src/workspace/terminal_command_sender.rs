@@ -186,11 +186,18 @@ struct TerminalCommandSenderRunTarget {
     pane: WeakEntity<TerminalPane>,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum CompactSuggestionMode {
+    Automatic,
+    History,
+    Dismissed,
+}
+
 /// Owns sender documents, target snapshots, timers, cancellation, and progress.
 pub(super) struct TerminalCommandSenderEntity {
     layout: TerminalCommandSenderLayout,
     compact_focused: bool,
-    compact_suggestions_open: bool,
+    compact_suggestion_mode: CompactSuggestionMode,
     compact_suggestion_highlighted: Option<usize>,
     panel_height: f32,
     pub(super) available_height: Rc<Cell<f32>>,
@@ -226,7 +233,7 @@ impl TerminalCommandSenderEntity {
         Self {
             layout: TerminalCommandSenderLayout::Compact,
             compact_focused: false,
-            compact_suggestions_open: false,
+            compact_suggestion_mode: CompactSuggestionMode::Automatic,
             compact_suggestion_highlighted: None,
             panel_height: TERMINAL_SENDER_DEFAULT_HEIGHT,
             available_height: Rc::new(Cell::new(0.0)),
@@ -362,8 +369,8 @@ impl TerminalCommandSenderEntity {
         }
     }
 
-    pub(super) fn compact_suggestions_open(&self) -> bool {
-        self.compact_suggestions_open
+    pub(super) fn compact_suggestion_mode(&self) -> CompactSuggestionMode {
+        self.compact_suggestion_mode
     }
 
     pub(super) fn compact_suggestion_highlighted(&self) -> Option<usize> {
@@ -374,6 +381,7 @@ impl TerminalCommandSenderEntity {
         &mut self,
         suggestions_len: usize,
         move_down: bool,
+        mode: CompactSuggestionMode,
         cx: &mut Context<Self>,
     ) -> Option<usize> {
         if suggestions_len == 0 {
@@ -381,6 +389,9 @@ impl TerminalCommandSenderEntity {
                 cx.notify();
             }
             return None;
+        }
+        if self.compact_suggestion_mode != mode {
+            self.compact_suggestion_highlighted = None;
         }
         let last = suggestions_len.saturating_sub(1);
         let next = if move_down {
@@ -392,7 +403,7 @@ impl TerminalCommandSenderEntity {
                 .map(|index| index.saturating_sub(1))
                 .unwrap_or(last)
         };
-        self.compact_suggestions_open = true;
+        self.compact_suggestion_mode = mode;
         self.compact_suggestion_highlighted = Some(next);
         cx.notify();
         Some(next)
@@ -400,13 +411,20 @@ impl TerminalCommandSenderEntity {
 
     pub(super) fn dismiss_compact_suggestions(&mut self) -> bool {
         let had_highlight = self.compact_suggestion_highlighted.take().is_some();
-        let changed = self.compact_suggestions_open || had_highlight;
-        self.compact_suggestions_open = false;
+        let changed =
+            self.compact_suggestion_mode != CompactSuggestionMode::Automatic || had_highlight;
+        self.compact_suggestion_mode = CompactSuggestionMode::Automatic;
         changed
     }
 
+    pub(super) fn hide_compact_suggestions(&mut self, cx: &mut Context<Self>) {
+        self.compact_suggestion_mode = CompactSuggestionMode::Dismissed;
+        self.compact_suggestion_highlighted = None;
+        cx.notify();
+    }
+
     pub(super) fn show_compact_history(&mut self, cx: &mut Context<Self>) {
-        self.compact_suggestions_open = true;
+        self.compact_suggestion_mode = CompactSuggestionMode::History;
         self.compact_suggestion_highlighted = None;
         cx.notify();
     }
@@ -1355,21 +1373,22 @@ mod tests {
         });
 
         sender.update(cx, |sender, cx| {
+            let mode = CompactSuggestionMode::History;
             assert_eq!(
-                sender.move_compact_suggestion_selection(3, true, cx),
+                sender.move_compact_suggestion_selection(3, true, mode, cx),
                 Some(0)
             );
             assert_eq!(
-                sender.move_compact_suggestion_selection(3, true, cx),
+                sender.move_compact_suggestion_selection(3, true, mode, cx),
                 Some(1)
             );
             assert_eq!(
-                sender.move_compact_suggestion_selection(3, false, cx),
+                sender.move_compact_suggestion_selection(3, false, mode, cx),
                 Some(0)
             );
-            assert!(sender.dismiss_compact_suggestions());
+            sender.dismiss_compact_suggestions();
             assert_eq!(
-                sender.move_compact_suggestion_selection(3, false, cx),
+                sender.move_compact_suggestion_selection(3, false, mode, cx),
                 Some(2)
             );
         });

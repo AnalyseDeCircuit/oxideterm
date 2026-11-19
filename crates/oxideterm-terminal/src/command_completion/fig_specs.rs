@@ -1,14 +1,18 @@
 use super::{
     TerminalFigArgType, TerminalFigOptionSpec, TerminalFigSpec, TerminalFigSubcommandSpec,
 };
+use std::sync::{Arc, Mutex};
 
 const TERMINAL_COMMAND_SPECS_FILENAME: &str = "terminal-command-specs.json";
 
+static TERMINAL_FIG_SPECS: Mutex<Option<TerminalFigSpecCache>> = Mutex::new(None);
+
 #[derive(Clone)]
-struct TerminalFigUserSpecCache {
+struct TerminalFigSpecCache {
     path: std::path::PathBuf,
     modified: Option<std::time::SystemTime>,
-    specs: Vec<TerminalFigSpec>,
+    specs: Arc<[TerminalFigSpec]>,
+    user_count: usize,
 }
 
 #[derive(serde::Deserialize)]
@@ -161,16 +165,8 @@ fn terminal_fig_arg_type_value(arg_type: TerminalFigArgType) -> &'static str {
     }
 }
 
-pub fn terminal_fig_specs(settings_path: &std::path::Path) -> Vec<TerminalFigSpec> {
-    let mut specs = built_in_terminal_fig_specs();
-    for custom in load_user_terminal_fig_specs(settings_path) {
-        if let Some(existing) = specs.iter_mut().find(|spec| spec.name == custom.name) {
-            *existing = custom;
-        } else {
-            specs.push(custom);
-        }
-    }
-    specs
+pub fn terminal_fig_specs(settings_path: &std::path::Path) -> Arc<[TerminalFigSpec]> {
+    load_terminal_fig_specs(settings_path).specs
 }
 
 pub fn terminal_command_specs_path(settings_path: &std::path::Path) -> std::path::PathBuf {
@@ -240,64 +236,65 @@ pub fn normalize_terminal_command_specs_json(value: &str) -> Result<String, Stri
 }
 
 pub fn user_terminal_fig_specs_count(settings_path: &std::path::Path) -> usize {
-    load_user_terminal_fig_specs(settings_path).len()
+    load_terminal_fig_specs(settings_path).user_count
 }
 
-fn load_user_terminal_fig_specs(settings_path: &std::path::Path) -> Vec<TerminalFigSpec> {
-    static USER_TERMINAL_FIG_SPECS: std::sync::OnceLock<
-        std::sync::Mutex<Option<TerminalFigUserSpecCache>>,
-    > = std::sync::OnceLock::new();
+pub fn invalidate_user_terminal_fig_specs(settings_path: &std::path::Path) {
+    let path = terminal_command_specs_path(settings_path);
+    if let Ok(mut cache) = TERMINAL_FIG_SPECS.lock()
+        && cache.as_ref().is_some_and(|entry| entry.path == path)
+    {
+        *cache = None;
+    }
+}
+
+fn load_terminal_fig_specs(settings_path: &std::path::Path) -> TerminalFigSpecCache {
     let path = terminal_command_specs_path(settings_path);
 
     let modified = std::fs::metadata(&path)
         .and_then(|metadata| metadata.modified())
         .ok();
-    let cache = USER_TERMINAL_FIG_SPECS.get_or_init(|| std::sync::Mutex::new(None));
-    if let Ok(guard) = cache.lock()
+    if let Ok(guard) = TERMINAL_FIG_SPECS.lock()
         && let Some(snapshot) = guard.as_ref()
         && snapshot.path == path
         && snapshot.modified == modified
     {
-        return snapshot.specs.clone();
+        return snapshot.clone();
     }
 
-    let Ok(bytes) = std::fs::read(&path) else {
-        if let Ok(mut guard) = cache.lock() {
-            *guard = Some(TerminalFigUserSpecCache {
-                path,
-                modified,
-                specs: Vec::new(),
-            });
-        }
-        return Vec::new();
+    let configs = match std::fs::read(&path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<TerminalFigSpecConfigRoot>(&bytes).ok())
+    {
+        Some(
+            TerminalFigSpecConfigRoot::Specs { specs } | TerminalFigSpecConfigRoot::List(specs),
+        ) => specs,
+        None => Vec::new(),
     };
-    let Ok(root) = serde_json::from_slice::<TerminalFigSpecConfigRoot>(&bytes) else {
-        if let Ok(mut guard) = cache.lock() {
-            *guard = Some(TerminalFigUserSpecCache {
-                path,
-                modified,
-                specs: Vec::new(),
-            });
-        }
-        return Vec::new();
-    };
-    let configs = match root {
-        TerminalFigSpecConfigRoot::Specs { specs } => specs,
-        TerminalFigSpecConfigRoot::List(specs) => specs,
-    };
-    let specs = configs
+    let mut specs = built_in_terminal_fig_specs();
+    let mut user_count = 0;
+    for config in configs
         .into_iter()
         .filter(|spec| !spec.name.trim().is_empty())
-        .map(Into::into)
-        .collect::<Vec<_>>();
-    if let Ok(mut guard) = cache.lock() {
-        *guard = Some(TerminalFigUserSpecCache {
-            path,
-            modified,
-            specs: specs.clone(),
-        });
+    {
+        let custom = TerminalFigSpec::from(config);
+        user_count += 1;
+        if let Some(existing) = specs.iter_mut().find(|spec| spec.name == custom.name) {
+            *existing = custom;
+        } else {
+            specs.push(custom);
+        }
     }
-    specs
+    let snapshot = TerminalFigSpecCache {
+        path,
+        modified,
+        specs: specs.into(),
+        user_count,
+    };
+    if let Ok(mut cache) = TERMINAL_FIG_SPECS.lock() {
+        *cache = Some(snapshot.clone());
+    }
+    snapshot
 }
 
 fn option(
@@ -1075,43 +1072,68 @@ pub fn built_in_terminal_fig_specs() -> Vec<TerminalFigSpec> {
 
 #[cfg(test)]
 mod terminal_fig_registry_tests {
-    use super::{
-        TerminalFigArgType, TerminalFigSpec, TerminalFigSpecConfigRoot, built_in_terminal_fig_specs,
+    use super::*;
+    use crate::{
+        command_completion::{active_fig_arg_type, terminal_command_fig_suggestions},
+        tokenize_terminal_command_line,
     };
 
     #[test]
-    fn built_in_terminal_fig_specs_cover_common_tools() {
-        let specs = built_in_terminal_fig_specs();
-        for command in ["jq", "make", "go", "uv", "psql", "tmux", "journalctl", "nc"] {
-            assert!(specs.iter().any(|spec| spec.name == command), "{command}");
-        }
-    }
-
-    #[test]
     fn terminal_fig_config_accepts_subcommand_options() {
-        let root: TerminalFigSpecConfigRoot = serde_json::from_str(
+        let directory = tempfile::tempdir().unwrap();
+        let settings = directory.path().join("settings.json");
+        let candidates = |input: &str| {
+            terminal_command_fig_suggestions(
+                &tokenize_terminal_command_line(input, input.len()),
+                &terminal_fig_specs(&settings),
+            )
+        };
+        let builtin = candidates("docker ");
+        for label in ["ps", "logs", "exec"] {
+            assert!(
+                builtin.iter().any(|suggestion| suggestion.label == label),
+                "{label}"
+            );
+        }
+
+        std::fs::write(
+            terminal_command_specs_path(&settings),
             r#"{
                 "specs": [{
-                    "name": "demo",
-                    "description": "Demo",
+                    "name": "docker",
                     "subcommands": [{
-                        "name": "run",
+                        "name": "ship",
                         "options": [{ "name": "--profile", "args": "value" }]
                     }]
                 }]
             }"#,
         )
         .unwrap();
-        let TerminalFigSpecConfigRoot::Specs { specs } = root else {
-            panic!("expected wrapped specs");
-        };
-        let spec: TerminalFigSpec = specs.into_iter().next().unwrap().into();
-        let run = spec
-            .subcommands
-            .iter()
-            .find(|subcommand| subcommand.name == "run")
-            .unwrap();
-        assert_eq!(run.options[0].name, "--profile");
-        assert_eq!(run.options[0].args, TerminalFigArgType::Value);
+        invalidate_user_terminal_fig_specs(&settings);
+        let custom = candidates("docker ");
+        assert_eq!(
+            custom
+                .iter()
+                .map(|s| s.insert_text.as_str())
+                .collect::<Vec<_>>(),
+            ["ship "]
+        );
+        assert_eq!(custom[0].replacement, 7..7);
+        let options = candidates("docker ship --p");
+        assert_eq!(
+            options
+                .iter()
+                .map(|s| s.insert_text.as_str())
+                .collect::<Vec<_>>(),
+            ["--profile "]
+        );
+        let input = "docker ship --profile ";
+        assert_eq!(
+            active_fig_arg_type(
+                &tokenize_terminal_command_line(input, input.len()),
+                &terminal_fig_specs(&settings),
+            ),
+            TerminalFigArgType::Value
+        );
     }
 }

@@ -184,5 +184,6 @@ fn subcommand_token_index(
 }
 
 fn terminal_matches_prefix(value: &str, query: &str) -> bool {
-    value.to_lowercase().starts_with(&query.to_lowercase())
+    let query = zeroize::Zeroizing::new(query.to_lowercase());
+    value.to_lowercase().starts_with(query.as_str())
 }

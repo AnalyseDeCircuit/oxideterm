@@ -153,7 +153,7 @@ Les éléments marqués *(plugin)* s’installent depuis le catalogue de plugins
 - Recherche par expressions régulières, respect de la casse et requêtes multilignes, indépendante dans chaque volet
 - Intégration de Bash, Zsh, Fish, Nushell et PowerShell : répertoire courant, codes de sortie et repères de commandes ; installation sur les serveurs depuis l’application
 - Repli des commandes terminées avec conservation de leur état de sortie
-- Barre de commandes avec saisie multiligne, historique, suggestions de chemins, complétion et commandes rapides
+- Barre de commandes avec saisie multiligne, historique, complétion de commandes intégrée et personnalisée, et commandes rapides
 - Suggestions approximatives depuis l’historique, et historique persistant par connexion en option
 - Mode de saisie libre pour modifier la commande courante avec la souris
 - Modification des collages multilignes avant envoi, avec annulation et retrait des délimiteurs de blocs de code

@@ -5,7 +5,7 @@ use std::{
 };
 use zeroize::{Zeroize, Zeroizing};
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct TerminalShellToken {
     pub value: String,
     pub start: usize,
@@ -13,13 +13,25 @@ pub struct TerminalShellToken {
     pub quote: Option<char>,
 }
 
-#[derive(Clone, Debug)]
+impl Drop for TerminalShellToken {
+    fn drop(&mut self) {
+        self.value.zeroize();
+    }
+}
+
+#[derive(Clone)]
 pub struct TerminalShellParseResult {
     pub reliable: bool,
     pub tokens: Vec<TerminalShellToken>,
     pub current_token: TerminalShellToken,
     pub current_token_index: isize,
     pub command_name: Option<String>,
+}
+
+impl Drop for TerminalShellParseResult {
+    fn drop(&mut self) {
+        self.command_name.zeroize();
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -101,15 +113,14 @@ pub fn tokenize_terminal_command_line(
     if quote.is_some() || escaped {
         reliable = false;
     }
-    let current_token_index = tokens
+    let token_at_cursor = tokens
         .iter()
-        .position(|token| cursor >= token.start && cursor <= token.end)
-        .map(|index| index as isize)
-        .unwrap_or(-1);
-    let current_token = current_token_index
-        .try_into()
-        .ok()
-        .and_then(|index: usize| tokens.get(index).cloned())
+        .position(|token| cursor >= token.start && cursor <= token.end);
+    // Whitespace after a command starts the next argument, including an empty one.
+    let current_token_index =
+        token_at_cursor.unwrap_or_else(|| tokens.partition_point(|token| token.end < cursor));
+    let current_token = token_at_cursor
+        .map(|index| tokens[index].clone())
         .unwrap_or(TerminalShellToken {
             value: String::new(),
             start: cursor,
@@ -121,21 +132,18 @@ pub fn tokenize_terminal_command_line(
         command_name: tokens.first().map(|token| token.value.clone()),
         tokens,
         current_token,
-        current_token_index,
+        current_token_index: current_token_index as isize,
     }
 }
 
 fn unescape_terminal_token(raw: &str, quote: Option<char>) -> String {
-    let mut value = raw.to_string();
-    if let Some(quote) = quote {
-        if value.starts_with(quote) {
-            value.remove(0);
-        }
-        if value.ends_with(quote) {
-            value.pop();
-        }
-    }
-    let mut output = String::new();
+    let value = if let Some(quote) = quote {
+        let unquoted = raw.strip_prefix(quote).unwrap_or(raw);
+        unquoted.strip_suffix(quote).unwrap_or(unquoted)
+    } else {
+        raw
+    };
+    let mut output = String::with_capacity(value.len());
     let mut escaped = false;
     for character in value.chars() {
         if escaped {

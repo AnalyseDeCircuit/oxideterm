@@ -153,7 +153,7 @@ Các mục đánh dấu *(plugin)* được cài từ chợ plugin trong ứng d
 - Tìm bằng biểu thức chính quy, phân biệt hoa/thường và nhiều dòng, giữ trạng thái riêng từng ngăn
 - Tích hợp Bash, Zsh, Fish, Nushell, PowerShell: theo dõi thư mục, mã thoát, dấu lệnh và cài trên máy chủ từ ứng dụng
 - Thu gọn đầu ra lệnh đã xong nhưng giữ trạng thái thoát
-- Thanh lệnh với nhập nhiều dòng, lịch sử, gợi ý đường dẫn, hoàn thành và lệnh nhanh
+- Thanh lệnh hỗ trợ nhập nhiều dòng, lịch sử, tự động hoàn thành lệnh theo quy tắc có sẵn hoặc tùy chỉnh và lệnh nhanh
 - Gợi ý gần đúng từ lịch sử và lịch sử theo kết nối tồn tại qua khởi động lại nếu bật
 - Chế độ nhập tự do để sửa lệnh hiện tại bằng chuột
 - Sửa nội dung dán nhiều dòng trước khi gửi, có hoàn tác và bỏ dấu bao khối mã

@@ -153,7 +153,7 @@ Os itens marcados como *(plugin)* são instalados pelo marketplace de plugins de
 - Busca com regex, diferenciação de maiúsculas e consultas multilinha, independente por painel
 - Integração Bash, Zsh, Fish, Nushell e PowerShell: diretórios, códigos de saída, marcas de comandos e instalação remota pelo aplicativo
 - Recolhimento da saída de comandos concluídos, preservando o status de saída
-- Barra de comandos com entrada multilinha, histórico, sugestões de caminhos, completamento e comandos rápidos
+- Barra de comandos com entrada multilinha, histórico, preenchimento automático de comandos integrado e personalizado, e comandos rápidos
 - Sugestões aproximadas do histórico e histórico persistente por conexão opcional
 - Modo de digitação livre para editar o comando atual com o mouse
 - Edição de colagens multilinha antes do envio, com desfazer e remoção dos delimitadores de blocos de código
