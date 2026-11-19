@@ -376,37 +376,30 @@ fn session_row_selection_target(row: &ActiveSessionSidebarRow) -> Option<&NodeId
     Some(&row.node_id)
 }
 
-/// Nodes whose subtree still holds a terminal session.
-///
-/// Batch removal of such a parent would take that live session down with the
-/// subtree, so they are never offered as "inactive".
-fn session_nodes_with_active_descendant(rows: &[ActiveSessionSidebarRow]) -> HashSet<NodeId> {
-    let parent_by_node = rows
-        .iter()
-        .map(|row| (&row.node_id, row.parent_id.as_ref()))
-        .collect::<HashMap<_, _>>();
-    let mut active_ancestors = HashSet::new();
-    for row in rows {
-        if row.node_view.terminal_ids.is_empty() {
-            continue;
-        }
-        let mut ancestor = parent_by_node.get(&row.node_id).copied().flatten();
-        while let Some(node_id) = ancestor {
-            active_ancestors.insert(node_id.clone());
-            ancestor = parent_by_node.get(node_id).copied().flatten();
-        }
-    }
-    active_ancestors
+fn session_subtree_is_inactive(
+    router: &NodeRouter,
+    node_id: &NodeId,
+    has_workspace_owner: impl Fn(&NodeId) -> bool,
+) -> bool {
+    // Search and grouping can hide descendants that removal would still affect.
+    router.subtree_postorder(node_id).into_iter().all(|id| {
+        router.node_metadata(&id).is_some_and(|node| {
+            matches!(
+                node.readiness,
+                NodeReadiness::Disconnected | NodeReadiness::Error
+            ) && node.connection_id.is_none()
+                && node.terminal_session_id.is_none()
+                && node.sftp_session_id.is_none()
+                && !has_workspace_owner(&id)
+        })
+    })
 }
 
 /// Every selectable row outside the kept set, in rendered order.
 ///
 /// Ancestors of a kept row are kept as well: removing one would drop the kept
 /// node together with its subtree.
-fn session_other_node_ids(
-    rows: &[ActiveSessionSidebarRow],
-    kept: &HashSet<NodeId>,
-) -> Vec<NodeId> {
+fn session_other_node_ids(rows: &[ActiveSessionSidebarRow], kept: &HashSet<NodeId>) -> Vec<NodeId> {
     let parent_by_node = rows
         .iter()
         .map(|row| (&row.node_id, row.parent_id.as_ref()))
@@ -1216,7 +1209,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let node_ids = self.selected_session_node_ids(cx);
-        self.request_remove_session_nodes(node_ids, window, cx);
+        self.request_remove_session_nodes(node_ids, false, window, cx);
     }
 
     /// Single removals keep the existing row action contract (no confirm); two or
@@ -1225,17 +1218,24 @@ impl WorkspaceApp {
     /// reported count matches the nodes that disappear.
     fn request_remove_session_nodes(
         &mut self,
-        node_ids: Vec<NodeId>,
+        mut node_ids: Vec<NodeId>,
+        inactive_only: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if inactive_only {
+            node_ids.retain(|node_id| self.can_remove_inactive_session_subtree(node_id, cx));
+        }
         match node_ids.len() {
-            0 => {}
-            1 => self.remove_session_nodes_now(node_ids, window, cx),
+            0 => cx.notify(),
+            1 => self.remove_session_nodes_now(node_ids, inactive_only, window, cx),
             _ => {
                 self.overlay.update(cx, |overlay, cx| {
                     overlay.open_confirm(
-                        WorkspaceOverlayConfirmKind::RemoveSessionNodes { node_ids },
+                        WorkspaceOverlayConfirmKind::RemoveSessionNodes {
+                            node_ids,
+                            inactive_only,
+                        },
                         cx,
                     );
                 });
@@ -1253,8 +1253,12 @@ impl WorkspaceApp {
         if !started {
             return;
         }
-        if let Some(WorkspaceOverlayConfirmEffect::RemoveSessionNodes { node_ids }) = effect {
-            self.remove_session_nodes_now(node_ids, window, cx);
+        if let Some(WorkspaceOverlayConfirmEffect::RemoveSessionNodes {
+            node_ids,
+            inactive_only,
+        }) = effect
+        {
+            self.remove_session_nodes_now(node_ids, inactive_only, window, cx);
         }
     }
 
@@ -1265,6 +1269,7 @@ impl WorkspaceApp {
     fn remove_session_nodes_now(
         &mut self,
         node_ids: Vec<NodeId>,
+        inactive_only: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -1272,7 +1277,12 @@ impl WorkspaceApp {
             if !self.ssh_nodes.contains_key(&node_id) {
                 continue;
             }
-            if self.node_router.connection_id_for_node(&node_id).is_some() {
+            if inactive_only {
+                // A reconnect or a new consumer may have started while the dialog was open.
+                if !self.can_remove_inactive_session_subtree(&node_id, cx) {
+                    continue;
+                }
+            } else if self.node_router.connection_id_for_node(&node_id).is_some() {
                 self.disconnect_ssh_node(&node_id, window, cx);
             }
             self.remove_inactive_session_tree_node(&node_id, window, cx);
@@ -1298,17 +1308,27 @@ impl WorkspaceApp {
         self.session_row_menu.take().is_some()
     }
 
-    /// Inactive means the node currently owns no terminal session at all, and no
-    /// descendant owns one either: removing the node would otherwise take a live
-    /// session down with its subtree.
-    fn inactive_session_node_ids(&self, cx: &App) -> Vec<NodeId> {
-        let rows = self.active_session_sidebar_display_rows(cx);
-        let active_parents = session_nodes_with_active_descendant(&rows);
+    fn can_remove_inactive_session_subtree(&self, node_id: &NodeId, cx: &App) -> bool {
+        let runtime = self.workspace_runtime.read(cx);
+        let dedicated_sftp = self.dedicated_sftp_connections.lock();
+        session_subtree_is_inactive(&self.node_router, node_id, |id| {
+            runtime.connecting_node_locks().contains(id)
+                || runtime.has_active_reconnect_job(id)
+                || self
+                    .ssh_nodes
+                    .get(id)
+                    .is_some_and(|node| !node.terminal_ids.is_empty())
+                || dedicated_sftp
+                    .get(id)
+                    .is_some_and(|slot| slot.try_lock().map_or(true, |lease| lease.is_some()))
+        })
+    }
+
+    fn inactive_session_node_ids(&self, rows: &[ActiveSessionSidebarRow], cx: &App) -> Vec<NodeId> {
         rows.iter()
-            .filter(|row| session_row_selection_target(row).is_some())
-            .filter(|row| row.node_view.terminal_ids.is_empty())
-            .filter(|row| !active_parents.contains(&row.node_id))
-            .map(|row| row.node_id.clone())
+            .filter_map(session_row_selection_target)
+            .filter(|node_id| self.can_remove_inactive_session_subtree(node_id, cx))
+            .cloned()
             .collect()
     }
 
@@ -1320,9 +1340,7 @@ impl WorkspaceApp {
         session_other_node_ids(&rows, kept)
     }
 
-    /// Right-click menu for a node row. Each command recomputes its target set
-    /// from the live tree, so a menu left open across a tree change cannot act on
-    /// rows the user no longer sees.
+    /// Right-click menu for a node row. Inactive targets are checked again before removal.
     pub(in crate::workspace) fn render_session_row_menu(
         &mut self,
         window: &mut Window,
@@ -1330,17 +1348,17 @@ impl WorkspaceApp {
     ) -> Option<AnyElement> {
         let menu = self.session_row_menu.clone()?;
         let rows = self.active_session_sidebar_display_rows(cx);
-        if !rows.iter().any(|row| {
-            session_row_selection_target(row).is_some() && row.node_id == menu.node_id
-        }) {
+        if !rows
+            .iter()
+            .any(|row| session_row_selection_target(row).is_some() && row.node_id == menu.node_id)
+        {
             self.session_row_menu = None;
             return None;
         }
 
         let selected = self.selected_session_node_ids(cx);
         let clicked_selected = selected.contains(&menu.node_id);
-        let remove_selected =
-            (clicked_selected && !selected.is_empty()).then(|| selected.clone());
+        let remove_selected = (clicked_selected && !selected.is_empty()).then(|| selected.clone());
         // "Remove others" keeps the current selection and the row the menu was
         // opened on; without a selection that row is the only kept node.
         let mut kept = selected.iter().cloned().collect::<HashSet<_>>();
@@ -1348,7 +1366,7 @@ impl WorkspaceApp {
         // Each command counts its own resolved set; the selection already holds
         // the descendants of every checked row.
         let others = self.others_removal_node_ids(&kept, cx);
-        let inactive = self.inactive_session_node_ids(cx);
+        let inactive = self.inactive_session_node_ids(&rows, cx);
 
         let mut items = Vec::new();
         if let Some(node_ids) = remove_selected {
@@ -1368,7 +1386,7 @@ impl WorkspaceApp {
                     MouseButton::Left,
                     cx.listener(move |this, _, window, cx| {
                         this.session_row_menu = None;
-                        this.request_remove_session_nodes(node_ids.clone(), window, cx);
+                        this.request_remove_session_nodes(node_ids.clone(), false, window, cx);
                         cx.stop_propagation();
                     }),
                 ),
@@ -1387,7 +1405,7 @@ impl WorkspaceApp {
                 MouseButton::Left,
                 cx.listener(move |this, _, window, cx| {
                     this.session_row_menu = None;
-                    this.request_remove_session_nodes(vec![this_node.clone()], window, cx);
+                    this.request_remove_session_nodes(vec![this_node.clone()], false, window, cx);
                     cx.stop_propagation();
                 }),
             ),
@@ -1411,7 +1429,7 @@ impl WorkspaceApp {
                     MouseButton::Left,
                     cx.listener(move |this, _, window, cx| {
                         this.session_row_menu = None;
-                        this.request_remove_session_nodes(others.clone(), window, cx);
+                        this.request_remove_session_nodes(others.clone(), false, window, cx);
                         cx.stop_propagation();
                     }),
                 )
@@ -1434,7 +1452,7 @@ impl WorkspaceApp {
                     MouseButton::Left,
                     cx.listener(move |this, _, window, cx| {
                         this.session_row_menu = None;
-                        this.request_remove_session_nodes(inactive.clone(), window, cx);
+                        this.request_remove_session_nodes(inactive.clone(), true, window, cx);
                         cx.stop_propagation();
                     }),
                 )
@@ -1453,14 +1471,16 @@ impl WorkspaceApp {
             menu_height,
             8.0,
         );
-        let menu_body = context_menu_event_boundary(div().child(
-            dropdown_menu_content(&self.tokens)
-                .w(px(SESSION_ROW_MENU_WIDTH))
-                .id("session-row-menu-content")
-                .max_h(px(menu_height))
-                .overflow_y_scroll()
-                .children(items),
-        ));
+        let menu_body = context_menu_event_boundary(
+            div().child(
+                dropdown_menu_content(&self.tokens)
+                    .w(px(SESSION_ROW_MENU_WIDTH))
+                    .id("session-row-menu-content")
+                    .max_h(px(menu_height))
+                    .overflow_y_scroll()
+                    .children(items),
+            ),
+        );
 
         Some(
             self.workspace_context_menu_backdrop(
@@ -1472,7 +1492,9 @@ impl WorkspaceApp {
                         .child(oxideterm_gpui_ui::motion::popover_zoom_enter(
                             &self.tokens,
                             "session-row-menu-enter",
-                            div().child(oxideterm_gpui_ui::modal::overlay_content_boundary(menu_body)),
+                            div().child(oxideterm_gpui_ui::modal::overlay_content_boundary(
+                                menu_body,
+                            )),
                             -4.0,
                             gpui::point(0.5, 0.0),
                         )),
@@ -4142,12 +4164,7 @@ mod sorting_tests {
             row("grandchild", "Grandchild", Some("child"), true),
             row("other", "Other", None, true),
         ];
-        let ids = |nodes: Vec<NodeId>| {
-            nodes
-                .into_iter()
-                .map(|node| node.0)
-                .collect::<Vec<_>>()
-        };
+        let ids = |nodes: Vec<NodeId>| nodes.into_iter().map(|node| node.0).collect::<Vec<_>>();
 
         assert_eq!(
             ids(session_subtree_node_ids(&NodeId::new("parent"), &rows)),
@@ -4173,12 +4190,7 @@ mod sorting_tests {
             row("child", "Child", Some("parent"), true),
             row("sibling", "Sibling", None, true),
         ];
-        let ids = |nodes: Vec<NodeId>| {
-            nodes
-                .into_iter()
-                .map(|node| node.0)
-                .collect::<Vec<_>>()
-        };
+        let ids = |nodes: Vec<NodeId>| nodes.into_iter().map(|node| node.0).collect::<Vec<_>>();
 
         assert_eq!(
             ids(session_other_node_ids(
@@ -4206,31 +4218,39 @@ mod sorting_tests {
     }
 
     #[test]
-    fn inactive_parents_are_detected_from_terminal_bearing_descendants() {
-        let mut child = row("child", "Child", Some("parent"), true);
-        child.node_view.terminal_ids.push(TerminalSessionId(1));
-        let mut grandchild = row("grandchild", "Grandchild", Some("child"), true);
-        grandchild.node_view.terminal_ids.push(TerminalSessionId(2));
-        let rows = vec![
-            row("parent", "Parent", None, true),
-            child,
-            grandchild,
-            row("other", "Other", None, false),
-        ];
+    fn inactive_cleanup_checks_runtime_descendants() {
+        let router = NodeRouter::new(SshConnectionRegistry::new(ConnectionPoolConfig::default()));
+        let parent = NodeId::new("parent");
+        let child = NodeId::new("child");
+        let terminal = NodeId::new("terminal");
+        router.upsert_node(parent.clone(), SshConfig::default());
+        let store = router.runtime_store();
+        store
+            .upsert_child_node(parent.clone(), child.clone(), SshConfig::default())
+            .unwrap();
+        store
+            .upsert_child_node(child.clone(), terminal.clone(), SshConfig::default())
+            .unwrap();
+        let can_remove = |id| session_subtree_is_inactive(&router, id, |_| false);
+        assert!(can_remove(&parent));
 
-        assert_eq!(
-            session_nodes_with_active_descendant(&rows),
-            HashSet::from([NodeId::new("parent"), NodeId::new("child")]),
-            "every ancestor of a terminal-bearing row is unsafe to batch-remove"
-        );
+        router.bind_terminal_session(&terminal, "terminal").unwrap();
+        assert!(!can_remove(&parent));
+        assert!(!can_remove(&child));
+        router.remove_runtime_subtree(&terminal);
+
+        router.bind_sftp_session(&child, "sftp", None).unwrap();
         assert!(
-            !session_nodes_with_active_descendant(&rows).contains(&NodeId::new("other")),
-            "a leaf without terminals has no active descendant"
+            !can_remove(&parent),
+            "an SFTP-only descendant protects its parent"
         );
+        router.remove_runtime_subtree(&child);
+        assert!(can_remove(&parent));
     }
 
     #[test]
-    fn manual_reorder_moves_siblings_with_their_subtrees() {        let ids = |rows: &[ActiveSessionSidebarRow]| {
+    fn manual_reorder_moves_siblings_with_their_subtrees() {
+        let ids = |rows: &[ActiveSessionSidebarRow]| {
             rows.iter()
                 .map(|row| row.node_id.0.as_str())
                 .collect::<Vec<_>>()

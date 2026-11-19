@@ -761,7 +761,8 @@ impl WorkspaceApp {
         let Some(snapshot) = self.overlay.read(cx).confirm_snapshot() else {
             return div().into_any_element();
         };
-        let WorkspaceOverlayConfirmKind::RemoveSessionNodes { node_ids } = &snapshot.kind else {
+        let WorkspaceOverlayConfirmKind::RemoveSessionNodes { node_ids, .. } = &snapshot.kind
+        else {
             return div().into_any_element();
         };
         let body = self

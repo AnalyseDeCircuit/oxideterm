@@ -298,6 +298,7 @@ pub(in crate::workspace) enum WorkspaceOverlayConfirmKind {
     /// the confirm opens; the executor re-reads the tree before each removal.
     RemoveSessionNodes {
         node_ids: Vec<NodeId>,
+        inactive_only: bool,
     },
 }
 
@@ -311,9 +312,16 @@ pub(in crate::workspace) struct WorkspaceOverlayConfirmSnapshot {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum WorkspaceOverlayConfirmEffect {
     ResetSettings,
-    ClearCommandHistory { all: bool },
-    DisconnectNode { node_id: NodeId },
-    RemoveSessionNodes { node_ids: Vec<NodeId> },
+    ClearCommandHistory {
+        all: bool,
+    },
+    DisconnectNode {
+        node_id: NodeId,
+    },
+    RemoveSessionNodes {
+        node_ids: Vec<NodeId>,
+        inactive_only: bool,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -788,11 +796,13 @@ impl WorkspaceOverlayEntity {
                         node_id: node_id.clone(),
                     })
                 }
-                WorkspaceOverlayConfirmKind::RemoveSessionNodes { node_ids } => {
-                    Some(WorkspaceOverlayConfirmEffect::RemoveSessionNodes {
-                        node_ids: node_ids.clone(),
-                    })
-                }
+                WorkspaceOverlayConfirmKind::RemoveSessionNodes {
+                    node_ids,
+                    inactive_only,
+                } => Some(WorkspaceOverlayConfirmEffect::RemoveSessionNodes {
+                    node_ids: node_ids.clone(),
+                    inactive_only: *inactive_only,
+                }),
                 WorkspaceOverlayConfirmKind::LegalNotice
                 | WorkspaceOverlayConfirmKind::ThirdPartyNotices
                 | WorkspaceOverlayConfirmKind::NativeUpdateReleaseNotes => None,
