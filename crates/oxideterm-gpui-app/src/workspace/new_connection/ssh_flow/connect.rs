@@ -145,10 +145,9 @@ impl WorkspaceApp {
                                 Some(&i18n),
                                 failure,
                             );
-                            let reported_to_form =
-                                this.connections.flow.update(cx, |flow, cx| {
-                                    flow.set_form_feedback(None, Some(message.clone()), cx)
-                                });
+                            let reported_to_form = this.connections.flow.update(cx, |flow, cx| {
+                                flow.set_form_feedback(None, Some(message.clone()), cx)
+                            });
                             if !reported_to_form {
                                 this.set_connection_status(Some(message), cx);
                             }
@@ -169,8 +168,13 @@ impl WorkspaceApp {
     }
 
     fn start_proxy_session_tree_connect_after_gate(
-        &mut self, mut config: SshConfig, title: String, intent: SshConnectionIntent,
-        save: Option<SaveConnectionRequest>, window: &mut Window, cx: &mut Context<Self>,
+        &mut self,
+        mut config: SshConfig,
+        title: String,
+        intent: SshConnectionIntent,
+        save: Option<SaveConnectionRequest>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
     ) {
         use oxideterm_gpui_connections::proxy_launch::{CHAIN_LOCK_BUSY, ProxyExpansion};
         if self

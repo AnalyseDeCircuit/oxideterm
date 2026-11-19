@@ -46,9 +46,11 @@ pub fn preflight(
         let mut worker_config = worker_config;
         if let Some(command) = worker_config.pre_connect_command.as_deref() {
             let wake = tx.wake();
-            if let Err(failure) = run_pre_connect_command_cancellable(
-                command, PRE_CONNECT_COMMAND_TIMEOUT, || wake.is_stopped()
-            ) {
+            if let Err(failure) =
+                run_pre_connect_command_cancellable(command, PRE_CONNECT_COMMAND_TIMEOUT, || {
+                    wake.is_stopped()
+                })
+            {
                 if wake.is_stopped() {
                     return;
                 }

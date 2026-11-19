@@ -340,10 +340,12 @@ impl WorkspaceApp {
     ) {
         // GPUI tasks have no Tokio reactor; the window close subscription
         // retires the gate on the workspace runtime before it can open a tab.
-        let worker = self.forwarding_runtime.spawn(oxideterm_terminal::run_pre_connect_command_async(
-            command,
-            oxideterm_terminal::PRE_CONNECT_COMMAND_TIMEOUT,
-        ));
+        let worker =
+            self.forwarding_runtime
+                .spawn(oxideterm_terminal::run_pre_connect_command_async(
+                    command,
+                    oxideterm_terminal::PRE_CONNECT_COMMAND_TIMEOUT,
+                ));
         let abort = worker.abort_handle();
         let close = window_shell::observe_window_close(window, cx, move |_, _| abort.abort());
         (tokio_util::task::AbortOnDropHandle::new(worker), close)
