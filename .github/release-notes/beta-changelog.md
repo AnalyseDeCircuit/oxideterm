@@ -4,6 +4,70 @@ Keep the newest beta release entry first. The native package workflow extracts
 the section whose heading matches the release version, so older beta entries can
 remain in this file.
 
+## 2.4.0-beta.1
+
+### 中文
+
+2.4.0 的首个 Beta 新增连接前命令，恢复底部命令栏的命令补全，并修复终端焦点、BLE 和 Windows 插件启动问题。
+
+#### 连接与终端
+
+- 保存连接时，可以设置在本机执行的连接前命令，例如先启动 VPN 或唤醒主机。命令失败或超时会停止本次连接；在已连接的节点上再开终端不会重复执行（PR [#817](https://github.com/AnalyseDeCircuit/oxideterm/pull/817)）。
+- 底部命令栏恢复内置和自定义命令补全。没有历史记录时，输入 `docker ` 也能看到候选；保存自定义补全规范后立即生效，历史补全照常工作。
+- 终端右键有三档：打开菜单、仅普通终端粘贴、始终粘贴。选择「仅普通终端粘贴」后，开启鼠标跟踪的终端应用仍能收到右键；Shift+右键始终打开 OxideTerm 菜单。
+- 修复从主机工具搜索框切回终端或底部命令栏时，Delete 仍被搜索框接收的问题；切换焦点会保留搜索词。
+- 修复软换行的输出在滚动时语义颜色变化的问题，并减少大量终端输出时的网格锁竞争（语义着色修复：PR [#809](https://github.com/AnalyseDeCircuit/oxideterm/pull/809)）。
+- 修复多适配器环境下已保存 BLE 连接偶尔打不开的问题，并防止对同一设备发起重复连接（PR [#807](https://github.com/AnalyseDeCircuit/oxideterm/pull/807)）。
+
+#### 工作区、插件与安装
+
+- 更新应用锁界面及锁定、解锁动画；命令面板跳过不可用条目，并更清楚地标出当前会话和最近使用项。
+- 修复部分 AI 提供方在多轮工具调用中丢失上下文的问题，并改进请求失败时的错误提示。
+- 修复 Windows 上使用 `.cmd` 或 `.bat` 启动器的进程型插件无法启用的问题；普通 `.exe` 入口保持原有启动方式（PR [#813](https://github.com/AnalyseDeCircuit/oxideterm/pull/813)）。
+- macOS 安装包采用 Developer ID 签名和 Apple 公证。
+- 重新划分了设置、连接、SFTP、文件管理、云同步和公开 MCP 等模块的内部职责。
+
+#### 👥 贡献者
+
+- 感谢 @alkaid-ops 实现连接前命令（PR [#817](https://github.com/AnalyseDeCircuit/oxideterm/pull/817)）。
+- 感谢 @BilityLeu 修复终端软换行和滚动时的语义着色（PR [#809](https://github.com/AnalyseDeCircuit/oxideterm/pull/809)）。
+- 感谢 @allegrox 修复多适配器 BLE 连接和 Windows 进程型插件启动（PR [#807](https://github.com/AnalyseDeCircuit/oxideterm/pull/807)、[#813](https://github.com/AnalyseDeCircuit/oxideterm/pull/813)）。
+
+#### 升级与验证
+
+此 Beta 会替换已有的 OxideTerm 安装。试用前建议备份设置；升级后优先检查常用连接、SFTP 传输、云同步和已安装插件。
+
+### English
+
+The first 2.4.0 beta adds pre-connect commands, restores command completion in the bottom command bar, and fixes terminal focus, BLE connections, and Windows plugin startup.
+
+#### Connections and terminal
+
+- Configure a local command to run before a saved connection, for example to start a VPN or wake a host. A failure or timeout stops the connection attempt. Opening another terminal on an already connected node does not run the command again (PR [#817](https://github.com/AnalyseDeCircuit/oxideterm/pull/817)).
+- Restored built-in and custom completions in the bottom command bar. Typing `docker ` shows suggestions even without command history, custom specs take effect on save, and history suggestions work as before.
+- Choose one of three right-click actions: Open Menu, Paste in Shell, or Always Paste. Paste in Shell passes right-clicks through to apps that track the mouse; Shift+right-click always opens the OxideTerm menu.
+- Fixed Delete still going to the host-tools search field after focus moves to the terminal or bottom command bar. Switching focus keeps the search query.
+- Fixed semantic colors changing as soft-wrapped output scrolls, and reduced terminal grid lock contention under heavy output (semantic coloring fix: PR [#809](https://github.com/AnalyseDeCircuit/oxideterm/pull/809)).
+- Fixed intermittent failures when opening saved BLE connections on systems with multiple adapters, and prevented duplicate connections to the same device (PR [#807](https://github.com/AnalyseDeCircuit/oxideterm/pull/807)).
+
+#### Workspace, plugins, and installation
+
+- Updated the app lock screen and lock/unlock transitions. The command palette skips unavailable entries and makes the current session and recent items easier to identify.
+- Fixed tool-call context loss across turns for some AI providers and improved error messages when requests fail.
+- Fixed Windows process plugins using `.cmd` or `.bat` launchers failing to activate. Ordinary `.exe` entries still launch as before (PR [#813](https://github.com/AnalyseDeCircuit/oxideterm/pull/813)).
+- macOS installers are signed with Developer ID and notarized by Apple.
+- Reorganized the internals of settings, connections, SFTP, file management, cloud sync, and Public MCP.
+
+#### 👥 Contributors
+
+- Thanks to @alkaid-ops for pre-connect commands (PR [#817](https://github.com/AnalyseDeCircuit/oxideterm/pull/817)).
+- Thanks to @BilityLeu for fixing terminal semantic colors through soft wrapping and scrolling (PR [#809](https://github.com/AnalyseDeCircuit/oxideterm/pull/809)).
+- Thanks to @allegrox for fixing multi-adapter BLE connections and Windows process plugin startup (PR [#807](https://github.com/AnalyseDeCircuit/oxideterm/pull/807), [#813](https://github.com/AnalyseDeCircuit/oxideterm/pull/813)).
+
+#### Upgrading and testing
+
+This beta replaces your existing OxideTerm installation. Back up your settings before trying it, then check your regular connections, SFTP transfers, cloud sync, and installed plugins.
+
 ## 2.3.4-beta.1
 
 ### 中文
