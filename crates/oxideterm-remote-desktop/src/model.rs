@@ -423,6 +423,9 @@ pub struct RemoteDesktopConnectionProfile {
     pub read_only: bool,
     #[serde(default)]
     pub session_options: RemoteDesktopSessionOptions,
+    /// Local gate that must succeed before the provider opens this desktop.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pre_connect_command: Option<String>,
 }
 
 impl RemoteDesktopConnectionProfile {
@@ -454,6 +457,7 @@ impl RemoteDesktopConnectionProfile {
             credential_ref: None,
             read_only: false,
             session_options: RemoteDesktopSessionOptions::default(),
+            pre_connect_command: None,
         })
     }
 

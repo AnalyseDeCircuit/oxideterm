@@ -65,6 +65,7 @@ fn telnet_proxy_preserves_legacy_direct_routes_and_restores_selected_credentials
 
     let mut source = store();
     let mut request = SaveTelnetProfileRequest {
+        pre_connect_command: None,
         name: "router".into(),
         host: "router.test".into(),
         port: 23,
@@ -214,6 +215,7 @@ fn fixture(store: &mut ConnectionStore) -> CredentialSyncSelection {
     );
     let rdp = store
         .upsert_remote_desktop_profile(SaveRemoteDesktopProfileRequest {
+            pre_connect_command: None,
             name: "desktop".into(),
             protocol: RemoteDesktopProtocol::Rdp,
             host: "desktop.test".into(),
@@ -225,6 +227,7 @@ fn fixture(store: &mut ConnectionStore) -> CredentialSyncSelection {
         .unwrap();
     let vnc = store
         .upsert_remote_desktop_profile(SaveRemoteDesktopProfileRequest {
+            pre_connect_command: None,
             name: "screen".into(),
             protocol: RemoteDesktopProtocol::Vnc,
             host: "screen.test".into(),
@@ -357,6 +360,7 @@ fn absent_password_preserves_local_value_but_explicit_clear_propagates() {
     let mut source = store();
     let profile = source
         .upsert_remote_desktop_profile(SaveRemoteDesktopProfileRequest {
+            pre_connect_command: None,
             name: "desktop".into(),
             protocol: RemoteDesktopProtocol::Rdp,
             host: "desktop.test".into(),
@@ -704,6 +708,7 @@ fn rdp_proxy_save_edit_and_cloud_credentials_round_trip() {
         },
     };
     let mut request = SaveRemoteDesktopProfileRequest {
+        pre_connect_command: None,
         name: "desktop".into(),
         protocol: RemoteDesktopProtocol::Rdp,
         host: "desktop.test".into(),

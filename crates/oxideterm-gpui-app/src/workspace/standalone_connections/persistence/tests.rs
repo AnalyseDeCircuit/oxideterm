@@ -144,6 +144,7 @@ fn temporary_sessions_persist_metadata_and_reauthenticate_into_the_same_record()
     let store = ConnectionStore::load_read_only(directory.path().join("connections.json")).unwrap();
     let mut registry = StandaloneConnectionRegistry::restore(path.clone(), &store);
     let serial = SerialSessionConfig {
+        pre_connect_command: None,
         port_path: "COM5".to_string(),
         baud_rate: 115200,
         data_bits: 7,
@@ -187,6 +188,7 @@ fn temporary_sessions_persist_metadata_and_reauthenticate_into_the_same_record()
                 },
             },
             config: TelnetSessionConfig {
+                pre_connect_command: None,
                 line_endings: Default::default(),
                 host: "switch.test".into(),
                 port: 2323,
@@ -246,6 +248,7 @@ fn temporary_sessions_persist_metadata_and_reauthenticate_into_the_same_record()
         ),
     ] {
         let profile = RemoteDesktopConnectionProfile {
+            pre_connect_command: None,
             id: "runtime-profile".into(),
             label: "desktop".into(),
             protocol,

@@ -18,6 +18,9 @@ pub enum SerialFlowControl {
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct SerialSessionConfig {
     pub port_path: String,
+    /// Local gate that must succeed before the port opens.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pre_connect_command: Option<String>,
     pub baud_rate: u32,
     pub data_bits: u8,
     pub stop_bits: u8,
@@ -808,6 +811,21 @@ fn run_serial_worker(
     command_rx: crossbeam_channel::Receiver<SerialCommand>,
     worker_tx: crate::backpressure::ByteBoundedSender<SerialWorkerEvent>,
 ) {
+    if let Some(command) = config.pre_connect_command.as_deref()
+        && let Err(failure) = crate::local_command::run_pre_connect_command(
+            command,
+            crate::local_command::PRE_CONNECT_COMMAND_TIMEOUT,
+        )
+    {
+        // The gate owns no port, so failing here leaves the device untouched.
+        let _ = worker_tx.send_control(SerialWorkerEvent::Failed(SerialError::new(
+            SerialErrorCode::OpenFailed,
+            crate::local_command::pre_connect_failure_message(None, failure),
+            Some(config.port_path.clone()),
+            true,
+        )));
+        return;
+    }
     let mut port = match open_serial_port(&config) {
         Ok(port) => port,
         Err(error) => {
@@ -1289,6 +1307,7 @@ mod serial_tests {
 
     fn valid_config() -> SerialSessionConfig {
         SerialSessionConfig {
+            pre_connect_command: None,
             port_path: "/dev/cu.usbserial-1".to_string(),
             baud_rate: 115_200,
             data_bits: 8,

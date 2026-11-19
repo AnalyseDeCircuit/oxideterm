@@ -888,6 +888,7 @@
         "proxy_chain": "Proxy chain",
         "agent_forwarding": "Agent forwarding",
         "post_connect_command": "Post-connect command",
+        "pre_connect_command": "Pre-connect command",
         "color": "Color",
         "tags": "Tags",
         "ssh_kex_algorithms": "SSH key exchange algorithms",
@@ -1359,6 +1360,14 @@
     "exit": "Exit Zen Mode",
     "hint": "Zen Mode — Press {{shortcut}} to exit",
     "hint_unbound": "Zen Mode — Exit from the command palette"
+  },
+  "connection": {
+    "pre_connect": {
+      "too_long": "Pre-connect command is too long (max {limit} bytes)",
+      "spawn_failed": "Pre-connect command could not start",
+      "timeout": "Pre-connect command timed out after {seconds} seconds",
+      "exit_code": "Pre-connect command failed with exit code {code}"
+    }
   },
   "tabbar": {
     "zoom_pane": "Enlarge pane",

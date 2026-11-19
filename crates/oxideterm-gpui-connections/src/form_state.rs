@@ -247,6 +247,7 @@ pub enum NewConnectionField {
     StandaloneSftpSecondaryUpstreamProxyUsername,
     StandaloneSftpSecondaryUpstreamProxyPassword,
     PostConnectCommand,
+    PreConnectCommand,
     ProxyCommand,
     Color,
     IconBackgroundColor,
@@ -838,6 +839,7 @@ pub struct NewConnectionForm {
     pub notes: String,
     pub sftp_initial_remote_path: String,
     pub post_connect_command: String,
+    pub pre_connect_command: String,
     pub proxy_command_enabled: bool,
     pub proxy_command: String,
     pub proxy_command_keychain_id: Option<String>,
@@ -1098,6 +1100,10 @@ impl fmt::Debug for NewConnectionForm {
             .field("notes_present", &!self.notes.is_empty())
             .field("sftp_initial_remote_path", &self.sftp_initial_remote_path)
             .field("post_connect_command", &self.post_connect_command)
+            .field(
+                "pre_connect_command_configured",
+                &!self.pre_connect_command.is_empty(),
+            )
             .field("proxy_command_enabled", &self.proxy_command_enabled)
             .field("proxy_command", &"[redacted secret]")
             .field("proxy_command_keychain_id", &self.proxy_command_keychain_id)
@@ -1269,6 +1275,7 @@ impl Default for NewConnectionForm {
             notes: String::new(),
             sftp_initial_remote_path: String::new(),
             post_connect_command: String::new(),
+            pre_connect_command: String::new(),
             proxy_command_enabled: false,
             proxy_command: String::new(),
             proxy_command_keychain_id: None,

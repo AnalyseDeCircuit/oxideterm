@@ -896,6 +896,7 @@
         "proxy_chain": "Chuỗi proxy",
         "agent_forwarding": "Chuyển tiếp agent",
         "post_connect_command": "Lệnh sau khi kết nối",
+        "pre_connect_command": "Lệnh trước khi kết nối",
         "color": "Màu",
         "tags": "Thẻ",
         "ssh_kex_algorithms": "Thuật toán trao đổi khóa SSH",
@@ -1354,6 +1355,14 @@
     "back": "Quay lại",
     "next": "Tiếp theo",
     "continue_button": "Tiếp tục đến OxideTerm 2"
+  },
+  "connection": {
+    "pre_connect": {
+      "too_long": "Lệnh trước khi kết nối quá dài (tối đa {limit} byte)",
+      "spawn_failed": "Không thể khởi chạy lệnh trước khi kết nối",
+      "timeout": "Lệnh trước khi kết nối đã quá thời gian sau {seconds} giây",
+      "exit_code": "Lệnh trước khi kết nối thất bại với mã thoát {code}"
+    }
   },
   "zen_mode": {
     "exit": "Thoát chế độ Zen",

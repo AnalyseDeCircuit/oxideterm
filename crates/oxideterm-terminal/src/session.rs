@@ -269,6 +269,7 @@ mod tests {
         let (worker_tx, events) = crate::backpressure::byte_bounded_channel(1024);
         let worker = run_telnet_worker(
             TelnetSessionConfig {
+                pre_connect_command: None,
                 line_endings: Default::default(),
                 host: "telnet.invalid".into(),
                 port: 2323,

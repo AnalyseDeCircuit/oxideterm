@@ -896,6 +896,7 @@
         "proxy_chain": "Cadeia de proxy",
         "agent_forwarding": "Encaminhamento do agente",
         "post_connect_command": "Comando pós-conexão",
+        "pre_connect_command": "Comando antes da conexão",
         "color": "Cor",
         "tags": "Tags",
         "ssh_kex_algorithms": "Algoritmos de troca de chaves SSH",
@@ -1354,6 +1355,14 @@
     "back": "Voltar",
     "next": "Avançar",
     "continue_button": "Continuar para o OxideTerm 2"
+  },
+  "connection": {
+    "pre_connect": {
+      "too_long": "O comando antes da conexão é longo demais (máximo de {limit} bytes)",
+      "spawn_failed": "Não foi possível iniciar o comando antes da conexão",
+      "timeout": "O comando antes da conexão expirou após {seconds} segundos",
+      "exit_code": "O comando antes da conexão falhou com o código de saída {code}"
+    }
   },
   "zen_mode": {
     "exit": "Sair do modo Zen",

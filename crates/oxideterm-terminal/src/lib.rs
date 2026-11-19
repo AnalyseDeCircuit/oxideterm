@@ -27,6 +27,7 @@ pub use history::{
 };
 mod editor_integration;
 mod integration_scripts;
+mod local_command;
 mod local_graphics_event_loop;
 mod local_shell;
 mod local_shell_integration;
@@ -70,6 +71,11 @@ pub use editor_integration::{
     EMACS_FREE_TYPE_INTEGRATION_SOURCE, TerminalEditorApplication, TerminalEditorCapabilities,
     TerminalEditorClipboardEvent, TerminalEditorClipboardOperation, TerminalEditorIntegrationEvent,
     TerminalEditorMode, TerminalEditorSelection, VIM_FREE_TYPE_INTEGRATION_SOURCE,
+};
+pub use local_command::{
+    LocalCommandFailure, PRE_CONNECT_COMMAND_MAX_BYTES, PRE_CONNECT_COMMAND_TIMEOUT,
+    normalize_pre_connect_command, pre_connect_failure_message, run_pre_connect_command,
+    run_pre_connect_command_async,
 };
 pub use local_shell::{
     LocalCommand, LocalPtyConfig, ShellInfo, default_shell, is_shell_executable, scan_shells,

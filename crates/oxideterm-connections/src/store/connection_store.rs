@@ -303,6 +303,8 @@ impl ConnectionStore {
             // Tauri stores this command under options; the top-level field remains
             // readable for old native plaintext stores but is no longer emitted.
             options.post_connect_command = post_connect_command;
+            options.pre_connect_command =
+                normalize_optional_text(request.pre_connect_command);
             let connection = SavedConnection {
                 id: id.clone(),
                 version: existing
@@ -1227,6 +1229,7 @@ impl ConnectionStore {
                 profile.output_line_ending = line_ending;
             }
             profile.terminal = request.terminal;
+            profile.pre_connect_command = normalize_optional_text(request.pre_connect_command);
             profile.connect_on_open = request.connect_on_open.unwrap_or(false);
             if !self
                 .data
@@ -1385,6 +1388,7 @@ impl ConnectionStore {
             profile.platform_identifier = normalize_optional_text(request.platform_identifier);
             profile.service_uuid = request.service_uuid.trim().to_string();
             profile.terminal = request.terminal;
+            profile.pre_connect_command = normalize_optional_text(request.pre_connect_command);
             if let Some(value) = request.input_line_ending {
                 profile.input_line_ending = value;
             }
@@ -1527,6 +1531,7 @@ impl ConnectionStore {
             )?;
             let next_proxy_ids = collect_keychain_ids_for_upstream_proxy(&profile.upstream_proxy);
             profile.terminal = request.terminal;
+            profile.pre_connect_command = normalize_optional_text(request.pre_connect_command);
             profile.connect_on_open = request.connect_on_open.unwrap_or(false);
             if !self
                 .data
@@ -1799,6 +1804,7 @@ impl ConnectionStore {
             profile.identity_agent = normalize_optional_text(request.identity_agent);
             profile.legacy_ssh_compatibility = request.legacy_ssh_compatibility;
             profile.terminal = request.terminal;
+            profile.pre_connect_command = normalize_optional_text(request.pre_connect_command);
             profile.updated_at = now;
             profile.validate()?;
 
@@ -2187,6 +2193,7 @@ impl ConnectionStore {
             profile.initial_remote_path = normalize_optional_text(request.initial_remote_path);
             profile.transfer_mode = request.transfer_mode;
             profile.secondary_endpoint = secondary_endpoint;
+            profile.pre_connect_command = normalize_optional_text(request.pre_connect_command);
             profile.updated_at = now;
             profile.validate()?;
 
@@ -2426,6 +2433,7 @@ impl ConnectionStore {
             profile.upstream_proxy = policy;
             profile.read_only = request.read_only;
             profile.session_options = request.session_options;
+            profile.pre_connect_command = normalize_optional_text(request.pre_connect_command);
             profile.updated_at = now;
             profile.validate()?;
             profile.upstream_proxy = self.materialize_upstream_proxy_policy(

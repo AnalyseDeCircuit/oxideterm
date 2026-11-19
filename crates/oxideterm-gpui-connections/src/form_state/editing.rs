@@ -186,6 +186,7 @@ pub fn current_connection_field_mut(form: &mut NewConnectionForm) -> &mut String
             &mut form.standalone_sftp_secondary.upstream_proxy_password
         }
         NewConnectionField::PostConnectCommand => &mut form.post_connect_command,
+        NewConnectionField::PreConnectCommand => &mut form.pre_connect_command,
         NewConnectionField::ProxyCommand => &mut form.proxy_command,
         NewConnectionField::UpstreamProxyHost => &mut form.upstream_proxy_host,
         NewConnectionField::UpstreamProxyPort => &mut form.upstream_proxy_port,
@@ -348,6 +349,7 @@ pub fn current_connection_field(form: &NewConnectionForm) -> &str {
             &form.standalone_sftp_secondary.upstream_proxy_password
         }
         NewConnectionField::PostConnectCommand => &form.post_connect_command,
+        NewConnectionField::PreConnectCommand => &form.pre_connect_command,
         NewConnectionField::ProxyCommand => &form.proxy_command,
         NewConnectionField::UpstreamProxyHost => &form.upstream_proxy_host,
         NewConnectionField::UpstreamProxyPort => &form.upstream_proxy_port,

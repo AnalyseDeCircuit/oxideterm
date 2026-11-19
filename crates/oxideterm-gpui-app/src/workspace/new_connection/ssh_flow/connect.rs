@@ -5,6 +5,7 @@ use std::collections::VecDeque;
 
 use super::*;
 use crate::workspace::new_connection::BleConnectionWorkerResult;
+use gpui::AppContext;
 
 impl WorkspaceApp {
     pub(in crate::workspace) fn ssh_worker_sender(
@@ -104,6 +105,52 @@ impl WorkspaceApp {
     }
 
     pub(super) fn start_proxy_session_tree_connect(
+        &mut self, mut config: SshConfig, title: String, intent: SshConnectionIntent,
+        save: Option<SaveConnectionRequest>, window: &mut Window, cx: &mut Context<Self>,
+    ) {
+        if !config.pre_connect_completed
+            && let Some(command) = config.pre_connect_command.clone()
+        {
+            let window_handle = window.window_handle();
+            let i18n = self.i18n.clone();
+            cx.spawn(async move |workspace, cx| {
+                let failure = oxideterm_terminal::run_pre_connect_command_async(
+                    command,
+                    oxideterm_terminal::PRE_CONNECT_COMMAND_TIMEOUT,
+                )
+                .await
+                .err();
+                let _ = cx.update_window(window_handle, move |_, window, cx| {
+                    let _ = workspace.update(cx, |this, cx| {
+                        if let Some(failure) = failure {
+                            let message = oxideterm_terminal::pre_connect_failure_message(
+                                Some(&i18n),
+                                failure,
+                            );
+                            let reported_to_form =
+                                this.connections.flow.update(cx, |flow, cx| {
+                                    flow.set_form_feedback(None, Some(message.clone()), cx)
+                                });
+                            if !reported_to_form {
+                                this.set_connection_status(Some(message), cx);
+                            }
+                            cx.notify();
+                            return;
+                        }
+                        config.pre_connect_completed = true;
+                        this.start_proxy_session_tree_connect_after_gate(
+                            config, title, intent, save, window, cx,
+                        );
+                    });
+                });
+            })
+            .detach();
+            return;
+        }
+        self.start_proxy_session_tree_connect_after_gate(config, title, intent, save, window, cx);
+    }
+
+    fn start_proxy_session_tree_connect_after_gate(
         &mut self, mut config: SshConfig, title: String, intent: SshConnectionIntent,
         save: Option<SaveConnectionRequest>, window: &mut Window, cx: &mut Context<Self>,
     ) {

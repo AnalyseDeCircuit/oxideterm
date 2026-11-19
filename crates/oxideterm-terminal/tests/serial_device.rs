@@ -13,6 +13,7 @@ fn manual_serial_pseudo_device_round_trip_and_reopen() {
     let port_path = std::env::var("OXIDETERM_SERIAL_MANUAL_PORT")
         .expect("OXIDETERM_SERIAL_MANUAL_PORT must point at a serial device");
     let config = SerialSessionConfig {
+        pre_connect_command: None,
         port_path: port_path.clone(),
         baud_rate: 115_200,
         data_bits: 8,

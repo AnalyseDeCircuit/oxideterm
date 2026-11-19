@@ -896,6 +896,7 @@
         "proxy_chain": "Proxy-Kette",
         "agent_forwarding": "Agent-Weiterleitung",
         "post_connect_command": "Befehl nach Verbindung",
+        "pre_connect_command": "Befehl vor dem Verbinden",
         "color": "Farbe",
         "tags": "Tags",
         "ssh_kex_algorithms": "SSH-Schlüsselaustauschalgorithmen",
@@ -1354,6 +1355,14 @@
     "cat_files_dev": "Dateien & Remote-IDE",
     "cat_ops_ai": "Host-Betrieb & KI",
     "cat_security_ext": "Sicherheit, Sync & Erweiterungen"
+  },
+  "connection": {
+    "pre_connect": {
+      "too_long": "Der Befehl vor dem Verbinden ist zu lang (max. {limit} Bytes)",
+      "spawn_failed": "Der Befehl vor dem Verbinden konnte nicht gestartet werden",
+      "timeout": "Zeitüberschreitung beim Befehl vor dem Verbinden nach {seconds} Sekunden",
+      "exit_code": "Der Befehl vor dem Verbinden ist mit Rückgabecode {code} fehlgeschlagen"
+    }
   },
   "zen_mode": {
     "exit": "Zen-Modus beenden",

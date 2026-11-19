@@ -270,6 +270,7 @@ impl LaunchSnapshot {
                     StandaloneConnectionLaunch::SavedSerial {
                         profile_id,
                         config: SerialSessionConfig {
+                            pre_connect_command: None,
                             port_path: profile.port_path.clone(),
                             baud_rate: profile.baud_rate,
                             data_bits: profile.data_bits,
@@ -297,6 +298,7 @@ impl LaunchSnapshot {
                         profile_id,
                         upstream_proxy: profile.upstream_proxy.clone(),
                         config: TelnetSessionConfig {
+                            pre_connect_command: None,
                             line_endings: new_connection::terminal_telnet_line_endings_from_profile(
                                 profile,
                             ),
@@ -321,6 +323,7 @@ impl LaunchSnapshot {
                             device_name: profile.device_name.clone(),
                             platform_identifier: profile.platform_identifier.clone(),
                             service_uuid: profile.service_uuid.clone(),
+                            pre_connect_command: profile.pre_connect_command.clone(),
                         },
                         terminal_options: profile.terminal.clone(),
                     }

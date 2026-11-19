@@ -896,6 +896,7 @@
         "proxy_chain": "Chaîne de proxy",
         "agent_forwarding": "Transfert d’agent",
         "post_connect_command": "Commande après connexion",
+        "pre_connect_command": "Commande avant connexion",
         "color": "Couleur",
         "tags": "Étiquettes",
         "ssh_kex_algorithms": "Algorithmes d’échange de clés SSH",
@@ -1354,6 +1355,14 @@
     "cat_files_dev": "Fichiers et IDE distant",
     "cat_ops_ai": "Supervision et IA",
     "cat_security_ext": "Sécurité, synchro et extensions"
+  },
+  "connection": {
+    "pre_connect": {
+      "too_long": "La commande avant connexion est trop longue (max. {limit} octets)",
+      "spawn_failed": "Impossible de démarrer la commande avant connexion",
+      "timeout": "La commande avant connexion a expiré après {seconds} secondes",
+      "exit_code": "La commande avant connexion a échoué avec le code de sortie {code}"
+    }
   },
   "zen_mode": {
     "exit": "Quitter le mode Zen",

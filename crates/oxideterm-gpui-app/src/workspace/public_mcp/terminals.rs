@@ -413,6 +413,7 @@ impl WorkspaceApp {
                 let title = requested_title.unwrap_or_else(|| profile.name.clone());
                 let runtime_options = terminal_serial_runtime_options_from_profile(&profile);
                 let config = SerialSessionConfig {
+                    pre_connect_command: profile.pre_connect_command.clone(),
                     port_path: profile.port_path,
                     baud_rate: profile.baud_rate,
                     data_bits: profile.data_bits,
@@ -456,6 +457,7 @@ impl WorkspaceApp {
                 let profile_id = profile.id.clone();
                 let title = requested_title.unwrap_or_else(|| profile.name.clone());
                 let config = TelnetSessionConfig {
+                    pre_connect_command: profile.pre_connect_command.clone(),
                     line_endings:
                         crate::workspace::new_connection::terminal_telnet_line_endings_from_profile(
                             &profile,

@@ -179,6 +179,8 @@ pub struct ConnectionDirectArgs {
     pub legacy_ssh_compatibility: Option<bool>,
     #[arg(long, help = "Command to run after connecting")]
     pub post_connect_command: Option<String>,
+    #[arg(long, help = "Local command to run before connecting")]
+    pub pre_connect_command: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]

@@ -896,6 +896,7 @@
         "proxy_chain": "代理鏈",
         "agent_forwarding": "Agent 轉發",
         "post_connect_command": "連線後命令",
+        "pre_connect_command": "連線前命令",
         "color": "顏色",
         "tags": "標籤",
         "ssh_kex_algorithms": "SSH 金鑰交換演算法",
@@ -1354,6 +1355,14 @@
     "cat_files_dev": "檔案與遠端開發",
     "cat_ops_ai": "主機維運與 AI",
     "cat_security_ext": "安全、同步與原生擴充"
+  },
+  "connection": {
+    "pre_connect": {
+      "too_long": "連線前命令過長（最多 {limit} 位元組）",
+      "spawn_failed": "無法啟動連線前命令",
+      "timeout": "連線前命令在 {seconds} 秒後逾時",
+      "exit_code": "連線前命令失敗，結束碼 {code}"
+    }
   },
   "zen_mode": {
     "exit": "退出禪模式",

@@ -3119,7 +3119,8 @@ impl ConnectionFormView {
                 false,
                 cx,
             ))
-            .child(self.render_connection_group_select(self.i18n.t("ssh.form.group"), &group, cx));
+            .child(self.render_connection_group_select(self.i18n.t("ssh.form.group"), &group, cx))
+            .child(self.render_connection_pre_connect_command(cx));
         self.render_connection_form_section(
             ConnectionFormSection::LocalShell,
             content.into_any_element(),
@@ -3332,6 +3333,7 @@ impl ConnectionFormView {
                     )),
             )
             .child(self.render_ssh_algorithms_navigation_row(cx))
+            .child(self.render_connection_pre_connect_command(cx))
             .into_any_element()
     }
 
@@ -3562,6 +3564,11 @@ impl ConnectionFormView {
                     cx,
                 )
             })
+            .child(self.render_connection_form_section(
+                ConnectionFormSection::Terminal,
+                self.render_connection_pre_connect_command(cx),
+                cx,
+            ))
             .into_any_element()
     }
 
@@ -3935,11 +3942,19 @@ impl ConnectionFormView {
             .gap(px(self.tokens.metrics.modal_section_gap))
             .child(self.render_connection_form_section(ConnectionFormSection::Basic, basic, cx))
             .child(self.render_upstream_proxy_policy_section(false, cx))
-            .child(self.render_connection_form_section(
-                ConnectionFormSection::Terminal,
-                self.render_connection_terminal_options(cx),
-                cx,
-            ))
+            .child(
+                self.render_connection_form_section(
+                    ConnectionFormSection::Terminal,
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(self.tokens.metrics.modal_section_gap))
+                        .child(self.render_connection_terminal_options(cx))
+                        .child(self.render_connection_pre_connect_command(cx))
+                        .into_any_element(),
+                    cx,
+                ),
+            )
             .into_any_element()
     }
 
@@ -4087,6 +4102,11 @@ impl ConnectionFormView {
             .child(self.render_connection_form_section(
                 ConnectionFormSection::SerialParameters,
                 parameters,
+                cx,
+            ))
+            .child(self.render_connection_form_section(
+                ConnectionFormSection::Terminal,
+                self.render_connection_pre_connect_command(cx),
                 cx,
             ))
             .into_any_element()
@@ -4377,6 +4397,36 @@ impl ConnectionFormView {
                     this.clear_workspace_tooltip(tooltip_id, cx);
                 }
             }))
+            .into_any_element()
+    }
+
+    /// Renders the local gate shared by every connection type. The value is
+    /// optional and runs on this machine, so one label and one hint are enough.
+    pub(super) fn render_connection_pre_connect_command(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(command) = self
+            .connection_form_state(cx)
+            .form
+            .as_ref()
+            .map(|form| form.pre_connect_command.clone())
+        else {
+            return div().into_any_element();
+        };
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(self.tokens.spacing.two))
+            .child(self.render_connection_field(
+                self.i18n.t("ssh.form.pre_connect_command"),
+                &command,
+                self.i18n.t("ssh.form.pre_connect_command_placeholder"),
+                NewConnectionField::PreConnectCommand,
+                false,
+                cx,
+            ))
+            .child(self.render_connection_hint(self.i18n.t("ssh.form.pre_connect_command_hint")))
             .into_any_element()
     }
 

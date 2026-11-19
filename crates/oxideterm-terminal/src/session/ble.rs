@@ -1390,6 +1390,8 @@ pub enum BleResolveError {
     InvalidServiceUuid {
         service_uuid: String,
     },
+    /// The local pre-connect gate failed before any adapter work started.
+    PreConnectCommand(crate::local_command::LocalCommandFailure),
 }
 
 impl std::fmt::Display for BleResolveError {
@@ -1424,6 +1426,11 @@ impl std::fmt::Display for BleResolveError {
             Self::InvalidServiceUuid { service_uuid } => {
                 write!(f, "invalid service UUID: {service_uuid}")
             }
+            Self::PreConnectCommand(failure) => write!(
+                f,
+                "{}",
+                crate::local_command::pre_connect_failure_message(None, *failure)
+            ),
         }
     }
 }
@@ -1718,6 +1725,7 @@ pub async fn ble_resolve_profile_to_session(
     runtime_options: SerialRuntimeOptions,
     mtu: Option<u16>,
     write_without_response: bool,
+    pre_connect_command: Option<String>,
     mut on_stage: impl FnMut(BleResolveStage),
 ) -> Result<
     (
@@ -1730,6 +1738,16 @@ pub async fn ble_resolve_profile_to_session(
     use btleplug::api::Peripheral as _;
     use uuid::Uuid;
 
+    if let Some(command) = pre_connect_command.clone()
+        && let Err(failure) = crate::local_command::run_pre_connect_command_async(
+            command,
+            crate::local_command::PRE_CONNECT_COMMAND_TIMEOUT,
+        )
+        .await
+    {
+        // The gate must finish before any adapter or radio work begins.
+        return Err(BleResolveError::PreConnectCommand(failure));
+    }
     on_stage(BleResolveStage::OpeningAdapter);
     let target_service =
         Uuid::parse_str(service_uuid).map_err(|_| BleResolveError::InvalidServiceUuid {
@@ -2159,6 +2177,7 @@ async fn run_ble_worker(
     i18n: oxideterm_i18n::I18n,
 ) {
     use btleplug::api::{Manager as _, Peripheral as _};
+
     use futures_util::StreamExt;
 
     // Reuse the adapter that produced the scan results when the form handed it

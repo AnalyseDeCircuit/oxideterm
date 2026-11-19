@@ -66,6 +66,7 @@ impl WorkspaceApp {
                     ),
                 mtu: profile.mtu,
                 write_without_response: profile.write_without_response,
+                pre_connect_command: profile.pre_connect_command.clone(),
                 profile_id: Some(profile.id),
                 form_id: None,
                 standalone: standalone.unwrap_or(BleStandaloneTarget::New),
@@ -159,6 +160,7 @@ impl WorkspaceApp {
             runtime_options,
             mtu,
             write_without_response,
+            pre_connect_command,
             profile_id,
             form_id,
             standalone: _,
@@ -200,6 +202,7 @@ impl WorkspaceApp {
                 runtime_options,
                 mtu,
                 write_without_response,
+                pre_connect_command,
                 |stage| {
                     last_stage = stage;
                     let _ = stage_tx.send(BleConnectionWorkerResult::StageChanged {
@@ -457,6 +460,9 @@ impl WorkspaceApp {
                 "connections.ble.resolve.invalid_service_uuid",
                 &[("uuid", service_uuid)],
             ),
+            BleResolveError::PreConnectCommand(failure) => {
+                oxideterm_terminal::pre_connect_failure_message(Some(&self.i18n), *failure)
+            }
         }
     }
 

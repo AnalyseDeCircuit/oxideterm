@@ -4694,6 +4694,7 @@ mod host_view_render_tests {
                 .connection_store
                 .upsert_local_terminal_profile(
                     oxideterm_connections::SaveLocalTerminalProfileRequest {
+                        pre_connect_command: None,
                         id: Some("local-layout".into()),
                         name: "Layout Zsh".into(),
                         group: None,

@@ -75,6 +75,7 @@ impl ConnectionFlowEntity {
                     crate::workers::preflight(
                         config, title, SshConnectionIntent::StandaloneSftpSecondary { pair_launch_token: token },
                         self.ssh_worker_sender(), managed_key_resolver_from_store(store),
+                        i18n.clone(),
                     );
                 } else {
                     self.take_sftp_pair_launch(&token);

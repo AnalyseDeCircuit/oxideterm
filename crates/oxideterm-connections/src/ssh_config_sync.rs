@@ -392,6 +392,7 @@ mod tests {
         let mut store = ConnectionStore::load(store_path.clone()).unwrap();
         store
             .upsert(SaveConnectionRequest {
+                pre_connect_command: None,
                 totp_credential_id: None,
                 id: None,
                 name: "production".to_string(),

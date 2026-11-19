@@ -1026,6 +1026,7 @@ fn build_saved_connection_from_sync_payload(
             legacy_ssh_compatibility: payload.legacy_ssh_compatibility,
             ssh_algorithms: payload.ssh_algorithms.clone(),
             post_connect_command: payload.post_connect_command.clone(),
+            pre_connect_command: payload.pre_connect_command.clone(),
             ..Default::default()
         });
     options.ssh_algorithms.validate()?;

@@ -147,6 +147,7 @@ pub(crate) fn sample_connection(id: &str, name: &str) -> ConnectionInfo {
         legacy_ssh_compatibility: false,
         ssh_algorithms: oxideterm_connections::SshAlgorithmPreferences::default(),
         post_connect_command: None,
+        pre_connect_command: None,
     }
 }
 

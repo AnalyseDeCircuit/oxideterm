@@ -502,6 +502,7 @@ impl ConnectionFlowEntity {
                     runtime_options: open.runtime_options,
                     mtu: open.mtu,
                     write_without_response: open.write_without_response,
+                    pre_connect_command: open.pre_connect_command,
                     profile_id,
                     form_id: Some(open.form_id),
                     standalone: BleStandaloneTarget::New,
@@ -979,6 +980,7 @@ pub struct PendingBleOpen {
     pub runtime_options: oxideterm_terminal::SerialRuntimeOptions,
     pub mtu: Option<u16>,
     pub write_without_response: bool,
+    pub pre_connect_command: Option<String>,
 }
 
 pub fn prepare_serial_form(
@@ -1014,6 +1016,8 @@ pub fn prepare_serial_form(
         .map(terminal_serial_runtime_options_from_profile)
         .unwrap_or_default();
     let config = SerialSessionConfig {
+        pre_connect_command: (!form.pre_connect_command.trim().is_empty())
+            .then(|| form.pre_connect_command.trim().to_string()),
         port_path: port_path.clone(),
         baud_rate,
         data_bits: form.serial_data_bits,
@@ -1050,6 +1054,8 @@ pub fn prepare_serial_form(
         input_line_ending: None,
         output_line_ending: None,
         terminal: form.terminal.clone(),
+        pre_connect_command: (!form.pre_connect_command.trim().is_empty())
+            .then(|| form.pre_connect_command.trim().to_string()),
         connect_on_open: existing_connect_on_open,
     });
     form.pending = true;
@@ -1126,9 +1132,13 @@ pub fn prepare_telnet_form(
         host: host.clone(),
         port,
         terminal: form.terminal.clone(),
+        pre_connect_command: (!form.pre_connect_command.trim().is_empty())
+            .then(|| form.pre_connect_command.trim().to_string()),
         connect_on_open: existing_connect_on_open,
     });
     let config = TelnetSessionConfig {
+        pre_connect_command: (!form.pre_connect_command.trim().is_empty())
+            .then(|| form.pre_connect_command.trim().to_string()),
         host,
         port,
         line_endings: oxideterm_terminal::TelnetLineEndings {
@@ -1249,6 +1259,8 @@ pub fn prepare_mosh_form(
             legacy_ssh_compatibility: form.legacy_ssh_compatibility,
             ssh_algorithms: form.ssh_algorithms.clone(),
             strict_host_key_checking: true,
+            pre_connect_command: (!form.pre_connect_command.trim().is_empty())
+                .then(|| form.pre_connect_command.trim().to_string()),
             ..SshConfig::default()
         };
         form.pending = true;
@@ -1331,6 +1343,8 @@ pub fn prepare_mosh_form(
         legacy_ssh_compatibility: form.legacy_ssh_compatibility,
         ssh_algorithms: form.ssh_algorithms.clone(),
         terminal: form.terminal.clone(),
+        pre_connect_command: (!form.pre_connect_command.trim().is_empty())
+            .then(|| form.pre_connect_command.trim().to_string()),
     };
     form.pending = true;
     form.error = None;
@@ -1451,6 +1465,8 @@ pub fn prepare_standalone_sftp_form(
             .then(|| form.sftp_initial_remote_path.trim().to_string()),
         transfer_mode: form.standalone_sftp_transfer_mode,
         secondary_endpoint,
+        pre_connect_command: (!form.pre_connect_command.trim().is_empty())
+            .then(|| form.pre_connect_command.trim().to_string()),
     };
     form.pending = true;
     form.error = None;
@@ -1587,8 +1603,12 @@ pub fn prepare_remote_desktop_form(
         clear_credential,
         read_only,
         session_options: form.remote_desktop_session_options,
+        pre_connect_command: (!form.pre_connect_command.trim().is_empty())
+            .then(|| form.pre_connect_command.trim().to_string()),
     });
     let profile = RemoteDesktopConnectionProfile {
+        pre_connect_command: (!form.pre_connect_command.trim().is_empty())
+            .then(|| form.pre_connect_command.trim().to_string()),
         id: format!("new-remote-desktop-{}", uuid::Uuid::new_v4()),
         label,
         protocol,
@@ -1742,6 +1762,8 @@ pub fn prepare_ble_form(
         local_echo: Some(form.ble.local_echo),
         mtu: Some(mtu),
         write_without_response: Some(form.ble.write_without_response),
+        pre_connect_command: (!form.pre_connect_command.trim().is_empty())
+            .then(|| form.pre_connect_command.trim().to_string()),
         connect_on_open: existing.as_ref().map(|profile| profile.connect_on_open),
     });
     let open = PendingBleOpen {
@@ -1762,6 +1784,8 @@ pub fn prepare_ble_form(
         runtime_options: terminal_serial_runtime_options_from_ble_form(&form),
         mtu,
         write_without_response: form.ble.write_without_response,
+        pre_connect_command: (!form.pre_connect_command.trim().is_empty())
+            .then(|| form.pre_connect_command.trim().to_string()),
     };
     form.pending = true;
     form.error = None;

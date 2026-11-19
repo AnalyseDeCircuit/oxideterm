@@ -1294,6 +1294,19 @@ async fn run_telnet_worker(
     mut command_rx: tokio::sync::mpsc::Receiver<TelnetCommand>,
     worker_tx: crate::backpressure::ByteBoundedSender<TelnetWorkerEvent>,
 ) {
+    if let Some(command) = config.pre_connect_command.clone()
+        && let Err(failure) = crate::local_command::run_pre_connect_command_async(
+            command,
+            crate::local_command::PRE_CONNECT_COMMAND_TIMEOUT,
+        )
+        .await
+    {
+        // No dial happens until the local gate succeeds.
+        let _ = worker_tx.send_control(TelnetWorkerEvent::Failed(
+            crate::local_command::pre_connect_failure_message(None, failure),
+        ));
+        return;
+    }
     let dial = oxideterm_network_proxy::tcp::dial_initial_tcp(
         &config.host,
         config.port,
@@ -1490,6 +1503,7 @@ mod telnet_tests {
         };
         let mut session = TelnetSession::new_with_login(
             TelnetSessionConfig {
+                pre_connect_command: None,
                 line_endings: Default::default(),
                 host: "127.0.0.1".to_string(),
                 port,
@@ -1655,6 +1669,7 @@ mod telnet_tests {
                 .session("telnet", "pressure-fixture");
             let mut session = TelnetSession::new_with_login(
                 TelnetSessionConfig {
+                    pre_connect_command: None,
                     line_endings: Default::default(),
                     host: "127.0.0.1".into(),
                     port,
@@ -1769,6 +1784,7 @@ mod telnet_tests {
             .session("telnet", &format!("127.0.0.1:{port}"));
         let mut session = TelnetSession::new_with_login(
             TelnetSessionConfig {
+                pre_connect_command: None,
                 line_endings: Default::default(),
                 host: "127.0.0.1".to_string(),
                 port,
@@ -1831,6 +1847,7 @@ mod telnet_tests {
             .session("telnet", &format!("127.0.0.1:{port}"));
         let mut session = TelnetSession::new_with_login(
             TelnetSessionConfig {
+                pre_connect_command: None,
                 line_endings: Default::default(),
                 host: "127.0.0.1".to_string(),
                 port,

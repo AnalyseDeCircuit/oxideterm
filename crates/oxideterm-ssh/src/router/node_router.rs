@@ -31,6 +31,11 @@ impl NodeRouter {
         self.runtime.clone()
     }
 
+    /// Resets the one-shot pre-connect gate marker after an attempt consumed it.
+    pub fn clear_pre_connect_completed(&self, node_id: &NodeId) {
+        self.runtime.clear_pre_connect_completed(node_id);
+    }
+
     pub fn emitter(&self) -> &NodeEventEmitter {
         &self.emitter
     }

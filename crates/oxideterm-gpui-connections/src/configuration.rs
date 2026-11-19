@@ -205,6 +205,7 @@ pub fn form_from_saved_connection(
     form.icon = conn.icon.clone().unwrap_or_default();
     form.tags = conn.tags.clone();
     form.post_connect_command = conn.post_connect_command().unwrap_or_default().to_string();
+    form.pre_connect_command = conn.options.pre_connect_command.clone().unwrap_or_default();
     form.proxy_command_enabled = conn.proxy_command.is_some();
     form.proxy_command_keychain_id = conn
         .proxy_command
@@ -285,6 +286,7 @@ pub fn form_from_standalone_sftp_profile(
     // Edit mode restores only non-secret metadata and protected-store references.
     let upstream_proxy_form = upstream_proxy_form_fields(&profile.upstream_proxy);
     let mut form = NewConnectionForm::default();
+    form.pre_connect_command = profile.pre_connect_command.clone().unwrap_or_default();
     form.transport = NewConnectionTransport::StandaloneSftp;
     // Editing keeps the selected advanced transport discoverable in the shared selector.
     form.advanced_connections_expanded = true;
@@ -650,6 +652,7 @@ fn connection_draft_from_form_with_proxy_hop_prefix(
         ssh_channel_strategy: form.ssh_channel_strategy,
         x11_forwarding: form.x11_forwarding,
         post_connect_command: form.post_connect_command.clone(),
+        pre_connect_command: form.pre_connect_command.clone(),
         terminal: form.terminal.clone(),
     }
 }

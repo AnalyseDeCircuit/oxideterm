@@ -1122,6 +1122,7 @@ mod tests {
         let mut source = ConnectionStore::load(source_path).unwrap();
         source
             .upsert(SaveConnectionRequest {
+                pre_connect_command: None,
                 totp_credential_id: None,
                 id: Some("conn-1".to_string()),
                 name: "Production".to_string(),

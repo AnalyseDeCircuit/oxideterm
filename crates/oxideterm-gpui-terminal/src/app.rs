@@ -5664,6 +5664,7 @@ mod tests {
     fn missing_serial_port_is_reported_before_pane_construction() {
         const MISSING_SERIAL_PORT_PATH: &str = "oxideterm-test-missing-serial-port";
         let config = SerialSessionConfig {
+            pre_connect_command: None,
             port_path: MISSING_SERIAL_PORT_PATH.to_string(),
             baud_rate: 115_200,
             data_bits: 8,
@@ -6650,6 +6651,7 @@ mod tests {
                         return pane;
                     }
                     pane.with_serial_session_config(SerialSessionConfig {
+                        pre_connect_command: None,
                         port_path: "test-serial-console".into(),
                         baud_rate: 115_200,
                         data_bits: 8,

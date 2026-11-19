@@ -6,6 +6,7 @@ pub fn form_from_remote_desktop_profile(
 ) -> NewConnectionForm {
     // Editing carries only the keychain reference; the credential value is never loaded.
     let mut form = NewConnectionForm::default();
+    form.pre_connect_command = profile.pre_connect_command.clone().unwrap_or_default();
     form.transport = match profile.protocol {
         oxideterm_remote_desktop::RemoteDesktopProtocol::Rdp => NewConnectionTransport::Rdp,
         oxideterm_remote_desktop::RemoteDesktopProtocol::Vnc => NewConnectionTransport::Vnc,
@@ -32,6 +33,7 @@ pub fn form_from_remote_desktop_profile(
 pub fn form_from_mosh_profile(profile: &MoshProfile, ungrouped_label: String) -> NewConnectionForm {
     // Editing retains only protected-store references and never loads the secret value.
     let mut form = NewConnectionForm::default();
+    form.pre_connect_command = profile.pre_connect_command.clone().unwrap_or_default();
     form.transport = NewConnectionTransport::Mosh;
     form.mosh_profile_id = Some(profile.id.clone());
     form.name = profile.name.clone();
@@ -198,6 +200,7 @@ pub fn form_from_serial_profile(
 ) -> NewConnectionForm {
     // The edit form owns only persisted settings; live serial sessions keep their current port.
     let mut form = NewConnectionForm::default();
+    form.pre_connect_command = profile.pre_connect_command.clone().unwrap_or_default();
     form.transport = NewConnectionTransport::Serial;
     form.serial_profile_id = Some(profile.id.clone());
     form.serial_profile_name = profile.name.clone();
@@ -259,6 +262,7 @@ pub fn form_from_telnet_profile(
 ) -> NewConnectionForm {
     // The edit form owns only persisted settings; live Telnet sessions keep their current socket.
     let mut form = NewConnectionForm::default();
+    form.pre_connect_command = profile.pre_connect_command.clone().unwrap_or_default();
     form.transport = NewConnectionTransport::Telnet;
     form.telnet_profile_id = Some(profile.id.clone());
     form.telnet_input_line_ending = profile.input_line_ending;

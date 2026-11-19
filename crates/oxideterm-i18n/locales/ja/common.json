@@ -896,6 +896,7 @@
         "proxy_chain": "プロキシチェーン",
         "agent_forwarding": "エージェント転送",
         "post_connect_command": "接続後コマンド",
+        "pre_connect_command": "接続前コマンド",
         "color": "色",
         "tags": "タグ",
         "ssh_kex_algorithms": "SSH 鍵交換アルゴリズム",
@@ -1354,6 +1355,14 @@
     "cat_files_dev": "ファイルとリモート開発",
     "cat_ops_ai": "ホスト運用と AI",
     "cat_security_ext": "セキュリティ・同期・拡張"
+  },
+  "connection": {
+    "pre_connect": {
+      "too_long": "接続前コマンドが長すぎます（最大 {limit} バイト）",
+      "spawn_failed": "接続前コマンドを開始できませんでした",
+      "timeout": "接続前コマンドが {seconds} 秒後にタイムアウトしました",
+      "exit_code": "接続前コマンドが失敗しました（終了コード {code}）"
+    }
   },
   "zen_mode": {
     "exit": "Zen モードを終了",

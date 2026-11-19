@@ -65,6 +65,9 @@ impl PublicMcpHost {
             password,
             ssh_gateway_connection_id: saved.ssh_gateway_connection_id,
             profile: RemoteDesktopConnectionProfile {
+                // This tool entry point opens the tab directly, so it does not
+                // run the local gate that profile-based opens enforce.
+                pre_connect_command: None,
                 id: saved.id,
                 label: saved.name,
                 protocol: saved.protocol,

@@ -302,6 +302,15 @@ pub(super) fn connection_merge_fields(
     );
     push_merge_changed(
         &mut fields,
+        "plugin.cloud_sync.diff_fields.pre_connect_command",
+        redacted_presence(base.pre_connect_command.as_ref()),
+        redacted_presence(local.pre_connect_command.as_ref()),
+        redacted_presence(remote.pre_connect_command.as_ref()),
+        redacted_presence(effective.pre_connect_command.as_ref()),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
         "plugin.cloud_sync.diff_fields.color",
         base.color.clone(),
         local.color.clone(),

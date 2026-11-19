@@ -276,6 +276,9 @@ impl WorkspaceApp {
                         write_without_response: saved_profile
                             .map(|profile| profile.write_without_response)
                             .unwrap_or(true),
+                        pre_connect_command: saved_profile
+                            .and_then(|profile| profile.pre_connect_command.clone())
+                            .or_else(|| clues.pre_connect_command.clone()),
                         profile_id: saved_profile_id,
                         form_id: None,
                         standalone: BleStandaloneTarget::Reconnect {
@@ -418,6 +421,7 @@ impl WorkspaceApp {
                     config: current_profile.map_or_else(
                         || config.clone(),
                         |profile| SerialSessionConfig {
+                            pre_connect_command: profile.pre_connect_command.clone(),
                             port_path: profile.port_path.clone(),
                             baud_rate: profile.baud_rate,
                             data_bits: profile.data_bits,
@@ -470,6 +474,7 @@ impl WorkspaceApp {
                     config: current_profile.map_or_else(
                         || config.clone(),
                         |profile| TelnetSessionConfig {
+                            pre_connect_command: profile.pre_connect_command.clone(),
                             line_endings: new_connection::terminal_telnet_line_endings_from_profile(
                                 profile,
                             ),
@@ -513,6 +518,7 @@ impl WorkspaceApp {
                             device_name: profile.device_name.clone(),
                             platform_identifier: profile.platform_identifier.clone(),
                             service_uuid: profile.service_uuid.clone(),
+                            pre_connect_command: profile.pre_connect_command.clone(),
                         },
                     ),
                     terminal_options: current_profile.map_or_else(
@@ -563,6 +569,7 @@ mod tests {
     fn serial_launch() -> StandaloneConnectionLaunch {
         StandaloneConnectionLaunch::Serial {
             config: SerialSessionConfig {
+                pre_connect_command: None,
                 port_path: "/dev/tty.test".to_string(),
                 baud_rate: 115_200,
                 data_bits: 8,
@@ -626,6 +633,7 @@ mod tests {
                 device_name: Some("test-nus".to_string()),
                 platform_identifier: None,
                 service_uuid: "6e400001-b5a3-f393-e0a9-e50e24dcca9e".to_string(),
+                pre_connect_command: None,
             },
             terminal_options: ConnectionTerminalOptions::default(),
         }

@@ -29,6 +29,7 @@ impl ConnectionStore {
             icon_background_color: normalize_optional_text(request.icon_background_color),
             shell_id: normalize_optional_text(request.shell_id),
             cwd: normalize_optional_text(request.cwd),
+            pre_connect_command: normalize_optional_text(request.pre_connect_command),
             created_at: existing.map_or(now, |p| p.created_at),
             updated_at: now,
             last_used_at: existing.and_then(|p| p.last_used_at),

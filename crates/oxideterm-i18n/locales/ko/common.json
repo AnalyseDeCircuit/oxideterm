@@ -896,6 +896,7 @@
         "proxy_chain": "프록시 체인",
         "agent_forwarding": "에이전트 전달",
         "post_connect_command": "연결 후 명령",
+        "pre_connect_command": "연결 전 명령",
         "color": "색상",
         "tags": "태그",
         "ssh_kex_algorithms": "SSH 키 교환 알고리즘",
@@ -1354,6 +1355,14 @@
     "cat_files_dev": "파일 및 원격 개발",
     "cat_ops_ai": "호스트 운영 및 AI",
     "cat_security_ext": "보안, 동기화 및 확장"
+  },
+  "connection": {
+    "pre_connect": {
+      "too_long": "연결 전 명령이 너무 깁니다(최대 {limit}바이트)",
+      "spawn_failed": "연결 전 명령을 시작할 수 없습니다",
+      "timeout": "연결 전 명령이 {seconds}초 후 시간 초과되었습니다",
+      "exit_code": "연결 전 명령이 실패했습니다(종료 코드 {code})"
+    }
   },
   "zen_mode": {
     "exit": "Zen 모드 종료",

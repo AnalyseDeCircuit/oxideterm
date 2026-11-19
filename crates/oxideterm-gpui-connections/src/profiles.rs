@@ -596,6 +596,7 @@ pub fn runtime_mosh_config_from_saved(
         legacy_ssh_compatibility: profile.legacy_ssh_compatibility,
         ssh_algorithms: profile.ssh_algorithms.clone(),
         strict_host_key_checking: true,
+        pre_connect_command: profile.pre_connect_command.clone(),
         ..SshConfig::default()
     })
 }

@@ -655,11 +655,19 @@ impl ConnectionFormView {
             // Terminal behavior is shared with the telnet form: both call the
             // same renderer so encoding, key sequences, highlighting, and
             // session logging stay in sync instead of diverging.
-            .child(self.render_connection_form_section(
-                ConnectionFormSection::Terminal,
-                self.render_connection_terminal_options(cx),
-                cx,
-            ))
+            .child(
+                self.render_connection_form_section(
+                    ConnectionFormSection::Terminal,
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(self.tokens.metrics.modal_section_gap))
+                        .child(self.render_connection_terminal_options(cx))
+                        .child(self.render_connection_pre_connect_command(cx))
+                        .into_any_element(),
+                    cx,
+                ),
+            )
             .child(self.render_connection_form_section(
                 ConnectionFormSection::Appearance,
                 self.render_connection_appearance_options(cx),
