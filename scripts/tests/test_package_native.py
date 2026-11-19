@@ -591,13 +591,25 @@ class PlatformSigningTests(unittest.TestCase):
                 self.subTest(identity=identity),
                 patch.dict(package_native.os.environ, environment, clear=True),
             ):
-                command = package_native.macos_codesign_command("codesign", Path("OxideTerm.app"))
-                self.assertEqual(command[-3:], ["--sign", identity, "OxideTerm.app"])
-                if hardened:
-                    self.assertEqual(command[3:6], ["--options", "runtime", "--timestamp"])
-                else:
-                    self.assertNotIn("--options", command)
-                    self.assertNotIn("--timestamp", command)
+                for path, entitlements in [
+                    (Path("OxideTerm.app"), package_native.MACOS_ENTITLEMENTS),
+                    (Path("Contents/Resources/cli-bin/oxideterm"), None),
+                    (Path("OxideTerm.dmg"), None),
+                ]:
+                    expected = ["codesign", "--force"]
+                    if hardened and path.suffix != ".dmg":
+                        expected.extend(["--options", "runtime"])
+                    if hardened:
+                        expected.append("--timestamp")
+                    if entitlements:
+                        expected.extend(["--entitlements", str(entitlements)])
+                    expected.extend(["--sign", identity, str(path)])
+                    self.assertEqual(
+                        package_native.macos_codesign_command(
+                            "codesign", path, entitlements=entitlements
+                        ),
+                        expected,
+                    )
 
     def test_macos_notarization_is_optional_for_development_builds(self) -> None:
         with patch.dict(package_native.os.environ, {}, clear=True):

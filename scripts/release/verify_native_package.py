@@ -15,6 +15,7 @@ import zipfile
 from pathlib import Path
 
 from conpty_runtime import runtime_files as conpty_runtime_files, verify_digest
+from package_native import macos_binary_paths, macos_signing_identity
 
 
 REQUIRED_DOCUMENTS = {
@@ -210,6 +211,37 @@ def verify_macos_app_zip(path: Path, expected_version: str) -> None:
 def verify_macos_tauri_archive(path: Path, expected_version: str) -> None:
     """Validate the legacy Tauri updater archive using the app bundle contract."""
     verify_macos_app_zip(path, expected_version)
+
+
+def verify_macos_signature(path: Path, *, deep: bool = False) -> None:
+    command = [
+        "codesign", "--verify", "--strict",
+        "-R=anchor apple generic and certificate leaf[field.1.2.840.113635.100.6.1.13] exists",
+    ]
+    if deep:
+        command.append("--deep")
+    run_checked([*command, str(path)])
+
+
+def verify_macos_distribution_signatures(
+    app_zip: Path, disk_image: Path, *, notarized: bool
+) -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        run_checked(["ditto", "-x", "-k", str(app_zip), directory])
+        bundles = [path for path in Path(directory).glob("*.app") if path.is_dir()]
+        if len(bundles) != 1:
+            raise RuntimeError(f"expected one .app in {app_zip.name}, found {len(bundles)}")
+        app = bundles[0]
+        verify_macos_signature(app, deep=True)
+        # Resources code is sealed as data and isn't recursively verified by codesign.
+        for path in macos_binary_paths(app / "Contents" / "Resources"):
+            verify_macos_signature(path)
+        if notarized:
+            run_checked(["xcrun", "stapler", "validate", str(app)])
+
+    verify_macos_signature(disk_image)
+    if notarized:
+        run_checked(["xcrun", "stapler", "validate", str(disk_image)])
 
 
 def run_checked(command: list[str], *, cwd: Path | None = None) -> str:
@@ -435,8 +467,12 @@ def verify_windows_installer(path: Path, expected_version: str, target: str) -> 
                 verify_digest(runtime.read_bytes(), digest, relative)
 
 
-def verify_release(dist: Path, target: str, version: str) -> dict[str, object]:
+def verify_release(
+    dist: Path, target: str, version: str, *, macos_notarized: bool = False
+) -> dict[str, object]:
     version = normalized_version(version)
+    macos = "apple-darwin" in target
+    macos_signed = macos and (macos_notarized or macos_signing_identity() != "-")
     expected = expected_artifact_names(target, version)
     missing = sorted(name for name in expected if not (dist / name).is_file())
     if missing:
@@ -459,13 +495,23 @@ def verify_release(dist: Path, target: str, version: str) -> dict[str, object]:
         if "linux" in target:
             verify_linux_dynamic_libraries(binary)
             verify_linux_glibc_compatibility(binary)
-        elif "apple-darwin" in target:
+        elif macos:
             verify_macos_build_version(binary)
+            if macos_signed:
+                for path in macos_binary_paths(binary.parent):
+                    verify_macos_signature(path)
 
     if "windows" in target:
         verify_windows_installer(dist / f"OxideTerm_{version}_{label}-setup.exe", version, target)
-    elif "apple-darwin" in target:
-        verify_macos_app_zip(dist / f"OxideTerm_{version}_{label}.app.zip", version)
+    elif macos:
+        app_zip = dist / f"OxideTerm_{version}_{label}.app.zip"
+        verify_macos_app_zip(app_zip, version)
+        if macos_signed:
+            verify_macos_distribution_signatures(
+                app_zip,
+                dist / f"OxideTerm_{version}_{label}.dmg",
+                notarized=macos_notarized,
+            )
         legacy_archive = dist / f"OxideTerm_{version}_{label}.app.tar.gz"
         if legacy_archive.exists():
             verify_macos_tauri_archive(legacy_archive, version)
@@ -482,9 +528,15 @@ def main() -> int:
     parser.add_argument("--target", required=True)
     parser.add_argument("--version", required=True)
     parser.add_argument("--dist", type=Path, default=Path("dist"))
+    parser.add_argument(
+        "--macos-notarized", action="store_true",
+        help="Require Developer ID signatures and validate the stapled macOS tickets.",
+    )
     args = parser.parse_args()
     try:
-        summary = verify_release(args.dist, args.target, args.version)
+        summary = verify_release(
+            args.dist, args.target, args.version, macos_notarized=args.macos_notarized
+        )
     except Exception as error:
         print(json.dumps({"status": "error", "error": str(error)}, ensure_ascii=True))
         return 1

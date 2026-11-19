@@ -655,24 +655,30 @@ def build_macos_info_plist(version: str, identity: ReleaseIdentity) -> dict:
     return merge_macos_info_plist_extensions(plist)
 
 
-def macos_codesign_command(codesign: str, app_dir: Path) -> list[str]:
-    command = [codesign, "--force", "--deep"]
-    signing_identity = os.environ.get("MACOS_CODESIGN_IDENTITY", "-").strip() or "-"
+def macos_signing_identity() -> str:
+    return os.environ.get("MACOS_CODESIGN_IDENTITY", "-").strip() or "-"
+
+
+def macos_codesign_command(
+    codesign: str, path: Path, *, entitlements: Path | None = None
+) -> list[str]:
+    command = [codesign, "--force"]
+    signing_identity = macos_signing_identity()
     if signing_identity != "-":
-        command.extend(["--options", "runtime", "--timestamp"])
-    if MACOS_ENTITLEMENTS.exists():
-        # Keep ad-hoc preview builds aligned with the app bundle metadata.
-        # Without these entitlements, macOS can block local/private-network
-        # traffic even when Info.plist contains the usage description.
-        command.extend(["--entitlements", str(MACOS_ENTITLEMENTS)])
-    command.extend(["--sign", signing_identity, str(app_dir)])
+        if path.suffix != ".dmg":
+            command.extend(["--options", "runtime"])
+        command.append("--timestamp")
+        if keychain := os.environ.get("MACOS_SIGNING_KEYCHAIN"):
+            command.extend(["--keychain", keychain])
+    if entitlements is not None:
+        command.extend(["--entitlements", str(entitlements)])
+    command.extend(["--sign", signing_identity, str(path)])
     return command
 
 
 def should_include_macos_unsigned_install_notice(identity: ReleaseIdentity) -> bool:
     """Include Gatekeeper help in an unsigned DMG for the standard app."""
-    signing_identity = os.environ.get("MACOS_CODESIGN_IDENTITY", "-").strip() or "-"
-    return identity.app_identifier == STANDARD_APP_IDENTIFIER and signing_identity == "-"
+    return identity.app_identifier == STANDARD_APP_IDENTIFIER and macos_signing_identity() == "-"
 
 
 def copy_macos_unsigned_install_notice(
@@ -829,17 +835,17 @@ def create_macos_dmg(
     writable_dmg.unlink(missing_ok=True)
 
 
-def sign_macos_path(path: Path) -> None:
+def sign_macos_path(path: Path, *, entitlements: Path | None = None) -> None:
     codesign = require_tool("codesign")
     # Ad-hoc signing does not notarize the app, but it keeps stripped preview
     # bundles launchable on Apple Silicon instead of producing a damaged-app error.
-    run(macos_codesign_command(codesign, path))
+    run(macos_codesign_command(codesign, path, entitlements=entitlements))
     run([codesign, "--verify", "--verbose", str(path)])
 
 
 def is_macos_binary(path: Path) -> bool:
     """Return whether `path` contains Mach-O code that needs its own signature."""
-    if not path.is_file():
+    if path.is_symlink() or not path.is_file():
         return False
     file_tool = require_tool("file")
     description = subprocess.check_output(
@@ -848,11 +854,34 @@ def is_macos_binary(path: Path) -> bool:
     return "Mach-O" in description
 
 
-def sign_macos_portable_tree(package_root: Path) -> None:
+def macos_binary_paths(root: Path) -> list[Path]:
+    return [path for path in sorted(root.rglob("*")) if is_macos_binary(path)]
+
+
+def sign_macos_app_bundle(app_dir: Path) -> None:
+    contents = app_dir / "Contents"
+    main_executable = contents / "MacOS" / APP_BIN
+    for path in macos_binary_paths(contents):
+        if path != main_executable:
+            sign_macos_path(path)
+
+    nested_bundles = (
+        path for path in contents.rglob("*")
+        if path.suffix in {".framework", ".app", ".xpc", ".appex"}
+        and path.is_dir() and not path.is_symlink()
+    )
+    for bundle in sorted(nested_bundles, key=lambda path: (-len(path.parts), path)):
+        sign_macos_path(bundle)
+
+    # Signing the bundle signs its main executable. Helpers don't run Wasmtime.
+    sign_macos_path(app_dir, entitlements=MACOS_ENTITLEMENTS)
+
+
+def sign_macos_portable_tree(package_root: Path, main_executable: Path) -> None:
     """Sign every Mach-O payload because a portable directory is not a bundle."""
-    for candidate in sorted(package_root.rglob("*")):
-        if is_macos_binary(candidate):
-            sign_macos_path(candidate)
+    for path in macos_binary_paths(package_root):
+        entitlements = MACOS_ENTITLEMENTS if path == main_executable else None
+        sign_macos_path(path, entitlements=entitlements)
 
 
 def notarize_macos_portable_tree(package_root: Path) -> None:
@@ -875,7 +904,7 @@ def notarize_macos_artifact(path: Path, *, staple: bool) -> bool:
         return False
     if not all(configured):
         raise RuntimeError("macOS notarization requires key path, key id, and issuer id")
-    if os.environ.get("MACOS_CODESIGN_IDENTITY", "-").strip() in ("", "-"):
+    if macos_signing_identity() == "-":
         raise RuntimeError("macOS notarization requires a Developer ID signing identity")
 
     def notary_request(action: str, target: str) -> dict:
@@ -891,15 +920,23 @@ def notarize_macos_artifact(path: Path, *, staple: bool) -> bool:
             check=False,
         )
         print(response.stdout, end="", flush=True)
-        response.check_returncode()
+        if response.returncode != 0:
+            raise RuntimeError(f"notarytool {action} failed (exit {response.returncode})")
         return json.loads(response.stdout)
 
     # Log the submission ID before waiting so a timed-out CI job can be checked.
     print(f"Submitting {path.name} for macOS notarization.", flush=True)
     submission_id = notary_request("submit", str(path))["id"]
-    status = notary_request("wait", submission_id)["status"]
-    if status != "Accepted":
-        raise RuntimeError(f"macOS notarization for {path.name} ended with status {status}")
+    try:
+        status = notary_request("wait", submission_id)["status"]
+        if status != "Accepted":
+            raise RuntimeError(f"macOS notarization for {path.name} ended with status {status}")
+    except (RuntimeError, OSError, ValueError, KeyError):
+        try:
+            notary_request("log", submission_id)
+        except (RuntimeError, OSError, ValueError) as log_error:
+            print(f"Could not retrieve notarization log for {submission_id}: {log_error}", flush=True)
+        raise
 
     if staple:
         run(["xcrun", "stapler", "staple", str(path)])
@@ -1022,7 +1059,7 @@ def create_portable_package(
     if "apple-darwin" in target:
         # Standalone helpers are outside an app bundle, so each Mach-O file must
         # be signed and included in its own notarization submission.
-        sign_macos_portable_tree(package_root)
+        sign_macos_portable_tree(package_root, binary_dest)
         notarize_macos_portable_tree(package_root)
 
     if "windows" in target:
@@ -1367,7 +1404,7 @@ def create_macos_app(
     with (contents / "Info.plist").open("wb") as file:
         plistlib.dump(plist, file)
 
-    sign_macos_path(app_dir)
+    sign_macos_app_bundle(app_dir)
     app_zip = DIST_DIR / f"OxideTerm_{version}_{label}.app.zip"
     zip_macos_app_bundle(app_dir, app_zip)
     if notarize_macos_artifact(app_zip, staple=False):
@@ -1394,6 +1431,8 @@ def create_macos_app(
         copy_macos_unsigned_install_notice(dmg_root, identity)
         dmg_path = DIST_DIR / f"OxideTerm_{version}_{label}.dmg"
         create_macos_dmg(dmg_root, dmg_path, identity)
+        if macos_signing_identity() != "-":
+            sign_macos_path(dmg_path)
         notarize_macos_artifact(dmg_path, staple=True)
         shutil.rmtree(dmg_root)
 
