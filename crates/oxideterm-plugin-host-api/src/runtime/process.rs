@@ -12,6 +12,71 @@ const PROCESS_OUTPUT_QUEUE_CAPACITY: usize = 32;
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
+fn build_process_command(executable: &Path) -> Result<tokio::process::Command, PluginError> {
+    #[cfg(windows)]
+    if executable
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("cmd") || ext.eq_ignore_ascii_case("bat"))
+    {
+        let path = plain_batch_path(executable)?;
+        // Command probes a sibling with an added .exe suffix before it recognizes
+        // a batch file. It must not launch an entry other than the validated one.
+        let mut exe_probe = path.as_os_str().to_os_string();
+        exe_probe.push(".exe");
+        match fs::symlink_metadata(&exe_probe) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Ok(_) => {
+                return Err(PluginError::runtime(
+                    "process_spawn_failed",
+                    "A sibling .exe shadows the plugin batch entry",
+                ));
+            }
+            Err(error) => {
+                return Err(PluginError::runtime(
+                    "process_spawn_failed",
+                    format!("Cannot check plugin batch entry: {error}"),
+                ));
+            }
+        }
+        // Let Rust quote the script and disable cmd.exe AutoRun. Protocol data
+        // stays on stdin; no plugin arguments are passed to the command prompt.
+        return Ok(tokio::process::Command::new(path));
+    }
+    Ok(tokio::process::Command::new(executable))
+}
+
+#[cfg(windows)]
+fn plain_batch_path(executable: &Path) -> Result<PathBuf, PluginError> {
+    let invalid_path = || {
+        PluginError::runtime(
+            "process_spawn_failed",
+            "Plugin batch entry cannot be passed to the Windows command prompt unchanged",
+        )
+    };
+    let text = executable.to_str().ok_or_else(invalid_path)?;
+    // The standard library quotes the script name but only escapes percent
+    // characters in its arguments. Avoid expansion in the script name itself.
+    if text.contains('%') {
+        return Err(invalid_path());
+    }
+    let Some(rest) = text.strip_prefix(r"\\?\") else {
+        return Err(invalid_path());
+    };
+    let path = if let Some(share) = rest.strip_prefix(r"UNC\") {
+        PathBuf::from(format!(r"\\{share}"))
+    } else if matches!(rest.as_bytes(), [drive, b':', b'\\', ..] if drive.is_ascii_alphabetic()) {
+        PathBuf::from(rest)
+    } else {
+        return Err(invalid_path());
+    };
+    // Removing the verbatim prefix can change Windows path normalization.
+    // Confirm that the command prompt's path still names the validated entry.
+    if !matches!(fs::canonicalize(&path), Ok(resolved) if resolved == executable) {
+        return Err(invalid_path());
+    }
+    Ok(path)
+}
+
 pub struct NativeProcessPluginRuntime {
     plugin_dir: PathBuf,
     entry: String,
@@ -101,7 +166,7 @@ impl NativeProcessPluginRuntime {
             // Process plugins communicate over host-owned stdio. Do not inherit
             // workspace stdio, because plugin logs/results must be captured and
             // classified by the runtime bridge instead of leaking to the app.
-            let mut command = tokio::process::Command::new(executable);
+            let mut command = build_process_command(&executable)?;
             command
                 .current_dir(&self.plugin_dir)
                 .stdin(Stdio::piped())

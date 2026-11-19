@@ -1169,3 +1169,56 @@ sleep 2
         PluginRuntimeLifecycleState::Error
     );
 }
+
+#[cfg(windows)]
+#[tokio::test]
+async fn windows_process_batch_entry_completes_activation_handshake() {
+    let plugin_dir = unique_temp_dir("batch plugin & handshake");
+    fs::create_dir_all(&plugin_dir).unwrap();
+    let entry = "plugin.cmd";
+    fs::write(
+        plugin_dir.join(entry),
+        concat!(
+            "@echo off\r\n",
+            "set \"request=\"\r\n",
+            "set /p request=\r\n",
+            "if not defined request exit /b 1\r\n",
+            "echo {\"protocolVersion\":1,\"requestId\":\"batch-activate\",\"payload\":{\"requestId\":\"batch-activate\",\"result\":{\"status\":\"ok\",\"value\":{\"entry\":\"plugin.cmd\"}}}}\r\n",
+        ),
+    )
+    .unwrap();
+
+    let mut runtime = NativeProcessPluginRuntime::new(
+        "com.example.runtime",
+        &plugin_dir,
+        entry,
+        Duration::from_secs(10),
+    );
+    let request = || PluginActivateRequest {
+        request_id: "batch-activate".to_string(),
+        manifest: sample_manifest(),
+        permissions: PluginPermissionSet::default(),
+        timeout_ms: 10_000,
+    };
+
+    let response = runtime.activate(request()).await.unwrap();
+    let PluginResponseResult::Ok { value } = response.result else {
+        panic!("batch entry did not complete the activation handshake");
+    };
+    assert_eq!(value, serde_json::json!({ "entry": "plugin.cmd" }));
+    assert_eq!(
+        runtime.health().await.unwrap().state,
+        PluginRuntimeLifecycleState::Active
+    );
+    runtime.kill().await.unwrap();
+
+    // A sibling executable must not silently take precedence over the manifest entry.
+    fs::write(plugin_dir.join("plugin.cmd.exe"), b"not the manifest entry").unwrap();
+    let error = runtime.activate(request()).await.unwrap_err();
+    assert_eq!(error.code, "process_spawn_failed");
+    assert_eq!(
+        error.message,
+        "A sibling .exe shadows the plugin batch entry"
+    );
+    fs::remove_dir_all(plugin_dir).unwrap();
+}
