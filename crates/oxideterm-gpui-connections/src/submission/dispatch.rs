@@ -169,6 +169,16 @@ impl ConnectionFlowEntity {
         }
     }
 
+    pub fn open_desktop_reconnect_form(
+        &mut self,
+        mut form: NewConnectionForm,
+        reconnect_id: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        form.standalone_connection_id = reconnect_id;
+        self.replace_form(form, cx);
+    }
+
     pub fn open_duplicate_form(
         &mut self,
         form: NewConnectionForm,

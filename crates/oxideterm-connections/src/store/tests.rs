@@ -3647,7 +3647,13 @@ mod tests {
             .unwrap();
         assert_eq!(serial.pre_connect_command, None);
 
-        let reloaded = ConnectionStore::load(path).unwrap();
+        let mut reloaded = ConnectionStore::load(path).unwrap();
+        let mut snapshot = reloaded.export_saved_connections_snapshot().unwrap();
+        let record = snapshot.records.iter_mut().find(|r| r.id == "pre-connect-ssh").unwrap();
+        let options = record.options.as_mut().unwrap();
+        assert_eq!(options.pre_connect_command, None);
+        options.pre_connect_command = Some("remote-supplied text".to_owned());
+        reloaded.apply_saved_connections_snapshot(snapshot, SavedConnectionsConflictStrategy::Replace).unwrap();
         assert_eq!(
             reloaded
                 .get("pre-connect-ssh")

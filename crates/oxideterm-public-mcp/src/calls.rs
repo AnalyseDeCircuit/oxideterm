@@ -257,8 +257,6 @@ pub struct PublicSshProfile {
     #[serde(default)]
     pub post_connect_command: Option<String>,
     #[serde(default)]
-    pub pre_connect_command: Option<String>,
-    #[serde(default)]
     pub terminal: PublicTerminalOptions,
 }
 
@@ -300,8 +298,6 @@ pub struct PublicSerialProfile {
     #[serde(default)]
     pub terminal: PublicTerminalOptions,
     #[serde(default)]
-    pub pre_connect_command: Option<String>,
-    #[serde(default)]
     pub connect_on_open: bool,
     #[serde(default)]
     pub color: Option<String>,
@@ -324,8 +320,6 @@ pub struct PublicTelnetProfile {
     pub port: u16,
     #[serde(default)]
     pub terminal: PublicTerminalOptions,
-    #[serde(default)]
-    pub pre_connect_command: Option<String>,
     #[serde(default)]
     pub connect_on_open: bool,
     #[serde(default)]
@@ -397,8 +391,6 @@ pub struct PublicMoshProfile {
     pub locale: Option<String>,
     #[serde(default)]
     pub terminal: PublicTerminalOptions,
-    #[serde(default)]
-    pub pre_connect_command: Option<String>,
     #[serde(default)]
     pub identity_agent: Option<String>,
     #[serde(default)]
@@ -523,8 +515,6 @@ pub struct PublicRemoteDesktopProfile {
     pub read_only: bool,
     #[serde(default)]
     pub options: PublicRemoteDesktopOptions,
-    #[serde(default)]
-    pub pre_connect_command: Option<String>,
     #[serde(default)]
     pub color: Option<String>,
     #[serde(default)]

@@ -44,13 +44,6 @@ impl WorkspaceApp {
         handled
     }
 
-    pub(super) fn cancel_session_group_editor(&mut self, cx: &mut Context<Self>) {
-        self.connections
-            .session_manager
-            .update(cx, SessionManagerState::cancel_group_editor);
-        self.ime_marked_text = None;
-    }
-
     pub(in crate::workspace) fn render_session_manager_surface(
         &mut self,
         _window: &Window,

@@ -169,6 +169,7 @@ impl ConnectionStore {
                 continue;
             }
             profile.last_used_at = existing.and_then(|p| p.last_used_at);
+            profile.pre_connect_command = existing.and_then(|p| p.pre_connect_command.clone());
             self.data
                 .local_terminal_tombstones
                 .retain(|t| t.id != profile.id);

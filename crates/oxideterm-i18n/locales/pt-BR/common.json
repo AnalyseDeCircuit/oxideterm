@@ -896,7 +896,6 @@
         "proxy_chain": "Cadeia de proxy",
         "agent_forwarding": "Encaminhamento do agente",
         "post_connect_command": "Comando pós-conexão",
-        "pre_connect_command": "Comando antes da conexão",
         "color": "Cor",
         "tags": "Tags",
         "ssh_kex_algorithms": "Algoritmos de troca de chaves SSH",

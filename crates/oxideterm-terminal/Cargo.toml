@@ -22,6 +22,7 @@ regex.workspace = true
 oxideterm-ssh = { path = "../oxideterm-ssh" }
 oxideterm-ble = { path = "../oxideterm-ble" }
 oxideterm-i18n = { path = "../oxideterm-i18n" }
+oxideterm-local-command = { path = "../oxideterm-local-command" }
 oxideterm-modem-transfer = { path = "../oxideterm-modem-transfer" }
 oxideterm-mosh = { path = "../oxideterm-mosh" }
 oxideterm-network-proxy = { path = "../oxideterm-network-proxy" }

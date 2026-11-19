@@ -66,7 +66,11 @@ impl crate::views::ConnectionsViews {
         i18n: &I18n,
         cx: &mut gpui::App,
     ) -> SshTestRoute {
-        if config.proxy_chain.as_ref().is_some_and(|chain| !chain.is_empty()) {
+        if config
+            .proxy_chain
+            .as_ref()
+            .is_some_and(|chain| !chain.is_empty())
+        {
             crate::conversion::prepare_proxy_chain_test_config(config);
             return SshTestRoute::Direct;
         }
@@ -81,11 +85,13 @@ impl crate::views::ConnectionsViews {
                 flow.clear_connected_form(cx);
             }
         });
-        self.session_manager.update(cx, |manager, cx| manager.set_status(None, cx));
+        self.session_manager
+            .update(cx, |manager, cx| manager.set_status(None, cx));
     }
 
     pub fn finish_drill_down_form(&self, i18n: &I18n, cx: &mut gpui::App) {
-        self.flow.update(cx, ConnectionFlowEntity::clear_connected_form);
+        self.flow
+            .update(cx, ConnectionFlowEntity::clear_connected_form);
         self.show_catalog_status(i18n.t("ssh.drill_down.connecting"), cx);
     }
 }
@@ -104,7 +110,11 @@ impl ConnectionFlowEntity {
     ) -> VerifiedManualSshRoute {
         self.clear_connected_form(cx);
         self.clear_host_key_challenge(cx);
-        if config.proxy_chain.as_ref().is_some_and(|chain| !chain.is_empty()) {
+        if config
+            .proxy_chain
+            .as_ref()
+            .is_some_and(|chain| !chain.is_empty())
+        {
             VerifiedManualSshRoute::SessionTree
         } else {
             VerifiedManualSshRoute::Direct
@@ -127,7 +137,11 @@ impl ConnectionFlowEntity {
     ) {
         self.set_form_feedback(Some(true), Some(i18n.t("ssh.form.test_running")), cx);
         crate::workers::test_standalone_sftp(
-            config, self.ssh_worker_sender(), managed_key_resolver_from_store(store), registry, runtime,
+            config,
+            self.ssh_worker_sender(),
+            managed_key_resolver_from_store(store),
+            registry,
+            runtime,
         );
     }
 

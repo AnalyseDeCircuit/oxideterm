@@ -1738,15 +1738,15 @@ pub async fn ble_resolve_profile_to_session(
     use btleplug::api::Peripheral as _;
     use uuid::Uuid;
 
-    if let Some(command) = pre_connect_command.clone()
-        && let Err(failure) = crate::local_command::run_pre_connect_command_async(
-            command,
-            crate::local_command::PRE_CONNECT_COMMAND_TIMEOUT,
-        )
-        .await
-    {
-        // The gate must finish before any adapter or radio work begins.
-        return Err(BleResolveError::PreConnectCommand(failure));
+    if let Some(command) = pre_connect_command {
+        tokio::select! {
+            biased;
+            _ = cancelled.cancelled() => return Err(BleResolveError::Cancelled),
+            result = crate::local_command::run_pre_connect_command_async(
+                command,
+                crate::local_command::PRE_CONNECT_COMMAND_TIMEOUT,
+            ) => result.map_err(BleResolveError::PreConnectCommand)?,
+        }
     }
     on_stage(BleResolveStage::OpeningAdapter);
     let target_service =

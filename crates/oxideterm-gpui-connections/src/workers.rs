@@ -7,7 +7,7 @@ use oxideterm_ssh::{
     check_host_key_with_upstream_proxy,
 };
 use oxideterm_terminal::{
-    PRE_CONNECT_COMMAND_TIMEOUT, pre_connect_failure_message, run_pre_connect_command,
+    PRE_CONNECT_COMMAND_TIMEOUT, pre_connect_failure_message, run_pre_connect_command_cancellable,
 };
 use oxideterm_workspace::delivery::ActiveDeliverySender;
 
@@ -44,8 +44,14 @@ pub fn preflight(
     let prompt_handler = Arc::new(NativeSshPromptHandler::new(tx.clone()));
     std::thread::spawn(move || {
         let mut worker_config = worker_config;
-        if let Some(command) = worker_config.pre_connect_command.clone() {
-            if let Err(failure) = run_pre_connect_command(&command, PRE_CONNECT_COMMAND_TIMEOUT) {
+        if let Some(command) = worker_config.pre_connect_command.as_deref() {
+            let wake = tx.wake();
+            if let Err(failure) = run_pre_connect_command_cancellable(
+                command, PRE_CONNECT_COMMAND_TIMEOUT, || wake.is_stopped()
+            ) {
+                if wake.is_stopped() {
+                    return;
+                }
                 let _ = tx.send(SshConnectionWorkerResult::Preflight {
                     config: worker_config,
                     upstream_proxy,

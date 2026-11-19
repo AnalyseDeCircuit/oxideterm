@@ -32,6 +32,7 @@ oxideterm-settings = { path = "../oxideterm-settings" }
 oxideterm-settings-model = { path = "../oxideterm-settings-model" }
 oxideterm-ssh = { path = "../oxideterm-ssh" }
 oxideterm-terminal = { path = "../oxideterm-terminal" }
+oxideterm-terminal-triggers = { path = "../oxideterm-terminal-triggers" }
 oxideterm-theme = { path = "../oxideterm-theme" }
 oxideterm-workspace = { path = "../oxideterm-workspace" }
 serde.workspace = true

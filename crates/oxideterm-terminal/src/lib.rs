@@ -74,8 +74,8 @@ pub use editor_integration::{
 };
 pub use local_command::{
     LocalCommandFailure, PRE_CONNECT_COMMAND_MAX_BYTES, PRE_CONNECT_COMMAND_TIMEOUT,
-    normalize_pre_connect_command, pre_connect_failure_message, run_pre_connect_command,
-    run_pre_connect_command_async,
+    normalize_pre_connect_command, pre_connect_failure_message,
+    run_pre_connect_command_async, run_pre_connect_command_cancellable,
 };
 pub use local_shell::{
     LocalCommand, LocalPtyConfig, ShellInfo, default_shell, is_shell_executable, scan_shells,

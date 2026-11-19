@@ -242,6 +242,42 @@ pub trait ProgressStore: Send + Sync {
     async fn delete_for_session(&self, session_id: &str) -> Result<(), SftpError>;
 }
 
+pub async fn list_incomplete_browser_transfers(
+    store: &dyn ProgressStore,
+    connection_id: &str,
+    relay_endpoint: Option<&str>,
+) -> Result<Vec<StoredTransferProgress>, SftpError> {
+    let mut transfers = store.list_incomplete(connection_id).await?;
+    if let Some(endpoint_id) = relay_endpoint {
+        // Relay progress is saved under its profile, not either connection generation.
+        for progress in store.list_all_incomplete().await? {
+            if progress
+                .remote_relay
+                .as_ref()
+                .is_some_and(|relay| relay.contains_endpoint(endpoint_id))
+                && !transfers
+                    .iter()
+                    .any(|item| item.transfer_id == progress.transfer_id)
+            {
+                transfers.push(progress);
+            }
+        }
+    }
+    Ok(transfers)
+}
+
+pub async fn update_stored_transfer_progress(
+    store: &dyn ProgressStore,
+    transfer_id: &str,
+    update: impl FnOnce(&mut StoredTransferProgress),
+) -> Result<(), SftpError> {
+    if let Some(mut progress) = store.load(transfer_id).await? {
+        update(&mut progress);
+        store.save(&progress).await?;
+    }
+    Ok(())
+}
+
 pub struct DummyProgressStore;
 
 #[async_trait]

@@ -2,7 +2,7 @@ use super::*;
 
 pub(in crate::workspace) struct SftpPage {
     view: Entity<SftpWorkspaceEntity>,
-    _subscriptions: Vec<Subscription>,
+    _events: Subscription,
 }
 
 /// Pins a synchronous dispatch to its source view without moving or copying page state.
@@ -134,7 +134,6 @@ impl WorkspaceApp {
             return;
         }
         let view = cx.new(SftpWorkspaceEntity::new);
-        let observation = cx.observe(&view, |_, _, cx| cx.notify());
         let events = cx.subscribe(
             &view,
             move |workspace, _, event: &SftpWorkspaceEvent, cx| {
@@ -145,7 +144,7 @@ impl WorkspaceApp {
             id,
             SftpPage {
                 view,
-                _subscriptions: vec![observation, events],
+                _events: events,
             },
         );
     }
@@ -197,22 +196,6 @@ impl WorkspaceApp {
             .map(|handle| handle.window_id())
     }
 
-    pub(in crate::workspace) fn sftp_listener<E: ?Sized + 'static>(
-        &self,
-        cx: &Context<Self>,
-        f: impl Fn(&mut Self, &E, &mut Window, &mut Context<Self>) + 'static,
-    ) -> impl Fn(&E, &mut Window, &mut App) + 'static {
-        let surface = self.sftp_surface_id();
-        cx.listener(move |workspace, event, window, cx| {
-            // An event queued by a closed page must not fall through to another view.
-            if !workspace.has_sftp_surface(surface) {
-                return;
-            }
-            let _scope = workspace.enter_sftp_surface(surface);
-            f(workspace, event, window, cx);
-        })
-    }
-
     pub(in crate::workspace) fn handle_sftp_surface_event(
         &mut self,
         surface: SftpSurfaceId,
@@ -224,14 +207,17 @@ impl WorkspaceApp {
         }
         let _scope = self.enter_sftp_surface(surface);
         match event {
+            sftp::SftpWorkspaceEvent::InputFocusChanged => {
+                if self.sftp_focused_surface == surface {
+                    // Focus changes can install or remove the window's platform input handler.
+                    cx.notify();
+                }
+            }
             sftp::SftpWorkspaceEvent::WorkerEffectsReady(effects) => {
                 self.handle_sftp_worker_effects(effects, cx);
             }
             sftp::SftpWorkspaceEvent::OpenFileRequested { pane, file } => {
                 self.open_or_preview_sftp_file(*pane, file, cx);
-            }
-            sftp::SftpWorkspaceEvent::ToggleTreeDirectoryRequested { path } => {
-                self.toggle_sftp_tree_directory(path.clone(), cx);
             }
             sftp::SftpWorkspaceEvent::TransferStateRequested { id, state } => {
                 self.set_sftp_transfer_state(*id, *state, cx);
@@ -292,7 +278,5 @@ impl WorkspaceApp {
                 );
             }
         }
-
-        cx.notify();
     }
 }

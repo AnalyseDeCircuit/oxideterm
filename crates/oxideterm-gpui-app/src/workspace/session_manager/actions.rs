@@ -1,11 +1,5 @@
 use super::*;
-use crate::workspace::new_connection::{
-    terminal_serial_flow_from_profile,
-    terminal_serial_parity_from_profile, terminal_serial_runtime_options_from_profile,
-};
-use crate::workspace::terminal_command_bar::{
-    SavedConsoleProfileKind, delete_saved_console_profile,
-};
+use crate::workspace::terminal_command_bar::delete_saved_console_profile;
 use oxideterm_remote_desktop::RemoteDesktopSecret;
 
 impl WorkspaceApp {
@@ -54,31 +48,10 @@ impl WorkspaceApp {
         self.update_catalog_groups(cx, |catalog, cx| catalog.submit_session_group_editor(cx));
     }
 
-    pub(super) fn open_session_group_creation(&mut self, cx: &mut Context<Self>) {
-        self.update_catalog_groups(cx, |catalog, cx| catalog.open_session_group_creation(cx));
-        self.ime_marked_text = None;
-    }
-
-    pub(super) fn open_session_subgroup_creation(
-        &mut self,
-        parent_path: &str,
-        cx: &mut Context<Self>,
-    ) {
-        self.update_catalog_groups(cx, |catalog, cx| {
-            catalog.open_session_subgroup_creation(parent_path, cx)
-        });
-        self.ime_marked_text = None;
-    }
-
-    pub(super) fn open_session_group_rename(&mut self, group: &str, cx: &mut Context<Self>) {
-        self.update_catalog_groups(cx, |catalog, cx| {
-            catalog.open_session_group_rename(group, cx)
-        });
-        self.ime_marked_text = None;
-    }
-
     pub(in crate::workspace) fn close_session_group_manager(&mut self, cx: &mut Context<Self>) {
-        self.update_catalog_groups(cx, |catalog, cx| catalog.close_session_group_manager(cx));
+        self.connections
+            .session_manager
+            .update(cx, SessionManagerState::close_session_group_manager);
         self.ime_marked_text = None;
     }
 
@@ -113,42 +86,27 @@ impl WorkspaceApp {
         single: bool,
         cx: &mut Context<Self>,
     ) -> anyhow::Result<bool> {
-        use SessionManagerSelectionTarget as Target;
-        let console = match target {
-            Target::Serial(id) => Some((SavedConsoleProfileKind::Serial, id)),
-            Target::Telnet(id) => Some((SavedConsoleProfileKind::Telnet, id)),
-            Target::Mosh(id) => Some((SavedConsoleProfileKind::Mosh, id)),
-            _ => None,
-        };
-        if let Some((kind, id)) = console {
-            return delete_saved_console_profile(
+        match remove_catalog_target(&mut self.connection_store, target, single)? {
+            CatalogRemoval::Completed(changed) => Ok(changed),
+            CatalogRemoval::DeleteConsole { id, kind } => delete_saved_console_profile(
                 &mut self.connection_store,
                 &self.terminal_history_store,
                 kind,
                 id,
-            );
-        }
-        match target {
-            Target::Tunnel(id) => {
+            ),
+            CatalogRemoval::StopTunnel(id) => {
                 self.stop_ssh_tunnel(id, true, cx);
                 Ok(false)
             }
-            Target::Connection(id) => {
-                let removed = match self.connection_store.delete(id) {
-                    Err(_) if !single => return Ok(false),
-                    result => result?,
-                };
-                if removed || single {
-                    // Owner-bound forwards must not be restored by a later sync.
-                    self.forwarding_service
-                        .registry()
-                        .delete_owned_forwards(id)
-                        .map_err(|e| anyhow::anyhow!(e.to_string()))?;
-                    self.release_ide_runtime_for_saved_connection(id, cx);
-                }
-                Ok(removed || single)
+            CatalogRemoval::ReleaseSavedSsh(id) => {
+                // Owner-bound forwards must not be restored by a later sync.
+                self.forwarding_service
+                    .registry()
+                    .delete_owned_forwards(id)
+                    .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+                self.release_ide_runtime_for_saved_connection(id, cx);
+                Ok(true)
             }
-            _ => delete_catalog_profile(&mut self.connection_store, target),
         }
     }
 
@@ -163,21 +121,9 @@ impl WorkspaceApp {
         target: SessionManagerRowActionTarget,
         cx: &mut Context<Self>,
     ) {
-        if let SessionManagerRowActionTarget::Group(group) = target {
-            self.update_catalog_groups(cx, |catalog, cx| {
-                catalog.request_delete_session_group(&group, cx)
-            });
-        } else {
-            self.connections.session_manager.update(cx, |state, cx| {
-                state.request_row_delete(target, &self.connection_store, cx)
-            });
-        }
-    }
-
-    pub(super) fn request_delete_selected_connections(&mut self, cx: &mut Context<Self>) {
-        self.connections
-            .session_manager
-            .update(cx, SessionManagerState::request_selected_delete);
+        self.connections.session_manager.update(cx, |state, cx| {
+            state.request_row_delete(target, &self.connection_store, cx)
+        });
     }
 
     pub(in crate::workspace) fn open_saved_serial_profile(
@@ -186,54 +132,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(profile) = self
-            .connection_store
-            .serial_profiles()
-            .iter()
-            .find(|profile| profile.id == id)
-            .cloned()
-        else {
-            return;
-        };
-        let config = oxideterm_terminal::SerialSessionConfig {
-            pre_connect_command: profile.pre_connect_command.clone(),
-            port_path: profile.port_path.clone(),
-            baud_rate: profile.baud_rate,
-            data_bits: profile.data_bits,
-            stop_bits: profile.stop_bits,
-            parity: terminal_serial_parity_from_profile(&profile.parity),
-            flow_control: terminal_serial_flow_from_profile(&profile.flow_control),
-            runtime_options: terminal_serial_runtime_options_from_profile(&profile),
-        };
-        match self.create_serial_terminal_tab(
-            config,
-            &profile.name,
-            profile.terminal.clone(),
-            window,
-            cx,
-        ) {
-            Ok(session_id) => {
-                self.register_terminal_saved_connection(
-                    session_id,
-                    oxideterm_terminal_triggers::SavedConnectionKind::Serial,
-                    profile.id.clone(),
-                    cx,
-                );
-                let _ = self.connection_store.mark_serial_profile_used(id);
-                self.queue_cloud_sync_dirty_refresh(cx);
-            }
-            Err(error) => {
-                let status = format!(
-                    "{}: {error}",
-                    self.i18n.t("sessionManager.serial_profiles.open_failed")
-                );
-                self.connections
-                    .session_manager
-                    .update(cx, |session_manager, cx| {
-                        session_manager.set_status(Some(status), cx)
-                    });
-            }
-        }
+        self.open_saved_console_profile(DirectConsoleProfileKind::Serial, id, window, cx);
     }
 
     pub(in crate::workspace) fn open_saved_telnet_profile(
@@ -242,49 +141,51 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(profile) = self
-            .connection_store
-            .telnet_profiles()
-            .iter()
-            .find(|profile| profile.id == id)
-            .cloned()
-        else {
+        self.open_saved_console_profile(DirectConsoleProfileKind::Telnet, id, window, cx);
+    }
+
+    fn open_saved_console_profile(
+        &mut self,
+        kind: DirectConsoleProfileKind,
+        id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(launch) = prepare_saved_console_launch(&self.connection_store, kind, id) else {
             return;
         };
-        let config = oxideterm_terminal::TelnetSessionConfig {
-            pre_connect_command: profile.pre_connect_command.clone(),
-            line_endings: new_connection::terminal_telnet_line_endings_from_profile(&profile),
-            host: profile.host.clone(),
-            port: profile.port,
+        let result = match launch {
+            SavedConsoleLaunch::Serial {
+                config,
+                title,
+                terminal,
+            } => self.create_serial_terminal_tab(config, &title, terminal, window, cx),
+            SavedConsoleLaunch::Telnet {
+                config,
+                proxy,
+                terminal,
+            } => self.create_telnet_terminal_tab(config, proxy, terminal, window, cx),
         };
-        match self.create_telnet_terminal_tab(
-            config,
-            profile.upstream_proxy,
-            profile.terminal,
-            window,
-            cx,
-        ) {
+        match result {
             Ok(session_id) => {
-                self.telnet_terminal_profile_ids
-                    .insert(session_id, profile.id.clone());
+                if kind == DirectConsoleProfileKind::Telnet {
+                    self.telnet_terminal_profile_ids
+                        .insert(session_id, id.to_owned());
+                }
                 self.register_terminal_saved_connection(
                     session_id,
-                    oxideterm_terminal_triggers::SavedConnectionKind::Telnet,
-                    profile.id,
+                    kind.connection_kind(),
+                    id.to_owned(),
                     cx,
                 );
-                let _ = self.connection_store.mark_telnet_profile_used(id);
+                if mark_catalog_console_used(&mut self.connection_store, kind, id) {
+                    self.queue_cloud_sync_dirty_refresh(cx);
+                }
             }
             Err(error) => {
-                let status = format!(
-                    "{}: {error}",
-                    self.i18n.t("sessionManager.telnet_profiles.open_failed")
-                );
-                self.connections
-                    .session_manager
-                    .update(cx, |session_manager, cx| {
-                        session_manager.set_status(Some(status), cx)
-                    });
+                self.connections.session_manager.update(cx, |state, cx| {
+                    state.report_console_open_failure(kind, &error, &self.i18n, cx);
+                });
             }
         }
     }
@@ -325,12 +226,18 @@ impl WorkspaceApp {
                     self.standalone_connections.mark_attempt_error(attempt);
                 }
                 match other {
-                    Ok(Some(SavedDesktopOpen::Prompt(mut form))) => {
-                        form.standalone_connection_id = runtime_connection_attempt_id
-                            .as_deref()
-                            .and_then(|attempt| self.standalone_connections.connection_id_for_attempt(attempt));
+                    Ok(Some(SavedDesktopOpen::Prompt(form))) => {
+                        let reconnect_id =
+                            runtime_connection_attempt_id
+                                .as_deref()
+                                .and_then(|attempt| {
+                                    self.standalone_connections
+                                        .connection_id_for_attempt(attempt)
+                                });
                         self.open_new_connection_form(window, cx);
-                        self.connections.flow.update(cx, |flow, cx| flow.replace_form(*form, cx));
+                        self.connections.flow.update(cx, |flow, cx| {
+                            flow.open_desktop_reconnect_form(*form, reconnect_id, cx)
+                        });
                     }
                     Err(status) => {
                         self.connections.session_manager.update(cx, |manager, cx| {
@@ -408,33 +315,24 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(conn) = self.connection_store.get(id).cloned() else {
-            let status = self.i18n.t("sessionManager.toast.test_failed");
-            self.connections
-                .session_manager
-                .update(cx, |session_manager, cx| {
-                    session_manager.set_status(Some(status), cx)
-                });
-            return;
-        };
-        let Some(config) = oxideterm_session_adapter::ssh_config_from_saved_connection(
+        match prepare_saved_ssh_test(
             &self.connection_store,
             self.settings_store.settings(),
-            &conn,
-        ) else {
-            self.open_saved_connection_prompt(
-                id,
-                SavedConnectionPromptAction::Test,
-                Some(
-                    self.i18n
-                        .t("sessionManager.edit_properties.password_placeholder"),
-                ),
-                window,
-                cx,
-            );
-            return;
-        };
-        self.start_ssh_test_flow(config, conn.name, cx);
+            id,
+            &self.i18n,
+        ) {
+            SavedSshTest::Missing(status) => self.connections.show_catalog_status(status, cx),
+            SavedSshTest::Prompt(message) => {
+                self.open_saved_connection_prompt(
+                    id,
+                    SavedConnectionPromptAction::Test,
+                    Some(message),
+                    window,
+                    cx,
+                );
+            }
+            SavedSshTest::Run { config, title } => self.start_ssh_test_flow(config, title, cx),
+        }
     }
 
     pub(super) fn move_selected_connections(

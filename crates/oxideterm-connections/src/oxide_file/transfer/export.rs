@@ -455,7 +455,10 @@ fn export_connection(
         icon_background_color: conn.icon_background_color.clone(),
         icon: conn.icon.clone(),
         tags: conn.tags.clone(),
-        options: conn.options.clone(),
+        options: crate::ConnectionOptions {
+            pre_connect_command: None,
+            ..conn.options.clone()
+        },
         upstream_proxy: export_upstream_proxy_policy(&conn.upstream_proxy),
         proxy_chain,
         forwards,

@@ -49,13 +49,13 @@ impl WorkspaceApp {
             // succeeds; the attempt continues through the same path afterwards.
             let window_handle = window.window_handle();
             let i18n = self.i18n.clone();
+            let (gate, window_close) = self.spawn_window_pre_connect(command, window, cx);
             cx.spawn(async move |workspace, cx| {
-                let failure = oxideterm_terminal::run_pre_connect_command_async(
-                    command,
-                    oxideterm_terminal::PRE_CONNECT_COMMAND_TIMEOUT,
-                )
-                .await
-                .err();
+                let _window_close = window_close;
+                let Ok(result) = gate.await else {
+                    return;
+                };
+                let failure = result.err();
                 let _ = cx.update_window(window_handle, move |_, window, cx| {
                     let _ = workspace.update(cx, |workspace, cx| {
                         if let Some(failure) = failure {

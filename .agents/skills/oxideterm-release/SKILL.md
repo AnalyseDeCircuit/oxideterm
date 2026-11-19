@@ -1,6 +1,6 @@
 ---
 name: oxideterm-release
-description: Prepare, publish, or recover canceled OxideTerm stable, beta, or GPUI preview releases by deriving changelog content from the previous tag, selecting the requested release-note detail level, running the repository version-bump script, validating channel-specific notes and fork ownership, committing, pushing, creating the correct annotated tag, and dispatching the main-scoped native package workflow. Use when the user asks to upgrade the OxideTerm version, prepare a release, write a release changelog, commit and push a release, create a release tag, republish the same version after its release workflow was canceled, or repair release assets from a completed Native Package run.
+description: Prepare, publish, or recover OxideTerm stable, beta, or GPUI preview releases. Use for version bumps, release notes, release commits and tags, Native Package trial runs, canceled release dispatches, and release asset repair.
 ---
 
 # OxideTerm Release
@@ -17,6 +17,15 @@ Resolve these values before making release changes:
 - Release-note detail level when the user explicitly requests `minimal`, `medium`, or `detailed`; otherwise use `detailed`.
 
 Infer the channel only when the version is unambiguous. Ask before publishing if GUI approval is absent. Preparing a changelog or dry run does not require approval.
+
+## Confirm the macOS packaging mode
+
+Before dispatching any Native Package run (trial, release, or recovery), ask the maintainer to choose unless they already specified the mode for this run. Wait for their answer and pass `notarize_macos` explicitly:
+
+- **Sign and notarize** (recommended for public releases): `notarize_macos=true`.
+- **Sign only**: `notarize_macos=false`. The configured Developer ID certificate still signs the package, but Gatekeeper may block packages distributed without notarization.
+
+The GitHub checkbox defaults to enabled for manual runs; that default is not the maintainer's answer when dispatching on their behalf. This choice is separate from the release channel and from uploading a GitHub Release. For an artifacts-only trial, omit `release_tag` and pass `upload_release=false`; to validate Apple notarization without publishing, choose **Sign and notarize**.
 
 ## Channel contract
 
@@ -125,7 +134,7 @@ For a fork release, each language block must clearly separate changes inherited 
 
 #### PR references and contributor thanks
 
-Follow the attribution pattern in [NyaTerm v1.2.12](https://github.com/nyakang/nyaterm/releases/tag/v1.2.12): PR references beside the changes they introduced, plus a dedicated contributor section. Derive the actual entries from OxideTerm's release range.
+Derive PR references and contributor credits from OxideTerm's release range.
 
 - Append linked PR numbers to every release-note item introduced through a PR, including maintainer-authored PRs. Use `（PR [#<number>](<pr-url>)）` in Chinese and `(PR [#<number>](<pr-url>))` in English. Put the reference at the end of the relevant bullet or feature paragraph, rather than only in the contributor list or full-changelog link. Keep issue links distinct from PR links. Direct commits have no invented PR number.
 - When several PRs contributed to a grouped item, include all relevant PR numbers once in that item. Attribute only the outcome supported by each PR; separate a maintainer's independent follow-up change when grouping would credit the wrong author. For PRs from another repository, qualify the link label with `owner/repo#number`.
@@ -239,6 +248,8 @@ The `rg` commands are discovery checks: review each match rather than blindly re
 
 ### 6. Review, commit, push, tag, and dispatch
 
+Confirm the macOS packaging mode before starting this step for a release.
+
 Review the complete release diff and status before staging. Confirm that no secret, build artifact, unrelated file, or temporary release-notes file is included.
 
 Stage only the reviewed release files and intended product changes, then inspect the exact commit payload:
@@ -274,9 +285,12 @@ gh workflow run native-package.yml \
   --repo <owner/repo> \
   --ref main \
   -f release_tag=<tag> \
-  -f upload_release=true
+  -f upload_release=true \
+  -f notarize_macos=<confirmed-mode>
 git status --short --branch
 ```
+
+If a notarized run fails due to missing signing or notarization credentials, fix the credentials rather than switching to sign-only.
 
 Find the new `workflow_dispatch` run and verify that its `headSha` is the dispatched branch commit and its display title names the intended tag:
 
@@ -297,6 +311,8 @@ The first release dispatched after this migration seeds the main-scoped cache fo
 ## Recover a canceled release dispatch
 
 Use this procedure only when the maintainer explicitly requests republishing the same version. The earlier main-scoped Native Package dispatch must have been canceled before it created a published GitHub Release. If `gh release view <tag>` finds a published release or updater assets may already have reached users, keep the tag immutable and publish the next patch version instead.
+
+Confirm the macOS packaging mode for the recovery dispatch before changing any refs.
 
 1. Fetch and record both the remote annotated tag object and its peeled commit before changing anything:
 
@@ -331,7 +347,8 @@ gh workflow run native-package.yml \
   --repo <owner/repo> \
   --ref main \
   -f release_tag=<tag> \
-  -f upload_release=true
+  -f upload_release=true \
+  -f notarize_macos=<confirmed-mode>
 gh run list --repo <owner/repo> --workflow native-package.yml --branch main --event workflow_dispatch --limit 10
 ```
 

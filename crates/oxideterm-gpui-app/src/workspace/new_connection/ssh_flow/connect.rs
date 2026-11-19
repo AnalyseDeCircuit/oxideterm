@@ -106,13 +106,13 @@ impl WorkspaceApp {
         {
             let window_handle = window.window_handle();
             let i18n = self.i18n.clone();
+            let (gate, window_close) = self.spawn_window_pre_connect(command, window, cx);
             cx.spawn(async move |workspace, cx| {
-                let failure = oxideterm_terminal::run_pre_connect_command_async(
-                    command,
-                    oxideterm_terminal::PRE_CONNECT_COMMAND_TIMEOUT,
-                )
-                .await
-                .err();
+                let _window_close = window_close;
+                let Ok(result) = gate.await else {
+                    return;
+                };
+                let failure = result.err();
                 let _ = cx.update_window(window_handle, move |_, window, cx| {
                     let _ = workspace.update(cx, |this, cx| {
                         if let Some(failure) = failure {
@@ -371,7 +371,10 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         use oxideterm_gpui_connections::preflight::SshTestRoute;
-        match self.connections.prepare_ssh_test_route(&mut config, &self.i18n, cx) {
+        match self
+            .connections
+            .prepare_ssh_test_route(&mut config, &self.i18n, cx)
+        {
             SshTestRoute::Direct => self.start_ssh_test(config, cx),
             SshTestRoute::HostKeyPreflight => {
                 self.start_ssh_preflight(config, title, SshConnectionIntent::Test, cx);
@@ -588,48 +591,55 @@ impl WorkspaceApp {
         let route = self.connections.flow.update(cx, |flow, cx| {
             flow.prepare_verified_manual_terminal(&config, cx)
         });
-        let (node_id, config) = match route {
+        let (node_id, direct_config) = match route {
             VerifiedManualSshRoute::Direct => (
                 self.materialize_ssh_root_node(config.clone(), title.clone(), None),
-                config,
+                Some(config),
             ),
             VerifiedManualSshRoute::SessionTree => {
                 let expansion_id = format!("manual-{}", self.next_ssh_node_id);
                 match self.expand_saved_connection_tree(&expansion_id, config, title.clone()) {
-                    Ok(expansion) => {
-                        self.set_opening_node_terminal_options(&expansion.target_node_id, &options);
-                        let Some(snapshot) = self.node_router.node_runtime_snapshot(&expansion.target_node_id) else {
-                            return;
-                        };
-                        (expansion.target_node_id, snapshot.config)
-                    }
+                    Ok(expansion) => (expansion.target_node_id, None),
                     Err(error) => return self.set_connection_status(Some(error.to_string()), cx),
                 }
             }
         };
-        if matches!(route, VerifiedManualSshRoute::Direct) {
-            self.set_opening_node_terminal_options(&node_id, &options);
-        }
-        let post_connect_command = config.post_connect_command.clone();
-        let _ = self.queue_ssh_terminal_tab_for_node_with_mark_used(
-            node_id, post_connect_command, config, title, None, None, None,
-            options.open_sftp_on_connect, window, cx,
-        );
-    }
-
-    fn set_opening_node_terminal_options(&mut self, node_id: &NodeId, options: &SshTerminalConnectionOptions) {
-        if let Some(node) = self.ssh_nodes.get_mut(node_id) {
-            node.terminal_options = options.terminal.clone();
+        if let Some(node) = self.ssh_nodes.get_mut(&node_id) {
+            node.terminal_options = options.terminal;
             node.dedicated_new_terminal_connection = options.dedicated_new_terminal_connection;
             node.ssh_channel_strategy = options.ssh_channel_strategy;
         }
+        let Some(config) = direct_config.or_else(|| {
+            self.node_router
+                .node_runtime_snapshot(&node_id)
+                .map(|snapshot| snapshot.config)
+        }) else {
+            return;
+        };
+        let post_connect_command = config.post_connect_command.clone();
+        let _ = self.queue_ssh_terminal_tab_for_node_with_mark_used(
+            node_id,
+            post_connect_command,
+            config,
+            title,
+            None,
+            None,
+            None,
+            options.open_sftp_on_connect,
+            window,
+            cx,
+        );
     }
 
     fn start_standalone_sftp_test(&mut self, config: SshConfig, cx: &mut Context<Self>) {
         self.connections.flow.update(cx, |flow, cx| {
             flow.start_standalone_sftp_test(
-                config, &self.connection_store, self.ssh_registry.clone(),
-                self.forwarding_runtime.as_ref(), &self.i18n, cx,
+                config,
+                &self.connection_store,
+                self.ssh_registry.clone(),
+                self.forwarding_runtime.as_ref(),
+                &self.i18n,
+                cx,
             );
         });
     }

@@ -888,7 +888,6 @@
         "proxy_chain": "Proxy chain",
         "agent_forwarding": "Agent forwarding",
         "post_connect_command": "Post-connect command",
-        "pre_connect_command": "Pre-connect command",
         "color": "Color",
         "tags": "Tags",
         "ssh_kex_algorithms": "SSH key exchange algorithms",

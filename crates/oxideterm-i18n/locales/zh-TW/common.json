@@ -896,7 +896,6 @@
         "proxy_chain": "代理鏈",
         "agent_forwarding": "Agent 轉發",
         "post_connect_command": "連線後命令",
-        "pre_connect_command": "連線前命令",
         "color": "顏色",
         "tags": "標籤",
         "ssh_kex_algorithms": "SSH 金鑰交換演算法",

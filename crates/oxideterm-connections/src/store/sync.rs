@@ -599,7 +599,8 @@ impl ConnectionStore {
                 .any(|t| t.id == profile.id && t.deleted_at >= profile.updated_at)
         });
         changed |= self.data.serial_profiles.len() != record_count;
-        for profile in snapshot.records {
+        for mut profile in snapshot.records {
+            profile.pre_connect_command = None;
             // A deletion that postdates the incoming record suppresses it; a
             // record re-created after the deletion keeps its newer timestamp
             // and must survive.
@@ -618,6 +619,7 @@ impl ConnectionStore {
                 .find(|existing| existing.id == profile.id)
             {
                 if profile.updated_at >= existing.updated_at {
+                    profile.pre_connect_command = existing.pre_connect_command.take();
                     *existing = profile;
                     applied += 1;
                 }
@@ -670,7 +672,8 @@ impl ConnectionStore {
                 .any(|t| t.id == profile.id && t.deleted_at >= profile.updated_at)
         });
         changed |= self.data.ble_profiles.len() != record_count;
-        for profile in snapshot.records {
+        for mut profile in snapshot.records {
+            profile.pre_connect_command = None;
             if self
                 .data
                 .ble_tombstones
@@ -686,6 +689,7 @@ impl ConnectionStore {
                 .find(|existing| existing.id == profile.id)
             {
                 if profile.updated_at >= existing.updated_at {
+                    profile.pre_connect_command = existing.pre_connect_command.take();
                     *existing = profile;
                     applied += 1;
                 }
@@ -738,6 +742,7 @@ impl ConnectionStore {
         });
         changed |= self.data.telnet_profiles.len() != record_count;
         for mut profile in snapshot.records {
+            profile.pre_connect_command = None;
             if self
                 .data
                 .telnet_tombstones
@@ -758,6 +763,7 @@ impl ConnectionStore {
                         &mut profile.upstream_proxy,
                         &existing.upstream_proxy,
                     );
+                    profile.pre_connect_command = existing.pre_connect_command.take();
                     *existing = profile;
                     applied += 1;
                 }
@@ -810,6 +816,7 @@ impl ConnectionStore {
         });
         changed |= self.data.remote_desktop_profiles.len() != record_count;
         for mut profile in snapshot.records {
+            profile.pre_connect_command = None;
             if self
                 .data
                 .remote_desktop_tombstones
@@ -834,6 +841,7 @@ impl ConnectionStore {
                         &mut profile.upstream_proxy,
                         &existing.upstream_proxy,
                     );
+                    profile.pre_connect_command = existing.pre_connect_command.take();
                     *existing = profile;
                     applied += 1;
                 }
@@ -886,6 +894,7 @@ impl ConnectionStore {
         });
         changed |= self.data.mosh_profiles.len() != record_count;
         for mut profile in snapshot.records {
+            profile.pre_connect_command = None;
             if self
                 .data
                 .mosh_tombstones
@@ -906,6 +915,7 @@ impl ConnectionStore {
                         &mut profile.proxy_chain,
                         &existing.proxy_chain,
                     );
+                    profile.pre_connect_command = existing.pre_connect_command.take();
                     *existing = profile;
                     applied += 1;
                 }
@@ -960,6 +970,7 @@ impl ConnectionStore {
         });
         changed |= self.data.standalone_sftp_profiles.len() != record_count;
         for mut profile in snapshot.records {
+            profile.pre_connect_command = None;
             if self
                 .data
                 .standalone_sftp_tombstones
@@ -981,6 +992,7 @@ impl ConnectionStore {
             {
                 if profile.updated_at >= existing.updated_at {
                     preserve_standalone_sftp_local_secrets(&mut profile, existing);
+                    profile.pre_connect_command = existing.pre_connect_command.take();
                     *existing = profile;
                     applied += 1;
                 }
@@ -1017,7 +1029,7 @@ fn build_saved_connection_from_sync_payload(
     for hop in &proxy_chain {
         hop.ssh_algorithms.validate()?;
     }
-    let options = synced_options
+    let mut options = synced_options
         .cloned()
         .unwrap_or_else(|| ConnectionOptions {
             // Older snapshots exposed only these option fields through
@@ -1026,9 +1038,12 @@ fn build_saved_connection_from_sync_payload(
             legacy_ssh_compatibility: payload.legacy_ssh_compatibility,
             ssh_algorithms: payload.ssh_algorithms.clone(),
             post_connect_command: payload.post_connect_command.clone(),
-            pre_connect_command: payload.pre_connect_command.clone(),
             ..Default::default()
         });
+    // A remote snapshot can update metadata, never authorize a local process.
+    options.pre_connect_command = existing
+        .filter(|connection| connection.id == payload.id)
+        .and_then(|connection| connection.options.pre_connect_command.clone());
     options.ssh_algorithms.validate()?;
 
     Ok(SavedConnection {
@@ -1088,6 +1103,7 @@ fn build_saved_connections_sync_snapshot(
     local_terminal_profiles.sort_by(|a, b| a.id.cmp(&b.id));
     for profile in &mut local_terminal_profiles {
         profile.last_used_at = None;
+        profile.pre_connect_command = None;
     }
     let mut local_terminal_tombstones =
         active_connection_tombstones(&data.local_terminal_tombstones);
@@ -1130,6 +1146,9 @@ fn build_serial_profiles_sync_snapshot(
     data: &ConnectionStoreData,
 ) -> Result<SerialProfilesSyncSnapshot> {
     let mut records = data.serial_profiles.clone();
+    for profile in &mut records {
+        profile.pre_connect_command = None;
+    }
     records.sort_by(|left, right| left.id.cmp(&right.id));
     let mut tombstones = data.serial_tombstones.clone();
     tombstones.sort_by(|left, right| left.id.cmp(&right.id));
@@ -1153,6 +1172,9 @@ fn build_ble_profiles_sync_snapshot(
     data: &ConnectionStoreData,
 ) -> Result<BleProfilesSyncSnapshot> {
     let mut records = data.ble_profiles.clone();
+    for profile in &mut records {
+        profile.pre_connect_command = None;
+    }
     records.sort_by(|left, right| left.id.cmp(&right.id));
     let mut tombstones = data.ble_tombstones.clone();
     tombstones.sort_by(|left, right| left.id.cmp(&right.id));
@@ -1177,6 +1199,7 @@ fn build_telnet_profiles_sync_snapshot(
 ) -> Result<TelnetProfilesSyncSnapshot> {
     let mut records = data.telnet_profiles.clone();
     for profile in &mut records {
+        profile.pre_connect_command = None;
         profile.upstream_proxy = portable_upstream_proxy(&profile.upstream_proxy);
     }
     records.sort_by(|left, right| left.id.cmp(&right.id));
@@ -1203,6 +1226,7 @@ fn build_mosh_profiles_sync_snapshot(
 ) -> Result<MoshProfilesSyncSnapshot> {
     let mut records = data.mosh_profiles.clone();
     for profile in &mut records {
+        profile.pre_connect_command = None;
         profile.auth = portable_mosh_auth(&profile.auth);
         for hop in &mut profile.proxy_chain {
             hop.auth = portable_mosh_auth(&hop.auth);
@@ -1231,6 +1255,7 @@ fn build_standalone_sftp_profiles_sync_snapshot(
 ) -> Result<StandaloneSftpProfilesSyncSnapshot> {
     let mut records = data.standalone_sftp_profiles.clone();
     for profile in &mut records {
+        profile.pre_connect_command = None;
         make_standalone_sftp_profile_portable(profile);
     }
     records.sort_by(|left, right| left.id.cmp(&right.id));
@@ -1562,6 +1587,7 @@ fn build_remote_desktop_profiles_sync_snapshot(
 ) -> Result<RemoteDesktopProfilesSyncSnapshot> {
     let mut records = data.remote_desktop_profiles.clone();
     for profile in &mut records {
+        profile.pre_connect_command = None;
         // Snapshots are portable asset metadata, never a transport for local credential handles.
         profile.credential_ref = None;
         profile.upstream_proxy = portable_upstream_proxy(&profile.upstream_proxy);
@@ -1591,7 +1617,9 @@ fn build_saved_connection_sync_record(
     let mut payload = ConnectionInfo::from(connection);
     // Protected-store references identify one device and must never enter a portable snapshot.
     payload.upstream_proxy = portable_upstream_proxy(&payload.upstream_proxy);
-    let options = connection.options.clone();
+    payload.pre_connect_command = None;
+    let mut options = connection.options.clone();
+    options.pre_connect_command = None;
     Ok(SavedConnectionSyncRecord {
         id: connection.id.clone(),
         revision: sha256_hex(&(&payload, &options))?,

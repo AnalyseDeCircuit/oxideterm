@@ -837,22 +837,39 @@ impl SshTransportClient {
     /// entries retire immediately, so bootstrap traffic cannot join the saved
     /// SSH node pool or inherit its long-lived capabilities.
     pub async fn connect_dedicated_node_with_registry(
-        self,
+        mut self,
         registry: SshConnectionRegistry,
         consumer: ConnectionConsumer,
     ) -> Result<SshConnectionHandle, SshTransportError> {
+        self.run_pre_connect_for_dedicated_transport().await?;
         let connection = registry.acquire_dedicated(self.config.clone(), consumer.clone());
         self.connect_existing_node_with_registry(registry, consumer, connection)
             .await
     }
 
+    async fn run_pre_connect_for_dedicated_transport(&mut self) -> Result<(), SshTransportError> {
+        if std::mem::take(&mut self.config.pre_connect_completed) {
+            return Ok(());
+        }
+        if let Some(command) = self.config.pre_connect_command.as_deref() {
+            oxideterm_local_command::run(command, oxideterm_local_command::PRE_CONNECT_COMMAND_TIMEOUT)
+                .await
+                .map_err(|failure| SshTransportError::ConnectionFailed(failure.to_string()))?;
+        }
+        Ok(())
+    }
+
     pub async fn connect_dedicated_consumer_with_registry(
-        self,
+        mut self,
         registry: SshConnectionRegistry,
         consumer: ConnectionConsumer,
         parent_connection_id: Option<String>,
     ) -> Result<DedicatedConnectionLease, SshTransportError> {
+        // A consumer lease opens a fresh transport; a marker from the node's
+        // original preflight cannot authorize this attempt.
+        self.config.pre_connect_completed = false;
         let handle = if let Some(parent_connection_id) = parent_connection_id {
+            self.run_pre_connect_for_dedicated_transport().await?;
             let connection = registry.acquire_dedicated(self.config.clone(), consumer.clone());
             let connection_id = connection.connection_id().to_string();
             let parent_consumer =

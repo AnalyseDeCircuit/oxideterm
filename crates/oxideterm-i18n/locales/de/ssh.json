@@ -163,7 +163,7 @@
       "gssapi_delegation_warning": "Nur an vertrauenswürdige Server delegieren. Der entfernte Host kann die delegierten Anmeldedaten für andere Kerberos-Dienste verwenden.",
       "post_connect_command": "Nach Verbindung ausführen",
       "post_connect_command_hint": "Optional. Wird einmal ausgeführt, nachdem die interaktive Shell geöffnet wurde.",
-      "pre_connect_command": "Vor dem Verbinden ausführen",
+      "pre_connect_command": "Vor dem Verbinden ausführen (nur auf diesem Gerät)",
       "pre_connect_command_placeholder": "~/.config/vpn/up.sh",
       "pre_connect_command_hint": "Optional. Wird vor dem Verbindungsaufbau lokal in Ihrer Standard-Shell ausgeführt; eine Rückgabe ungleich 0 bricht den Vorgang ab.",
       "post_connect_command_placeholder": "cd /srv/app",

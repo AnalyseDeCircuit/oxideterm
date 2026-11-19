@@ -171,6 +171,7 @@ pub struct SerialSession {
     lifecycle: TerminalLifecycle,
     command_tx: crossbeam_channel::Sender<SerialCommand>,
     worker_handle: Option<std::thread::JoinHandle<()>>,
+    connecting: tokio_util::sync::CancellationToken,
     port_reservation: Option<SerialPortReservation>,
     title: Option<String>,
     graphics_ingress: GraphicsIngress,
@@ -316,8 +317,10 @@ impl SerialSession {
         // Tauri owns serial handles in a registry; native mirrors that by
         // reserving the normalized port for the lifetime of this backend.
         let worker_config = config.clone();
+        let connecting = tokio_util::sync::CancellationToken::new();
+        let cancelled = connecting.clone();
         let worker_handle = std::thread::spawn(move || {
-            run_serial_worker(worker_config, command_rx, worker_tx);
+            run_serial_worker(worker_config, command_rx, worker_tx, cancelled);
         });
 
         let mut serial_graphics_options = graphics_options;
@@ -376,6 +379,7 @@ impl SerialSession {
             lifecycle: TerminalLifecycle::Running,
             command_tx,
             worker_handle: Some(worker_handle),
+            connecting,
             port_reservation: Some(port_reservation),
             title: None,
             graphics_ingress: GraphicsIngress::new(serial_graphics_options),
@@ -773,6 +777,7 @@ impl TerminalSessionBackend for SerialSession {
                 .as_mut()
                 .is_some_and(|pending| !pending.flush());
         self.worker_rx.close();
+        self.connecting.cancel();
         let _ = self.command_tx.try_send(SerialCommand::Close);
         let joined = self
             .worker_handle
@@ -810,13 +815,18 @@ fn run_serial_worker(
     config: SerialSessionConfig,
     command_rx: crossbeam_channel::Receiver<SerialCommand>,
     worker_tx: crate::backpressure::ByteBoundedSender<SerialWorkerEvent>,
+    cancelled: tokio_util::sync::CancellationToken,
 ) {
     if let Some(command) = config.pre_connect_command.as_deref()
-        && let Err(failure) = crate::local_command::run_pre_connect_command(
+        && let Err(failure) = crate::local_command::run_pre_connect_command_cancellable(
             command,
             crate::local_command::PRE_CONNECT_COMMAND_TIMEOUT,
+            || cancelled.is_cancelled(),
         )
     {
+        if cancelled.is_cancelled() {
+            return;
+        }
         // The gate owns no port, so failing here leaves the device untouched.
         let _ = worker_tx.send_control(SerialWorkerEvent::Failed(SerialError::new(
             SerialErrorCode::OpenFailed,
@@ -824,6 +834,9 @@ fn run_serial_worker(
             Some(config.port_path.clone()),
             true,
         )));
+        return;
+    }
+    if cancelled.is_cancelled() {
         return;
     }
     let mut port = match open_serial_port(&config) {
@@ -1429,6 +1442,7 @@ mod serial_tests {
             lifecycle: TerminalLifecycle::Running,
             command_tx,
             worker_handle: None,
+            connecting: tokio_util::sync::CancellationToken::new(),
             port_reservation: Some(SerialPortReservation {
                 normalized_port_path: "test-serial-session".to_string(),
             }),

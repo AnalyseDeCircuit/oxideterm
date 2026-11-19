@@ -896,7 +896,6 @@
         "proxy_chain": "프록시 체인",
         "agent_forwarding": "에이전트 전달",
         "post_connect_command": "연결 후 명령",
-        "pre_connect_command": "연결 전 명령",
         "color": "색상",
         "tags": "태그",
         "ssh_kex_algorithms": "SSH 키 교환 알고리즘",

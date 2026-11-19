@@ -235,13 +235,16 @@ impl WorkspaceApp {
             [
                 file_manager.preview_document_scroll.clone(),
                 file_manager.preview_metadata_scroll.clone(),
-                sftp.diff_document_scroll.clone(),
                 sftp.preview_document_scroll.clone(),
                 sftp.font_preview_scroll.clone(),
                 sftp.drives_scroll.clone(),
             ]
         };
-        for handle in handles.into_iter().chain(page_handles) {
+        let diff_scroll = match self.sftp_view().read(cx).dialog() {
+            Some(super::sftp::SftpDialog::Diff { view }) => Some(view.read(cx).document_scroll()),
+            _ => None,
+        };
+        for handle in handles.into_iter().chain(diff_scroll).chain(page_handles) {
             scrolled |= self.selectable_text_scroll_handle_autoscroll(&handle, position);
         }
         scrolled

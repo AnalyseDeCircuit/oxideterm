@@ -53,6 +53,9 @@ impl PublicMcpHost {
             .get_remote_desktop_profile(profile_id)
             .cloned()
             .ok_or("The saved remote desktop profile is unavailable")?;
+        if saved.pre_connect_command.is_some() {
+            return Err("Open this profile in OxideTerm to run its local pre-connect command");
+        }
         let password = store
             .get_remote_desktop_credential(profile_id)
             .map_err(|_| "The saved remote desktop credential is unavailable")?
@@ -65,8 +68,6 @@ impl PublicMcpHost {
             password,
             ssh_gateway_connection_id: saved.ssh_gateway_connection_id,
             profile: RemoteDesktopConnectionProfile {
-                // This tool entry point opens the tab directly, so it does not
-                // run the local gate that profile-based opens enforce.
                 pre_connect_command: None,
                 id: saved.id,
                 label: saved.name,

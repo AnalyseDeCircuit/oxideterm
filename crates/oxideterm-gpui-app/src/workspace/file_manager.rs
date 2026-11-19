@@ -9,7 +9,6 @@ use oxideterm_gpui_file_manager::{
 };
 
 pub(super) use oxideterm_gpui_file_manager::{FileManagerDialog, FileManagerInput};
-pub(in crate::workspace) use oxideterm_local_files::local_file_audit_context;
 
 pub(super) fn mount(
     store: &oxideterm_settings::SettingsStore,

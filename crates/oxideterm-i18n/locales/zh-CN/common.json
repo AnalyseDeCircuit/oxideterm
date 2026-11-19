@@ -888,7 +888,6 @@
         "proxy_chain": "代理链",
         "agent_forwarding": "Agent 转发",
         "post_connect_command": "连接后命令",
-        "pre_connect_command": "连接前命令",
         "color": "颜色",
         "tags": "标签",
         "ssh_kex_algorithms": "SSH 密钥交换算法",

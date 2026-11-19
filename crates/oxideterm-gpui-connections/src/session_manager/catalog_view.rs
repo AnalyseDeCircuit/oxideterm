@@ -176,7 +176,58 @@ impl CatalogView {
     }
 
     fn action(&self, action: CatalogAction, window: Option<&mut Window>, cx: &mut App) {
-        (self.dispatch)(Request::Catalog(action), window, cx);
+        use CatalogAction as Action;
+        let reset_composition = match action {
+            Action::NewGroup | Action::NewSubgroup(_) => {
+                let parent_path = match action {
+                    Action::NewSubgroup(group) => Some(group),
+                    _ => None,
+                };
+                self.session_manager.update(cx, |manager, cx| {
+                    manager.open_group_editor(
+                        SessionManagerGroupEditor::Create { parent_path },
+                        String::new(),
+                        cx,
+                    );
+                });
+                true
+            }
+            Action::RenameGroup(group) => {
+                self.session_manager
+                    .update(cx, |manager, cx| manager.rename_group_editor(group, cx));
+                true
+            }
+            Action::CloseGroupManager => {
+                self.session_manager
+                    .update(cx, SessionManagerState::close_session_group_manager);
+                true
+            }
+            Action::CancelGroupEditor => {
+                self.session_manager
+                    .update(cx, SessionManagerState::cancel_group_editor);
+                true
+            }
+            Action::Delete(SessionManagerRowActionTarget::Group(group)) => {
+                self.session_manager.update(cx, |manager, cx| {
+                    manager.request_delete_session_group(group, cx)
+                });
+                false
+            }
+            Action::DeleteSelected => {
+                self.session_manager
+                    .update(cx, SessionManagerState::request_selected_delete);
+                false
+            }
+            Action::CancelDelete => {
+                self.session_manager
+                    .update(cx, SessionManagerState::cancel_delete);
+                false
+            }
+            action => return (self.dispatch)(Request::Catalog(action), window, cx),
+        };
+        if reset_composition {
+            (self.dispatch)(Request::ClearComposition, None, cx);
+        }
     }
 
     fn open_session_manager_target_with_sftp(

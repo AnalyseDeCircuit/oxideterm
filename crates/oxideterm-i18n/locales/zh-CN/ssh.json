@@ -109,7 +109,7 @@
       "post_connect_command": "连接后执行",
       "post_connect_command_placeholder": "cd /srv/app",
       "post_connect_command_hint": "可选。交互式 Shell 打开后自动执行一次。",
-      "pre_connect_command": "连接前执行",
+      "pre_connect_command": "连接前执行（仅此设备）",
       "pre_connect_command_placeholder": "~/.config/vpn/up.sh",
       "pre_connect_command_hint": "可选。在连接开始前于本机默认 Shell 中执行；退出码非零将中止连接。",
       "proxy_command_enable": "使用 ProxyCommand",

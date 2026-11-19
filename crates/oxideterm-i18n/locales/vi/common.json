@@ -896,7 +896,6 @@
         "proxy_chain": "Chuỗi proxy",
         "agent_forwarding": "Chuyển tiếp agent",
         "post_connect_command": "Lệnh sau khi kết nối",
-        "pre_connect_command": "Lệnh trước khi kết nối",
         "color": "Màu",
         "tags": "Thẻ",
         "ssh_kex_algorithms": "Thuật toán trao đổi khóa SSH",

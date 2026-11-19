@@ -17,6 +17,11 @@ on:
         required: false
         default: false
         type: boolean
+      notarize_macos:
+        description: 'Notarize macOS packages with Apple (uncheck to sign without notarizing)'
+        required: false
+        default: true
+        type: boolean
 
 permissions:
   contents: read
@@ -281,9 +286,6 @@ jobs:
         env:
           MACOS_SIGN_CERTIFICATE_BASE64: ${{ secrets.MACOS_SIGN_CERTIFICATE_BASE64 }}
           MACOS_SIGN_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_SIGN_CERTIFICATE_PASSWORD }}
-          MACOS_NOTARY_KEY_BASE64: ${{ secrets.MACOS_NOTARY_KEY_BASE64 }}
-          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
-          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
         run: |
           set -euo pipefail
           if [[ -z "${MACOS_SIGN_CERTIFICATE_BASE64:-}" ]]; then
@@ -324,20 +326,33 @@ jobs:
           echo "MACOS_CODESIGN_IDENTITY=${signing_identity}" >> "${GITHUB_ENV}"
           echo "MACOS_SIGNING_KEYCHAIN=${keychain_path}" >> "${GITHUB_ENV}"
 
-          if [[ -n "${MACOS_NOTARY_KEY_BASE64:-}" ]]; then
-            if [[ -z "${MACOS_NOTARY_KEY_ID:-}" || -z "${MACOS_NOTARY_ISSUER_ID:-}" ]]; then
-              echo 'macOS notarization key requires key id and issuer id.' >&2
-              exit 1
-            fi
-            notary_key_path="${RUNNER_TEMP}/AuthKey_${MACOS_NOTARY_KEY_ID}.p8"
-            printf '%s' "${MACOS_NOTARY_KEY_BASE64}" | openssl base64 -d -A > "${notary_key_path}"
-            chmod 600 "${notary_key_path}"
-            echo "MACOS_NOTARY_KEY_PATH=${notary_key_path}" >> "${GITHUB_ENV}"
-            echo "MACOS_NOTARY_KEY_ID=${MACOS_NOTARY_KEY_ID}" >> "${GITHUB_ENV}"
-            echo "MACOS_NOTARY_ISSUER_ID=${MACOS_NOTARY_ISSUER_ID}" >> "${GITHUB_ENV}"
-          fi
-
           rm -f "${certificate_path}" "${identity_path}"
+
+      - name: Import macOS notarization key
+        if: runner.os == 'macOS' && inputs.notarize_macos
+        shell: bash
+        env:
+          MACOS_NOTARY_KEY_BASE64: ${{ secrets.MACOS_NOTARY_KEY_BASE64 }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${MACOS_CODESIGN_IDENTITY:-}" ]]; then
+            echo 'macOS notarization requires a Developer ID Application signing certificate.' >&2
+            exit 1
+          fi
+          if [[ -z "${MACOS_NOTARY_KEY_BASE64:-}" || -z "${MACOS_NOTARY_KEY_ID:-}" || -z "${MACOS_NOTARY_ISSUER_ID:-}" ]]; then
+            echo 'macOS notarization requires MACOS_NOTARY_KEY_BASE64, MACOS_NOTARY_KEY_ID, and MACOS_NOTARY_ISSUER_ID.' >&2
+            exit 1
+          fi
+          notary_key_path="${RUNNER_TEMP}/AuthKey_${MACOS_NOTARY_KEY_ID}.p8"
+          printf '%s' "${MACOS_NOTARY_KEY_BASE64}" | openssl base64 -d -A > "${notary_key_path}"
+          chmod 600 "${notary_key_path}"
+          {
+            echo "MACOS_NOTARY_KEY_PATH=${notary_key_path}"
+            echo "MACOS_NOTARY_KEY_ID=${MACOS_NOTARY_KEY_ID}"
+            echo "MACOS_NOTARY_ISSUER_ID=${MACOS_NOTARY_ISSUER_ID}"
+          } >> "${GITHUB_ENV}"
 
       - name: Package native app
         env:

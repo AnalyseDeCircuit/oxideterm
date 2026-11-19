@@ -55,22 +55,7 @@ fn saved_console_history_identity(
     Some((scope.to_string(), label.clone()))
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(in crate::workspace) enum SavedConsoleProfileKind {
-    Telnet,
-    Mosh,
-    Serial,
-}
-
-impl SavedConsoleProfileKind {
-    fn connection_kind(self) -> SavedConnectionKind {
-        match self {
-            Self::Telnet => SavedConnectionKind::Telnet,
-            Self::Mosh => SavedConnectionKind::Mosh,
-            Self::Serial => SavedConnectionKind::Serial,
-        }
-    }
-}
+pub(in crate::workspace) use oxideterm_gpui_connections::session_manager::SavedConsoleProfileKind;
 
 pub(in crate::workspace) fn delete_saved_console_profile(
     connections: &mut ConnectionStore,

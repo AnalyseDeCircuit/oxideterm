@@ -1,0 +1,18 @@
+[lints]
+workspace = true
+
+[package]
+name = "oxideterm-local-command"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+tokio.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = ["Win32_Security", "Win32_Storage_FileSystem", "Win32_System_JobObjects", "Win32_System_SystemInformation", "Win32_System_Threading"] }
+zeroize.workspace = true

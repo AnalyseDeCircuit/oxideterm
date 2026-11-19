@@ -149,13 +149,13 @@ impl WorkspaceApp {
         if let Some(command) = pre_connect_command {
             let window_handle = window.window_handle();
             let i18n = self.i18n.clone();
+            let (gate, window_close) = self.spawn_window_pre_connect(command, window, cx);
             cx.spawn(async move |workspace, cx| {
-                let failure = oxideterm_terminal::run_pre_connect_command_async(
-                    command,
-                    oxideterm_terminal::PRE_CONNECT_COMMAND_TIMEOUT,
-                )
-                .await
-                .err();
+                let _window_close = window_close;
+                let Ok(result) = gate.await else {
+                    return;
+                };
+                let failure = result.err();
                 let _ = cx.update_window(window_handle, move |_, window, cx| {
                     let _ = workspace.update(cx, |this, cx| {
                         if let Some(failure) = failure {
@@ -310,13 +310,13 @@ impl WorkspaceApp {
         let window_handle = window.window_handle();
         let i18n = self.i18n.clone();
         let profile_id = id.to_string();
+        let (gate, window_close) = self.spawn_window_pre_connect(command, window, cx);
         cx.spawn(async move |workspace, cx| {
-            let failure = oxideterm_terminal::run_pre_connect_command_async(
-                command,
-                oxideterm_terminal::PRE_CONNECT_COMMAND_TIMEOUT,
-            )
-            .await
-            .err();
+            let _window_close = window_close;
+            let Ok(result) = gate.await else {
+                return;
+            };
+            let failure = result.err();
             let _ = cx.update_window(window_handle, move |_, window, cx| {
                 let _ = workspace.update(cx, |this, cx| {
                     if let Some(failure) = failure {
@@ -328,6 +328,26 @@ impl WorkspaceApp {
             });
         })
         .detach();
+    }
+
+    pub(in crate::workspace) fn spawn_window_pre_connect(
+        &self,
+        command: String,
+        window: &Window,
+        cx: &mut App,
+    ) -> (
+        tokio_util::task::AbortOnDropHandle<Result<(), oxideterm_terminal::LocalCommandFailure>>,
+        Subscription,
+    ) {
+        // GPUI tasks have no Tokio reactor; the window close subscription
+        // retires the gate on the workspace runtime before it can open a tab.
+        let worker = self.forwarding_runtime.spawn(oxideterm_terminal::run_pre_connect_command_async(
+            command,
+            oxideterm_terminal::PRE_CONNECT_COMMAND_TIMEOUT,
+        ));
+        let abort = worker.abort_handle();
+        let close = window_shell::observe_window_close(window, cx, move |_, _| abort.abort());
+        (tokio_util::task::AbortOnDropHandle::new(worker), close)
     }
 
     fn report_local_pre_connect_failure(
