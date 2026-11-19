@@ -1355,6 +1355,14 @@
     "next": "Siguiente",
     "continue_button": "Continuar a OxideTerm 2"
   },
+  "connection": {
+    "pre_connect": {
+      "too_long": "El comando previo a la conexión es demasiado largo (máximo {limit} bytes)",
+      "spawn_failed": "No se pudo iniciar el comando previo a la conexión",
+      "timeout": "El comando previo a la conexión agotó el tiempo tras {seconds} segundos",
+      "exit_code": "El comando previo a la conexión falló con el código de salida {code}"
+    }
+  },
   "zen_mode": {
     "exit": "Salir del modo Zen",
     "hint": "Modo Zen — Pulsa {{shortcut}} para salir",

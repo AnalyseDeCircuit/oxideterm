@@ -37,6 +37,7 @@ pub(super) struct ConnectionSpec {
     legacy_ssh_compatibility: Option<bool>,
     ssh_channel_strategy: Option<SshChannelStrategy>,
     post_connect_command: Option<Option<String>>,
+    pre_connect_command: Option<Option<String>>,
 }
 
 #[derive(Deserialize)]
@@ -124,6 +125,7 @@ pub(super) fn connection_spec_from_direct_args(
         legacy_ssh_compatibility: args.legacy_ssh_compatibility,
         ssh_channel_strategy: None,
         post_connect_command: args.post_connect_command.map(Some),
+        pre_connect_command: args.pre_connect_command.map(Some),
     }))
 }
 
@@ -258,6 +260,9 @@ pub(super) fn connection_request_from_spec(
             .unwrap_or_default(),
         post_connect_command: spec.post_connect_command.unwrap_or_else(|| {
             existing.and_then(|connection| connection.post_connect_command().map(ToOwned::to_owned))
+        }),
+        pre_connect_command: spec.pre_connect_command.unwrap_or_else(|| {
+            existing.and_then(|connection| connection.options.pre_connect_command.clone())
         }),
         terminal: existing
             // Preserve the stored terminal options while resolving CLI overrides from a shared connection.
@@ -551,5 +556,6 @@ impl ConnectionDirectArgs {
             || self.agent_forwarding.is_some()
             || self.legacy_ssh_compatibility.is_some()
             || self.post_connect_command.is_some()
+            || self.pre_connect_command.is_some()
     }
 }

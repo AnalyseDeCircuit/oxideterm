@@ -167,6 +167,7 @@ fn remote_desktop_edit_form_restores_options_without_loading_secret() {
         },
         read_only: true,
         session_options,
+        pre_connect_command: None,
         created_at: now,
         updated_at: now,
         last_used_at: None,
@@ -481,6 +482,7 @@ fn jump_hop_uses_saved_connection_metadata_without_secrets() {
         legacy_ssh_compatibility: true,
         ssh_algorithms: oxideterm_connections::SshAlgorithmPreferences::default(),
         post_connect_command: None,
+        pre_connect_command: None,
     };
     let mut hop = NewConnectionProxyHop::new();
     hop.password = "old-password".to_string();

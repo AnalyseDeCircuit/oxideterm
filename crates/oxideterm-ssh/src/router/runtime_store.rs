@@ -48,6 +48,16 @@ impl NodeRuntimeStore {
         }
     }
 
+    /// Clears the one-shot gate marker so the next attempt runs the command again.
+    ///
+    /// The flag never notifies observers: it changes no routing or readiness
+    /// state and exists only inside one attempt's config snapshot.
+    pub fn clear_pre_connect_completed(&self, node_id: &NodeId) {
+        if let Some(mut entry) = self.nodes.get_mut(node_id) {
+            entry.config.pre_connect_completed = false;
+        }
+    }
+
     fn audit_context(&self, node_id: &NodeId, mut context: oxideterm_audit::AuditContext) -> Option<oxideterm_audit::AuditContext> {
         let node = self.nodes.get(node_id)?;
         context.session_id = Some(node.audit_session_id.clone());
@@ -1275,4 +1285,29 @@ fn snapshot_node_depth(
         current = parent_by_id.get(&parent_id).cloned().flatten();
     }
     depth
+}
+
+#[cfg(test)]
+mod pre_connect_tests {
+    use super::*;
+
+    #[test]
+    fn clearing_the_pre_connect_marker_keeps_the_command_for_the_next_attempt() {
+        let store = NodeRuntimeStore::default();
+        let node_id = NodeId::new("node-a");
+        let mut config = SshConfig::password("target.example.com", 22, "operator", "pw");
+        config.pre_connect_command = Some("~/.config/vpn/up.sh".to_string());
+        config.pre_connect_completed = true;
+        store.upsert_node(node_id.clone(), config);
+
+        store.clear_pre_connect_completed(&node_id);
+        let snapshot = store.snapshot(&node_id).expect("node runtime remains");
+
+        assert!(!snapshot.config.pre_connect_completed);
+        assert_eq!(
+            snapshot.config.pre_connect_command.as_deref(),
+            Some("~/.config/vpn/up.sh")
+        );
+        assert_eq!(snapshot.config.host, "target.example.com");
+    }
 }

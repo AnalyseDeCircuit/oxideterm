@@ -9,6 +9,7 @@ version.workspace = true
 
 [dependencies]
 oxideterm-audit = { path = "../oxideterm-audit" }
+oxideterm-local-command = { path = "../oxideterm-local-command" }
 oxideterm-atomic-file = { path = "../oxideterm-atomic-file" }
 oxideterm-network-proxy = { path = "../oxideterm-network-proxy" }
 base64.workspace = true

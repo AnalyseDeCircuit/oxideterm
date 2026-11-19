@@ -139,6 +139,45 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Opening a local profile is a connection attempt: run its local gate
+        // off the UI thread before the PTY is created. Saving alone only
+        // persists the command.
+        let pre_connect_command = plan
+            .launch
+            .then(|| plan.pre_connect_command().map(str::to_owned))
+            .flatten();
+        if let Some(command) = pre_connect_command {
+            let window_handle = window.window_handle();
+            let i18n = self.i18n.clone();
+            let (gate, window_close) = self.spawn_window_pre_connect(command, window, cx);
+            cx.spawn(async move |workspace, cx| {
+                let _window_close = window_close;
+                let Ok(result) = gate.await else {
+                    return;
+                };
+                let failure = result.err();
+                let _ = cx.update_window(window_handle, move |_, window, cx| {
+                    let _ = workspace.update(cx, |this, cx| {
+                        if let Some(failure) = failure {
+                            this.report_local_pre_connect_failure(failure, &i18n, cx);
+                            return;
+                        }
+                        this.open_local_terminal_from_form_after_gate(plan, window, cx);
+                    });
+                });
+            })
+            .detach();
+            return;
+        }
+        self.open_local_terminal_from_form_after_gate(plan, window, cx);
+    }
+
+    fn open_local_terminal_from_form_after_gate(
+        &mut self,
+        plan: LocalFormSubmission,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let result = (|| -> Result<()> {
             // Saving a portable profile does not require its shell or directory to exist here.
             let config = plan
@@ -253,6 +292,88 @@ impl WorkspaceApp {
     }
 
     pub(super) fn open_saved_local_terminal_profile(
+        &mut self,
+        id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(command) = self
+            .connection_store
+            .local_terminal_profiles()
+            .iter()
+            .find(|profile| profile.id == id)
+            .and_then(|profile| profile.pre_connect_command.clone())
+        else {
+            self.open_saved_local_terminal_profile_after_gate(id, window, cx);
+            return;
+        };
+        let window_handle = window.window_handle();
+        let i18n = self.i18n.clone();
+        let profile_id = id.to_string();
+        let (gate, window_close) = self.spawn_window_pre_connect(command, window, cx);
+        cx.spawn(async move |workspace, cx| {
+            let _window_close = window_close;
+            let Ok(result) = gate.await else {
+                return;
+            };
+            let failure = result.err();
+            let _ = cx.update_window(window_handle, move |_, window, cx| {
+                let _ = workspace.update(cx, |this, cx| {
+                    if let Some(failure) = failure {
+                        this.report_local_pre_connect_failure(failure, &i18n, cx);
+                        return;
+                    }
+                    this.open_saved_local_terminal_profile_after_gate(&profile_id, window, cx);
+                });
+            });
+        })
+        .detach();
+    }
+
+    pub(in crate::workspace) fn spawn_window_pre_connect(
+        &self,
+        command: String,
+        window: &Window,
+        cx: &mut App,
+    ) -> (
+        tokio_util::task::AbortOnDropHandle<Result<(), oxideterm_terminal::LocalCommandFailure>>,
+        Subscription,
+    ) {
+        // GPUI tasks have no Tokio reactor; the window close subscription
+        // retires the gate on the workspace runtime before it can open a tab.
+        let worker = self.forwarding_runtime.spawn(oxideterm_terminal::run_pre_connect_command_async(
+            command,
+            oxideterm_terminal::PRE_CONNECT_COMMAND_TIMEOUT,
+        ));
+        let abort = worker.abort_handle();
+        let close = window_shell::observe_window_close(window, cx, move |_, _| abort.abort());
+        (tokio_util::task::AbortOnDropHandle::new(worker), close)
+    }
+
+    fn report_local_pre_connect_failure(
+        &mut self,
+        failure: oxideterm_terminal::LocalCommandFailure,
+        i18n: &oxideterm_i18n::I18n,
+        cx: &mut Context<Self>,
+    ) {
+        let message = oxideterm_terminal::pre_connect_failure_message(Some(i18n), failure);
+        self.connections.session_manager.update(cx, |manager, cx| {
+            manager.set_status(Some(message.clone()), cx)
+        });
+        self.push_workspace_notice(
+            TerminalNotice {
+                title: message,
+                description: None,
+                status_text: None,
+                progress: None,
+                variant: TerminalNoticeVariant::Error,
+            },
+            cx,
+        );
+        cx.notify();
+    }
+
+    fn open_saved_local_terminal_profile_after_gate(
         &mut self,
         id: &str,
         window: &mut Window,

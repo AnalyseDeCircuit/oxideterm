@@ -1355,6 +1355,14 @@
     "cat_ops_ai": "Host-Betrieb & KI",
     "cat_security_ext": "Sicherheit, Sync & Erweiterungen"
   },
+  "connection": {
+    "pre_connect": {
+      "too_long": "Der Befehl vor dem Verbinden ist zu lang (max. {limit} Bytes)",
+      "spawn_failed": "Der Befehl vor dem Verbinden konnte nicht gestartet werden",
+      "timeout": "Zeitüberschreitung beim Befehl vor dem Verbinden nach {seconds} Sekunden",
+      "exit_code": "Der Befehl vor dem Verbinden ist mit Rückgabecode {code} fehlgeschlagen"
+    }
+  },
   "zen_mode": {
     "exit": "Zen-Modus beenden",
     "hint": "Zen-Modus — Zum Beenden {{shortcut}} drücken",

@@ -687,6 +687,7 @@ impl WorkspaceApp {
             intent,
             tx,
             managed_key_resolver_from_store(&self.connection_store),
+            self.i18n.clone(),
         );
     }
 }

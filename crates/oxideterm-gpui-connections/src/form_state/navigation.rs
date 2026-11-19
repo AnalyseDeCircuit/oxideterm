@@ -129,6 +129,7 @@ pub fn next_connection_field(
             NewConnectionField::Group,
             NewConnectionField::Notes,
             NewConnectionField::Password,
+            NewConnectionField::PreConnectCommand,
             NewConnectionField::PostConnectCommand,
         ],
         SshAuthTab::DefaultKey => vec![
@@ -139,6 +140,7 @@ pub fn next_connection_field(
             NewConnectionField::Group,
             NewConnectionField::Notes,
             NewConnectionField::Passphrase,
+            NewConnectionField::PreConnectCommand,
             NewConnectionField::PostConnectCommand,
         ],
         SshAuthTab::SshKey => vec![
@@ -150,6 +152,7 @@ pub fn next_connection_field(
             NewConnectionField::Notes,
             NewConnectionField::KeyPath,
             NewConnectionField::Passphrase,
+            NewConnectionField::PreConnectCommand,
             NewConnectionField::PostConnectCommand,
         ],
         SshAuthTab::ManagedKey => vec![
@@ -161,6 +164,7 @@ pub fn next_connection_field(
             NewConnectionField::Notes,
             NewConnectionField::ManagedKeyId,
             NewConnectionField::Passphrase,
+            NewConnectionField::PreConnectCommand,
             NewConnectionField::PostConnectCommand,
         ],
         SshAuthTab::Certificate => vec![
@@ -173,6 +177,7 @@ pub fn next_connection_field(
             NewConnectionField::KeyPath,
             NewConnectionField::CertPath,
             NewConnectionField::Passphrase,
+            NewConnectionField::PreConnectCommand,
             NewConnectionField::PostConnectCommand,
         ],
         SshAuthTab::Agent => vec![
@@ -183,6 +188,7 @@ pub fn next_connection_field(
             NewConnectionField::Group,
             NewConnectionField::Notes,
             NewConnectionField::IdentityAgent,
+            NewConnectionField::PreConnectCommand,
             NewConnectionField::PostConnectCommand,
         ],
         SshAuthTab::TwoFactor => vec![
@@ -192,6 +198,7 @@ pub fn next_connection_field(
             NewConnectionField::Username,
             NewConnectionField::Group,
             NewConnectionField::Notes,
+            NewConnectionField::PreConnectCommand,
             NewConnectionField::PostConnectCommand,
         ],
     };

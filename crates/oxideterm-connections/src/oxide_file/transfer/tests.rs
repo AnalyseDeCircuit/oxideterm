@@ -419,6 +419,7 @@ mod tests {
                 open_sftp_on_connect: false,
                 ssh_channel_strategy: crate::SshChannelStrategy::default(),
                 post_connect_command: None,
+                pre_connect_command: None,
                 terminal: ConnectionTerminalOptions::default(),
             },
             created_at: Utc::now(),
@@ -634,6 +635,7 @@ mod tests {
             .unwrap();
         source
             .upsert_serial_profile(SaveSerialProfileRequest {
+                pre_connect_command: None,
                 id: Some("serial-import".to_string()),
                 name: "Imported Serial".to_string(),
                 port_path: "/dev/cu.imported".to_string(),
@@ -688,6 +690,7 @@ mod tests {
             .unwrap();
         target
             .upsert_serial_profile(SaveSerialProfileRequest {
+                pre_connect_command: None,
                 id: Some("serial-local".to_string()),
                 name: "Local Serial".to_string(),
                 port_path: "/dev/cu.local".to_string(),
@@ -744,6 +747,7 @@ mod tests {
             .unwrap();
         let profile = source
             .upsert_serial_profile(SaveSerialProfileRequest {
+                pre_connect_command: None,
                 id: Some("serial-1".to_string()),
                 name: "Lab console".to_string(),
                 port_path: "/dev/cu.usbserial-1".to_string(),
@@ -760,6 +764,7 @@ mod tests {
                 .unwrap();
         let telnet_profile = source
             .upsert_telnet_profile(SaveTelnetProfileRequest {
+                pre_connect_command: None,
                 id: Some("telnet-1".to_string()),
                 upstream_proxy: Some(SavedUpstreamProxyPolicy::Custom {
                     proxy: SavedUpstreamProxyConfig {
@@ -849,6 +854,7 @@ mod tests {
         let mut source = temp_store("mosh-profile-source");
         let profile = source
             .upsert_mosh_profile(SaveMoshProfileRequest {
+                pre_connect_command: None,
                 id: Some("mosh-1".to_string()),
                 name: "Roaming shell".to_string(),
                 group: Some("Mobile".to_string()),
@@ -928,6 +934,7 @@ mod tests {
         const PASSWORD: &str = "standalone-sftp-archive-secret";
         let mut source = temp_store("standalone-sftp-profile-source");
         let mut request = crate::SaveStandaloneSftpProfileRequest {
+            pre_connect_command: None,
             id: Some("sftp-archive".to_string()),
             name: "Archive endpoint".to_string(),
             group: Some("Storage".to_string()),
@@ -1077,6 +1084,7 @@ mod tests {
             .unwrap();
         source
             .upsert_remote_desktop_profile(SaveRemoteDesktopProfileRequest {
+                pre_connect_command: None,
                 id: Some("remote-1".to_string()),
                 name: "Lab desktop".to_string(),
                 group: Some("Lab".to_string()),

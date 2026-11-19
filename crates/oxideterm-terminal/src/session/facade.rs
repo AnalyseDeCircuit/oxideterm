@@ -18,6 +18,9 @@ impl Drop for TerminalSession {
 pub struct TelnetSessionConfig {
     pub host: String,
     pub port: u16,
+    /// Local gate that must succeed before the Telnet dial starts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pre_connect_command: Option<String>,
     #[serde(default)]
     pub line_endings: TelnetLineEndings,
 }

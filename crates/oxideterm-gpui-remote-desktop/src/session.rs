@@ -871,6 +871,7 @@ pub fn preview_remote_desktop_profile(
     };
 
     RemoteDesktopConnectionProfile {
+        pre_connect_command: None,
         id: format!("preview-{}", protocol.provider_id()),
         label: label.to_string(),
         protocol,

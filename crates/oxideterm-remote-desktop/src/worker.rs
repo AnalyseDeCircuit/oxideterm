@@ -438,6 +438,7 @@ mod tests {
 
     fn profile() -> RemoteDesktopConnectionProfile {
         RemoteDesktopConnectionProfile {
+            pre_connect_command: None,
             id: "preview-rdp".to_string(),
             label: "RDP Preview".to_string(),
             protocol: RemoteDesktopProtocol::Rdp,

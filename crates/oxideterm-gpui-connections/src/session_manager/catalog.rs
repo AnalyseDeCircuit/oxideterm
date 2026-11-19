@@ -63,6 +63,7 @@ pub fn prepare_saved_console_launch(
                 .find(|profile| profile.id == id)?;
             Some(SavedConsoleLaunch::Serial {
                 config: oxideterm_terminal::SerialSessionConfig {
+                    pre_connect_command: profile.pre_connect_command.clone(),
                     port_path: profile.port_path.clone(),
                     baud_rate: profile.baud_rate,
                     data_bits: profile.data_bits,
@@ -82,6 +83,7 @@ pub fn prepare_saved_console_launch(
                 .find(|profile| profile.id == id)?;
             Some(SavedConsoleLaunch::Telnet {
                 config: oxideterm_terminal::TelnetSessionConfig {
+                    pre_connect_command: profile.pre_connect_command.clone(),
                     line_endings: terminal_telnet_line_endings_from_profile(profile),
                     host: profile.host.clone(),
                     port: profile.port,

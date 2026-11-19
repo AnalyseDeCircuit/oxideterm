@@ -1355,6 +1355,14 @@
     "cat_ops_ai": "主机运维与 AI",
     "cat_security_ext": "安全、同步与原生扩展"
   },
+  "connection": {
+    "pre_connect": {
+      "too_long": "连接前命令过长（最多 {limit} 字节）",
+      "spawn_failed": "无法启动连接前命令",
+      "timeout": "连接前命令在 {seconds} 秒后超时",
+      "exit_code": "连接前命令失败，退出码 {code}"
+    }
+  },
   "zen_mode": {
     "exit": "退出禅模式",
     "hint": "禅模式 — 按 {{shortcut}} 退出",

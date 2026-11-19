@@ -87,6 +87,10 @@ impl LocalFormSubmission {
         self.request.cwd.as_deref()
     }
 
+    pub fn pre_connect_command(&self) -> Option<&str> {
+        self.request.pre_connect_command.as_deref()
+    }
+
     pub fn title(
         &self,
         shell_label: Option<&str>,
@@ -124,6 +128,8 @@ impl ConnectionFlowEntity {
                     .then(|| form.icon_background_color.clone()),
                 shell_id: form.local_shell_id.clone(),
                 cwd: (!form.local_cwd.trim().is_empty()).then(|| form.local_cwd.trim().to_owned()),
+                pre_connect_command: (!form.pre_connect_command.trim().is_empty())
+                    .then(|| form.pre_connect_command.trim().to_string()),
                 group: (!connection_group_is_ungrouped(&form.group, i18n))
                     .then(|| form.group.trim().to_owned()),
             },

@@ -16,6 +16,7 @@ mod tests {
 
     fn request(id: &str, auth: SavedAuth) -> SaveConnectionRequest {
         SaveConnectionRequest {
+            pre_connect_command: None,
             totp_credential_id: None,
             id: Some(id.to_string()),
             name: "Home".to_string(),
@@ -154,6 +155,7 @@ mod tests {
 
     fn mosh_request(id: &str, auth: SavedAuth) -> SaveMoshProfileRequest {
         SaveMoshProfileRequest {
+            pre_connect_command: None,
             id: Some(id.to_string()),
             name: "Mobile shell".to_string(),
             group: None,
@@ -184,6 +186,7 @@ mod tests {
         auth: SavedAuth,
     ) -> SaveStandaloneSftpProfileRequest {
         SaveStandaloneSftpProfileRequest {
+            pre_connect_command: None,
             id: Some(id.to_string()),
             name: "Archive SFTP".to_string(),
             group: Some("Storage".to_string()),
@@ -3338,6 +3341,7 @@ mod tests {
             open_sftp_on_connect: false,
             ssh_channel_strategy: SshChannelStrategy::DedicatedPerConsumer,
             post_connect_command: Some("uname -a".to_string()),
+            pre_connect_command: None,
             terminal: ConnectionTerminalOptions::default(),
         };
         source.save().unwrap();
@@ -3475,6 +3479,7 @@ mod tests {
             input_line_ending: SerialLineEnding::CrLf,
             output_line_ending: SerialLineEnding::Lf,
             terminal: ConnectionTerminalOptions::default(),
+            pre_connect_command: None,
             connect_on_open: true,
             created_at: now,
             updated_at: now,
@@ -3549,6 +3554,7 @@ mod tests {
                 highlight_rule_set: None,
                 session_log_policy: ConnectionTerminalSessionLogPolicy::Disabled,
             },
+            pre_connect_command: None,
             connect_on_open: true,
             created_at: now,
             updated_at: now,
@@ -3625,10 +3631,43 @@ mod tests {
     }
 
     #[test]
+    fn pre_connect_commands_are_trimmed_and_survive_reload() {
+        let path = temp_store_path("pre-connect-commands");
+        let mut store = ConnectionStore::load(path.clone()).expect("store should load");
+        let mut ssh = request("pre-connect-ssh", SavedAuth::Agent);
+        ssh.pre_connect_command = Some("  ~/.config/vpn/up.sh  ".to_string());
+        store.upsert(ssh).unwrap();
+        let serial = store
+            .upsert_serial_profile(SaveSerialProfileRequest {
+                pre_connect_command: Some("   ".to_string()),
+                name: "Serial".to_string(),
+                port_path: "/dev/ttyUSB0".to_string(),
+                ..SaveSerialProfileRequest::default()
+            })
+            .unwrap();
+        assert_eq!(serial.pre_connect_command, None);
+
+        let mut reloaded = ConnectionStore::load(path).unwrap();
+        let mut snapshot = reloaded.export_saved_connections_snapshot().unwrap();
+        let record = snapshot.records.iter_mut().find(|r| r.id == "pre-connect-ssh").unwrap();
+        let options = record.options.as_mut().unwrap();
+        assert_eq!(options.pre_connect_command, None);
+        options.pre_connect_command = Some("remote-supplied text".to_owned());
+        reloaded.apply_saved_connections_snapshot(snapshot, SavedConnectionsConflictStrategy::Replace).unwrap();
+        assert_eq!(
+            reloaded
+                .get("pre-connect-ssh")
+                .and_then(|connection| connection.options.pre_connect_command.as_deref()),
+            Some("~/.config/vpn/up.sh")
+        );
+    }
+
+    #[test]
     fn serial_line_endings_persist_in_sync_snapshot() {
         let mut store = load_empty_store("serial-line-endings-sync");
         let profile = store
             .upsert_serial_profile(SaveSerialProfileRequest {
+                pre_connect_command: None,
                 name: "Serial".to_string(),
                 port_path: "/dev/ttyUSB0".to_string(),
                 ..SaveSerialProfileRequest::default()
@@ -3674,6 +3713,7 @@ mod tests {
         let mut store = load_empty_store("asset-profile-icons");
         let serial = store
             .upsert_serial_profile(SaveSerialProfileRequest {
+                pre_connect_command: None,
                 name: "Serial".to_string(),
                 icon: Some("radio".to_string()),
                 color: Some("#fcd34d".to_string()),
@@ -3684,6 +3724,7 @@ mod tests {
             .unwrap();
         let telnet = store
             .upsert_telnet_profile(SaveTelnetProfileRequest {
+                pre_connect_command: None,
                 name: "Telnet".to_string(),
                 icon: Some("network".to_string()),
                 color: Some("#86efac".to_string()),
@@ -3695,6 +3736,7 @@ mod tests {
             .unwrap();
         let rdp = store
             .upsert_remote_desktop_profile(SaveRemoteDesktopProfileRequest {
+                pre_connect_command: None,
                 name: "RDP".to_string(),
                 icon: Some("monitor".to_string()),
                 color: Some("#7dd3fc".to_string()),
@@ -3707,6 +3749,7 @@ mod tests {
             .unwrap();
         let vnc = store
             .upsert_remote_desktop_profile(SaveRemoteDesktopProfileRequest {
+                pre_connect_command: None,
                 name: "VNC".to_string(),
                 icon: Some("desktop".to_string()),
                 color: Some("#c4b5fd".to_string()),
@@ -4209,6 +4252,7 @@ mod tests {
         const CREDENTIAL: &str = "remote-desktop-secret-value";
         let mut store = load_empty_store("remote-desktop-secret-boundary");
         let request = SaveRemoteDesktopProfileRequest {
+            pre_connect_command: None,
             id: Some("remote-1".to_string()),
             name: "Lab desktop".to_string(),
             group: Some("Lab".to_string()),
@@ -4241,6 +4285,7 @@ mod tests {
 
         let invalid_result =
             store.upsert_remote_desktop_profile(SaveRemoteDesktopProfileRequest {
+                pre_connect_command: None,
                 id: Some("remote-invalid".to_string()),
                 name: String::new(),
                 protocol: RemoteDesktopProtocol::Vnc,
@@ -4291,6 +4336,7 @@ mod tests {
         };
         let created = store
             .upsert_remote_desktop_profile(SaveRemoteDesktopProfileRequest {
+                pre_connect_command: None,
                 id: Some("remote-edit".to_string()),
                 name: "Original".to_string(),
                 protocol: RemoteDesktopProtocol::Rdp,
@@ -4308,6 +4354,7 @@ mod tests {
 
         let updated = store
             .upsert_remote_desktop_profile(SaveRemoteDesktopProfileRequest {
+                pre_connect_command: None,
                 id: Some(created.id.clone()),
                 name: "Updated".to_string(),
                 group: Some("Lab".to_string()),
@@ -4345,6 +4392,7 @@ mod tests {
 
         let cleared = store
             .upsert_remote_desktop_profile(SaveRemoteDesktopProfileRequest {
+                pre_connect_command: None,
                 id: Some(reloaded.id.clone()),
                 name: reloaded.name.clone(),
                 group: reloaded.group.clone(),
@@ -4408,11 +4456,13 @@ mod tests {
             .upsert(request("ssh-move", SavedAuth::Agent))
             .unwrap();
         let local = store.upsert_local_terminal_profile(SaveLocalTerminalProfileRequest {
+            pre_connect_command: None,
             id: Some("local-move".into()), name: "Local project".into(),
             cwd: Some("~/project".into()), ..Default::default()
         }).unwrap();
         let serial = store
             .upsert_serial_profile(SaveSerialProfileRequest {
+                pre_connect_command: None,
                 id: Some("serial-move".to_string()),
                 name: "Serial console".to_string(),
                 port_path: "/dev/tty.test".to_string(),
@@ -4421,6 +4471,7 @@ mod tests {
             .unwrap();
         let telnet = store
             .upsert_telnet_profile(SaveTelnetProfileRequest {
+                pre_connect_command: None,
                 id: Some("telnet-move".to_string()),
                 name: "Telnet console".to_string(),
                 host: "telnet.example.test".to_string(),
@@ -4439,6 +4490,7 @@ mod tests {
             .unwrap();
         let remote = store
             .upsert_remote_desktop_profile(SaveRemoteDesktopProfileRequest {
+                pre_connect_command: None,
                 id: Some("remote-move".to_string()),
                 name: "Remote desktop".to_string(),
                 protocol: RemoteDesktopProtocol::Rdp,
@@ -4449,6 +4501,7 @@ mod tests {
             .unwrap();
         let ble = store
             .upsert_ble_profile(SaveBleProfileRequest {
+                pre_connect_command: None,
                 id: Some("ble-move".to_string()),
                 name: "BLE console".to_string(),
                 service_uuid: "6e400001-b5a3-f393-e0a9-e50e24dcca9e".to_string(),
@@ -4537,6 +4590,7 @@ mod tests {
         let mut store = load_empty_store("remote-desktop-snapshot-redaction");
         let profile = store
             .upsert_remote_desktop_profile(SaveRemoteDesktopProfileRequest {
+                pre_connect_command: None,
                 id: Some("remote-1".to_string()),
                 name: "VNC lab".to_string(),
                 protocol: RemoteDesktopProtocol::Vnc,
@@ -4720,6 +4774,7 @@ mod tests {
         let identifier = "1b4d2f6e-1234-4c5d-9e8f-aabbccddeeff";
         store
             .upsert_ble_profile(SaveBleProfileRequest {
+                pre_connect_command: None,
                 id: Some("ble-direct".to_string()),
                 name: "BLE direct".to_string(),
                 device_mac: Some("AA:BB:CC:DD:EE:FF".to_string()),
@@ -4762,6 +4817,7 @@ mod tests {
         // platform-local value pointing at a device the OS may no longer know.
         reloaded
             .upsert_ble_profile(SaveBleProfileRequest {
+                pre_connect_command: None,
                 id: Some("ble-direct".to_string()),
                 name: "BLE direct".to_string(),
                 service_uuid: "6e400001-b5a3-f393-e0a9-e50e24dcca9e".to_string(),
@@ -4783,6 +4839,7 @@ mod tests {
         let mut source = load_empty_store("local-profile-source");
         let mut target = load_empty_store("local-profile-target");
         let profile = source.upsert_local_terminal_profile(SaveLocalTerminalProfileRequest {
+            pre_connect_command: None,
             id: Some("project".into()), name: "Project".into(), group: Some("Work/Code".into()),
             shell_id: Some("zsh".into()), cwd: Some("~/work/project".into()),
             icon: Some("debian".into()), ..Default::default()
@@ -4808,10 +4865,12 @@ mod tests {
     fn local_profile_sync_keeps_newer_edits_and_rolls_back_invalid_batches() {
         let mut store = load_empty_store("local-profile-conflict");
         store.upsert_local_terminal_profile(SaveLocalTerminalProfileRequest {
+            pre_connect_command: None,
             id: Some("project".into()), name: "Project".into(), cwd: Some("~/old".into()), ..Default::default()
         }).unwrap();
         let stale = store.export_saved_connections_snapshot().unwrap();
         store.upsert_local_terminal_profile(SaveLocalTerminalProfileRequest {
+            pre_connect_command: None,
             id: Some("project".into()), name: "Project".into(), cwd: Some("~/new".into()), ..Default::default()
         }).unwrap();
         store.apply_saved_connections_snapshot(stale.clone(), SavedConnectionsConflictStrategy::Merge).unwrap();

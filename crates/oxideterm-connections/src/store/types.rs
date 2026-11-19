@@ -381,6 +381,9 @@ pub struct ConnectionOptions {
     pub x11_forwarding: ConnectionX11ForwardingOptions,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub post_connect_command: Option<String>,
+    /// Local command that must succeed before this profile opens a transport.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pre_connect_command: Option<String>,
     /// Terminal protocol behavior is host-specific; absent values inherit the
     /// application defaults so existing saved connections remain compatible.
     #[serde(
@@ -897,6 +900,8 @@ pub struct ConnectionInfo {
     pub ssh_algorithms: SshAlgorithmPreferences,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub post_connect_command: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pre_connect_command: Option<String>,
 }
 
 impl ConnectionInfo {
@@ -1021,6 +1026,7 @@ impl From<&SavedConnection> for ConnectionInfo {
             legacy_ssh_compatibility: conn.options.legacy_ssh_compatibility,
             ssh_algorithms: conn.options.ssh_algorithms.clone(),
             post_connect_command: conn.post_connect_command().map(ToOwned::to_owned),
+            pre_connect_command: conn.options.pre_connect_command.clone(),
         }
     }
 }
@@ -1086,6 +1092,9 @@ pub struct LocalTerminalProfile {
     pub shell_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
+    /// Local command that must succeed before the PTY starts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pre_connect_command: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1102,6 +1111,7 @@ pub struct SaveLocalTerminalProfileRequest {
     pub icon_background_color: Option<String>,
     pub shell_id: Option<String>,
     pub cwd: Option<String>,
+    pub pre_connect_command: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -1134,6 +1144,9 @@ pub struct SerialProfile {
         skip_serializing_if = "ConnectionTerminalOptions::inherits_application_defaults"
     )]
     pub terminal: ConnectionTerminalOptions,
+    /// Local command that must succeed before this profile opens its transport.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pre_connect_command: Option<String>,
     #[serde(default, skip_serializing_if = "is_false")]
     pub connect_on_open: bool,
     pub created_at: DateTime<Utc>,
@@ -1160,6 +1173,7 @@ pub struct SaveSerialProfileRequest {
     pub input_line_ending: Option<SerialLineEnding>,
     pub output_line_ending: Option<SerialLineEnding>,
     pub terminal: ConnectionTerminalOptions,
+    pub pre_connect_command: Option<String>,
     pub connect_on_open: Option<bool>,
 }
 
@@ -1235,6 +1249,9 @@ pub struct BleProfile {
     /// field existed keep the lower-latency behavior.
     #[serde(default = "default_true", skip_serializing_if = "is_true")]
     pub write_without_response: bool,
+    /// Local command that must succeed before this profile opens its transport.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pre_connect_command: Option<String>,
     #[serde(default, skip_serializing_if = "is_false")]
     pub connect_on_open: bool,
     pub created_at: DateTime<Utc>,
@@ -1269,6 +1286,7 @@ pub struct SaveBleProfileRequest {
     /// preferred MTU.
     pub mtu: Option<Option<u16>>,
     pub write_without_response: Option<bool>,
+    pub pre_connect_command: Option<String>,
     pub connect_on_open: Option<bool>,
 }
 
@@ -1300,6 +1318,9 @@ pub struct TelnetProfile {
         skip_serializing_if = "ConnectionTerminalOptions::inherits_application_defaults"
     )]
     pub terminal: ConnectionTerminalOptions,
+    /// Local command that must succeed before this profile opens its transport.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pre_connect_command: Option<String>,
     #[serde(default, skip_serializing_if = "is_false")]
     pub connect_on_open: bool,
     pub created_at: DateTime<Utc>,
@@ -1323,6 +1344,7 @@ pub struct SaveTelnetProfileRequest {
     pub output_line_ending: Option<SerialLineEnding>,
     pub upstream_proxy: Option<SavedUpstreamProxyPolicy>,
     pub terminal: ConnectionTerminalOptions,
+    pub pre_connect_command: Option<String>,
     pub connect_on_open: Option<bool>,
 }
 
@@ -1402,6 +1424,9 @@ pub struct MoshProfile {
         skip_serializing_if = "ConnectionTerminalOptions::inherits_application_defaults"
     )]
     pub terminal: ConnectionTerminalOptions,
+    /// Local command that must succeed before the SSH bootstrap starts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pre_connect_command: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1436,6 +1461,7 @@ pub struct SaveMoshProfileRequest {
     pub legacy_ssh_compatibility: bool,
     pub ssh_algorithms: SshAlgorithmPreferences,
     pub terminal: ConnectionTerminalOptions,
+    pub pre_connect_command: Option<String>,
 }
 
 /// Carries a newly saved Mosh auth secret directly into one bootstrap attempt.
@@ -1617,6 +1643,9 @@ pub struct StandaloneSftpProfile {
     pub transfer_mode: StandaloneSftpTransferMode,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub secondary_endpoint: Option<StandaloneSftpEndpoint>,
+    /// Local command that must succeed before the first endpoint dials.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pre_connect_command: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1645,6 +1674,7 @@ pub struct SaveStandaloneSftpProfileRequest {
     pub initial_remote_path: Option<String>,
     pub transfer_mode: StandaloneSftpTransferMode,
     pub secondary_endpoint: Option<StandaloneSftpEndpoint>,
+    pub pre_connect_command: Option<String>,
 }
 
 impl fmt::Debug for SaveStandaloneSftpProfileRequest {
@@ -1775,6 +1805,9 @@ pub struct RemoteDesktopProfile {
     pub read_only: bool,
     #[serde(default)]
     pub session_options: RemoteDesktopSessionOptions,
+    /// Local command that must succeed before the provider opens the desktop.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pre_connect_command: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1805,6 +1838,7 @@ pub struct SaveRemoteDesktopProfileRequest {
     pub clear_credential: bool,
     pub read_only: bool,
     pub session_options: RemoteDesktopSessionOptions,
+    pub pre_connect_command: Option<String>,
 }
 
 impl SerialProfile {
@@ -1827,6 +1861,7 @@ impl SerialProfile {
             input_line_ending: SerialLineEnding::None,
             output_line_ending: SerialLineEnding::None,
             terminal: ConnectionTerminalOptions::default(),
+            pre_connect_command: None,
             connect_on_open: false,
             created_at: now,
             updated_at: now,
@@ -1881,6 +1916,7 @@ impl BleProfile {
             local_echo: false,
             mtu: None,
             write_without_response: true,
+            pre_connect_command: None,
             connect_on_open: false,
             created_at: now,
             updated_at: now,
@@ -1927,6 +1963,7 @@ impl TelnetProfile {
             output_line_ending: SerialLineEnding::None,
             upstream_proxy: SavedUpstreamProxyPolicy::Direct,
             terminal: ConnectionTerminalOptions::default(),
+            pre_connect_command: None,
             connect_on_open: false,
             created_at: now,
             updated_at: now,
@@ -1985,6 +2022,7 @@ impl MoshProfile {
             legacy_ssh_compatibility: false,
             ssh_algorithms: SshAlgorithmPreferences::default(),
             terminal: ConnectionTerminalOptions::default(),
+            pre_connect_command: None,
             created_at: now,
             updated_at: now,
             last_used_at: None,
@@ -2067,6 +2105,7 @@ impl StandaloneSftpProfile {
             initial_remote_path: None,
             transfer_mode: StandaloneSftpTransferMode::LocalRemote,
             secondary_endpoint: None,
+            pre_connect_command: None,
             created_at: now,
             updated_at: now,
             last_used_at: None,
@@ -2136,6 +2175,7 @@ impl RemoteDesktopProfile {
             credential_ref: None,
             read_only: false,
             session_options: RemoteDesktopSessionOptions::default(),
+            pre_connect_command: None,
             created_at: now,
             updated_at: now,
             last_used_at: None,
@@ -2225,6 +2265,7 @@ pub struct SaveConnectionRequest {
     pub ssh_channel_strategy: SshChannelStrategy,
     pub x11_forwarding: ConnectionX11ForwardingOptions,
     pub post_connect_command: Option<String>,
+    pub pre_connect_command: Option<String>,
     pub terminal: ConnectionTerminalOptions,
 }
 

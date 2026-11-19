@@ -576,6 +576,7 @@ mod tests {
             legacy_ssh_compatibility: false,
             ssh_algorithms: oxideterm_connections::SshAlgorithmPreferences::default(),
             post_connect_command: Some("export TOKEN=private".to_string()),
+            pre_connect_command: Some("export TOKEN=private".to_string()),
         };
 
         let serialized = native_plugin_saved_connection_snapshot(&connection).to_string();

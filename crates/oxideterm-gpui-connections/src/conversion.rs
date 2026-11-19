@@ -268,6 +268,8 @@ pub fn build_ssh_config(
         strict_host_key_checking: true,
         post_connect_command: (!form.post_connect_command.trim().is_empty())
             .then(|| form.post_connect_command.trim().to_string()),
+        pre_connect_command: (!form.pre_connect_command.trim().is_empty())
+            .then(|| form.pre_connect_command.trim().to_string()),
         ..SshConfig::default()
     };
     let title = if form.name.trim().is_empty() {
@@ -493,6 +495,7 @@ pub fn form_from_runtime_config(
     form.gssapi_delegate_credentials = auth_fields.gssapi_delegate_credentials;
     form.group = default_group;
     form.post_connect_command = config.post_connect_command.clone().unwrap_or_default();
+    form.pre_connect_command = config.pre_connect_command.clone().unwrap_or_default();
     form.agent_forwarding = config.agent_forwarding;
     form.identity_agent = config.identity_agent.clone().unwrap_or_default();
     form.agent_forwarding_socket = config.agent_forwarding_socket.clone();

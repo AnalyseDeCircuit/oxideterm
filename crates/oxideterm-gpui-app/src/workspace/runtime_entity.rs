@@ -852,6 +852,7 @@ impl WorkspaceRuntimeEntity {
         &mut self,
         node_id: &NodeId,
         managed_key_resolver: ManagedKeyResolver,
+        i18n: oxideterm_i18n::I18n,
     ) -> Result<(), NodeTransportStartError> {
         // A replacement must retire the old registry entry before reacquiring the
         // same logical consumer, so an old task cannot release the new attempt.
@@ -880,6 +881,13 @@ impl WorkspaceRuntimeEntity {
         }
 
         let parent_id = runtime_snapshot.parent_id;
+        // Host-key preflight may already have run the gate for this attempt.
+        // Consume that one-shot marker so the next reconnect runs it again.
+        let pre_connect_command = runtime_snapshot.config.pre_connect_command.clone();
+        let pre_connect_completed = runtime_snapshot.config.pre_connect_completed;
+        if pre_connect_completed {
+            self.node_router.clear_pre_connect_completed(node_id);
+        }
         let config = runtime_snapshot.config;
         let consumer = ConnectionConsumer::NodeRouter(node_id.0.clone());
         // The registry and the in-flight authentication attempt are distinct
@@ -922,6 +930,32 @@ impl WorkspaceRuntimeEntity {
         let task = self.task_runtime.spawn(async move {
             let connect = async move {
                 // This task owns the node transport independently from terminal panes and pages.
+                if !pre_connect_completed
+                    && let Some(command) = pre_connect_command
+                    && let Err(failure) = oxideterm_terminal::run_pre_connect_command_async(
+                        command,
+                        oxideterm_terminal::PRE_CONNECT_COMMAND_TIMEOUT,
+                    )
+                    .await
+                {
+                    // The gate owns no transport, so it must release the registry
+                    // consumer it acquired on behalf of this attempt.
+                    registry.release(&worker_connection_id, &consumer);
+                    let message =
+                        oxideterm_terminal::pre_connect_failure_message(Some(&i18n), failure);
+                    let _ = registry.mark_state(
+                        &worker_connection_id,
+                        ConnectionState::Error(message.clone()),
+                    );
+                    let _ = reconnect_tx.send(ReconnectWorkerResult::NodeConnectFailed {
+                        node_id: worker_node_id,
+                        connection_id: worker_connection_id,
+                        error: message,
+                        attempt_id,
+                        job_id: worker_job_id,
+                    });
+                    return;
+                }
                 if force_reconnect {
                     node_handle.clear_physical().await;
                 }
@@ -4172,11 +4206,16 @@ mod tests {
                 entity.start_node_transport(
                     &NodeId::new("missing-node"),
                     unavailable_managed_key_resolver(),
+                    oxideterm_i18n::I18n::new(oxideterm_i18n::Locale::En),
                 ),
                 Err(NodeTransportStartError::MissingRuntime)
             ));
             entity
-                .start_node_transport(&node_id, unavailable_managed_key_resolver())
+                .start_node_transport(
+                    &node_id,
+                    unavailable_managed_key_resolver(),
+                    oxideterm_i18n::I18n::new(oxideterm_i18n::Locale::En),
+                )
                 .expect("node transport start");
             let connection_id = entity
                 .node_router

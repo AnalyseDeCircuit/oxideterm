@@ -30,6 +30,7 @@ struct ConnectionFormModalSnapshot {
     group: String,
     notes: String,
     post_connect_command: String,
+    pre_connect_command: String,
     proxy_command_enabled: bool,
     proxy_command: zeroize::Zeroizing<String>,
     proxy_command_configured: bool,
@@ -85,6 +86,7 @@ impl ConnectionFormModalSnapshot {
             group: form.group.clone(),
             notes: form.notes.clone(),
             post_connect_command: form.post_connect_command.clone(),
+            pre_connect_command: form.pre_connect_command.clone(),
             proxy_command_enabled: form.proxy_command_enabled,
             // Rendering owns one bounded zeroizing copy; persisted forms retain only a keychain id.
             proxy_command: zeroize::Zeroizing::new(form.proxy_command.clone()),
@@ -1146,6 +1148,18 @@ impl ConnectionFormView {
                                         .gap(px(self.tokens.metrics.modal_section_gap))
                                         .child(self.render_connection_terminal_options(cx))
                                         .child(self.render_connection_field(
+                                            self.i18n.t("ssh.form.pre_connect_command"),
+                                            &form.pre_connect_command,
+                                            self.i18n
+                                                .t("ssh.form.pre_connect_command_placeholder"),
+                                            NewConnectionField::PreConnectCommand,
+                                            false,
+                                            cx,
+                                        ))
+                                        .child(self.render_connection_hint(
+                                            self.i18n.t("ssh.form.pre_connect_command_hint"),
+                                        ))
+                                        .child(self.render_connection_field(
                                             self.i18n.t("ssh.form.post_connect_command"),
                                             &form.post_connect_command,
                                             self.i18n
@@ -1208,6 +1222,11 @@ impl ConnectionFormView {
                                         .child(self.render_connection_form_section(
                                             ConnectionFormSection::SftpOptions,
                                             sftp_options,
+                                            cx,
+                                        ))
+                                        .child(self.render_connection_form_section(
+                                            ConnectionFormSection::Terminal,
+                                            self.render_connection_pre_connect_command(cx),
                                             cx,
                                         ))
                                 })

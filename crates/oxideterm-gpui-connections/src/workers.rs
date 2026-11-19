@@ -6,6 +6,9 @@ use oxideterm_ssh::{
     NodeRouter, SshConfig, SshConnectionRegistry, SshTransportClient, check_host_key_with_route,
     check_host_key_with_upstream_proxy,
 };
+use oxideterm_terminal::{
+    PRE_CONNECT_COMMAND_TIMEOUT, pre_connect_failure_message, run_pre_connect_command_cancellable,
+};
 use oxideterm_workspace::delivery::ActiveDeliverySender;
 
 use crate::{
@@ -19,6 +22,7 @@ pub fn preflight(
     intent: SshConnectionIntent,
     tx: ActiveDeliverySender<SshConnectionWorkerResult>,
     managed_key_resolver: ManagedKeyResolver,
+    i18n: oxideterm_i18n::I18n,
 ) {
     let host = config.host.clone();
     let port = config.port;
@@ -39,6 +43,32 @@ pub fn preflight(
         );
     let prompt_handler = Arc::new(NativeSshPromptHandler::new(tx.clone()));
     std::thread::spawn(move || {
+        let mut worker_config = worker_config;
+        if let Some(command) = worker_config.pre_connect_command.as_deref() {
+            let wake = tx.wake();
+            if let Err(failure) = run_pre_connect_command_cancellable(
+                command, PRE_CONNECT_COMMAND_TIMEOUT, || wake.is_stopped()
+            ) {
+                if wake.is_stopped() {
+                    return;
+                }
+                let _ = tx.send(SshConnectionWorkerResult::Preflight {
+                    config: worker_config,
+                    upstream_proxy,
+                    title: worker_title,
+                    intent,
+                    host,
+                    port,
+                    status: HostKeyStatus::Error {
+                        message: pre_connect_failure_message(Some(&i18n), failure),
+                    },
+                });
+                return;
+            }
+            // Host-key preflight already satisfied the gate for this attempt;
+            // the node transport starts without repeating it.
+            worker_config.pre_connect_completed = true;
+        }
         let (checked_host, checked_port, status) = match tokio::runtime::Runtime::new() {
             Ok(runtime) if routed_preflight => {
                 // Routed SFTP and Mosh preflight authenticate through every hop. The

@@ -1715,8 +1715,9 @@ impl WorkspaceApp {
         self.begin_connection_trace_for_node(node_id, trace_plan, parent_id.as_ref(), cx);
         let managed_key_resolver =
             oxideterm_session_adapter::managed_key_resolver_from_store(&self.connection_store);
+        let i18n = self.i18n.clone();
         let start_result = self.workspace_runtime.update(cx, |runtime, _cx| {
-            runtime.start_node_transport(node_id, managed_key_resolver)
+            runtime.start_node_transport(node_id, managed_key_resolver, i18n)
         });
         if let Err(error) = start_result {
             let detail = match error {

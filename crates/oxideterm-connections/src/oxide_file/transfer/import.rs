@@ -390,7 +390,7 @@ fn apply_oxide_import_with_options_inner(
                 Some(imported_id)
             }
             PlannedImportAction::Replace(existing_id) => {
-                let saved = encrypted_connection_to_saved(
+                let mut saved = encrypted_connection_to_saved(
                     store,
                     conn,
                     None,
@@ -404,6 +404,9 @@ fn apply_oxide_import_with_options_inner(
                     result.forward_records.extend(saved.1);
                     result.forward_replace_owner_ids.push(existing_id.clone());
                 }
+                saved.0.options.pre_connect_command = store
+                    .get(&existing_id)
+                    .and_then(|local| local.options.pre_connect_command.clone());
                 connections_to_save.push(saved.0);
                 result.imported += 1;
                 result.replaced += 1;
@@ -891,6 +894,8 @@ fn encrypted_connection_to_saved(
     let credential_connection_id = id.clone();
     let forward_records = import_forwards(&id, conn.forwards);
     let mut options = conn.options;
+    // Imported files cannot opt in to local command execution.
+    options.pre_connect_command = None;
     options.jump_host = None;
     let now = Utc::now();
     Ok((

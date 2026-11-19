@@ -23,6 +23,9 @@ pub struct BleConnectionClues {
     /// restarts carry it as host-local metadata.
     pub platform_identifier: Option<String>,
     pub service_uuid: String,
+    /// Local gate retained for reconnects that never reach a saved profile.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pre_connect_command: Option<String>,
 }
 
 /// Card identity reported by every BLE open attempt. Carrying it in the worker
@@ -83,6 +86,8 @@ pub struct BleOpenRequest {
     /// Prefer the write-without-response characteristic; `false` uses the
     /// acknowledged WRITE characteristic when the device exposes one.
     pub write_without_response: bool,
+    /// Local gate that must succeed before any BLE adapter work starts.
+    pub pre_connect_command: Option<String>,
     pub profile_id: Option<String>,
     /// The open started from the connection form, so completion and failure
     /// must settle its pending state instead of only updating the card.
@@ -99,6 +104,7 @@ impl BleOpenRequest {
             device_name: self.device_name.clone(),
             platform_identifier: self.platform_identifier.clone(),
             service_uuid: self.service_uuid.clone(),
+            pre_connect_command: self.pre_connect_command.clone(),
         }
     }
 }
@@ -188,6 +194,7 @@ impl BleOpenRequest {
                 ),
             mtu: profile.mtu,
             write_without_response: profile.write_without_response,
+            pre_connect_command: profile.pre_connect_command.clone(),
             profile_id: Some(profile.id),
             form_id: None,
             standalone,
@@ -218,6 +225,7 @@ impl crate::entity::ConnectionFlowEntity {
             runtime_options,
             mtu,
             write_without_response,
+            pre_connect_command,
             profile_id,
             form_id,
             standalone: _,
@@ -249,6 +257,7 @@ impl crate::entity::ConnectionFlowEntity {
                 runtime_options,
                 mtu,
                 write_without_response,
+                pre_connect_command,
                 |stage| {
                     last_stage = stage;
                     let _ = stage_tx.send(BleConnectionWorkerResult::StageChanged {
@@ -362,5 +371,8 @@ pub fn localize_ble_resolve_error(i18n: &oxideterm_i18n::I18n, error: &oxideterm
             "connections.ble.resolve.invalid_service_uuid",
             &[("uuid", service_uuid)],
         ),
+        BleResolveError::PreConnectCommand(failure) => {
+            oxideterm_terminal::pre_connect_failure_message(Some(i18n), *failure)
+        }
     }
 }

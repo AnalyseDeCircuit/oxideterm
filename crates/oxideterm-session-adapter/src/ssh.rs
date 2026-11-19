@@ -75,6 +75,7 @@ pub fn ssh_config_from_saved_connection_with_auth(
         .flatten(),
         strict_host_key_checking: true,
         post_connect_command: conn.post_connect_command().map(ToOwned::to_owned),
+        pre_connect_command: conn.options.pre_connect_command.clone(),
         ..SshConfig::default()
     })
 }
@@ -174,6 +175,7 @@ pub fn ssh_config_from_saved_connection_with_runtime_secrets(
         .flatten(),
         strict_host_key_checking: true,
         post_connect_command: conn.post_connect_command().map(ToOwned::to_owned),
+        pre_connect_command: conn.options.pre_connect_command.clone(),
         ..SshConfig::default()
     })
 }
@@ -206,14 +208,18 @@ pub fn ssh_config_from_standalone_sftp_profile_with_runtime_secrets(
         upstream_proxy: runtime_secrets.upstream_proxy.take(),
         proxy_command: runtime_secrets.proxy_command.take(),
     };
-    ssh_config_from_standalone_sftp_endpoint_with_runtime_secrets(
+    let mut config = ssh_config_from_standalone_sftp_endpoint_with_runtime_secrets(
         store,
         settings,
         &profile.name,
         &primary,
         primary_secrets,
         auth_override,
-    )
+    )?;
+    // The gate belongs to the whole profile launch, not to either endpoint's
+    // transport, so it travels on the primary config only.
+    config.pre_connect_command = profile.pre_connect_command.clone();
+    Some(config)
 }
 
 /// Materializes one endpoint of a standalone SFTP profile without NodeRouter ownership.

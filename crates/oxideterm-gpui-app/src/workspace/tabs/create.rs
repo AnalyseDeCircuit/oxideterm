@@ -391,6 +391,7 @@ impl WorkspaceApp {
         };
         let endpoint = RemoteDesktopEndpoint::new(launch.host, launch.port);
         let profile = RemoteDesktopConnectionProfile {
+            pre_connect_command: None,
             id: format!("native-remote-desktop-{}", uuid::Uuid::new_v4()),
             label: format!(
                 "{}://{}",
@@ -1363,6 +1364,7 @@ impl WorkspaceApp {
     ) -> Result<()> {
         let title = launch.title();
         let config = TelnetSessionConfig {
+            pre_connect_command: None,
             line_endings: Default::default(),
             host: launch.host,
             port: launch.port,

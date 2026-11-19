@@ -135,6 +135,12 @@ pub struct SshConfig {
     pub x11_forwarding: Option<X11ForwardPolicy>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub post_connect_command: Option<String>,
+    /// Local command that must succeed before this attempt opens a transport.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pre_connect_command: Option<String>,
+    /// True only while a caller already ran that command for this attempt.
+    #[serde(skip)]
+    pub pre_connect_completed: bool,
 }
 
 impl fmt::Debug for SshConfig {
@@ -182,6 +188,10 @@ impl fmt::Debug for SshConfig {
             .field(
                 "post_connect_command_configured",
                 &self.post_connect_command.is_some(),
+            )
+            .field(
+                "pre_connect_command_configured",
+                &self.pre_connect_command.is_some(),
             )
             .finish()
     }
@@ -630,6 +640,8 @@ impl Default for SshConfig {
             ssh_algorithms: SshAlgorithmPreferences::default(),
             x11_forwarding: None,
             post_connect_command: None,
+            pre_connect_command: None,
+            pre_connect_completed: false,
         }
     }
 }
@@ -724,11 +736,14 @@ mod tests {
     fn post_connect_command_is_redacted_from_runtime_debug_output() {
         let mut config = SshConfig::password("target", 22, "operator", "pw");
         config.post_connect_command = Some("command-with-private-token".to_string());
+        config.pre_connect_command = Some("local-command-with-private-token".to_string());
 
         let debug = format!("{config:?}");
 
         assert!(!debug.contains("command-with-private-token"));
+        assert!(!debug.contains("local-command-with-private-token"));
         assert!(debug.contains("post_connect_command_configured: true"));
+        assert!(debug.contains("pre_connect_command_configured: true"));
     }
 
     #[test]

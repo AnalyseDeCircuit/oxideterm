@@ -3685,6 +3685,7 @@ mod panel_layout_tests {
             workspace.settings_store.settings_mut().ssh_config.auto_load_hosts = false;
             workspace.connection_store.upsert_remote_desktop_profile(
                 oxideterm_connections::SaveRemoteDesktopProfileRequest {
+                    pre_connect_command: None,
                     id: Some("palette-rdp".into()),
                     name: "Palette Desktop".into(),
                     protocol: RemoteDesktopProtocol::Rdp,
@@ -3735,6 +3736,7 @@ mod panel_layout_tests {
             store
                 .upsert_local_terminal_profile(
                     oxideterm_connections::SaveLocalTerminalProfileRequest {
+                        pre_connect_command: None,
                         id: Some(id.into()),
                         name: name.into(),
                         shell_id: Some(shell_id.into()),

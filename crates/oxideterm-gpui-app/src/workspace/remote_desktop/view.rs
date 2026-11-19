@@ -44,6 +44,49 @@ impl WorkspaceApp {
             self.show_missing_remote_desktop_plugin(profile.protocol, cx);
             return;
         }
+        if let Some(command) = profile.pre_connect_command.take() {
+            // The desktop provider must not open before the local precondition
+            // succeeds; the attempt continues through the same path afterwards.
+            let window_handle = window.window_handle();
+            let i18n = self.i18n.clone();
+            let (gate, window_close) = self.spawn_window_pre_connect(command, window, cx);
+            cx.spawn(async move |workspace, cx| {
+                let _window_close = window_close;
+                let Ok(result) = gate.await else {
+                    return;
+                };
+                let failure = result.err();
+                let _ = cx.update_window(window_handle, move |_, window, cx| {
+                    let _ = workspace.update(cx, |workspace, cx| {
+                        if let Some(failure) = failure {
+                            let message = oxideterm_terminal::pre_connect_failure_message(
+                                Some(&i18n),
+                                failure,
+                            );
+                            if let Some(attempt) = connection_attempt_id.as_deref() {
+                                workspace.standalone_connections.mark_attempt_error(attempt);
+                            }
+                            workspace
+                                .connections
+                                .session_manager
+                                .update(cx, |manager, cx| manager.set_status(Some(message), cx));
+                            cx.notify();
+                            return;
+                        }
+                        workspace.open_remote_desktop_connection_for_connection(
+                            profile,
+                            password,
+                            ssh_gateway_connection_id,
+                            connection_attempt_id,
+                            window,
+                            cx,
+                        );
+                    });
+                });
+            })
+            .detach();
+            return;
+        }
         if let Some(attempt) = connection_attempt_id.as_deref() {
             let launch = if self
                 .connection_store

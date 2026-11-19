@@ -201,6 +201,7 @@ mod tests {
         let target = native_plugin_serial_terminal_target(
             TerminalSessionId(44),
             &SerialSessionConfig {
+                pre_connect_command: None,
                 port_path: "/dev/cu.usbserial-test".to_string(),
                 baud_rate: 115_200,
                 data_bits: 8,

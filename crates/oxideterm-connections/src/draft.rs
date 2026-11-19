@@ -132,6 +132,7 @@ pub struct ConnectionDraft {
     pub ssh_channel_strategy: crate::SshChannelStrategy,
     pub x11_forwarding: crate::ConnectionX11ForwardingOptions,
     pub post_connect_command: String,
+    pub pre_connect_command: String,
     pub terminal: ConnectionTerminalOptions,
 }
 
@@ -263,6 +264,8 @@ pub fn save_request_from_draft(
 ) -> Result<SaveConnectionRequest> {
     let port = draft.port.trim().parse::<u16>().unwrap_or(22);
     Ok(SaveConnectionRequest {
+        pre_connect_command: (!draft.pre_connect_command.trim().is_empty())
+            .then(|| draft.pre_connect_command.trim().to_string()),
         totp_credential_id: draft.totp_credential_id,
         id,
         name: draft.name.trim().to_string(),
@@ -739,6 +742,7 @@ mod tests {
             open_sftp_on_connect: false,
             ssh_channel_strategy: crate::SshChannelStrategy::default(),
             post_connect_command: String::new(),
+            pre_connect_command: String::new(),
             terminal: ConnectionTerminalOptions::default(),
         };
 

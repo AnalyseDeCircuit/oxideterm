@@ -2542,6 +2542,7 @@ mod tests {
                 if let Some(protocol) = protocol {
                     workspace.open_remote_desktop_connection_for_connection(
                         oxideterm_remote_desktop::RemoteDesktopConnectionProfile {
+                            pre_connect_command: None,
                             id: "restored-profile".into(),
                             label: "Restored profile".into(),
                             protocol,
@@ -2664,6 +2665,7 @@ mod tests {
                     .connection_store
                     .upsert_local_terminal_profile(
                         oxideterm_connections::SaveLocalTerminalProfileRequest {
+                            pre_connect_command: None,
                             name: "Unavailable palette profile".into(),
                             cwd: Some(directory.to_string_lossy().into_owned()),
                             ..Default::default()

@@ -545,8 +545,10 @@ fn write_connection_secret(
         }
     };
     let post_connect_command = connection.post_connect_command().map(ToOwned::to_owned);
+    let pre_connect_command = connection.options.pre_connect_command.clone();
     store
         .upsert(SaveConnectionRequest {
+            pre_connect_command,
             totp_credential_id: None,
             id: Some(connection.id),
             name: connection.name,

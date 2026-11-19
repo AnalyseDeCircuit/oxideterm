@@ -1344,6 +1344,7 @@ mod tests {
         let mut connections = ConnectionStore::load(directory.join("connections.json")).unwrap();
         connections
             .upsert_local_terminal_profile(SaveLocalTerminalProfileRequest {
+                pre_connect_command: None,
                 id: Some("terminal".into()),
                 name: "Original".into(),
                 cwd: Some("/original".into()),
@@ -1437,6 +1438,7 @@ mod tests {
         // This edit happens after preparation, while the network phase is away.
         connections
             .upsert_local_terminal_profile(SaveLocalTerminalProfileRequest {
+                pre_connect_command: None,
                 id: Some("terminal".into()),
                 name: "Original".into(),
                 cwd: Some("/during-download".into()),
@@ -1470,6 +1472,7 @@ mod tests {
         assert!(!directory.join("replica/recovery.oxide").exists());
         connections
             .upsert_local_terminal_profile(SaveLocalTerminalProfileRequest {
+                pre_connect_command: None,
                 id: Some("terminal".into()),
                 name: "Edited during upload".into(),
                 cwd: Some("/during-download".into()),

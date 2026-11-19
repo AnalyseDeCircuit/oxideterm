@@ -1355,6 +1355,14 @@
     "cat_ops_ai": "ホスト運用と AI",
     "cat_security_ext": "セキュリティ・同期・拡張"
   },
+  "connection": {
+    "pre_connect": {
+      "too_long": "接続前コマンドが長すぎます（最大 {limit} バイト）",
+      "spawn_failed": "接続前コマンドを開始できませんでした",
+      "timeout": "接続前コマンドが {seconds} 秒後にタイムアウトしました",
+      "exit_code": "接続前コマンドが失敗しました（終了コード {code}）"
+    }
+  },
   "zen_mode": {
     "exit": "Zen モードを終了",
     "hint": "Zen モード — {{shortcut}} で終了",

@@ -577,6 +577,7 @@ fn domain_mapping_and_recovery_restore_interrupted_writes_then_keep_committed_va
         icon_background_color: None,
         shell_id: Some("zsh".into()),
         cwd: Some("/original".into()),
+        pre_connect_command: None,
         created_at: now,
         updated_at: now,
         last_used_at: None,

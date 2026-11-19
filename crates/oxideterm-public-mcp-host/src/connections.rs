@@ -356,6 +356,8 @@ fn save_profile(
                         .unwrap_or(DEFAULT_X11_UNTRUSTED_TIMEOUT_SECONDS),
                 },
                 post_connect_command: profile.post_connect_command.clone(),
+                // ConnectionManage does not authorize writing a host-local command.
+                pre_connect_command: existing.and_then(|connection| connection.options.pre_connect_command.clone()),
                 terminal: terminal_options(&profile.terminal),
             };
             let saved = store.upsert(request).map_err(public_store_error)?;
@@ -366,6 +368,7 @@ fn save_profile(
                 typed_existing_id(existing_key, CONNECTION_KEY_SERIAL_PREFIX, "serial")?;
             let saved = store
                 .upsert_serial_profile(SaveSerialProfileRequest {
+                    pre_connect_command: existing_id.and_then(|id| store.serial_profiles().iter().find(|saved| saved.id == id)).and_then(|saved| saved.pre_connect_command.clone()),
                     id: existing_id.map(ToOwned::to_owned),
                     name: profile.name.clone(),
                     group: profile.group.clone(),
@@ -400,6 +403,7 @@ fn save_profile(
                 typed_existing_id(existing_key, CONNECTION_KEY_TELNET_PREFIX, "telnet")?;
             let saved = store
                 .upsert_telnet_profile(SaveTelnetProfileRequest {
+                    pre_connect_command: existing_id.and_then(|id| store.telnet_profiles().iter().find(|saved| saved.id == id)).and_then(|saved| saved.pre_connect_command.clone()),
                     input_line_ending: None,
                     output_line_ending: None,
                     upstream_proxy: None,
@@ -452,6 +456,7 @@ fn save_profile(
                 .collect::<Result<Vec<_>, String>>()?;
             let saved = store
                 .upsert_mosh_profile(SaveMoshProfileRequest {
+                    pre_connect_command: existing.and_then(|saved| saved.pre_connect_command.clone()),
                     id: existing_id.map(ToOwned::to_owned),
                     name: profile.name.clone(),
                     group: profile.group.clone(),
@@ -524,6 +529,7 @@ fn save_remote_desktop_profile(
     }
     let saved = store
         .upsert_remote_desktop_profile(SaveRemoteDesktopProfileRequest {
+            pre_connect_command: existing_id.and_then(|id| store.get_remote_desktop_profile(id)).and_then(|saved| saved.pre_connect_command.clone()),
             id: existing_id.map(ToOwned::to_owned),
             name: profile.name.clone(),
             group: profile.group.clone(),

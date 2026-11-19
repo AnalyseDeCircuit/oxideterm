@@ -115,6 +115,7 @@ fn connection_sync_record(
             legacy_ssh_compatibility: false,
             ssh_algorithms: oxideterm_connections::SshAlgorithmPreferences::default(),
             post_connect_command: None,
+            pre_connect_command: None,
         }),
         options: Some(options),
     }
@@ -512,6 +513,7 @@ fn local_profile_cloud_merge_and_selection_preserve_independent_edits() {
         group: None,
         shell_id: Some("zsh".into()),
         cwd: Some("~/base".into()),
+        pre_connect_command: None,
         created_at: now,
         updated_at: now,
         last_used_at: None,

@@ -1355,6 +1355,14 @@
     "cat_ops_ai": "Gestione host e IA",
     "cat_security_ext": "Sicurezza, sincronizzazione ed estensioni"
   },
+  "connection": {
+    "pre_connect": {
+      "too_long": "Il comando pre-connessione è troppo lungo (massimo {limit} byte)",
+      "spawn_failed": "Impossibile avviare il comando pre-connessione",
+      "timeout": "Il comando pre-connessione è scaduto dopo {seconds} secondi",
+      "exit_code": "Il comando pre-connessione non è riuscito (codice di uscita {code})"
+    }
+  },
   "zen_mode": {
     "exit": "Esci dalla modalità Zen",
     "hint": "Modalità Zen — Premi {{shortcut}} per uscire",
