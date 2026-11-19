@@ -1337,15 +1337,13 @@ impl WorkspaceApp {
                                     .justify_center()
                                     .opacity(enter.ritual_opacity)
                                     .child(
-                                        div()
-                                            .relative()
-                                            .left(px(glide_x))
-                                            .top(px(glide_y))
-                                            .child(visual::render_padlock_mechanism(
+                                        div().relative().left(px(glide_x)).top(px(glide_y)).child(
+                                            visual::render_padlock_mechanism(
                                                 self.tokens.ui,
                                                 visual::APP_LOCK_RITUAL_SIZE,
                                                 enter.ritual_visual,
-                                            )),
+                                            ),
+                                        ),
                                     ),
                             )
                         },

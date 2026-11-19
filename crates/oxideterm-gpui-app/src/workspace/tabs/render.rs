@@ -1237,12 +1237,18 @@ impl WorkspaceApp {
         if recent.is_empty() {
             surface = surface.child(container.child(self.render_welcome_recent_empty(cx)));
         } else {
+            let count = recent.len();
             let mut list = div().w_full().flex().flex_col();
             for (index, connection) in recent.into_iter().enumerate() {
                 if index > 0 {
                     list = list.child(div().h(px(1.0)).bg(rgba((theme.border << 8) | 0x45)));
                 }
-                list = list.child(self.render_welcome_recent_row(connection, cx));
+                list = list.child(self.render_welcome_recent_row(
+                    connection,
+                    index == 0,
+                    index + 1 == count,
+                    cx,
+                ));
             }
             surface = surface.child(container.child(list));
         }
@@ -1297,16 +1303,23 @@ impl WorkspaceApp {
     fn render_welcome_recent_row(
         &self,
         connection: WelcomeRecentConnection,
+        is_first: bool,
+        is_last: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let metrics = welcome_workbench_metrics(&self.tokens);
+        let inner_radius =
+            oxideterm_gpui_ui::modal::rounded_shell_child_radius(self.tokens.radii.lg);
         let target = connection.target.clone();
         div()
             .w_full()
             .min_w_0()
             .h(px(metrics.recent_row_height))
             .px(px(12.0))
+            // GPUI overflow_hidden masks to a rectangle; round edge rows to match the outer card.
+            .when(is_first, |row| row.rounded_t(px(inner_radius)))
+            .when(is_last, |row| row.rounded_b(px(inner_radius)))
             .flex()
             .items_center()
             .gap(px(10.0))
@@ -1440,14 +1453,22 @@ impl WorkspaceApp {
             .overflow_hidden()
             .flex()
             .flex_col();
+        let utility_count = utility_actions.len();
         for (index, (icon, title_key, desc_key, action)) in utility_actions.into_iter().enumerate()
         {
             if index > 0 {
                 utility_list =
                     utility_list.child(div().h(px(1.0)).bg(rgba((theme.border << 8) | 0x45)));
             }
-            utility_list = utility_list
-                .child(self.render_welcome_utility_row(icon, title_key, desc_key, action, cx));
+            utility_list = utility_list.child(self.render_welcome_utility_row(
+                icon,
+                title_key,
+                desc_key,
+                action,
+                index == 0,
+                index + 1 == utility_count,
+                cx,
+            ));
         }
 
         div()
@@ -1551,21 +1572,28 @@ impl WorkspaceApp {
         self.bind_welcome_tool_action(card, title_key, description_key, action, cx)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn render_welcome_utility_row(
         &self,
         icon: LucideIcon,
         title_key: &str,
         description_key: &str,
         action: WelcomeToolAction,
+        is_first: bool,
+        is_last: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let metrics = welcome_workbench_metrics(&self.tokens);
+        let inner_radius =
+            oxideterm_gpui_ui::modal::rounded_shell_child_radius(self.tokens.radii.lg);
         let row = div()
             .w_full()
             .min_w_0()
             .h(px(metrics.utility_row_height))
             .px(px(12.0))
+            .when(is_first, |row| row.rounded_t(px(inner_radius)))
+            .when(is_last, |row| row.rounded_b(px(inner_radius)))
             .flex()
             .items_center()
             .gap(px(10.0))

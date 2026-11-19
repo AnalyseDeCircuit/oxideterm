@@ -48,8 +48,15 @@ struct ConnectionFormModalSnapshot {
     mosh_udp_host: String,
     mosh_udp_port: String,
     mosh_locale: String,
-    sftp_initial_remote_path: String,
     connect_timeout_seconds_text: String,
+    active_drawer: Option<crate::form_state::ConnectionFormDrawer>,
+    totp_picker_expanded: bool,
+    totp_credential_id: Option<String>,
+    proxy_hops_len: usize,
+    upstream_proxy_policy: NewConnectionUpstreamProxyPolicy,
+    x11_enabled: bool,
+    ssh_algorithms_customized: bool,
+    terminal_customized: bool,
     // True when the selected BLE service offers both notify and write, i.e. it
     // can back a read/write terminal channel.
     ble_can_open: bool,
@@ -105,8 +112,21 @@ impl ConnectionFormModalSnapshot {
             mosh_udp_host: form.mosh_udp_host.clone(),
             mosh_udp_port: form.mosh_udp_port.clone(),
             mosh_locale: form.mosh_locale.clone(),
-            sftp_initial_remote_path: form.sftp_initial_remote_path.clone(),
             connect_timeout_seconds_text: form.connect_timeout_seconds_text.clone(),
+            active_drawer: form.active_drawer,
+            totp_picker_expanded: form.totp_picker_expanded,
+            totp_credential_id: form.totp_credential_id.clone(),
+            proxy_hops_len: form.proxy_hops.len(),
+            upstream_proxy_policy: form.upstream_proxy_policy,
+            x11_enabled: form.x11_forwarding.enabled,
+            ssh_algorithms_customized: !form.ssh_algorithms.kex.is_empty()
+                || !form.ssh_algorithms.host_key.is_empty()
+                || !form.ssh_algorithms.cipher.is_empty()
+                || !form.ssh_algorithms.mac.is_empty()
+                || !form.ssh_algorithms.compression.is_empty(),
+            terminal_customized: form.terminal != Default::default()
+                || !form.pre_connect_command.trim().is_empty()
+                || !form.post_connect_command.trim().is_empty(),
             ble_can_open: form
                 .ble
                 .selected_service_uuid
@@ -398,19 +418,21 @@ impl ConnectionFormView {
             form.pending || !(has_required_fields || (ble_mode && form.ble_profile_id.is_some()));
         let form_visible = self.connection_form_state(cx).presence.phase()
             == oxideterm_gpui_ui::motion::ExitPhase::Visible;
-        let base_modal_width = if drill_down_mode {
-            TAURI_DRILL_DOWN_MODAL_WIDTH
-        } else if prompt_mode || edit_properties_mode || saved_profile_edit_mode {
-            TAURI_EDIT_MODAL_WIDTH
+        let base_modal_width = if drill_down_mode || prompt_mode {
+            520.0
         } else if shows_transport_selector {
-            self.tokens.metrics.modal_width
-                + NEW_CONNECTION_TYPE_SIDEBAR_WIDTH
-                + self.tokens.metrics.modal_section_gap
+            composer::CONNECTION_STUDIO_WIDTH
         } else {
-            self.tokens.metrics.modal_width
+            composer::CONNECTION_STUDIO_EDIT_WIDTH
         };
-        let algorithm_editor_visible =
-            form.ssh_algorithm_editor_open && (ssh_submission_mode || mosh_mode);
+        let studio_min_height = if drill_down_mode || prompt_mode {
+            None
+        } else {
+            Some(composer::CONNECTION_STUDIO_MIN_HEIGHT.min(modal_max_height))
+        };
+        let algorithm_editor_visible = form.ssh_algorithm_editor_open
+            && form.active_drawer == Some(crate::form_state::ConnectionFormDrawer::SshSecurity)
+            && (ssh_submission_mode || mosh_mode);
         let requested_modal_width = if algorithm_editor_visible {
             base_modal_width
                 + SSH_ALGORITHM_CATEGORY_COLUMN_WIDTH
@@ -423,6 +445,293 @@ impl ConnectionFormView {
             - NEW_CONNECTION_MODAL_VIEWPORT_MARGIN * 2.0)
             .max(TAURI_EDIT_MODAL_WIDTH);
         let modal_width = requested_modal_width.min(available_modal_width);
+        let light = theme.is_light();
+        let modal_shadows = vec![
+            gpui::BoxShadow {
+                color: rgba(if light { 0x00000018 } else { 0x00000066 }).into(),
+                offset: point(px(0.0), px(20.0)),
+                blur_radius: px(44.0),
+                spread_radius: px(-8.0),
+                inset: false,
+            },
+            gpui::BoxShadow {
+                color: rgba(if light { 0x0000000c } else { 0x00000038 }).into(),
+                offset: point(px(0.0), px(4.0)),
+                blur_radius: px(12.0),
+                spread_radius: px(-2.0),
+                inset: false,
+            },
+        ];
+        let uses_category_sidebar = !prompt_mode
+            && !drill_down_mode
+            && !wsl_graphics_mode
+            && (ssh_submission_mode
+                || mosh_mode
+                || remote_desktop_mode
+                || serial_mode
+                || ble_mode
+                || telnet_mode
+                || ftp_mode
+                || local_terminal_mode);
+        let show_general_page = !uses_category_sidebar || form.active_drawer.is_none();
+        let category_sidebar = uses_category_sidebar.then(|| {
+            use crate::form_state::ConnectionFormDrawer;
+            let route_summary = if form.proxy_command_enabled {
+                Some("Proxy".to_string())
+            } else if form.proxy_hops_len > 0 {
+                Some(format!("{}", form.proxy_hops_len))
+            } else if !mosh_mode
+                && form.upstream_proxy_policy != NewConnectionUpstreamProxyPolicy::UseGlobal
+            {
+                Some("•".to_string())
+            } else {
+                None
+            };
+            let notes_summary = (!form.notes.trim().is_empty()).then(|| "•".to_string());
+            let terminal_summary = form.terminal_customized.then(|| "•".to_string());
+            let items = if local_terminal_mode {
+                vec![
+                    composer::CategoryNavItem {
+                        drawer: None,
+                        icon: LucideIcon::Terminal,
+                        label: self.i18n.t("ssh.form.basic_information"),
+                        summary: None,
+                    },
+                    composer::CategoryNavItem {
+                        drawer: Some(ConnectionFormDrawer::Notes),
+                        icon: LucideIcon::Sparkles,
+                        label: self.i18n.t("ssh.form.appearance"),
+                        summary: notes_summary,
+                    },
+                ]
+            } else if serial_mode {
+                vec![
+                    composer::CategoryNavItem {
+                        drawer: None,
+                        icon: LucideIcon::Radio,
+                        label: self.i18n.t("modals.new_connection.serial_section_title"),
+                        summary: None,
+                    },
+                    composer::CategoryNavItem {
+                        drawer: Some(ConnectionFormDrawer::Terminal),
+                        icon: LucideIcon::Terminal,
+                        label: self.i18n.t("ssh.form.terminal_options"),
+                        summary: terminal_summary,
+                    },
+                    composer::CategoryNavItem {
+                        drawer: Some(ConnectionFormDrawer::Notes),
+                        icon: LucideIcon::Sparkles,
+                        label: self.i18n.t("ssh.form.appearance"),
+                        summary: notes_summary,
+                    },
+                ]
+            } else if ble_mode {
+                vec![
+                    composer::CategoryNavItem {
+                        drawer: None,
+                        icon: LucideIcon::Bluetooth,
+                        label: self.i18n.t("modals.new_connection.ble_form_title"),
+                        summary: None,
+                    },
+                    composer::CategoryNavItem {
+                        drawer: Some(ConnectionFormDrawer::BleTransportOptions),
+                        icon: LucideIcon::Radio,
+                        label: self
+                            .i18n
+                            .t("modals.new_connection.ble_transport_options_title"),
+                        summary: None,
+                    },
+                    composer::CategoryNavItem {
+                        drawer: Some(ConnectionFormDrawer::Terminal),
+                        icon: LucideIcon::Terminal,
+                        label: self.i18n.t("ssh.form.terminal_options"),
+                        summary: terminal_summary,
+                    },
+                    composer::CategoryNavItem {
+                        drawer: Some(ConnectionFormDrawer::Notes),
+                        icon: LucideIcon::Sparkles,
+                        label: self.i18n.t("ssh.form.appearance"),
+                        summary: notes_summary,
+                    },
+                ]
+            } else if telnet_mode {
+                vec![
+                    composer::CategoryNavItem {
+                        drawer: None,
+                        icon: LucideIcon::Network,
+                        label: self.i18n.t("ssh.form.basic_information"),
+                        summary: None,
+                    },
+                    composer::CategoryNavItem {
+                        drawer: Some(ConnectionFormDrawer::Route),
+                        icon: LucideIcon::Network,
+                        label: self.i18n.t("ssh.form.connection_route"),
+                        summary: (form.upstream_proxy_policy
+                            != NewConnectionUpstreamProxyPolicy::Direct)
+                            .then(|| "•".to_string()),
+                    },
+                    composer::CategoryNavItem {
+                        drawer: Some(ConnectionFormDrawer::Terminal),
+                        icon: LucideIcon::Terminal,
+                        label: self.i18n.t("ssh.form.terminal_options"),
+                        summary: terminal_summary,
+                    },
+                    composer::CategoryNavItem {
+                        drawer: Some(ConnectionFormDrawer::Notes),
+                        icon: LucideIcon::Sparkles,
+                        label: self.i18n.t("ssh.form.appearance"),
+                        summary: notes_summary,
+                    },
+                ]
+            } else if ftp_mode {
+                vec![
+                    composer::CategoryNavItem {
+                        drawer: None,
+                        icon: LucideIcon::FolderSync,
+                        label: self.i18n.t("ssh.form.basic_information"),
+                        summary: None,
+                    },
+                    composer::CategoryNavItem {
+                        drawer: Some(ConnectionFormDrawer::FtpOptions),
+                        icon: LucideIcon::Network,
+                        label: self.i18n.t("ssh.form.connection_route"),
+                        summary: None,
+                    },
+                    composer::CategoryNavItem {
+                        drawer: Some(ConnectionFormDrawer::Notes),
+                        icon: LucideIcon::Sparkles,
+                        label: self.i18n.t("ssh.form.appearance"),
+                        summary: notes_summary,
+                    },
+                ]
+            } else if let Some(protocol) = remote_desktop_protocol {
+                let mut items = vec![
+                    composer::CategoryNavItem {
+                        drawer: None,
+                        icon: LucideIcon::Monitor,
+                        label: self.i18n.t("ssh.form.basic_information"),
+                        summary: None,
+                    },
+                    composer::CategoryNavItem {
+                        drawer: Some(ConnectionFormDrawer::Route),
+                        icon: LucideIcon::Network,
+                        label: self
+                            .i18n
+                            .t("modals.new_connection.remote_desktop_ssh_gateway"),
+                        summary: None,
+                    },
+                ];
+                if protocol == oxideterm_remote_desktop::RemoteDesktopProtocol::Vnc {
+                    items.push(composer::CategoryNavItem {
+                        drawer: Some(ConnectionFormDrawer::VncPreferences),
+                        icon: LucideIcon::ShieldCheck,
+                        label: self
+                            .i18n
+                            .t("modals.new_connection.vnc_preferences_title"),
+                        summary: None,
+                    });
+                }
+                items.push(composer::CategoryNavItem {
+                    drawer: Some(ConnectionFormDrawer::RemoteFeatures),
+                    icon: LucideIcon::AppWindow,
+                    label: self
+                        .i18n
+                        .t("modals.new_connection.remote_desktop_features_title"),
+                    summary: None,
+                });
+                items.push(composer::CategoryNavItem {
+                    drawer: Some(ConnectionFormDrawer::Terminal),
+                    icon: LucideIcon::Terminal,
+                    label: self.i18n.t("ssh.form.terminal_options"),
+                    summary: terminal_summary,
+                });
+                items.push(composer::CategoryNavItem {
+                    drawer: Some(ConnectionFormDrawer::Notes),
+                    icon: LucideIcon::Sparkles,
+                    label: self.i18n.t("ssh.form.appearance"),
+                    summary: notes_summary,
+                });
+                items
+            } else if mosh_mode {
+                vec![
+                    composer::CategoryNavItem {
+                        drawer: None,
+                        icon: LucideIcon::Wifi,
+                        label: self.i18n.t("ssh.form.basic_information"),
+                        summary: None,
+                    },
+                    composer::CategoryNavItem {
+                        drawer: Some(ConnectionFormDrawer::Route),
+                        icon: LucideIcon::Network,
+                        label: self.i18n.t("ssh.form.connection_route"),
+                        summary: route_summary,
+                    },
+                    composer::CategoryNavItem {
+                        drawer: Some(ConnectionFormDrawer::MoshOptions),
+                        icon: LucideIcon::Terminal,
+                        label: self.i18n.t("mosh.form.advanced"),
+                        summary: None,
+                    },
+                    composer::CategoryNavItem {
+                        drawer: Some(ConnectionFormDrawer::Notes),
+                        icon: LucideIcon::Sparkles,
+                        label: self.i18n.t("ssh.form.appearance"),
+                        summary: notes_summary,
+                    },
+                ]
+            } else {
+                let security_summary = if form.gssapi_enabled {
+                    Some("KRB".to_string())
+                } else if form.agent_forwarding
+                    || form.legacy_ssh_compatibility
+                    || form.x11_enabled
+                    || form.ssh_algorithms_customized
+                {
+                    Some("•".to_string())
+                } else {
+                    None
+                };
+                vec![
+                    composer::CategoryNavItem {
+                        drawer: None,
+                        icon: LucideIcon::Server,
+                        label: self.i18n.t("ssh.form.basic_information"),
+                        summary: None,
+                    },
+                    composer::CategoryNavItem {
+                        drawer: Some(ConnectionFormDrawer::Route),
+                        icon: LucideIcon::Network,
+                        label: self.i18n.t("ssh.form.connection_route"),
+                        summary: route_summary,
+                    },
+                    composer::CategoryNavItem {
+                        drawer: Some(ConnectionFormDrawer::SshSecurity),
+                        icon: LucideIcon::ShieldCheck,
+                        label: self.i18n.t("ssh.form.ssh_options"),
+                        summary: security_summary,
+                    },
+                    composer::CategoryNavItem {
+                        drawer: Some(ConnectionFormDrawer::Terminal),
+                        icon: LucideIcon::Terminal,
+                        label: self.i18n.t("ssh.form.terminal_options"),
+                        summary: terminal_summary,
+                    },
+                    composer::CategoryNavItem {
+                        drawer: Some(ConnectionFormDrawer::Notes),
+                        icon: LucideIcon::Sparkles,
+                        label: self.i18n.t("ssh.form.appearance"),
+                        summary: notes_summary,
+                    },
+                ]
+            };
+            self.render_studio_category_sidebar(
+                items,
+                form.active_drawer,
+                shows_icon_field,
+                Some(ConnectionFormDrawer::Notes),
+                cx,
+            )
+        });
         // A long scrolling form uses an opaque theme surface: underlying text
         // must not bleed through, and live backdrop blur would add GPU work
         // to every scroll frame.
@@ -449,33 +758,44 @@ impl ConnectionFormView {
                     "new-connection-form-enter",
                     modal_container(&self.tokens)
                 .bg(rgb(theme.bg_elevated))
+                .shadow(modal_shadows)
+                .overflow_hidden()
                 .w(px(modal_width))
+                .when_some(studio_min_height, |container, min_h| container.min_h(px(min_h)))
                 .max_h(px(modal_max_height))
                 .flex()
                 .flex_col()
                 .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
                     cx.stop_propagation();
                 })
-                .child(modal_header(&self.tokens, title, description))
+                .child(self.render_studio_top_chrome(
+                    title,
+                    Some(description),
+                    shows_transport_selector,
+                    !uses_category_sidebar && shows_icon_field,
+                    cx,
+                ))
                 .child(
-                    modal_body(&self.tokens)
+                    div()
                         .flex_1()
                         .min_h(px(0.0))
+                        .flex()
+                        .when_some(category_sidebar, |content, sidebar| content.child(sidebar))
                         .child(
                             div()
-                                .size_full()
+                                .flex_1()
                                 .min_h(px(0.0))
+                                .min_w(px(0.0))
                                 .flex()
                                 .gap(px(self.tokens.metrics.modal_section_gap))
-                                .when(shows_transport_selector, |content| {
-                                    content.child(self.render_transport_selector(cx))
-                                })
                                 .child(
                                     div()
                                         .id("new-connection-modal-form-scroll")
                                         .flex_1()
                                         .min_h(px(0.0))
                                         .min_w(px(0.0))
+                                        .px(px(22.0))
+                                        .py(px(18.0))
                                         .overflow_y_scroll()
                                         .track_scroll(
                                             &self.selectable_text_scroll_handle(
@@ -505,24 +825,45 @@ impl ConnectionFormView {
                                             content.child(self.render_mosh_plugin_status(cx))
                                         })
                                         .when(local_terminal_mode, |content| {
-                                            content.child(self.render_local_terminal_form_branch(cx))
+                                            content.child(self.render_local_terminal_form_branch(
+                                                form.active_drawer,
+                                                cx,
+                                            ))
                                         })
                                         .when(serial_mode, |content| {
-                                            content.child(self.render_serial_form_branch(cx))
+                                            content.child(self.render_serial_form_branch(
+                                                form.active_drawer,
+                                                cx,
+                                            ))
                                         })
                                         .when(ble_mode, |content| {
-                                            content.child(self.render_ble_form_branch(window, cx))
+                                            content.child(self.render_ble_form_branch(
+                                                form.active_drawer,
+                                                window,
+                                                cx,
+                                            ))
                                         })
                                         .when(telnet_mode, |content| {
-                                            content.child(self.render_telnet_form_branch(cx))
+                                            content.child(self.render_telnet_form_branch(
+                                                form.active_drawer,
+                                                cx,
+                                            ))
                                         })
-                                        .when(ftp_mode, |content| content.child(self.render_ftp_form_branch(cx)))
+                                        .when(ftp_mode, |content| {
+                                            content.child(self.render_ftp_form_branch(
+                                                form.active_drawer,
+                                                cx,
+                                            ))
+                                        })
                                         .when(wsl_graphics_mode, |content| {
                                             content.child(self.render_wsl_graphics_form_branch(cx))
                                         })
                                         .when_some(remote_desktop_protocol, |content, protocol| {
-                                            content
-                                                .child(self.render_remote_desktop_form_branch(protocol, cx))
+                                            content.child(self.render_remote_desktop_form_branch(
+                                                protocol,
+                                                form.active_drawer,
+                                                cx,
+                                            ))
                                         })
                                         .when(
                                             !serial_mode
@@ -556,48 +897,73 @@ impl ConnectionFormView {
                                 .when(
                                     (ssh_submission_mode || mosh_mode || standalone_sftp_mode)
                                         && !prompt_mode
-                                        && !drill_down_mode,
+                                        && !drill_down_mode
+                                        && show_general_page,
                                     |content| {
-                                        let basic = div()
+                                        let target_fields = div()
+                                            .w_full()
                                             .flex()
                                             .flex_col()
-                                            .gap(px(self.tokens.metrics.modal_section_gap))
-                                        .child(self.render_connection_field(
-                                            self.i18n.t("ssh.form.name"),
-                                            &form.name,
-                                            self.i18n.t("ssh.form.name_placeholder"),
-                                            NewConnectionField::Name,
-                                            false,
-                                            cx,
-                                        ))
-                                        .child(
-                                            div()
-                                                .flex()
-                                                .flex_row()
-                                                .gap(px(self.tokens.metrics.form_host_port_gap))
-                                                .child(div().flex_1().child(
-                                                    self.render_connection_field(
-                                                        if standalone_sftp_mode {
-                                                            self.i18n.t("sftp.standalone.host")
-                                                        } else {
-                                                            self.i18n.t("ssh.form.host")
-                                                        },
-                                                        &form.host,
-                                                        if standalone_sftp_mode {
-                                                            self.i18n
-                                                                .t("sftp.standalone.host_placeholder")
-                                                        } else {
-                                                            self.i18n.t("ssh.form.host_placeholder")
-                                                        },
-                                                        NewConnectionField::Host,
-                                                        false,
-                                                        cx,
-                                                    ),
-                                                ))
-                                                .child(
-                                                    div()
-                                                        .w(px(self.tokens.metrics.form_port_width))
-                                                        .child(self.render_connection_field(
+                                            .gap(px(14.0))
+                                            .child(
+                                                div()
+                                                    .flex()
+                                                    .flex_row()
+                                                    .gap(px(12.0))
+                                                    .child(div().flex_1().min_w_0().child(
+                                                        self.render_connection_field(
+                                                            self.i18n.t("ssh.form.name"),
+                                                            &form.name,
+                                                            self.i18n.t("ssh.form.name_placeholder"),
+                                                            NewConnectionField::Name,
+                                                            false,
+                                                            cx,
+                                                        ),
+                                                    ))
+                                                    .child(div().w(px(196.0)).flex_none().child(
+                                                        self.render_connection_group_select(
+                                                            if edit_properties_mode
+                                                                || mosh_edit_mode
+                                                                || standalone_sftp_edit_mode
+                                                            {
+                                                                self.i18n.t(
+                                                                    "sessionManager.edit_properties.group",
+                                                                )
+                                                            } else {
+                                                                self.i18n.t("ssh.form.group")
+                                                            },
+                                                            &form.group,
+                                                            cx,
+                                                        ),
+                                                    )),
+                                            )
+                                            .child(
+                                                div()
+                                                    .flex()
+                                                    .flex_row()
+                                                    .gap(px(12.0))
+                                                    .child(div().flex_1().min_w_0().child(
+                                                        self.render_connection_field(
+                                                            if standalone_sftp_mode {
+                                                                self.i18n.t("sftp.standalone.host")
+                                                            } else {
+                                                                self.i18n.t("ssh.form.host")
+                                                            },
+                                                            &form.host,
+                                                            if standalone_sftp_mode {
+                                                                self.i18n.t(
+                                                                    "sftp.standalone.host_placeholder",
+                                                                )
+                                                            } else {
+                                                                self.i18n.t("ssh.form.host_placeholder")
+                                                            },
+                                                            NewConnectionField::Host,
+                                                            false,
+                                                            cx,
+                                                        ),
+                                                    ))
+                                                    .child(div().w(px(88.0)).flex_none().child(
+                                                        self.render_connection_field(
                                                             if standalone_sftp_mode {
                                                                 self.i18n.t("sftp.standalone.port")
                                                             } else {
@@ -608,36 +974,22 @@ impl ConnectionFormView {
                                                             NewConnectionField::Port,
                                                             false,
                                                             cx,
-                                                        )),
-                                                ),
-                                        )
-                                        .child(self.render_connection_field(
-                                            self.i18n.t("ssh.form.username"),
-                                            &form.username,
-                                            "root".to_string(),
-                                            NewConnectionField::Username,
-                                            false,
-                                            cx,
-                                        ))
-                                        .child(self.render_connection_group_select(
-                                            if edit_properties_mode
-                                                || mosh_edit_mode
-                                                || standalone_sftp_edit_mode
-                                            {
-                                                self.i18n.t("sessionManager.edit_properties.group")
-                                            } else {
-                                                self.i18n.t("ssh.form.group")
-                                            },
-                                            &form.group,
-                                            cx,
-                                        ))
-                                        .child(self.render_connection_notes_fields(&form.notes, cx))
-                                        .into_any_element();
-                                        content.child(self.render_connection_form_section(
-                                            ConnectionFormSection::Basic,
-                                            basic,
-                                            cx,
-                                        ))
+                                                        ),
+                                                    ))
+                                                    .child(div().w(px(156.0)).flex_none().child(
+                                                        self.render_connection_field(
+                                                            self.i18n.t("ssh.form.username"),
+                                                            &form.username,
+                                                            "root".to_string(),
+                                                            NewConnectionField::Username,
+                                                            false,
+                                                            cx,
+                                                        ),
+                                                    )),
+                                            );
+                                        content
+                                            .child(target_fields)
+                                            .child(div().w_full().h(px(1.0)).bg(rgb(theme.border)))
                                     },
                                 )
                                 .when(drill_down_mode, |content| {
@@ -694,7 +1046,7 @@ impl ConnectionFormView {
                                         ))
                                     },
                                 )
-                                .child({
+                                .when(show_general_page, |content| content.child({
                                     let selector = self.render_auth_selector(
                                         form.auth_tab,
                                         if prompt_mode {
@@ -712,67 +1064,79 @@ impl ConnectionFormView {
                                         false,
                                         cx,
                                     );
+                                    let show_totp_select = form.totp_picker_expanded
+                                        || form.totp_credential_id.is_some();
+                                    let totp_active = form.totp_credential_id.is_some();
+                                    let totp_toggle_chip = (!prompt_mode && !drill_down_mode).then(|| {
+                                        div()
+                                            .id("composer-totp-toggle")
+                                            .h(px(self.tokens.metrics.ui_tabs_list_height))
+                                            .px(px(10.0))
+                                            .rounded(px(self.tokens.radii.md))
+                                            .border_1()
+                                            .border_color(if totp_active || show_totp_select {
+                                                rgb(theme.accent)
+                                            } else {
+                                                rgb(theme.border)
+                                            })
+                                            .bg(if totp_active || show_totp_select {
+                                                rgba((theme.accent << 8) | 0x18)
+                                            } else {
+                                                rgb(theme.bg_panel)
+                                            })
+                                            .cursor_pointer()
+                                            .hover(|el| el.bg(rgb(theme.bg_hover)))
+                                            .flex()
+                                            .items_center()
+                                            .gap(px(5.0))
+                                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                                            .font_weight(gpui::FontWeight::MEDIUM)
+                                            .text_color(rgb(if totp_active || show_totp_select {
+                                                theme.accent
+                                            } else {
+                                                theme.text_muted
+                                            }))
+                                            .child(Self::render_lucide_icon(
+                                                LucideIcon::KeyRound,
+                                                12.0,
+                                                rgb(if totp_active || show_totp_select {
+                                                    theme.accent
+                                                } else {
+                                                    theme.text_muted
+                                                }),
+                                            ))
+                                            .child("TOTP")
+                                            .on_mouse_down(
+                                                MouseButton::Left,
+                                                cx.listener(|this, _, _, cx| {
+                                                    this.update_connection_form_state(cx, |state| {
+                                                        if let Some(form) = state.form.as_mut() {
+                                                            form.totp_picker_expanded =
+                                                                !form.totp_picker_expanded;
+                                                        }
+                                                    });
+                                                    cx.stop_propagation();
+                                                    cx.notify();
+                                                }),
+                                            )
+                                    });
                                     let authentication = div()
                                         .flex()
                                         .flex_col()
-                                        .gap(px(self.tokens.metrics.modal_section_gap))
-                                        .child(self.render_connection_checkbox("ssh-kerberos", 
-                                            self.i18n.t("ssh.form.kerberos_preferred"),
-                                            form.gssapi_enabled,
-                                            |form| form.gssapi_enabled = !form.gssapi_enabled,
-                                            cx,
-                                        ))
-                                        .when(form.gssapi_enabled, |content| {
-                                            content
-                                                .child(self.render_connection_hint(
-                                                    self.i18n.t("ssh.form.gssapi_desc"),
-                                                ))
-                                                .child(self.render_connection_field(
-                                                    self.i18n.t(
-                                                        "ssh.form.gssapi_server_identity",
-                                                    ),
-                                                    &form.gssapi_server_identity,
-                                                    self.i18n.t(
-                                                        "ssh.form.gssapi_server_identity_placeholder",
-                                                    ),
-                                                    NewConnectionField::GssapiServerIdentity,
-                                                    false,
-                                                    cx,
-                                                ))
-                                                .child(self.render_connection_hint(
-                                                    self.i18n.t(
-                                                        "ssh.form.gssapi_server_identity_hint",
-                                                    ),
-                                                ))
-                                                .child(self.render_kerberos_credentials_status(
-                                                    form.gssapi_credentials_available,
-                                                ))
-                                                .child(
-                                                    self.render_connection_checkbox_with_warning(
-                                                        "kerberos-delegation-help",
-                                                        "kerberos-delegation-tooltip",
-                                                        "ssh.form.gssapi_delegate_credentials",
-                                                        "ssh.form.gssapi_delegation_warning",
-                                                        form.gssapi_delegate_credentials,
-                                                        |form| {
-                                                            form.gssapi_delegate_credentials =
-                                                                !form.gssapi_delegate_credentials;
-                                                        },
-                                                        cx,
-                                                    ),
-                                                )
-                                        })
+                                        .gap(px(14.0))
                                         .child(
                                             div()
-                                                .text_size(px(self.tokens.metrics.ui_text_sm))
-                                                .font_weight(gpui::FontWeight::MEDIUM)
-                                                .text_color(rgb(self.tokens.ui.text))
-                                                .child(self.i18n.t(
-                                                    "ssh.form.fallback_authentication",
-                                                )),
+                                                .flex()
+                                                .items_end()
+                                                .gap(px(10.0))
+                                                .child(div().flex_1().min_w_0().child(selector))
+                                                .when_some(totp_toggle_chip, |row, chip| {
+                                                    row.child(chip)
+                                                }),
                                         )
-                                        .child(selector)
-                                        .child(self.render_connection_totp_select(false, cx))
+                                        .when(show_totp_select, |content| {
+                                            content.child(self.render_connection_totp_select(false, cx))
+                                        })
                                 .when(form.auth_tab == SshAuthTab::Password, |content| {
                                     if edit_properties_mode
                                         && form.saved_password_keychain_id.is_some()
@@ -836,34 +1200,52 @@ impl ConnectionFormView {
                                                 },
                                             )
                                     } else {
-                                        content
-                                            .child(self.render_connection_secret_field(
-                                                self.i18n.t("ssh.form.password"),
-                                                String::new(),
-                                                NewConnectionField::Password,
-                                                cx,
-                                            ))
-                                            .child(self.render_connection_checkbox("ssh-save-password", 
-                                                self.i18n.t("ssh.form.save_password"),
-                                                form.save_password,
-                                                |form| form.save_password = !form.save_password,
-                                                cx,
-                                            ))
+                                        content.child(self.render_connection_secret_field(
+                                            self.i18n.t("ssh.form.password"),
+                                            String::new(),
+                                            NewConnectionField::Password,
+                                            cx,
+                                        ))
                                     }
                                 })
                                 .when(form.auth_tab == SshAuthTab::Password && !prompt_mode, |content| {
-                                    content.child(self.render_connection_checkbox("ssh-empty-password", 
-                                        self.i18n.t("ssh.form.use_empty_password"),
-                                        form.empty_password,
-                                        |form| {
-                                            form.empty_password = !form.empty_password;
-                                            form.field_focused = false;
-                                            form.saved_password_keychain_id = None;
-                                            form.password_from_store = false;
-                                            form.password_loaded = true;
-                                            if form.empty_password { form.password.zeroize(); }
-                                        }, cx,
-                                    ))
+                                    let shows_save_checkbox = !edit_properties_mode
+                                        && !drill_down_mode
+                                        && !mosh_edit_mode
+                                        && !standalone_sftp_edit_mode;
+                                    content.child(
+                                        div()
+                                            .flex()
+                                            .flex_row()
+                                            .flex_wrap()
+                                            .items_center()
+                                            .gap(px(20.0))
+                                            .when(shows_save_checkbox, |row| {
+                                                row.child(self.render_connection_checkbox(
+                                                    "ssh-save-password",
+                                                    self.i18n.t("ssh.form.save_password"),
+                                                    form.save_password,
+                                                    |form| form.save_password = !form.save_password,
+                                                    cx,
+                                                ))
+                                            })
+                                            .child(self.render_connection_checkbox(
+                                                "ssh-empty-password",
+                                                self.i18n.t("ssh.form.use_empty_password"),
+                                                form.empty_password,
+                                                |form| {
+                                                    form.empty_password = !form.empty_password;
+                                                    form.field_focused = false;
+                                                    form.saved_password_keychain_id = None;
+                                                    form.password_from_store = false;
+                                                    form.password_loaded = true;
+                                                    if form.empty_password {
+                                                        form.password.zeroize();
+                                                    }
+                                                },
+                                                cx,
+                                            )),
+                                    )
                                 })
                                 .when(prompt_mode, |content| {
                                     content.child(self.render_connection_checkbox("ssh-save-credentials", 
@@ -1099,173 +1481,172 @@ impl ConnectionFormView {
                                     },
                                 )
                                 .into_any_element();
-                                    if (ssh_submission_mode || mosh_mode || standalone_sftp_mode)
-                                        && !prompt_mode
-                                        && !drill_down_mode
-                                    {
-                                        self.render_connection_form_section(
-                                            ConnectionFormSection::Authentication,
-                                            authentication,
-                                            cx,
-                                        )
-                                    } else {
-                                        authentication
-                                    }
-                                })
+                                    authentication
+                                }))
                                 .when(
                                     !prompt_mode
                                         && !drill_down_mode
                                         && !mosh_mode
-                                        && !standalone_sftp_mode,
+                                        && !standalone_sftp_mode
+                                        && form.active_drawer.is_some(),
                                     |content| {
-                                    let route_body = div()
-                                        .flex()
-                                        .flex_col()
-                                        .gap(px(self.tokens.metrics.modal_section_gap))
-                                        .child(self.render_proxy_command_section(
-                                            form.proxy_command_enabled,
-                                            &form.proxy_command,
-                                            form.proxy_command_configured,
-                                            false,
-                                            cx,
-                                        ))
-                                        // ProxyCommand replaces the regular route without erasing
-                                        // its saved upstream-proxy or jump-server configuration.
-                                        .when(!form.proxy_command_enabled, |route| {
-                                            route
-                                                .child(self.render_upstream_proxy_policy_section(false, cx))
-                                                .child(self.render_proxy_chain_section(false, cx))
-                                        })
-                                        .into_any_element();
-                                    let ssh_options_body = self.render_connection_ssh_options(
-                                        form.agent_forwarding,
-                                        form.legacy_ssh_compatibility,
-                                        cx,
-                                    );
-                                    let terminal_body = div()
-                                        .flex()
-                                        .flex_col()
-                                        .gap(px(self.tokens.metrics.modal_section_gap))
-                                        .child(self.render_connection_terminal_options(cx))
-                                        .child(self.render_connection_field(
-                                            self.i18n.t("ssh.form.pre_connect_command"),
-                                            &form.pre_connect_command,
-                                            self.i18n
-                                                .t("ssh.form.pre_connect_command_placeholder"),
-                                            NewConnectionField::PreConnectCommand,
-                                            false,
-                                            cx,
-                                        ))
-                                        .child(self.render_connection_hint(
-                                            self.i18n.t("ssh.form.pre_connect_command_hint"),
-                                        ))
-                                        .child(self.render_connection_field(
-                                            self.i18n.t("ssh.form.post_connect_command"),
-                                            &form.post_connect_command,
-                                            self.i18n
-                                                .t("ssh.form.post_connect_command_placeholder"),
-                                            NewConnectionField::PostConnectCommand,
-                                            false,
-                                            cx,
-                                        ))
-                                        .child(self.render_connection_hint(
-                                            self.i18n.t("ssh.form.post_connect_command_hint"),
-                                        ))
-                                        .into_any_element();
-                                    content
-                                        .child(self.render_connection_form_section(
-                                            ConnectionFormSection::Route,
-                                            route_body,
-                                            cx,
-                                        ))
-                                        .child(self.render_connection_form_section(
-                                            ConnectionFormSection::SshOptions,
-                                            ssh_options_body,
-                                            cx,
-                                        ))
-                                        .child(self.render_connection_form_section(
-                                            ConnectionFormSection::Terminal,
-                                            terminal_body,
-                                            cx,
-                                        ))
+                                        use crate::form_state::ConnectionFormDrawer;
+                                        let page_body = match form.active_drawer {
+                                            Some(ConnectionFormDrawer::Route) => Some(
+                                                div()
+                                                    .flex()
+                                                    .flex_col()
+                                                    .gap(px(self.tokens.metrics.modal_section_gap))
+                                                    .child(self.render_proxy_command_section(
+                                                        form.proxy_command_enabled,
+                                                        &form.proxy_command,
+                                                        form.proxy_command_configured,
+                                                        false,
+                                                        cx,
+                                                    ))
+                                                    .when(!form.proxy_command_enabled, |route| {
+                                                        route
+                                                            .child(self.render_upstream_proxy_policy_section(false, cx))
+                                                            .child(self.render_proxy_chain_section(false, cx))
+                                                    })
+                                                    .into_any_element(),
+                                            ),
+                                            Some(ConnectionFormDrawer::SshSecurity) => Some(
+                                                div()
+                                                    .flex()
+                                                    .flex_col()
+                                                    .gap(px(12.0))
+                                                    .child(self.render_connection_checkbox(
+                                                        "ssh-kerberos",
+                                                        self.i18n.t("ssh.form.kerberos_preferred"),
+                                                        form.gssapi_enabled,
+                                                        |form| form.gssapi_enabled = !form.gssapi_enabled,
+                                                        cx,
+                                                    ))
+                                                    .when(form.gssapi_enabled, |sec| {
+                                                        sec.child(self.render_connection_hint(
+                                                            self.i18n.t("ssh.form.gssapi_desc"),
+                                                        ))
+                                                        .child(self.render_connection_field(
+                                                            self.i18n.t("ssh.form.gssapi_server_identity"),
+                                                            &form.gssapi_server_identity,
+                                                            self.i18n.t(
+                                                                "ssh.form.gssapi_server_identity_placeholder",
+                                                            ),
+                                                            NewConnectionField::GssapiServerIdentity,
+                                                            false,
+                                                            cx,
+                                                        ))
+                                                        .child(self.render_kerberos_credentials_status(
+                                                            form.gssapi_credentials_available,
+                                                        ))
+                                                        .child(
+                                                            self.render_connection_checkbox_with_warning(
+                                                                "kerberos-delegation-help",
+                                                                "kerberos-delegation-tooltip",
+                                                                "ssh.form.gssapi_delegate_credentials",
+                                                                "ssh.form.gssapi_delegation_warning",
+                                                                form.gssapi_delegate_credentials,
+                                                                |form| {
+                                                                    form.gssapi_delegate_credentials =
+                                                                        !form.gssapi_delegate_credentials;
+                                                                },
+                                                                cx,
+                                                            ),
+                                                        )
+                                                    })
+                                                    .child(div().h(px(1.0)).bg(rgb(theme.border)))
+                                                    .child(self.render_connection_ssh_options(
+                                                        form.agent_forwarding,
+                                                        form.legacy_ssh_compatibility,
+                                                        cx,
+                                                    ))
+                                                    .into_any_element(),
+                                            ),
+                                            Some(ConnectionFormDrawer::Terminal) => Some(
+                                                div()
+                                                    .flex()
+                                                    .flex_col()
+                                                    .gap(px(self.tokens.metrics.modal_section_gap))
+                                                    .child(self.render_connection_terminal_options(cx))
+                                                    .child(self.render_connection_field(
+                                                        self.i18n.t("ssh.form.pre_connect_command"),
+                                                        &form.pre_connect_command,
+                                                        self.i18n.t(
+                                                            "ssh.form.pre_connect_command_placeholder",
+                                                        ),
+                                                        NewConnectionField::PreConnectCommand,
+                                                        false,
+                                                        cx,
+                                                    ))
+                                                    .child(self.render_connection_field(
+                                                        self.i18n.t("ssh.form.post_connect_command"),
+                                                        &form.post_connect_command,
+                                                        self.i18n.t(
+                                                            "ssh.form.post_connect_command_placeholder",
+                                                        ),
+                                                        NewConnectionField::PostConnectCommand,
+                                                        false,
+                                                        cx,
+                                                    ))
+                                                    .into_any_element(),
+                                            ),
+                                            Some(ConnectionFormDrawer::Notes) => Some(
+                                                div()
+                                                    .flex()
+                                                    .flex_col()
+                                                    .gap(px(self.tokens.metrics.modal_section_gap))
+                                                    .when(shows_icon_field, |col| {
+                                                        col.child(self.render_connection_appearance_options(cx))
+                                                            .child(div().h(px(1.0)).bg(rgb(theme.border)))
+                                                    })
+                                                    .child(self.render_connection_notes_fields(&form.notes, cx))
+                                                    .into_any_element(),
+                                            ),
+                                            _ => None,
+                                        };
+                                        content.when_some(page_body, |c, body| c.child(body))
                                     },
                                 )
-                                .when(standalone_sftp_mode, |content| {
-                                    let route_body = div()
-                                        .flex()
-                                        .flex_col()
-                                        .gap(px(self.tokens.metrics.modal_section_gap))
-                                        .child(self.render_proxy_command_section(
-                                            form.proxy_command_enabled,
-                                            &form.proxy_command,
-                                            form.proxy_command_configured,
-                                            false,
-                                            cx,
-                                        ))
-                                        .when(!form.proxy_command_enabled, |route| {
-                                            route
-                                                .child(self.render_upstream_proxy_policy_section(false, cx))
+                                .when(mosh_mode && form.active_drawer.is_some(), |content| {
+                                    use crate::form_state::ConnectionFormDrawer;
+                                    let page_body = match form.active_drawer {
+                                        Some(ConnectionFormDrawer::Route) => Some(
+                                            div()
+                                                .flex()
+                                                .flex_col()
+                                                .gap(px(self.tokens.metrics.modal_section_gap))
+                                                .child(self.render_connection_hint(
+                                                    self.i18n.t("mosh.form.jump_route_hint"),
+                                                ))
                                                 .child(self.render_proxy_chain_section(false, cx))
-                                        })
-                                        .into_any_element();
-                                    let sftp_options = self.render_standalone_sftp_options(
-                                        &form.sftp_initial_remote_path,
-                                        &form.connect_timeout_seconds_text,
-                                        cx,
-                                    );
-                                    content
-                                        .child(self.render_connection_form_section(
-                                            ConnectionFormSection::Route,
-                                            route_body,
-                                            cx,
-                                        ))
-                                        .child(self.render_connection_form_section(
-                                            ConnectionFormSection::SftpOptions,
-                                            sftp_options,
-                                            cx,
-                                        ))
-                                        .child(self.render_connection_form_section(
-                                            ConnectionFormSection::Terminal,
-                                            self.render_connection_pre_connect_command(cx),
-                                            cx,
-                                        ))
+                                                .into_any_element(),
+                                        ),
+                                        Some(ConnectionFormDrawer::MoshOptions) => {
+                                            Some(self.render_mosh_advanced_fields(
+                                                &form.mosh_server_executable,
+                                                &form.mosh_udp_host,
+                                                &form.mosh_udp_port,
+                                                &form.mosh_locale,
+                                                cx,
+                                            ))
+                                        }
+                                        Some(ConnectionFormDrawer::Notes) => Some(
+                                            div()
+                                                .flex()
+                                                .flex_col()
+                                                .gap(px(self.tokens.metrics.modal_section_gap))
+                                                .when(shows_icon_field, |col| {
+                                                    col.child(self.render_connection_appearance_options(cx))
+                                                        .child(div().h(px(1.0)).bg(rgb(theme.border)))
+                                                })
+                                                .child(self.render_connection_notes_fields(&form.notes, cx))
+                                                .into_any_element(),
+                                        ),
+                                        _ => None,
+                                    };
+                                    content.when_some(page_body, |c, body| c.child(body))
                                 })
-                                .when(mosh_mode, |content| {
-                                    let route = div()
-                                        .flex()
-                                        .flex_col()
-                                        .gap(px(self.tokens.metrics.modal_section_gap))
-                                        .child(self.render_connection_hint(
-                                            self.i18n.t("mosh.form.jump_route_hint"),
-                                        ))
-                                        .child(self.render_proxy_chain_section(false, cx))
-                                        .into_any_element();
-                                    let mosh_options = self.render_mosh_advanced_fields(
-                                        &form.mosh_server_executable,
-                                        &form.mosh_udp_host,
-                                            &form.mosh_udp_port,
-                                        &form.mosh_locale,
-                                        cx,
-                                        );
-                                    content
-                                        .child(self.render_connection_form_section(
-                                            ConnectionFormSection::Route,
-                                            route,
-                                            cx,
-                                        ))
-                                        .child(self.render_connection_form_section(
-                                            ConnectionFormSection::MoshOptions,
-                                            mosh_options,
-                                            cx,
-                                        ))
-                                })
-                                    })
-                                    .when(shows_icon_field, |content| {
-                                        content.child(self.render_connection_form_section(
-                                            ConnectionFormSection::Appearance,
-                                            self.render_connection_appearance_options(cx),
-                                            cx,
-                                        ))
                                     })
                                 ),
                         )
@@ -1274,31 +1655,63 @@ impl ConnectionFormView {
                                 .child(self.render_ssh_algorithm_category_column(cx))
                                 .child(self.render_ssh_algorithm_detail_column(cx))
                         })
-                        )
-                        .when_some(
-                            if prompt_mode {
-                                None
-                            } else {
-                                form.error.clone()
-                            },
-                            |content, error| {
-                                let feedback_color = if form.feedback_success {
-                                    theme.success
-                                } else {
-                                    theme.error
-                                };
-                                content.child(
-                                    div()
-                                        .text_size(px(self.tokens.metrics.ui_text_xs))
-                                        .text_color(rgb(feedback_color))
-                                        .child(error),
-                                )
-                            },
                         ),
                 )
-                .child(
-                    modal_footer(&self.tokens)
+                .child({
+                    let show_test_button = !reauthentication_mode
+                        && !edit_properties_mode
+                        && self.connection_form_state(cx).saved_connection_prompt_action.is_none()
+                        && !drill_down_mode
+                        && (ssh_submission_mode || standalone_sftp_mode);
+                    let footer_feedback = if prompt_mode {
+                        None
+                    } else {
+                        form.error.clone()
+                    };
+                    let left_cluster = div()
+                        .flex_1()
+                        .min_w_0()
+                        .flex()
+                        .items_center()
+                        .gap(px(10.0))
+                        .when(show_test_button, |left| {
+                            left.child(self.render_connection_button(
+                                self.i18n.t("ssh.form.test"),
+                                false,
+                                ConnectionButtonAction::Test,
+                                primary_disabled,
+                                cx,
+                            ))
+                        })
+                        .when_some(footer_feedback, |left, error| {
+                            let feedback_color = if form.feedback_success {
+                                theme.success
+                            } else {
+                                theme.error
+                            };
+                            let icon = if form.feedback_success {
+                                LucideIcon::CheckCircle
+                            } else {
+                                LucideIcon::AlertCircle
+                            };
+                            left.child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(5.0))
+                                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                                    .text_color(rgb(feedback_color))
+                                    .child(Self::render_lucide_icon(icon, 13.0, rgb(feedback_color)))
+                                    .child(div().min_w_0().truncate().child(error)),
+                            )
+                        });
+                    let right_cluster = div()
                         .flex_none()
+                        .flex()
+                        .items_center()
+                        .gap(px(8.0))
                         .child(self.render_connection_button(
                             self.i18n.t("ssh.form.cancel"),
                             false,
@@ -1315,22 +1728,6 @@ impl ConnectionFormView {
                                 cx,
                             ))
                         })
-                        .when(
-                            !reauthentication_mode
-                                && !edit_properties_mode
-                                && self.connection_form_state(cx).saved_connection_prompt_action.is_none()
-                                && !drill_down_mode
-                                && (ssh_submission_mode || standalone_sftp_mode),
-                            |footer| {
-                                footer.child(self.render_connection_button(
-                                    self.i18n.t("ssh.form.test"),
-                                    false,
-                                    ConnectionButtonAction::Test,
-                                    primary_disabled,
-                                    cx,
-                                ))
-                            },
-                        )
                         .when(
                             !reauthentication_mode
                                 && !edit_properties_mode
@@ -1463,8 +1860,18 @@ impl ConnectionFormView {
                                     cx,
                                 ))
                             },
-                        ),
-                    ),
+                        );
+
+                    modal_footer(&self.tokens)
+                        .flex_none()
+                        .bg(rgb(theme.bg_panel))
+                        .px(px(22.0))
+                        .py(px(13.0))
+                        .justify_between()
+                        .gap(px(12.0))
+                        .child(left_cluster)
+                        .child(right_cluster)
+                }),
                     form_visible,
                 ),
         )

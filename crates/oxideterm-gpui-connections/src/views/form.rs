@@ -75,6 +75,7 @@ use oxideterm_settings_model::{settings_multiline_line_ranges, settings_multilin
 // Keep the modal, proxy-chain, and field-control implementations in explicit
 // submodules so their dependencies and visibility remain locally auditable.
 mod ble_fields;
+mod composer;
 mod field_controls;
 mod form_modal;
 mod ftp;
@@ -94,7 +95,6 @@ const SECRET_VISIBILITY_BUTTON_SIZE: f32 = 28.0;
 const SECRET_VISIBILITY_BUTTON_OFFSET: f32 = 4.0;
 const SECRET_VISIBILITY_ICON_SIZE: f32 = 16.0;
 const TAURI_JUMP_MODAL_WIDTH: f32 = 425.0; // Tauri sm:max-w-[425px]
-const TAURI_DRILL_DOWN_MODAL_WIDTH: f32 = 480.0; // Tauri DrillDownDialog sm:max-w-[480px]
 const TAURI_PROXY_CHAIN_MAX_HEIGHT: f32 = 250.0; // Tauri max-h-[250px]
 const TAURI_PROXY_CHAIN_SECTION_PADDING: f32 = 16.0; // Tauri p-4
 const TAURI_PROXY_CHAIN_HEADER_MARGIN: f32 = 16.0; // Tauri mb-4
@@ -314,14 +314,6 @@ impl ConnectionFormView {
         (self.selectable_text)(scope, key, value, color, cx)
     }
 
-    fn settings_panel_background(&self, color: u32) -> Rgba {
-        if self.environment.panel_glass {
-            rgba((color << 8) | oxideterm_gpui_ui::theme_glass_card_background_alpha(&self.tokens))
-        } else {
-            rgb(color)
-        }
-    }
-
     fn render_lucide_icon(icon: LucideIcon, size: f32, color: Rgba) -> AnyElement {
         gpui::svg()
             .path(icon.path())
@@ -443,14 +435,16 @@ impl Render for ConnectionFormView {
         self.i18n = theme.i18n;
         self.environment = environment;
         match self.mount {
-            FormMount::Body if self.environment.tunnel.is_none() => div()
+            FormMount::Body => div()
                 .absolute()
                 .inset_0()
-                .child(self.render_new_connection_modal(window, cx))
+                .child(if self.environment.tunnel.is_none() {
+                    self.render_new_connection_modal(window, cx)
+                } else {
+                    self.render_ssh_tunnel_form(window, cx)
+                        .unwrap_or_else(|| div().into_any_element())
+                })
                 .into_any_element(),
-            FormMount::Body => self
-                .render_ssh_tunnel_form(window, cx)
-                .unwrap_or_else(|| div().into_any_element()),
             FormMount::Overlays => {
                 let jump_open = self
                     .connection_form_state(cx)
@@ -462,6 +456,7 @@ impl Render for ConnectionFormView {
                     .absolute()
                     .inset_0()
                     .children(jump)
+                    .children(self.render_composer_overlays(cx))
                     .children(self.render_new_connection_select_overlay(window, cx))
                     .children(self.algorithms().render_ssh_algorithm_context_menu(cx))
                     .into_any_element()
@@ -469,7 +464,6 @@ impl Render for ConnectionFormView {
         }
     }
 }
-const NEW_CONNECTION_TRANSPORT_SELECTOR_ID: &str = "new-connection-transport-selector";
 const NEW_CONNECTION_AUTH_SELECTOR_ID: &str = "new-connection-auth-selector";
 const EDIT_CONNECTION_AUTH_SELECTOR_ID: &str = "edit-connection-auth-selector";
 const PROMPT_CONNECTION_AUTH_SELECTOR_ID: &str = "prompt-connection-auth-selector";
@@ -562,16 +556,6 @@ impl ConnectionFormView {
     }
 }
 impl ConnectionFormView {
-    pub(super) fn render_vertical_selection_surface(
-        &self,
-        control_id: &'static str,
-        active_index: usize,
-        surface: gpui::Div,
-    ) -> AnyElement {
-        self.user_motion
-            .render_vertical(control_id, active_index, &self.tokens, surface)
-    }
-
     pub(super) fn begin_user_segmented_control_transition_from(
         &mut self,
         control_id: &'static str,
@@ -584,22 +568,6 @@ impl ConnectionFormView {
             Some(previous_index),
             target_index,
             None,
-            cx,
-        );
-    }
-
-    pub(super) fn begin_user_segmented_control_transition_with_vertical_offset(
-        &mut self,
-        control_id: &'static str,
-        target_index: usize,
-        vertical_offset_y: Option<f32>,
-        cx: &mut Context<Self>,
-    ) {
-        self.begin_user_segmented_control_transition_with_history(
-            control_id,
-            None,
-            target_index,
-            vertical_offset_y,
             cx,
         );
     }

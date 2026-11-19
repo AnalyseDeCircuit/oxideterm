@@ -241,11 +241,12 @@ impl ConnectionFormView {
                     .child(error),
             );
         }
-        let width = self.tokens.metrics.modal_width + NEW_CONNECTION_TYPE_SIDEBAR_WIDTH + gap;
+        let width = composer::CONNECTION_STUDIO_WIDTH;
         let height = f32::from(window.viewport_size().height)
             * self.tokens.metrics.modal_max_viewport_height_ratio;
         let dialog = modal_container(&self.tokens)
             .bg(rgb(self.tokens.ui.bg_elevated))
+            .overflow_hidden()
             .w(px(width.min(
                 (f32::from(window.viewport_size().width) - 64.0).max(0.0),
             )))
@@ -253,20 +254,25 @@ impl ConnectionFormView {
             .flex()
             .flex_col()
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .child(modal_header(
-                &self.tokens,
+            .child(self.render_studio_top_chrome(
                 self.i18n.t("ssh_tunnel.title"),
-                self.i18n.t("ssh_tunnel.description"),
+                Some(self.i18n.t("ssh_tunnel.description")),
+                true,
+                false,
+                cx,
             ))
             .child(
-                modal_body(&self.tokens).flex_1().min_h_0().child(
-                    div()
-                        .size_full()
-                        .min_h_0()
-                        .flex()
-                        .gap(px(gap))
-                        .child(self.render_transport_selector(cx))
-                        .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .flex()
+                    .child(
+                        modal_body(&self.tokens).flex_1().min_w_0().min_h_0().child(
+                            div()
+                                .size_full()
+                                .min_h_0()
+                                .flex()
+                                .child(
                             div()
                                 .id("ssh-tunnel-form-scroll")
                                 .flex_1()
@@ -285,11 +291,13 @@ impl ConnectionFormView {
                                 }))
                                 .child(body),
                         ),
+                    ),
                 ),
             )
             .child(
                 modal_footer(&self.tokens)
                     .flex_none()
+                    .bg(rgb(self.tokens.ui.bg_panel))
                     .child(
                         button_with(
                             &self.tokens,
@@ -364,14 +372,15 @@ impl ConnectionFormView {
                 )
                 .child(staged_overlay_scrim(
                     &self.tokens,
-                    "ssh-tunnel-form-scrim",
+                    "new-connection-form-scrim",
                     TauriBackdropRole::Dialog,
                     true,
                 ))
-                .child(oxideterm_gpui_ui::motion::form_enter(
+                .child(oxideterm_gpui_ui::motion::form_transition(
                     &self.tokens,
-                    "ssh-tunnel-form-enter",
+                    "new-connection-form-enter",
                     dialog,
+                    true,
                 ))
                 .into_any_element(),
         )

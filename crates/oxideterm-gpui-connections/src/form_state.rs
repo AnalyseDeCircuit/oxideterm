@@ -777,6 +777,20 @@ impl Drop for StandaloneSftpSecondaryForm {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ConnectionFormDrawer {
+    Route,
+    SshSecurity,
+    Terminal,
+    Notes,
+    MoshOptions,
+    RemoteFeatures,
+    VncPreferences,
+    SerialParameters,
+    BleTransportOptions,
+    FtpOptions,
+}
+
 pub struct NewConnectionForm {
     pub tunnel_target_host: String,
     pub tunnel_target_port: String,
@@ -864,6 +878,14 @@ pub struct NewConnectionForm {
     pub local_shell_section_expanded: Option<bool>,
     /// Keeps the uncommon transport group out of the primary list until requested.
     pub advanced_connections_expanded: bool,
+    /// Single-open in-place capability drawer shown below the composer chip rail.
+    pub active_drawer: Option<ConnectionFormDrawer>,
+    /// Floating categorized protocol picker opened from the header transport pill.
+    pub transport_picker_open: bool,
+    /// Floating icon and accent color picker opened from the header session avatar.
+    pub appearance_popover_open: bool,
+    /// Expands the optional TOTP selector inside the authentication card on demand.
+    pub totp_picker_expanded: bool,
     pub tags: Vec<String>,
     pub proxy_hops: Vec<NewConnectionProxyHop>,
     pub proxy_chain_expanded: bool,
@@ -1298,6 +1320,10 @@ impl Default for NewConnectionForm {
             sftp_options_section_expanded: None,
             local_shell_section_expanded: None,
             advanced_connections_expanded: false,
+            active_drawer: None,
+            transport_picker_open: false,
+            appearance_popover_open: false,
+            totp_picker_expanded: false,
             tags: Vec::new(),
             proxy_hops: Vec::new(),
             proxy_chain_expanded: false,
