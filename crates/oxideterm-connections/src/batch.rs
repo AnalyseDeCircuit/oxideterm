@@ -1445,14 +1445,6 @@ fn parse_auth_slot(slot: &str) -> Result<BatchRowAuth, BatchIssueKind> {
     )))
 }
 
-fn password_from_slot(value: &str) -> Result<BatchRowAuth, BatchIssueKind> {
-    let value = value.trim();
-    if value.is_empty() {
-        return Err(BatchIssueKind::AuthEmpty);
-    }
-    Ok(BatchRowAuth::Password(SecretString::new(value)))
-}
-
 fn key_path_from_slot(key_path: &str) -> Result<BatchRowAuth, BatchIssueKind> {
     let key_path = key_path.trim();
     if key_path.is_empty() {

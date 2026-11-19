@@ -8,7 +8,7 @@ pub(crate) use oxideterm_gpui_ui::virtual_list::{
 
 pub(crate) use oxideterm_gpui_ui::virtual_list::{
     TauriVirtualScrollAlign, browser_drag_edge_scroll_step, scroll_tauri_virtual_list_to_index,
-    tauri_virtual_uniform_list, tracked_uniform_list,
+    tauri_virtual_uniform_list,
 };
 
 #[allow(dead_code)]

@@ -237,18 +237,6 @@ impl WorkspaceApp {
         }
     }
 
-    pub(in crate::workspace) fn settings_multiline_input_viewport(
-        &self,
-        target: WorkspaceImeTarget,
-        content: AnyElement,
-    ) -> AnyElement {
-        let anchor = target.anchor_id();
-        let scroll = self.selectable_text_scroll_handle(format!("multiline-input-{}", anchor.0));
-        oxideterm_gpui_settings_view::components::multiline_input_viewport(
-            anchor, content, false, &scroll,
-        )
-    }
-
     pub(in crate::workspace) fn load_terminal_command_specs_editor_value(&self) -> String {
         let path = super::terminal_command_bar::completion::terminal_command_specs_path(
             self.settings_store.path(),

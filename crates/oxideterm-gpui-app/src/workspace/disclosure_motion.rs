@@ -29,29 +29,4 @@ impl WorkspaceApp {
         })
         .detach();
     }
-
-    pub(super) fn toggle_ai_thinking_with_motion(
-        &mut self,
-        key: String,
-        default_expanded: bool,
-        cx: &mut Context<Self>,
-    ) {
-        let expanded = self.ai.state.update(cx, |ai, _| {
-            ai.toggle_thinking_expansion(key.clone(), default_expanded);
-            ai.chat_ui()
-                .thinking_expansion_state
-                .get(&key)
-                .copied()
-                .unwrap_or(default_expanded)
-        });
-        self.begin_disclosure_motion(format!("ai:{key}:thinking"), expanded, cx);
-    }
-
-    pub(super) fn toggle_ai_tool_with_motion(&mut self, key: String, cx: &mut Context<Self>) {
-        let expanded = self.ai.state.update(cx, |ai, _| {
-            ai.toggle_tool_call_expansion(key.clone());
-            ai.chat_ui().tool_call_expansion_state.contains(&key)
-        });
-        self.begin_disclosure_motion(format!("ai:{key}:tool"), expanded, cx);
-    }
 }

@@ -9,21 +9,6 @@ use oxideterm_settings_model::{
 };
 
 impl WorkspaceApp {
-    pub(in crate::workspace) fn deferred_ai_text_input_anchor_update(
-        workspace: gpui::Entity<Self>,
-    ) -> impl FnOnce(TextInputAnchor, &mut Window, &mut App) {
-        move |anchor, window, cx| {
-            // AI sidebar text anchors can be repainted while a floating menu
-            // click opens another overlay. Defer the write to avoid re-entering
-            // WorkspaceApp from GPUI prepaint.
-            window.defer(cx, move |_window, cx| {
-                let _ = workspace.update(cx, |this, cx| {
-                    this.update_text_input_anchor(anchor, cx);
-                });
-            });
-        }
-    }
-
     pub(in crate::workspace) fn handle_settings_input_key(
         &mut self,
         event: &KeyDownEvent,

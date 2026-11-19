@@ -10,9 +10,6 @@ use table::TablePage;
 mod inspection;
 use inspection::InspectionPage;
 
-pub(super) fn local_inspection_preview(path: &str) -> Option<oxideterm_local_files::LocalPreview> {
-    oxideterm_local_files::local_inspection_preview(path, oxideterm_preview::inspection_mime_type)
-}
 enum RenderedPage {
     Image(Arc<RenderImage>, u32, f32),
     Table(TablePage),

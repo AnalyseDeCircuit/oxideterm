@@ -6,13 +6,12 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use gpui::{
-    AnyElement, App, Context, ElementId, Entity, Hsla, InteractiveElement, IntoElement,
-    MouseButton, ParentElement, Pixels, Point, ScrollHandle, SharedString,
-    StatefulInteractiveElement, Styled, StyledText, TextLayout, TextRun, Timer, Window, div, font,
-    prelude::FluentBuilder, px, rgb,
+    AnyElement, App, Context, Entity, Hsla, InteractiveElement, IntoElement, MouseButton,
+    ParentElement, Pixels, Point, ScrollHandle, SharedString, StatefulInteractiveElement, Styled,
+    StyledText, TextLayout, TextRun, Timer, Window, div, font, prelude::FluentBuilder, px, rgb,
 };
 use oxideterm_gpui_ui::{
-    scroll::{ScrollableElement, vertical_scrollbar_layer},
+    scroll::ScrollableElement,
     tauri_ui_font_family,
     text_input::{TextInputAnchor, text_input_anchor_probe},
     text_selection::selectable_text_hit_target,
@@ -30,25 +29,10 @@ pub(crate) trait SelectableTextScrollExt:
     fn selectable_overflow_y_scroll(self, handle: &ScrollHandle) -> Self {
         self.overflow_y_scroll().track_scroll(handle)
     }
-
-    fn selectable_overflow_y_scrollbar(self, handle: &ScrollHandle) -> Self {
-        self.overflow_y_scroll()
-            .track_scroll(handle)
-            .vertical_scrollbar(handle)
-    }
 }
 
 impl<T> SelectableTextScrollExt for T where T: StatefulInteractiveElement + ScrollableElement + Sized
 {}
-
-pub(crate) fn selectable_vertical_scrollbar_layer(
-    id: impl Into<ElementId>,
-    handle: &ScrollHandle,
-) -> AnyElement {
-    // Keep scrollbar chrome outside the scrolled content tree; otherwise the
-    // thumb is translated with the page and disappears while dragging down.
-    vertical_scrollbar_layer(id, handle)
-}
 
 #[derive(Clone)]
 pub(super) struct SelectableTextRenderState {
@@ -509,28 +493,6 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         self.render_selectable_text_with_style(id, text, color, None, cx)
-    }
-
-    pub(super) fn render_selectable_text_in_group(
-        &self,
-        group_id: u64,
-        fragment_id: u64,
-        order: usize,
-        text: impl Into<SharedString>,
-        color: u32,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let text = text.into();
-        let value = text.to_string();
-        let run = self.selectable_plain_text_run(&value, color);
-        self.render_selectable_styled_text_in_group(
-            group_id,
-            fragment_id,
-            order,
-            text,
-            vec![run],
-            cx,
-        )
     }
 
     pub(super) fn render_selectable_text_with_style(

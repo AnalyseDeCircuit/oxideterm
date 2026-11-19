@@ -248,43 +248,6 @@ impl CommandPaletteEntity {
         cx.notify();
     }
 
-    pub(in crate::workspace) fn move_selection_forward(
-        &mut self,
-        item_count: usize,
-        step: usize,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        if item_count == 0 {
-            return false;
-        }
-        let next = self.selected_index.saturating_add(step).min(item_count - 1);
-        self.set_selected_index(next, cx)
-    }
-
-    pub(in crate::workspace) fn move_selection_backward(
-        &mut self,
-        item_count: usize,
-        step: usize,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        if item_count == 0 {
-            return false;
-        }
-        let next = self.selected_index.min(item_count - 1).saturating_sub(step);
-        self.set_selected_index(next, cx)
-    }
-
-    pub(in crate::workspace) fn select_last(
-        &mut self,
-        item_count: usize,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        if item_count == 0 {
-            return false;
-        }
-        self.set_selected_index(item_count - 1, cx)
-    }
-
     pub(in crate::workspace) fn set_selected_index(
         &mut self,
         index: usize,
@@ -432,21 +395,6 @@ mod tests {
             action: PaletteAction::ReloadWindow,
             disabled,
         }
-    }
-
-    #[gpui::test]
-    fn selection_stays_within_item_bounds(cx: &mut TestAppContext) {
-        let entity = cx.new(|_| CommandPaletteEntity::new(test_runtime()));
-        entity.update(cx, |entity, cx| {
-            entity.open(false, HashSet::new(), cx);
-            assert!(!entity.move_selection_forward(0, 1, cx));
-            assert!(entity.move_selection_forward(3, 8, cx));
-            assert_eq!(entity.selected_index(), 2);
-            assert!(entity.move_selection_backward(3, 8, cx));
-            assert_eq!(entity.selected_index(), 0);
-            assert!(entity.select_last(3, cx));
-            assert_eq!(entity.selected_index(), 2);
-        });
     }
 
     #[gpui::test]

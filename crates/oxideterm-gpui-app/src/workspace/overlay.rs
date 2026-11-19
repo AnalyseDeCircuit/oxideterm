@@ -122,21 +122,6 @@ impl WorkspaceApp {
             }
         }
     }
-
-    pub(in crate::workspace) fn deferred_ai_select_anchor_update(
-        workspace: gpui::Entity<Self>,
-    ) -> impl FnOnce(OverlayAnchor, &mut Window, &mut App) {
-        move |anchor, window, cx| {
-            // AI popovers are rendered from floating overlay probes. Updating the
-            // workspace synchronously from prepaint can re-enter WorkspaceApp
-            // when a click opened another modal in the same effect cycle.
-            window.defer(cx, move |_window, cx| {
-                let _ = workspace.update(cx, |this, cx| {
-                    this.update_select_anchor(anchor, cx);
-                });
-            });
-        }
-    }
 }
 
 pub(in crate::workspace) fn select_anchor_tracks_while_closed(anchor_id: SelectAnchorId) -> bool {

@@ -43,7 +43,7 @@ pub(in crate::workspace) use reconnect::{
     release_reconnect_forward_bindings,
 };
 pub(in crate::workspace) use runtime_service::{
-    ForwardingRuntimeService, PublicMcpForwardMutation, ReconnectForwardRestoreRequest,
+    ForwardingRuntimeService, ReconnectForwardRestoreRequest,
 };
 
 pub(super) const FORWARDS_NODE_SESSION_PREFIX: &str = "node:";

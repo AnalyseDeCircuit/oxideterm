@@ -11,7 +11,6 @@ pub(in crate::workspace) const NOTIFICATION_CENTER_SWITCHER_ID: &str =
     "notification-center-tab-bar";
 #[cfg(test)]
 const SETTINGS_NAVIGATION_ID: &str = "settings-navigation";
-pub(in crate::workspace) const FILE_MANAGER_NAVIGATION_ID: &str = "file-manager-navigation";
 #[cfg(test)]
 const NEW_CONNECTION_AUTH_SELECTOR_ID: &str = "new-connection-auth-selector";
 pub(in crate::workspace) const VERSION_MIGRATION_MOTION_SWITCHER_ID: &str =
@@ -20,20 +19,6 @@ pub(in crate::workspace) const VERSION_MIGRATION_MOTION_SWITCHER_ID: &str =
 pub(super) use oxideterm_gpui_ui::motion::UserSegmentedControlMotionState;
 
 impl WorkspaceApp {
-    pub(in crate::workspace) fn render_vertical_selection_surface(
-        &self,
-        control_id: &'static str,
-        active_index: usize,
-        surface: gpui::Div,
-    ) -> AnyElement {
-        self.segmented_control_user_motion.render_vertical(
-            control_id,
-            active_index,
-            &self.tokens,
-            surface,
-        )
-    }
-
     pub(in crate::workspace) fn begin_user_segmented_control_transition(
         &mut self,
         control_id: &'static str,
@@ -127,15 +112,6 @@ impl WorkspaceApp {
     ) -> bool {
         self.segmented_control_user_motion
             .is_active_for(control_id, active_index)
-    }
-
-    pub(in crate::workspace) fn segmented_control_user_transition(
-        &self,
-        control_id: &'static str,
-        active_index: usize,
-    ) -> Option<(u64, Option<f32>)> {
-        self.segmented_control_user_motion
-            .transition_for(control_id, active_index)
     }
 
     pub(in crate::workspace) fn segmented_control_user_previous_index(

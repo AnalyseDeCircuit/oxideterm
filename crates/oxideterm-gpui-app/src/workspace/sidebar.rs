@@ -191,7 +191,6 @@ mod ai_model_picker;
 mod ai_transcript;
 mod helpers;
 mod region;
-pub(in crate::workspace) use region::sidebar_resize_hotzone_chrome;
 mod sessions;
 mod state;
 mod titlebar;

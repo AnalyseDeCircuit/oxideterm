@@ -1,7 +1,7 @@
 use super::*;
 pub(in crate::workspace) use oxideterm_gpui_settings_view::local_terminal::expand_local_terminal_cwd;
 use oxideterm_gpui_settings_view::local_terminal::{
-    LOCAL_GIT_BASH_ID, LocalTerminalRequest, effective_local_shells, resolve_local_shell,
+    LOCAL_GIT_BASH_ID, LocalTerminalRequest, effective_local_shells,
 };
 
 impl WorkspaceApp {
@@ -13,19 +13,6 @@ impl WorkspaceApp {
             &self.local_shells,
             settings.local_terminal.git_bash_path.as_deref(),
             &settings.local_terminal.shell_paths,
-        )
-    }
-
-    pub(in crate::workspace) fn resolved_local_shell(
-        &self,
-        selected_shell_id: Option<&str>,
-    ) -> Option<ShellInfo> {
-        let settings = self.settings_store.settings();
-        let effective_shells = self.effective_local_shells_for_settings(settings);
-        resolve_local_shell(
-            &effective_shells,
-            selected_shell_id,
-            settings.local_terminal.default_shell_id.as_deref(),
         )
     }
 

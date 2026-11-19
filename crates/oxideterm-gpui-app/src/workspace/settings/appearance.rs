@@ -1,5 +1,4 @@
 use super::*;
-use oxideterm_gpui_settings_view::appearance_page::AppearancePreview;
 use oxideterm_gpui_settings_view::appearance_page::{
     AppearanceAction, AppearancePageData, render_appearance_slider,
 };
@@ -107,23 +106,6 @@ impl WorkspaceApp {
         }
     }
 
-    pub(in crate::workspace) fn appearance_theme_controls_with_hints(
-        &self,
-        settings: &PersistedSettings,
-        show_hints: bool,
-        cx: &Context<Self>,
-    ) -> Vec<AnyElement> {
-        let owner = cx.entity();
-        let weak = owner.downgrade();
-        self.appearance_page_data(cx)
-            .page(
-                self.settings_controls_for(owner, cx),
-                Rc::new(move |action, cx| {
-                    let _ = weak.update(cx, |app, cx| app.handle_appearance_request(action, cx));
-                }),
-            )
-            .appearance_theme_controls_with_hints(settings, show_hints, cx)
-    }
     pub(super) fn handle_background_request(
         &mut self,
         request: oxideterm_gpui_settings_view::background_page::BackgroundRequest,
@@ -170,51 +152,6 @@ impl WorkspaceApp {
             value,
             Self::settings_window_dispatch(cx),
         )
-    }
-
-    pub(in crate::workspace) fn appearance_theme_preview_compact(
-        &self,
-        settings: &PersistedSettings,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        self.appearance_theme_preview_with_hint(settings, false, cx)
-    }
-
-    fn appearance_theme_preview_with_hint(
-        &self,
-        settings: &PersistedSettings,
-        show_hint: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let preview = self
-            .settings_workspace
-            .read(cx)
-            .theme_background_preview
-            .clone();
-        self.appearance_preview(settings, preview, show_hint, cx)
-    }
-
-    fn appearance_preview(
-        &self,
-        settings: &PersistedSettings,
-        preview: Entity<oxideterm_gpui_background::BackgroundPreview>,
-        show_hint: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let picker = self
-            .settings_views
-            .theme_picker
-            .read(cx)
-            .preview()
-            .map(str::to_owned);
-        AppearancePreview {
-            tokens: self.tokens,
-            i18n: &self.i18n,
-            state: &self.settings_workspace,
-            open_settings_select: self.open_settings_select,
-            hovered_theme: picker.as_deref(),
-        }
-        .render(settings, preview, show_hint, cx)
     }
 
     pub(in crate::workspace) fn theme_editor_bindings(
