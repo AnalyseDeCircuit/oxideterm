@@ -879,6 +879,7 @@ impl TerminalPane {
             return div().into_any_element();
         };
         let tokens = &self.theme.tokens;
+        let mono_font = self.metrics.font.family.clone();
         let labels = &self.preferences.autosuggest_labels;
         let (navigation_hint, dismiss_hint) =
             terminal_autosuggest_hints(labels, cfg!(target_os = "macos"));
@@ -980,10 +981,15 @@ impl TerminalPane {
                             .text_color(rgb(tokens.ui.text_muted)),
                     )
                     .child(
-                        div().flex_1().min_w_0().truncate().child(
-                            gpui::StyledText::new(candidate.command.clone())
-                                .with_highlights(highlights),
-                        ),
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .font_family(mono_font.clone())
+                            .child(
+                                gpui::StyledText::new(candidate.command.clone())
+                                    .with_highlights(highlights),
+                            ),
                     )
                     .child(
                         div()
@@ -1059,6 +1065,7 @@ impl TerminalPane {
                         .border_color(rgb(tokens.ui.border))
                         .px(px(12.0))
                         .py(px(6.0))
+                        .font_family(mono_font.clone())
                         .text_size(px(tokens.metrics.ui_text_xs))
                         .whitespace_normal()
                         .child(div().w_full().child(command)),
