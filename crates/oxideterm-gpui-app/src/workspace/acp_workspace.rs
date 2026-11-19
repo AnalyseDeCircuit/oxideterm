@@ -18,9 +18,15 @@ impl super::WorkspaceApp {
     {
         let owner = cx.weak_entity();
         oxideterm_gpui_ai::conversation::acp_terminal::AcpTerminalBridge::for_native_terminal(
-            move |config, title, window, cx| owner.update(cx, |app, cx| {
-                app.create_local_terminal_tab_with_owned_session(config, title, window, cx)
-            }).ok()?.ok().map(|(_, session)| session),
+            move |config, title, window, cx| {
+                owner
+                    .update(cx, |app, cx| {
+                        app.create_local_terminal_tab_with_owned_session(config, title, window, cx)
+                    })
+                    .ok()?
+                    .ok()
+                    .map(|(_, session)| session)
+            },
         )
     }
 }

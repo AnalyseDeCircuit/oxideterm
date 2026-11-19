@@ -3,8 +3,8 @@
 
 //! Workspace-owned side effects for stable product plugin APIs.
 
-use oxideterm_gpui_ai::conversation::actions::AiChatActions as _;
 use gpui::{Context, Window};
+use oxideterm_gpui_ai::conversation::actions::AiChatActions as _;
 use oxideterm_quick_commands::{
     QuickCommandConfirmationPolicy, QuickCommandDraft, QuickCommandParameter,
     QuickCommandTargetProtocol,

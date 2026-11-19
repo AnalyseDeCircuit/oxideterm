@@ -1,8 +1,7 @@
 //! Behavioral coverage for the extracted stream-state responsibility.
 
 use crate::{
-    AiChatMessage, AiChatMessageMetadata, AiChatRole, AiConversation,
-    set_ai_provider_parts,
+    AiChatMessage, AiChatMessageMetadata, AiChatRole, AiConversation, set_ai_provider_parts,
 };
 
 use super::*;

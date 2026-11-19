@@ -161,7 +161,8 @@ impl WorkspaceApp {
             self.active_context_sidebar_panel,
         );
         let viewport_width = self
-            .ai.state
+            .ai
+            .state
             .read(cx)
             .chat_ui()
             .overlay_window_size

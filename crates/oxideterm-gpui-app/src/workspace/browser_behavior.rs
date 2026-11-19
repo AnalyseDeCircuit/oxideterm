@@ -1,7 +1,7 @@
+pub(crate) use oxideterm_gpui_ui::context_menu::clamp_context_menu_position;
 #[cfg(test)]
-use oxideterm_gpui_ui::context_menu::{BrowserOverlayPlacement, preserve_or_move_context_selection};
-pub(crate) use oxideterm_gpui_ui::context_menu::{
-    clamp_context_menu_position,
+use oxideterm_gpui_ui::context_menu::{
+    BrowserOverlayPlacement, preserve_or_move_context_selection,
 };
 
 use super::WorkspaceApp;

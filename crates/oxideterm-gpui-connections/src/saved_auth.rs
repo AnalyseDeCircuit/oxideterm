@@ -7,23 +7,35 @@ use oxideterm_connections::{
 use oxideterm_ssh::{AuthMethod, NodeId, NodeOrigin, SshConfig, SshPasswordPrompt};
 
 impl crate::entity::ConnectionFlowEntity {
-    pub fn reveal_saved_password(
-        &mut self, store: &ConnectionStore, cx: &mut gpui::Context<Self>,
-    ) {
-        let Some(id) = self.form.form.as_ref().and_then(|form| form.saved_password_keychain_id.clone()) else { return; };
+    pub fn reveal_saved_password(&mut self, store: &ConnectionStore, cx: &mut gpui::Context<Self>) {
+        let Some(id) = self
+            .form
+            .form
+            .as_ref()
+            .and_then(|form| form.saved_password_keychain_id.clone())
+        else {
+            return;
+        };
         let store = store.clone();
         let executor = cx.background_executor().clone();
-        self.start_password_load(async move {
-            // Native credential access can block on the protected store.
-            executor.spawn(async move {
-                store.get_saved_auth_password_optional(&SavedAuth::Password {
-                    empty_password: false,
-                    keychain_id: Some(id),
-                    plaintext_password: None,
-                }).map_err(|error| SavedPasswordLoadError::from_store_error(&error))?
-                    .ok_or(SavedPasswordLoadError::NotFound)
-            }).await
-        }, cx);
+        self.start_password_load(
+            async move {
+                // Native credential access can block on the protected store.
+                executor
+                    .spawn(async move {
+                        store
+                            .get_saved_auth_password_optional(&SavedAuth::Password {
+                                empty_password: false,
+                                keychain_id: Some(id),
+                                plaintext_password: None,
+                            })
+                            .map_err(|error| SavedPasswordLoadError::from_store_error(&error))?
+                            .ok_or(SavedPasswordLoadError::NotFound)
+                    })
+                    .await
+            },
+            cx,
+        );
     }
 }
 

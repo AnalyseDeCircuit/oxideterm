@@ -220,38 +220,28 @@ impl SessionManagerState {
             ("enter", SessionManagerInput::BatchTemplateName) => CommitTemplateName,
             ("backspace", _) => {
                 let changed = match input {
-                    SessionManagerInput::Search => {
-                        self.search_query.pop().is_some()
-                    }
-                    SessionManagerInput::GroupName => {
-                        self.group_name_draft.pop().is_some()
-                    }
-                    SessionManagerInput::OxideImportPassword => self
-                        .oxide_import_dialog
-                        .as_mut()
-                        .is_some_and(|dialog| {
+                    SessionManagerInput::Search => self.search_query.pop().is_some(),
+                    SessionManagerInput::GroupName => self.group_name_draft.pop().is_some(),
+                    SessionManagerInput::OxideImportPassword => {
+                        self.oxide_import_dialog.as_mut().is_some_and(|dialog| {
                             dialog.password.pop().is_some() || dialog.error.take().is_some()
-                        }),
-                    SessionManagerInput::OxideExportPassword => self
-                        .oxide_export_dialog
-                        .as_mut()
-                        .is_some_and(|dialog| {
+                        })
+                    }
+                    SessionManagerInput::OxideExportPassword => {
+                        self.oxide_export_dialog.as_mut().is_some_and(|dialog| {
                             dialog.password.pop().is_some() || dialog.error.take().is_some()
-                        }),
-                    SessionManagerInput::OxideExportConfirmPassword => self
-                        .oxide_export_dialog
-                        .as_mut()
-                        .is_some_and(|dialog| {
-                            dialog.confirm_password.pop().is_some()
-                                || dialog.error.take().is_some()
-                        }),
-                    SessionManagerInput::OxideExportDescription => self
-                        .oxide_export_dialog
-                        .as_mut()
-                        .is_some_and(|dialog| {
-                            dialog.description.pop().is_some()
-                                || dialog.error.take().is_some()
-                        }),
+                        })
+                    }
+                    SessionManagerInput::OxideExportConfirmPassword => {
+                        self.oxide_export_dialog.as_mut().is_some_and(|dialog| {
+                            dialog.confirm_password.pop().is_some() || dialog.error.take().is_some()
+                        })
+                    }
+                    SessionManagerInput::OxideExportDescription => {
+                        self.oxide_export_dialog.as_mut().is_some_and(|dialog| {
+                            dialog.description.pop().is_some() || dialog.error.take().is_some()
+                        })
+                    }
                     SessionManagerInput::BatchPassword => {
                         self.batch_add.as_mut().is_some_and(|dialog| {
                             dialog.password.pop().is_some() || dialog.error.take().is_some()
@@ -291,8 +281,7 @@ impl SessionManagerState {
             .filter_map(|item| item.selection_target())
             .collect::<std::collections::HashSet<_>>();
         let previous_count = self.selected_items.len();
-        self
-            .selected_items
+        self.selected_items
             .retain(|target| visible_items.contains(target));
         // A hidden anchor row would make the next Shift+click degrade or
         // span across rows the user cannot see; keep anchors that are

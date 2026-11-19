@@ -1,7 +1,8 @@
 use std::rc::Rc;
 
 use gpui::{
-    AnyElement, App, Context, Entity, MouseButton, MouseDownEvent, Render, Subscription, Task, Window, div, prelude::*, px, relative, rgb,
+    AnyElement, App, Context, Entity, MouseButton, MouseDownEvent, Render, Subscription, Task,
+    Window, div, prelude::*, px, relative, rgb,
 };
 use oxideterm_gpui_ui::{
     ConfirmDialogAction,

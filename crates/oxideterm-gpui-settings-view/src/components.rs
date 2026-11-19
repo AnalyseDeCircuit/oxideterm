@@ -7,7 +7,9 @@ mod terminal_display;
 pub use terminal_display::TerminalPreviewFont;
 mod controls;
 mod multiline;
-pub use multiline::{multiline_input_viewport, settings_multiline_field, settings_multiline_patterns_field};
+pub use multiline::{
+    multiline_input_viewport, settings_multiline_field, settings_multiline_patterns_field,
+};
 
 pub use controls::*;
 

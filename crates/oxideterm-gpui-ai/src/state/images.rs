@@ -167,7 +167,8 @@ pub fn check_chat_image_model(
     i18n: &oxideterm_i18n::I18n,
 ) -> Result<(), String> {
     if config.execution_backend == oxideterm_ai::AiExecutionBackend::Acp
-        || oxideterm_ai::model_image_input(&config.provider_type, &config.model, config.image_input) != Some(false)
+        || oxideterm_ai::model_image_input(&config.provider_type, &config.model, config.image_input)
+            != Some(false)
     {
         Ok(())
     } else {

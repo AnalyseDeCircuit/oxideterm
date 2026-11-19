@@ -409,20 +409,29 @@ fn sidebar_search_owns_keys_only_while_the_disclosure_is_visible(cx: &mut TestAp
         // active terminal keeps its keyboard model.
         assert_eq!(workspace.active_session_manager_input(cx), None);
 
-        workspace.connections.session_manager.update(cx, SessionManagerState::open_sidebar_search);
+        workspace
+            .connections
+            .session_manager
+            .update(cx, SessionManagerState::open_sidebar_search);
         assert_eq!(
             workspace.active_session_manager_input(cx),
             Some(SessionManagerInput::Search)
         );
 
         // The header sort menu owns the panel keyboard while it is open.
-        workspace.connections.session_manager.update(cx, |manager, cx| {
-            manager.set_sidebar_sort_open(true, cx);
-        });
+        workspace
+            .connections
+            .session_manager
+            .update(cx, |manager, cx| {
+                manager.set_sidebar_sort_open(true, cx);
+            });
         assert_eq!(workspace.active_session_manager_input(cx), None);
-        workspace.connections.session_manager.update(cx, |manager, cx| {
-            manager.set_sidebar_sort_open(false, cx);
-        });
+        workspace
+            .connections
+            .session_manager
+            .update(cx, |manager, cx| {
+                manager.set_sidebar_sort_open(false, cx);
+            });
 
         // Escape collapses the disclosure and drops the draft, matching the
         // active-sessions search.
@@ -436,7 +445,13 @@ fn sidebar_search_owns_keys_only_while_the_disclosure_is_visible(cx: &mut TestAp
             prefer_character_input: false,
         };
         assert!(workspace.handle_session_manager_key(&escape, cx));
-        assert!(!workspace.connections.session_manager.read(cx).sidebar_search_open);
+        assert!(
+            !workspace
+                .connections
+                .session_manager
+                .read(cx)
+                .sidebar_search_open
+        );
         assert!(
             workspace
                 .connections
@@ -458,7 +473,10 @@ fn sidebar_search_owns_keys_only_while_the_disclosure_is_visible(cx: &mut TestAp
     workspace.update(cx, |workspace, cx| {
         let visible_count = workspace.session_manager_display_items(cx).len();
         assert!(visible_count > 1);
-        workspace.connections.session_manager.update(cx, SessionManagerState::open_sidebar_search);
+        workspace
+            .connections
+            .session_manager
+            .update(cx, SessionManagerState::open_sidebar_search);
         workspace
             .connections
             .session_manager
@@ -469,7 +487,13 @@ fn sidebar_search_owns_keys_only_while_the_disclosure_is_visible(cx: &mut TestAp
         assert_eq!(workspace.session_manager_display_items(cx).len(), 1);
         workspace.set_sidebar_section(SidebarSection::Sessions, cx);
         workspace.set_sidebar_section(SidebarSection::Connections, cx);
-        assert!(!workspace.connections.session_manager.read(cx).sidebar_search_open);
+        assert!(
+            !workspace
+                .connections
+                .session_manager
+                .read(cx)
+                .sidebar_search_open
+        );
         assert_eq!(
             workspace.session_manager_display_items(cx).len(),
             visible_count

@@ -552,15 +552,20 @@ impl AiWorkspaceEntity {
 }
 
 impl AiWorkspaceEntity {
-    pub fn agent_attention_description(&self, conversation_id: &str, message_id: &str) -> Option<String> {
+    pub fn agent_attention_description(
+        &self,
+        conversation_id: &str,
+        message_id: &str,
+    ) -> Option<String> {
         let record = self
             .agents
             .message_runs
             .get(message_id)
             .and_then(|id| self.agents.records.get(id));
         if self.conversation_state().active_conversation_id.as_deref() == Some(conversation_id)
-            && record
-                .is_none_or(|record| self.agents.detail.as_ref() == Some(&record.snapshot.run.run_id))
+            && record.is_none_or(|record| {
+                self.agents.detail.as_ref() == Some(&record.snapshot.run.run_id)
+            })
         {
             return None;
         }
@@ -586,6 +591,8 @@ impl AiWorkspaceEntity {
             })
             .unwrap_or_default();
 
-        Some(oxideterm_ai::sanitize_for_persistence(&format!("{conversation} · {task}")))
+        Some(oxideterm_ai::sanitize_for_persistence(&format!(
+            "{conversation} · {task}"
+        )))
     }
 }

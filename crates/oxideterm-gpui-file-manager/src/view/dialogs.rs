@@ -338,8 +338,8 @@ impl FileManagerView {
         let viewport = window.viewport_size();
         let viewport_height = f32::from(viewport.height);
         // Clamp only to the usable viewport height instead of a 520px ceiling that clipped the bottom row.
-        let max_height = (viewport_height - FILE_MANAGER_CONTEXT_MENU_VIEWPORT_MARGIN * 2.0)
-            .max(180.0);
+        let max_height =
+            (viewport_height - FILE_MANAGER_CONTEXT_MENU_VIEWPORT_MARGIN * 2.0).max(180.0);
         let vertical_chrome = self.tokens.metrics.ui_menu_padding * 2.0 + 2.0;
         let estimated_height = (item_count as f32) * FILE_MANAGER_CONTEXT_MENU_ITEM_HEIGHT
             + (separator_count as f32)

@@ -191,7 +191,11 @@ pub fn semantic_context_label(context: SemanticRuleContext, i18n: &I18n) -> Stri
 }
 
 impl HighlightPage<'_> {
-    pub fn section(&self, section: oxideterm_settings_model::SettingsSectionId, cx: &App) -> AnyElement {
+    pub fn section(
+        &self,
+        section: oxideterm_settings_model::SettingsSectionId,
+        cx: &App,
+    ) -> AnyElement {
         use oxideterm_settings_model::SettingsSectionId::*;
         match section {
             TerminalHighlightSelection => self.highlight_selection_card(self.settings, cx),

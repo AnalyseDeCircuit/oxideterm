@@ -142,8 +142,17 @@ impl KnowledgeWorkspaceEntity {
         self.pending_document_id.take()
     }
 
-    pub fn request_close_if_dirty(&mut self, tab_id: TabId, window_handle: AnyWindowHandle, cx: &mut gpui::Context<Self>) -> bool {
-        if !self.editor.as_ref().is_some_and(|editor| editor.read(cx).is_dirty()) {
+    pub fn request_close_if_dirty(
+        &mut self,
+        tab_id: TabId,
+        window_handle: AnyWindowHandle,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        if !self
+            .editor
+            .as_ref()
+            .is_some_and(|editor| editor.read(cx).is_dirty())
+        {
             return false;
         }
         self.request_close(tab_id, window_handle);
@@ -152,7 +161,11 @@ impl KnowledgeWorkspaceEntity {
     }
 
     pub fn request_quit_if_dirty(&mut self, cx: &mut gpui::Context<Self>) -> bool {
-        if !self.editor.as_ref().is_some_and(|editor| editor.read(cx).is_dirty()) {
+        if !self
+            .editor
+            .as_ref()
+            .is_some_and(|editor| editor.read(cx).is_dirty())
+        {
             return false;
         }
         self.request_app_quit();

@@ -198,10 +198,14 @@ impl ConnectionFormEnvironment {
         Self {
             connections: store.connection_infos(),
             groups: store.groups().to_vec(),
-            totp: store.totp_credentials().iter().map(|entry| FormTotpCredential {
-                id: entry.id.clone(),
-                name: entry.name.clone(),
-            }).collect(),
+            totp: store
+                .totp_credentials()
+                .iter()
+                .map(|entry| FormTotpCredential {
+                    id: entry.id.clone(),
+                    name: entry.name.clone(),
+                })
+                .collect(),
             keys: store.managed_ssh_keys(),
             terminal: settings.terminal.clone(),
             ui_font: settings.appearance.ui_font_family.clone(),

@@ -655,13 +655,15 @@ impl WorkspaceApp {
         // overlay anchor and re-derives the affected plugin runtimes.
         self.plugin_toolbar_pane_closed(pane_id, cx);
         if self
-            .ai.state
+            .ai
+            .state
             .read(cx)
             .terminal_inline_panel()
             .target
             .is_some_and(|(id, _)| id == *pane_id)
         {
-            self.ai.state
+            self.ai
+                .state
                 .update(cx, |ai, _| ai.close_terminal_inline_panel());
         }
         if self.search.focused == Some(*pane_id) {
@@ -1533,7 +1535,8 @@ impl WorkspaceApp {
                     .when(
                         self.ai.state.read(cx).terminal_inline_panel().open
                             && self
-                                .ai.state
+                                .ai
+                                .state
                                 .read(cx)
                                 .terminal_inline_panel()
                                 .target

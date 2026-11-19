@@ -77,10 +77,16 @@ impl<'a> Deref for ProxyPage<'a> {
 }
 
 impl ProxyPage<'_> {
-    pub fn section(&self, section: oxideterm_settings_model::SettingsSectionId, cx: &App) -> AnyElement {
+    pub fn section(
+        &self,
+        section: oxideterm_settings_model::SettingsSectionId,
+        cx: &App,
+    ) -> AnyElement {
         use oxideterm_settings_model::SettingsSectionId::*;
         match section {
-            NetworkSharedProxy => self.shared_proxy(self.settings.network.upstream_proxy.as_ref(), cx),
+            NetworkSharedProxy => {
+                self.shared_proxy(self.settings.network.upstream_proxy.as_ref(), cx)
+            }
             NetworkRouting => self.routing(cx),
             _ => div().into_any_element(),
         }

@@ -71,7 +71,11 @@ impl WorkspaceApp {
     }
 
     fn paste_into_keyboard_interactive_field(&mut self, cx: &mut Context<Self>) {
-        if self.connections.flow.update(cx, |flow, cx| flow.paste_interactive_clipboard(cx)) {
+        if self
+            .connections
+            .flow
+            .update(cx, |flow, cx| flow.paste_interactive_clipboard(cx))
+        {
             self.show_active_input_caret(cx);
         }
     }

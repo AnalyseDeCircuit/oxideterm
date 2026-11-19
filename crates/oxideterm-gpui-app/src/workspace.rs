@@ -2,8 +2,8 @@ mod acp_workspace;
 mod actions;
 use oxideterm_gpui_ai::background as ai_background_tasks;
 mod ai_runtime_context;
-use oxideterm_gpui_ai::state as ai_state;
 use ai_views::AiWorkspaceViews;
+use oxideterm_gpui_ai::state as ai_state;
 mod ai_views;
 mod app_lock;
 mod audit;
@@ -46,13 +46,13 @@ mod quick_commands;
 mod remote_desktop;
 mod runtime_entity;
 mod root {
-    pub(super) mod runtime_settings;
     pub(super) mod background;
     pub(super) mod helpers;
     pub(super) mod host_tools;
     pub(super) mod init;
     pub(super) mod modal_owner;
     pub(super) mod render;
+    pub(super) mod runtime_settings;
     pub(super) mod state;
     #[cfg(test)]
     pub(super) mod tests;
@@ -109,11 +109,11 @@ use self::{
 use anyhow::Result;
 use gpui::{
     AnchoredPositionMode, Animation, AnimationExt, AnyElement, AnyWindowHandle, App, Bounds,
-    ClipboardItem, Context, Corner, CursorStyle, Entity, FocusHandle, Focusable,
-    FontWeight, Image, IntoElement, KeyDownEvent, KeyUpEvent, ListAlignment, ListState,
-    ModifiersChangedEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit,
-    ParentElement, PathPromptOptions, Pixels, Point, Render, RenderImage, Rgba, ScrollEvent,
-    ScrollHandle, SharedString, Styled, StyledImage, Subscription, Task, TextLayout, Timer,
+    ClipboardItem, Context, Corner, CursorStyle, Entity, FocusHandle, Focusable, FontWeight, Image,
+    IntoElement, KeyDownEvent, KeyUpEvent, ListAlignment, ListState, ModifiersChangedEvent,
+    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit, ParentElement,
+    PathPromptOptions, Pixels, Point, Render, RenderImage, Rgba, ScrollEvent, ScrollHandle,
+    SharedString, Styled, StyledImage, Subscription, Task, TextLayout, Timer,
     UniformListScrollHandle, Window, anchored, canvas, deferred, div, prelude::*, px, relative,
     rgb, rgba, svg,
 };
@@ -135,19 +135,19 @@ use oxideterm_gpui_platform::{
 use oxideterm_gpui_terminal::{
     BackgroundImageRenderCache, PrivilegePromptMatch, SemanticShellDialect,
     SharedTerminalCommandHistory, SharedTerminalSession, TerminalAutosuggestLabels,
-    TerminalBackgroundPreferences, TerminalBroadcastInputKind,
-    TerminalCommandSelectionLabels, TerminalContextAction, TerminalHighlightMatchScope,
-    TerminalHighlightRenderMode, TerminalHighlightRule as UiHighlightRule,
-    TerminalHighlightRuleSetOverride, TerminalHistoryStore, TerminalInputBroadcaster,
-    TerminalInputInterceptor, TerminalInputInterceptorResult, TerminalKittyFileTransmissionLabels,
-    TerminalModemLabels, TerminalNotice, TerminalNoticeVariant, TerminalOutputProcessor,
-    TerminalPane, TerminalPaneEvent, TerminalPasteLabels, TerminalRecordingState,
-    TerminalRecordingStatus, TerminalSearchStatus, TerminalSerialControlLabels,
-    TerminalSessionLogContext, TerminalSessionLogLabels, TerminalSessionLogOptions,
-    TerminalSessionLogState, TerminalSessionLogStatus, TerminalTmuxLabels,
-    TerminalToolbarActionSpec, TerminalTrzszLabels, TerminalUiPreferenceOverrides,
-    TerminalUiPreferences, TerminalUiTheme, TerminalWorkingDirectorySource,
-    detect_custom_privilege_prompt, prune_terminal_session_logs, resolved_terminal_semantic_scheme,
+    TerminalBackgroundPreferences, TerminalBroadcastInputKind, TerminalCommandSelectionLabels,
+    TerminalContextAction, TerminalHighlightMatchScope, TerminalHighlightRenderMode,
+    TerminalHighlightRule as UiHighlightRule, TerminalHighlightRuleSetOverride,
+    TerminalHistoryStore, TerminalInputBroadcaster, TerminalInputInterceptor,
+    TerminalInputInterceptorResult, TerminalKittyFileTransmissionLabels, TerminalModemLabels,
+    TerminalNotice, TerminalNoticeVariant, TerminalOutputProcessor, TerminalPane,
+    TerminalPaneEvent, TerminalPasteLabels, TerminalRecordingState, TerminalRecordingStatus,
+    TerminalSearchStatus, TerminalSerialControlLabels, TerminalSessionLogContext,
+    TerminalSessionLogLabels, TerminalSessionLogOptions, TerminalSessionLogState,
+    TerminalSessionLogStatus, TerminalTmuxLabels, TerminalToolbarActionSpec, TerminalTrzszLabels,
+    TerminalUiPreferenceOverrides, TerminalUiPreferences, TerminalUiTheme,
+    TerminalWorkingDirectorySource, detect_custom_privilege_prompt, prune_terminal_session_logs,
+    resolved_terminal_semantic_scheme,
 };
 use oxideterm_gpui_ui::scroll::ScrollableElement;
 use oxideterm_gpui_ui::{
@@ -186,13 +186,13 @@ use oxideterm_session_adapter::{
 use oxideterm_settings::{
     AI_SIDEBAR_ABSOLUTE_MAX_WIDTH, AI_SIDEBAR_ABSOLUTE_MIN_WIDTH, BackgroundScope,
     CursorStyle as SettingsCursorStyle, FrostedGlassMode, GLOBAL_HIGHLIGHT_RULE_SET_ID,
-    HighlightRule, HighlightRuleMatchScope, HighlightRuleRenderMode, Language,
-    PersistedSettings, SettingsStore, background_images_directory,
-    default_settings_path, ensure_bundled_background_image, list_background_images,
+    HighlightRule, HighlightRuleMatchScope, HighlightRuleRenderMode, Language, PersistedSettings,
+    SettingsStore, background_images_directory, default_settings_path,
+    ensure_bundled_background_image, list_background_images,
 };
 use oxideterm_sftp::{
-    BackgroundTransferState, LazyProgressStore, ProgressStore,
-    SftpTransferManager, StoredTransferProgress,
+    BackgroundTransferState, LazyProgressStore, ProgressStore, SftpTransferManager,
+    StoredTransferProgress,
 };
 use oxideterm_ssh::{
     AuthMethod, ConnectionConsumer, ConnectionPoolConfig, ConnectionProgressReporter,
@@ -216,9 +216,7 @@ use oxideterm_terminal::{
     TelnetSessionConfig, TerminalCommandMarkDetectionSource, TerminalCursorShape,
     TerminalLifecycle, load_local_shell_history_commands, scan_shells,
 };
-use oxideterm_theme::{
-    ThemeTokens, UiDensityProfile, UiMotionProfile, UiRadii,
-};
+use oxideterm_theme::{ThemeTokens, UiDensityProfile, UiMotionProfile, UiRadii};
 use oxideterm_workspace::{
     ActiveSessionNode, ActiveSessionReadiness, ActiveSessionStatus, MAX_PANES_PER_TAB, PaneId,
     PaneNode, SplitDirection, Tab, TabId, TabKind, TabTitleSource, TerminalSessionId,
@@ -229,7 +227,6 @@ use self::connection_monitor::{
     ConnectionRuntimeSection, HostToolsEntity, HostToolsEvent, HostToolsMessages,
     HostToolsWindowIntent, HostToolsWindowRequest,
 };
-use oxideterm_gpui_file_manager::FileManagerViews;
 use self::graphics::GraphicsWorkspaceEntity;
 use self::ime::{
     TextInputAnchorStore, WorkspaceImeDragSelection, WorkspaceImeElement, WorkspaceImeSelection,
@@ -238,8 +235,8 @@ use self::ime::{
 };
 use self::knowledge::KNOWLEDGE_WORKSPACE_SECTION_ESTIMATED_HEIGHT;
 use self::new_connection::{
-    ConnectionFlowEvent, NativeSshPromptHandler, NewConnectionField,
-    NewConnectionForm, SavedConnectionPromptAction, SshConnectionIntent,
+    ConnectionFlowEvent, NativeSshPromptHandler, NewConnectionField, NewConnectionForm,
+    SavedConnectionPromptAction, SshConnectionIntent,
 };
 use self::onboarding::OnboardingState;
 use self::overlay::{
@@ -250,9 +247,7 @@ use self::pane_tree::SplitDrag;
 pub(crate) use self::root::helpers::tokens_from_settings as portable_bootstrap_tokens_from_settings;
 use self::root::state::{ReconnectWorkerResult, WorkspaceSshNode, WorkspaceSshNodeEndpoint};
 use self::root::{background::*, helpers::*};
-use self::session_manager::{
-    SessionManagerInput, SessionManagerWorkspaceEvent,
-};
+use self::session_manager::{SessionManagerInput, SessionManagerWorkspaceEvent};
 use self::sidebar::{ActiveSessionSidebarViewMode, SidebarSection};
 use self::tabs::{TabRemovalTransition, TerminalLocation};
 use self::terminal_entity::{WorkspaceTerminalEntity, WorkspaceTerminalEvent};
@@ -271,9 +266,10 @@ use crate::{
     TerminalFreeTypeMode, TerminalRecording, ToggleFullscreen, ToggleSidebar, ZenMode,
 };
 use crate::{assets::LucideIcon, bundled_fonts};
+use oxideterm_gpui_file_manager::FileManagerViews;
 use oxideterm_gpui_markdown::{
-    MarkdownCodeBlockActions, MarkdownMermaidZoomHandler,
-    MarkdownOptions, MarkdownVirtualListScrollHandle,
+    MarkdownCodeBlockActions, MarkdownMermaidZoomHandler, MarkdownOptions,
+    MarkdownVirtualListScrollHandle,
 };
 
 const MERMAID_MODAL_RASTER_SCALE: f32 = 3.0;
@@ -288,16 +284,12 @@ use oxideterm_gpui_settings_view::{
 use oxideterm_gpui_ui::select::{OverlayAnchor, SelectAnchorId, select_anchor_probe};
 use oxideterm_gpui_ui::text_input::TextInputAnchor;
 use oxideterm_gpui_ui::typography::tauri_ui_font_family as settings_ui_font_family;
-pub(super) use selectable_text::{
-    SelectableTextRole, SelectableTextScrollExt,
-};
+pub(super) use selectable_text::{SelectableTextRole, SelectableTextScrollExt};
 pub(super) use virtual_list::{
     TauriVirtualListSpec, TauriVirtualScrollAlign, scroll_tauri_virtual_list_to_index,
     tauri_virtual_list, tauri_virtual_list_state, tauri_virtual_uniform_list,
 };
-use virtual_list::{
-    VirtualListSignatureCache, sync_tauri_variable_list_state_by_signatures,
-};
+use virtual_list::{VirtualListSignatureCache, sync_tauri_variable_list_state_by_signatures};
 
 const SETTINGS_SCROLL_CARET_PAUSE_MS: u64 = 700;
 const DETACHED_LOCAL_TERMINAL_LIST_INITIAL_ITEM_COUNT: usize = 0;
@@ -307,13 +299,11 @@ const ACTIVE_SESSION_SIDEBAR_LIST_INITIAL_ITEM_COUNT: usize = 0;
 const ACTIVE_SESSION_SIDEBAR_LIST_ESTIMATED_HEIGHT: f32 = 40.0;
 const ACTIVE_SESSION_SIDEBAR_LIST_OVERSCAN: usize = 8;
 
-
 // AI composer footer uses the same explicit action list as dialog footers so
 // keyboard focus order stays centralized even though it is not a modal trap.
 
 const CONFIRM_DIALOG_FOOTER_ACTIONS: [ConfirmDialogAction; 2] =
     [ConfirmDialogAction::Cancel, ConfirmDialogAction::Confirm];
-
 
 // Tauri NotificationsPanel uses variable-height grouped rows. Keep the native
 // estimate/overscan as a virtual-list spec instead of a raw overdraw number so
@@ -829,7 +819,6 @@ impl WorkspaceApp {
 }
 
 use oxideterm_terminal::command_completion::TerminalCommandSuggestion;
-
 
 #[derive(Clone)]
 struct DetachedLocalTerminalSession {

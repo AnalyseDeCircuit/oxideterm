@@ -5,10 +5,8 @@ use crate::workspace::*;
 use gpui::{Context, Window};
 use oxideterm_ai::AiExecutedToolResult;
 use oxideterm_ai::{
-    AiAutocompleteCandidate, AiChatStreamConfig,
-    AiProviderView, AiReferenceMatch,
-    AiStreamEvent, AiToolCall, ToolSessionId,
-    infer_ai_cwd,
+    AiAutocompleteCandidate, AiChatStreamConfig, AiProviderView, AiReferenceMatch, AiStreamEvent,
+    AiToolCall, ToolSessionId, infer_ai_cwd,
 };
 use oxideterm_gpui_settings_view::SettingsTab;
 use oxideterm_gpui_ui::ai::AiSafetyMode;

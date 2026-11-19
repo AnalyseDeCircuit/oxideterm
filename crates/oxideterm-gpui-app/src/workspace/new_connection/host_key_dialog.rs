@@ -50,14 +50,25 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn cancel_host_key_challenge(&mut self, cx: &mut Context<Self>) {
-        let delay = oxideterm_gpui_ui::motion::duration(&self.tokens, oxideterm_gpui_ui::motion::MotionDuration::Overlay);
-        let (intent, inline) = self.connections.flow.update(cx, |flow, cx| flow.start_host_key_cancellation(delay, cx));
+        let delay = oxideterm_gpui_ui::motion::duration(
+            &self.tokens,
+            oxideterm_gpui_ui::motion::MotionDuration::Overlay,
+        );
+        let (intent, inline) = self
+            .connections
+            .flow
+            .update(cx, |flow, cx| flow.start_host_key_cancellation(delay, cx));
         if let Some(intent) = intent {
-            self.fail_public_mcp_mosh_open_for_intent(&intent, "The host-key confirmation was cancelled");
+            self.fail_public_mcp_mosh_open_for_intent(
+                &intent,
+                "The host-key confirmation was cancelled",
+            );
         }
         if let Some(inline) = inline {
             self.cancel_active_proxy_connect_run(cx);
-            if !inline { self.set_connection_status(None, cx); }
+            if !inline {
+                self.set_connection_status(None, cx);
+            }
             cx.notify();
         }
     }

@@ -413,7 +413,9 @@ impl ConnectionsViews {
     }
 
     pub fn session_manager_sidebar_search_button(&self) -> AnyElement {
-        self.session_manager_sidebar_search_button.clone().into_any_element()
+        self.session_manager_sidebar_search_button
+            .clone()
+            .into_any_element()
     }
 
     pub fn session_manager_sidebar_search(&self) -> AnyElement {

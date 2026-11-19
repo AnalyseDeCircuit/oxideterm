@@ -1,17 +1,18 @@
 use gpui::{Div, PathPromptOptions, Rgba};
 use oxideterm_settings::{Language, PersistedSettings, RemoteShellIntegrationMode};
 use oxideterm_settings_model::{
-    KnowledgeDeleteTarget, SettingsDynamicSectionCounts, SettingsInputDraftApply, SettingsSectionId,
-    ThemeTarget, ai_mcp_configs, ai_provider_views, apply_persisted_settings_input_draft,
-    cloud_sync_form_input_value_ref, plugin_setting_draft_to_value,
+    KnowledgeDeleteTarget, SettingsDynamicSectionCounts, SettingsInputDraftApply,
+    SettingsSectionId, ThemeTarget, ai_mcp_configs, ai_provider_views,
+    apply_persisted_settings_input_draft, cloud_sync_form_input_value_ref,
+    plugin_setting_draft_to_value,
 };
 
 pub(in crate::workspace) use pages::open_path_external;
 
 pub(in crate::workspace) use oxideterm_gpui_settings_view::terminal_page::terminal_session_log_root_directory;
 
-use super::*;
 use super::ime::WorkspaceImeTarget;
+use super::*;
 use oxideterm_ai::{
     AiProviderView, apply_provider_model_refresh as ai_apply_provider_model_refresh,
     provider_id as ai_provider_id, provider_key_display_state as ai_provider_key_display_state,

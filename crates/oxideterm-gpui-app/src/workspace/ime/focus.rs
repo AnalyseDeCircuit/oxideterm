@@ -30,16 +30,31 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> bool {
         use oxideterm_gpui_settings_view::input::SettingsInputKeyEffect::*;
-        if event.keystroke.key == "tab" && self.settings_workspace.read(cx).settings_entity_focused_input().is_some_and(SettingsInput::is_ai_mcp) {
+        if event.keystroke.key == "tab"
+            && self
+                .settings_workspace
+                .read(cx)
+                .settings_entity_focused_input()
+                .is_some_and(SettingsInput::is_ai_mcp)
+        {
             if let Some(browser_behavior::ModalFooterInputKeyAction::FocusFooter(action)) =
                 browser_behavior::modal_footer_input_key_action(
-                    "tab", event.keystroke.modifiers.shift, &CONFIRM_DIALOG_FOOTER_ACTIONS,
-                    true, true, self.standard_confirm_focus_owner(), ConfirmDialogAction::Cancel, None,
+                    "tab",
+                    event.keystroke.modifiers.shift,
+                    &CONFIRM_DIALOG_FOOTER_ACTIONS,
+                    true,
+                    true,
+                    self.standard_confirm_focus_owner(),
+                    ConfirmDialogAction::Cancel,
+                    None,
                 )
             {
-                self.settings_workspace.update(cx, |state, cx| state.blur_settings_entity_input(cx));
+                self.settings_workspace
+                    .update(cx, |state, cx| state.blur_settings_entity_input(cx));
                 self.set_standard_confirm_focus(action);
-                self.settings_views.ai_mcp_dialog.update(cx, |view, cx| view.set_focus(Some(action), cx));
+                self.settings_views
+                    .ai_mcp_dialog
+                    .update(cx, |view, cx| view.set_focus(Some(action), cx));
                 self.show_active_input_caret(cx);
             }
             return true;
@@ -274,16 +289,22 @@ impl WorkspaceApp {
         if self.close_terminal_git_branch_picker(cx) {
             changed = true;
         }
-        if self.connections.session_manager.update(cx, |session_manager, cx| {
-            session_manager.clear_input_focus(cx)
-        }) {
+        if self
+            .connections
+            .session_manager
+            .update(cx, |session_manager, cx| {
+                session_manager.clear_input_focus(cx)
+            })
+        {
             self.ime_marked_text = None;
             changed = true;
         }
         if let Some(page) = self.forwarding_page(cx)
             && page.update(cx, |page, cx| {
                 let changed = page.clear_input_focus();
-                if changed { cx.notify(); }
+                if changed {
+                    cx.notify();
+                }
                 changed
             })
         {
@@ -324,7 +345,8 @@ impl WorkspaceApp {
             changed = true;
         }
         if self
-            .ai.state
+            .ai
+            .state
             .read(cx)
             .terminal_inline_panel()
             .prompt_focused

@@ -357,7 +357,11 @@ impl KnowledgeWorkspaceView {
                         page.open_knowledge_document_dialog(collection_id.clone(), owner, true);
                         cx.notify();
                     });
-                    (this.bindings.request)(KnowledgeRequest::PresentCreationDialog, Some(window), cx);
+                    (this.bindings.request)(
+                        KnowledgeRequest::PresentCreationDialog,
+                        Some(window),
+                        cx,
+                    );
                     cx.stop_propagation();
                 },
                 cx,
@@ -641,13 +645,19 @@ impl KnowledgeWorkspaceView {
                 }
             }
             KnowledgeAction::Embeddings => {
-                if let Some(id) = collection && let Some(job) = (self.bindings.embedding_job)(cx) {
-                    self.bindings.page.update(cx, |page, cx| page.request_embeddings(id, job, cx));
+                if let Some(id) = collection
+                    && let Some(job) = (self.bindings.embedding_job)(cx)
+                {
+                    self.bindings
+                        .page
+                        .update(cx, |page, cx| page.request_embeddings(id, job, cx));
                 }
             }
             KnowledgeAction::Reindex => {
                 if let Some(id) = collection {
-                    self.bindings.page.update(cx, |page, cx| page.request_knowledge_reindex(id, cx));
+                    self.bindings
+                        .page
+                        .update(cx, |page, cx| page.request_knowledge_reindex(id, cx));
                 }
             }
             KnowledgeAction::Settings => {

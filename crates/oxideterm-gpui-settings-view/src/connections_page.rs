@@ -94,7 +94,11 @@ impl<'a> Deref for ConnectionPage<'a> {
 }
 
 impl ConnectionPage<'_> {
-    pub fn section(&self, section: oxideterm_settings_model::SettingsSectionId, cx: &App) -> AnyElement {
+    pub fn section(
+        &self,
+        section: oxideterm_settings_model::SettingsSectionId,
+        cx: &App,
+    ) -> AnyElement {
         use oxideterm_settings_model::SettingsSectionId::*;
         match section {
             ConnectionsDefaults => self.settings_card(
@@ -625,7 +629,9 @@ impl ConnectionPage<'_> {
                 font_size: Some(self.tokens.metrics.ui_text_xs),
                 ..ToolbarButtonOptions::default()
             },
-            self.press(ConnectionRequest::Local(ConnectionAction::ImportSelectedSsh)),
+            self.press(ConnectionRequest::Local(
+                ConnectionAction::ImportSelectedSsh,
+            )),
         )
         .into_any_element()
     }
@@ -745,7 +751,9 @@ impl ConnectionPage<'_> {
                 font_size: Some(self.tokens.metrics.ui_text_sm),
                 ..ToolbarButtonOptions::default()
             },
-            self.press(ConnectionRequest::Local(ConnectionAction::ImportSsh(alias.clone()))),
+            self.press(ConnectionRequest::Local(ConnectionAction::ImportSsh(
+                alias.clone(),
+            ))),
         )
         .rounded_full()
         .into_any_element()
@@ -1091,7 +1099,9 @@ impl ConnectionPage<'_> {
                             hover_background: Some(rgba((theme.error << 8) | 0x14)),
                             ..IconButtonOptions::opaque_toolbar(30.0, ButtonRadius::Md)
                         },
-                        self.press(ConnectionRequest::Local(ConnectionAction::OpenKeyDelete(key))),
+                        self.press(ConnectionRequest::Local(ConnectionAction::OpenKeyDelete(
+                            key,
+                        ))),
                         cx,
                     )),
             )
@@ -1232,29 +1242,34 @@ impl ConnectionPage<'_> {
                     cx,
                 ),
                 div()
-                        .flex()
-                        .flex_col()
-                        .gap(px(8.0))
-                        .child(
-                            div()
-                                .text_size(px(self.tokens.metrics.ui_text_sm))
-                                .font_weight(gpui::FontWeight::MEDIUM)
-                                .text_color(rgb(self.tokens.ui.text))
-                                .child(self.i18n.t("modals.managed_key.paste.private_key")),
+                    .flex()
+                    .flex_col()
+                    .gap(px(8.0))
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_sm))
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(rgb(self.tokens.ui.text))
+                            .child(self.i18n.t("modals.managed_key.paste.private_key")),
+                    )
+                    .child({
+                        let input = SettingsInput::ManagedKeyPastePrivateKey;
+                        let state = self.state.read(cx);
+                        let value = state
+                            .settings_entity_input_value(input)
+                            .expect("managed private-key draft belongs to settings");
+                        let frame = self.ime.frame(input, value, cx);
+                        let scroll =
+                            (self.scroll)(&format!("multiline-input-{}", frame.anchor_id.0));
+                        crate::components::settings_multiline_field(
+                            self.tokens,
+                            frame,
+                            crate::components::settings_mono_font_family(self.settings),
+                            &scroll,
+                            self.controls.dispatch.clone(),
                         )
-                        .child({
-                            let input = SettingsInput::ManagedKeyPastePrivateKey;
-                            let state = self.state.read(cx);
-                            let value = state.settings_entity_input_value(input)
-                                .expect("managed private-key draft belongs to settings");
-                            let frame = self.ime.frame(input, value, cx);
-                            let scroll = (self.scroll)(&format!("multiline-input-{}", frame.anchor_id.0));
-                            crate::components::settings_multiline_field(
-                                self.tokens, frame, crate::components::settings_mono_font_family(self.settings),
-                                &scroll, self.controls.dispatch.clone(),
-                            )
-                        })
-                        .into_any_element(),
+                    })
+                    .into_any_element(),
                 self.settings_managed_key_secret_input_field(
                     "modals.managed_key.passphrase",
                     SettingsInput::ManagedKeyPastePassphrase,

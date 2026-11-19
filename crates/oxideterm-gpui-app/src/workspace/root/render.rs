@@ -64,7 +64,12 @@ impl WorkspaceApp {
                     chrome.portable_password.is_some(),
                 );
                 if navigation {
-                    modals.push(self.settings_views.navigation_editor.clone().into_any_element());
+                    modals.push(
+                        self.settings_views
+                            .navigation_editor
+                            .clone()
+                            .into_any_element(),
+                    );
                 }
                 modals.push(self.settings_views.ai_mcp_dialog.clone().into_any_element());
                 if let Some(modal) = self.render_knowledge_create_collection_dialog(cx) {
@@ -85,7 +90,12 @@ impl WorkspaceApp {
                     modals.push(modal);
                 }
                 if portable_password {
-                    modals.push(self.settings_views.portable_password_dialog.clone().into_any_element());
+                    modals.push(
+                        self.settings_views
+                            .portable_password_dialog
+                            .clone()
+                            .into_any_element(),
+                    );
                 }
             }
             TabKind::Knowledge => {
@@ -126,7 +136,9 @@ impl WorkspaceApp {
     }
 
     fn render_session_manager_window_modals(
-        &self, _window: &Window, _cx: &mut Context<Self>,
+        &self,
+        _window: &Window,
+        _cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
         vec![self.connections.session_manager_dialogs()]
     }
@@ -306,9 +318,14 @@ impl WorkspaceApp {
         let window_background_layer =
             self.render_workspace_window_background(window_background, window, cx);
         let has_window_background = window_background_layer.is_some();
-        let native_update_notification = self.settings_views.native_update_notice.clone().into_any_element();
+        let native_update_notification = self
+            .settings_views
+            .native_update_notice
+            .clone()
+            .into_any_element();
         let show_connection_cards = !self
-            .connections.flow
+            .connections
+            .flow
             .read(cx)
             .has_keyboard_interactive_challenge();
         let overlay_layers = {
@@ -344,7 +361,13 @@ impl WorkspaceApp {
         let mut key_context = gpui::KeyContext::new_with_defaults(cx.platform_info().os);
         key_context.add("Workspace");
         #[cfg(target_os = "macos")]
-        if self.settings_views.window_chrome.read(cx).state.recording_keybinding {
+        if self
+            .settings_views
+            .window_chrome
+            .read(cx)
+            .state
+            .recording_keybinding
+        {
             key_context.add("KeybindingRecording");
         }
         if self.active_window_modal_owner(cx).is_some() && !self.ide_modal_owns_input(cx) {

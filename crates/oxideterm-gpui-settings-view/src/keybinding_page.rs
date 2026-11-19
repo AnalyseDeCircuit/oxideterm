@@ -213,9 +213,7 @@ pub fn visible_scope_count(
         catalog
             .iter()
             .filter(|definition| definition.scope == *scope)
-            .filter(|definition| {
-                settings_keybinding_scope_matches(scope_filter, definition.scope)
-            })
+            .filter(|definition| settings_keybinding_scope_matches(scope_filter, definition.scope))
             .any(|definition| {
                 if query.is_empty() {
                     return true;

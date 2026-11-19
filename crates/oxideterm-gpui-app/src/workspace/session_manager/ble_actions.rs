@@ -41,7 +41,10 @@ impl WorkspaceApp {
                     .map(|attempt_id| BleStandaloneTarget::Reconnect { attempt_id })
             });
         self.start_ble_open_flow(
-            BleOpenRequest::from_saved_profile(profile, standalone.unwrap_or(BleStandaloneTarget::New)),
+            BleOpenRequest::from_saved_profile(
+                profile,
+                standalone.unwrap_or(BleStandaloneTarget::New),
+            ),
             cx,
         );
     }
@@ -120,7 +123,8 @@ impl WorkspaceApp {
         let pending = self.connections.flow.update(cx, |flow, cx| {
             flow.start_ble_resolver(request, attempt_id.clone(), &self.forwarding_runtime, cx)
         });
-        self.standalone_connections.set_ble_pending(&attempt_id, pending);
+        self.standalone_connections
+            .set_ble_pending(&attempt_id, pending);
     }
 
     /// Closes a resolver link that no session will adopt, on the shared
@@ -181,7 +185,8 @@ impl WorkspaceApp {
                 profile_id,
                 form_id,
             } => {
-                if form_id.is_some() && !self.connections.flow.read(cx).is_ble_form_current(form_id) {
+                if form_id.is_some() && !self.connections.flow.read(cx).is_ble_form_current(form_id)
+                {
                     self.abandon_ble_resolved_link(resolved_link);
                     self.standalone_connections.cancel_attempt(&attempt_id);
                     return;
@@ -265,7 +270,8 @@ impl WorkspaceApp {
                     profile_id = profile_id.as_deref().unwrap_or(""),
                     "BLE open failed"
                 );
-                let detail = oxideterm_gpui_connections::ble::localize_ble_resolve_error(&self.i18n, &error);
+                let detail =
+                    oxideterm_gpui_connections::ble::localize_ble_resolve_error(&self.i18n, &error);
                 // The record keeps its failure visible in the active-session
                 // list, which is where the reconnect action lives.
                 self.standalone_connections.mark_attempt_error(&attempt_id);

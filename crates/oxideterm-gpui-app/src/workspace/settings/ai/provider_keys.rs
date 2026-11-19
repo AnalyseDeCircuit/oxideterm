@@ -23,7 +23,8 @@ impl WorkspaceApp {
                 let _ = owner.update(cx, |app, cx| match request {
                     AiProviderRequest::Edit(edit) => app.edit_settings(edit, cx),
                     AiProviderRequest::LoadKeyStatus(ids) => app
-                        .ai.state
+                        .ai
+                        .state
                         .update(cx, |ai, _| ai.request_provider_key_statuses(ids)),
                     AiProviderRequest::RefreshModels(id) => {
                         if let Some((index, provider)) = app

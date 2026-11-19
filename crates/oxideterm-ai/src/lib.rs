@@ -32,9 +32,9 @@ mod streaming;
 mod suggestions;
 mod target_projection;
 pub mod terminal_observation;
-pub mod tool_resources;
 pub mod tool_loop;
 mod tool_protocol;
+pub mod tool_resources;
 pub mod tool_result_protocol;
 mod types;
 pub mod web;
@@ -149,12 +149,12 @@ pub use responses_state::{
     append_responses_round, has_responses_history, responses_round_state, scope_responses_history,
 };
 pub use runtime_context::{
-    AiRunCommandOwner, AiRuntimeAuthority, AiSftpRuntimeOwner,
-    RUNTIME_CONTEXT_MESSAGE_ID, RuntimeCapability, RuntimeCapabilityRegistry, RuntimeContextError,
-    RuntimeContextSnapshot, RuntimeHandleId, RuntimeHandleProjection, RuntimeOwnerGeneration,
-    RuntimeOwnerKey, RuntimeOwnerKind, RuntimeOwnerRegistration, RuntimeRegistryEpoch,
-    RuntimeRevocationReason, RuntimeValidationError, RuntimeValidationFailure, StableResourceKind,
-    StableResourceRef, ToolSessionId, ValidatedRuntimeHandle,
+    AiRunCommandOwner, AiRuntimeAuthority, AiSftpRuntimeOwner, RUNTIME_CONTEXT_MESSAGE_ID,
+    RuntimeCapability, RuntimeCapabilityRegistry, RuntimeContextError, RuntimeContextSnapshot,
+    RuntimeHandleId, RuntimeHandleProjection, RuntimeOwnerGeneration, RuntimeOwnerKey,
+    RuntimeOwnerKind, RuntimeOwnerRegistration, RuntimeRegistryEpoch, RuntimeRevocationReason,
+    RuntimeValidationError, RuntimeValidationFailure, StableResourceKind, StableResourceRef,
+    ToolSessionId, ValidatedRuntimeHandle,
 };
 pub use settings::{
     AiProviderKeyDisplayState, AiProviderRefreshKeyPolicy, add_provider_from_template,

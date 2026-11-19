@@ -43,9 +43,10 @@ impl WorkspaceApp {
             settings_store.path(),
             settings_store.settings().onboarding_completed,
         )?;
-        let audit_state = oxideterm_gpui_audit::AuditState::new(
-            oxideterm_audit::AuditService::start(settings_store.path().with_file_name("audit.sqlite3")),
-        );
+        let audit_state =
+            oxideterm_gpui_audit::AuditState::new(oxideterm_audit::AuditService::start(
+                settings_store.path().with_file_name("audit.sqlite3"),
+            ));
         let settings = settings_store.settings().clone();
         let i18n = I18n::new(locale_from_settings(settings.general.language));
         // Shell history is already the user's persistence boundary; OxideTerm keeps only a
@@ -112,13 +113,14 @@ impl WorkspaceApp {
             .iter()
             .map(std::path::PathBuf::from)
             .collect();
-        let skill_registry =
-            oxideterm_gpui_ai::state::skills::AiSkillCatalog::discover(oxideterm_skills::SkillDiscoveryOptions {
+        let skill_registry = oxideterm_gpui_ai::state::skills::AiSkillCatalog::discover(
+            oxideterm_skills::SkillDiscoveryOptions {
                 workspace_root: skill_workspace_root.clone(),
                 settings_path: Some(settings_store.path().to_path_buf()),
                 plugin_roots,
                 disabled_paths,
-            });
+            },
+        );
         let local_shells = scan_shells();
         let system_dark = matches!(
             window.appearance(),
@@ -223,7 +225,10 @@ impl WorkspaceApp {
         );
         let connections = oxideterm_gpui_connections::views::ConnectionsViews::new(
             Self::connections_view_bindings(cx.weak_entity()),
-            oxideterm_gpui_connections::views::ConnectionsEnvironment { tokens, i18n: i18n.clone() },
+            oxideterm_gpui_connections::views::ConnectionsEnvironment {
+                tokens,
+                i18n: i18n.clone(),
+            },
             forwarding_runtime.handle().clone(),
             cx,
         );
@@ -237,7 +242,8 @@ impl WorkspaceApp {
         let settings_workspace = cx.new(move |cx| {
             let mut settings = settings::SettingsWorkspaceEntity::new(cx);
             settings.appearance_edit_dark = appearance_edit_dark;
-            settings.terminal_triggers = settings::TerminalTriggersSettingsState::load(&settings_path);
+            settings.terminal_triggers =
+                settings::TerminalTriggersSettingsState::load(&settings_path);
             settings.start_external_store_watch(settings_path, connections_path, cx);
             settings
         });
@@ -251,7 +257,15 @@ impl WorkspaceApp {
                 ai_mcp: Self::ai_mcp_settings_bindings(cx),
                 acp_probe_status: Rc::new({
                     let owner = cx.weak_entity();
-                    move |id, cx| owner.upgrade().is_some_and(|app| app.read(cx).ai.state.read(cx).acp_agent_probe_is_pending(id))
+                    move |id, cx| {
+                        owner.upgrade().is_some_and(|app| {
+                            app.read(cx)
+                                .ai
+                                .state
+                                .read(cx)
+                                .acp_agent_probe_is_pending(id)
+                        })
+                    }
                 }),
                 surface: Self::settings_surface_bindings(cx),
                 native_update_notice: Self::native_update_notice_bindings(cx),
@@ -260,7 +274,9 @@ impl WorkspaceApp {
                 navigation_frame,
                 finish_navigation,
                 portable_frame,
-                portable_controls: oxideterm_gpui_settings_view::surface::settings_controls_source(cx.entity().downgrade()),
+                portable_controls: oxideterm_gpui_settings_view::surface::settings_controls_source(
+                    cx.entity().downgrade(),
+                ),
                 finish_portable,
                 theme_picker_frame,
                 apply_theme,
@@ -274,7 +290,8 @@ impl WorkspaceApp {
         );
         cx.subscribe(&settings_views.ai_confirm, |workspace, _, intent, cx| {
             workspace.apply_ai_settings_confirmation(intent, cx);
-        }).detach();
+        })
+        .detach();
         let settings_workspace_subscription = cx.subscribe(
             &settings_workspace,
             |workspace, settings, event: &settings::SettingsWorkspaceEvent, cx| {
@@ -335,9 +352,8 @@ impl WorkspaceApp {
             },
         );
         let sftp_view = cx.new(sftp::SftpWorkspaceEntity::new);
-        let sftp_bookmarks = cx.new(|_| {
-            oxideterm_gpui_sftp::SftpBookmarks::new(settings_store.path().to_path_buf())
-        });
+        let sftp_bookmarks = cx
+            .new(|_| oxideterm_gpui_sftp::SftpBookmarks::new(settings_store.path().to_path_buf()));
         let sftp_subscription = cx.subscribe(
             &sftp_view,
             |workspace, _, event: &sftp::SftpWorkspaceEvent, cx| {
@@ -488,11 +504,8 @@ impl WorkspaceApp {
         );
         let ai_key_store = oxideterm_ai::AiProviderKeyStore::new();
         let ai_entity = cx.new(|cx| {
-            let mut entity = ai_state::AiWorkspaceEntity::new(
-                forwarding_runtime.clone(),
-                ai_key_store,
-                cx,
-            );
+            let mut entity =
+                ai_state::AiWorkspaceEntity::new(forwarding_runtime.clone(), ai_key_store, cx);
             entity.configure_chat_surface(
                 initial_context_sidebar_width,
                 Some(current_window_size(window)),
@@ -513,7 +526,8 @@ impl WorkspaceApp {
                     cx,
                 ),
             }
-        }).detach();
+        })
+        .detach();
         let chat_header = Self::mount_ai_chat_header(&ai_entity, cx);
         let (composer_editor, message_editor) = Self::mount_ai_editors(&ai_entity, cx);
         let model_picker = Self::mount_ai_model_picker(&ai_entity, cx);
@@ -532,15 +546,14 @@ impl WorkspaceApp {
         });
         let ai_entity_subscription = cx.subscribe(
             &ai_entity,
-            |workspace, ai_entity, event: &ai_state::AiWorkspaceEvent, cx| {
-                match event {
-                    ai_state::AiWorkspaceEvent::CompactionDeliveryReady => {
-                        let deliveries = ai_entity.update(cx, |state, _| state.take_compaction_deliveries());
-                        workspace.apply_ai_compaction_deliveries(deliveries, cx);
-                    }
-                    ai_state::AiWorkspaceEvent::CompactionStateChanged => {}
-                    _ => workspace.enqueue_ai_window_effect(event, cx),
+            |workspace, ai_entity, event: &ai_state::AiWorkspaceEvent, cx| match event {
+                ai_state::AiWorkspaceEvent::CompactionDeliveryReady => {
+                    let deliveries =
+                        ai_entity.update(cx, |state, _| state.take_compaction_deliveries());
+                    workspace.apply_ai_compaction_deliveries(deliveries, cx);
                 }
+                ai_state::AiWorkspaceEvent::CompactionStateChanged => {}
+                _ => workspace.enqueue_ai_window_effect(event, cx),
             },
         );
         let acp_entity =
@@ -550,15 +563,13 @@ impl WorkspaceApp {
         });
         cx.subscribe(
             &ai_entity,
-            |workspace, _, event: &oxideterm_gpui_ai::acp::AcpWindowRequest, cx| {
-                match event {
-                    oxideterm_gpui_ai::acp::AcpWindowRequest::NotifyControlFailure => {
-                        workspace.push_ai_settings_toast(
-                            workspace.i18n.t("settings_view.ai.acp_agent_error_unknown"),
-                            TerminalNoticeVariant::Error,
-                            cx,
-                        );
-                    }
+            |workspace, _, event: &oxideterm_gpui_ai::acp::AcpWindowRequest, cx| match event {
+                oxideterm_gpui_ai::acp::AcpWindowRequest::NotifyControlFailure => {
+                    workspace.push_ai_settings_toast(
+                        workspace.i18n.t("settings_view.ai.acp_agent_error_unknown"),
+                        TerminalNoticeVariant::Error,
+                        cx,
+                    );
                 }
             },
         )
@@ -589,9 +600,8 @@ impl WorkspaceApp {
                     Some(AiBackgroundTaskFrame {
                         tokens: workspace.tokens,
                         i18n: workspace.i18n.clone(),
-                        background: workspace.context_sidebar_content_background(
-                            workspace.tokens.ui.shell_bg(),
-                        ),
+                        background: workspace
+                            .context_sidebar_content_background(workspace.tokens.ui.shell_bg()),
                     })
                 }),
                 initial,
@@ -599,14 +609,18 @@ impl WorkspaceApp {
             )
         });
         let transcript = Self::mount_ai_transcript(
-            &ai_entity, message_editor,
+            &ai_entity,
+            message_editor,
             oxideterm_gpui_ai::sidebar::transcript::AiSidebarChildren {
                 header: chat_header,
                 background: background_view,
                 model_trigger: model_picker.sidebar.clone(),
                 composer: composer_editor,
             },
-            tokens, i18n.clone(), forwarding_runtime.clone(), cx,
+            tokens,
+            i18n.clone(),
+            forwarding_runtime.clone(),
+            cx,
         );
         let inline_owner = cx.weak_entity();
         let inline_request_owner = inline_owner.clone();
@@ -623,7 +637,8 @@ impl WorkspaceApp {
                 Rc::new(move |anchor, window, cx| {
                     let owner = inline_anchor_owner.clone();
                     window.defer(cx, move |_, cx| {
-                        let _ = owner.update(cx, |app, cx| app.update_text_input_anchor(anchor, cx));
+                        let _ =
+                            owner.update(cx, |app, cx| app.update_text_input_anchor(anchor, cx));
                     });
                 }),
                 Rc::new(move |cx| {
@@ -633,30 +648,43 @@ impl WorkspaceApp {
                         tokens: workspace.tokens,
                         i18n: workspace.i18n.clone(),
                         mono_font: settings_mono_font_family(workspace.settings_store.settings()),
-                        cursor: workspace.terminal_ai_inline_target_pane(cx)
+                        cursor: workspace
+                            .terminal_ai_inline_target_pane(cx)
                             .and_then(|pane| pane.read(cx).cursor_anchor())
                             .map(|anchor| AiInlineCursorAnchor {
-                                y: anchor.y, line_height: anchor.line_height,
-                                container_width: anchor.container_width, container_height: anchor.container_height,
+                                y: anchor.y,
+                                line_height: anchor.line_height,
+                                container_width: anchor.container_width,
+                                container_height: anchor.container_height,
                             }),
                         submit_label: workspace.terminal_ai_keybinding_label("terminal.aiSubmit"),
                         insert_label: workspace.terminal_ai_keybinding_label("terminal.aiInsert"),
                         input_anchor: inline_target.anchor_id(),
-                        viewport: workspace.text_input_anchors.viewport(inline_target.anchor_id()),
+                        viewport: workspace
+                            .text_input_anchors
+                            .viewport(inline_target.anchor_id()),
                         active_offset: workspace.ime_active_offset_for_target(inline_target, cx),
                         selected_range: workspace.ime_selected_range_for_target(inline_target, cx),
-                        marked_text: workspace.marked_text_for_target(inline_target, cx).map(str::to_owned),
+                        marked_text: workspace
+                            .marked_text_for_target(inline_target, cx)
+                            .map(str::to_owned),
                         caret_visible: workspace.input_caret.visible(),
-
                     })
                 }),
                 Rc::new(move |request, window, cx| {
                     let _ = inline_request_owner.update(cx, |workspace, cx| match request {
-                        AiInlineWindowRequest::Close => workspace.close_terminal_ai_inline_panel(window, cx),
+                        AiInlineWindowRequest::Close => {
+                            workspace.close_terminal_ai_inline_panel(window, cx)
+                        }
                         AiInlineWindowRequest::PromptPointer(event) => {
                             workspace.ime_marked_text = None;
                             window.focus(&workspace.focus_handle, cx);
-                            workspace.begin_ime_selection_from_mouse_down(inline_target, &event, window, cx);
+                            workspace.begin_ime_selection_from_mouse_down(
+                                inline_target,
+                                &event,
+                                window,
+                                cx,
+                            );
                         }
                         AiInlineWindowRequest::PromptDrag(event) => {
                             workspace.update_ime_selection_drag_from_mouse_move(&event, window, cx);
@@ -679,7 +707,12 @@ impl WorkspaceApp {
             )
         });
         let ai_runtime_context = cx.new(|cx| {
-            cx.on_release(|authority: &mut ai_runtime_context::AiRuntimeContextEntity, _| authority.shutdown()).detach();
+            cx.on_release(
+                |authority: &mut ai_runtime_context::AiRuntimeContextEntity, _| {
+                    authority.shutdown()
+                },
+            )
+            .detach();
             ai_runtime_context::AiRuntimeContextEntity::new()
         });
         let plugin_task_runtime = forwarding_runtime.clone();
@@ -738,7 +771,13 @@ impl WorkspaceApp {
             cx,
         );
         let file_manager = file_manager::mount(
-            &settings_store, tokens, &i18n, &text_input_anchors, &plugin_entity, &forwarding_runtime, cx,
+            &settings_store,
+            tokens,
+            &i18n,
+            &text_input_anchors,
+            &plugin_entity,
+            &forwarding_runtime,
+            cx,
         );
         let tab_host = cx.new(|_| tabs::WorkspaceTabHostEntity::new());
         let tab_host_subscription = cx.subscribe(
@@ -783,10 +822,14 @@ impl WorkspaceApp {
         // The Knowledge workspace is tab-owned so its navigator and editor survive activity-bar
         // navigation without occupying the global context sidebar.
         let knowledge_bindings = Self::knowledge_bindings(knowledge_page, cx);
-        let knowledge_state = cx.new(|_| oxideterm_gpui_ai::knowledge::workspace::KnowledgeWorkspaceEntity::default());
+        let knowledge_state = cx
+            .new(|_| oxideterm_gpui_ai::knowledge::workspace::KnowledgeWorkspaceEntity::default());
         let knowledge_view = cx.new(|cx| {
             oxideterm_gpui_ai::knowledge::workspace::KnowledgeWorkspaceView::new(
-                knowledge_state.clone(), knowledge_bindings, focus_handle.clone(), cx,
+                knowledge_state.clone(),
+                knowledge_bindings,
+                focus_handle.clone(),
+                cx,
             )
         });
         let knowledge_workspace = oxideterm_gpui_ai::knowledge::workspace::KnowledgeViews {
@@ -903,7 +946,10 @@ impl WorkspaceApp {
             ),
             ai: AiWorkspaceViews {
                 conversations: oxideterm_gpui_ai::conversation::AiConversationController::new(
-                    ai_entity.clone(), ai_runtime_context.clone(), acp_entity.clone(), ai_background_tasks.clone(),
+                    ai_entity.clone(),
+                    ai_runtime_context.clone(),
+                    acp_entity.clone(),
+                    ai_background_tasks.clone(),
                 ),
                 state: ai_entity,
                 acp: acp_entity,
@@ -1814,7 +1860,8 @@ impl WorkspaceApp {
             return None;
         }
         oxideterm_gpui_settings_view::appearance_page::background_preferences_for_style(
-            &self.active_background, &self.tokens,
+            &self.active_background,
+            &self.tokens,
         )
     }
 }

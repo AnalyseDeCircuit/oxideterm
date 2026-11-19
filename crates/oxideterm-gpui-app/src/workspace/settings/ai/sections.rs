@@ -6,11 +6,7 @@ impl WorkspaceApp {
         agent_id: String,
         cx: &mut Context<Self>,
     ) {
-        if self
-            .ai.state
-            .read(cx)
-            .acp_agent_probe_is_pending(&agent_id)
-        {
+        if self.ai.state.read(cx).acp_agent_probe_is_pending(&agent_id) {
             return;
         }
         let Some(mut agent) = self
@@ -31,7 +27,8 @@ impl WorkspaceApp {
             return;
         }
         if self
-            .ai.state
+            .ai
+            .state
             .update(cx, |ai, _cx| ai.request_acp_agent_probe(agent))
         {
             self.settings_views.notify_acp(cx);

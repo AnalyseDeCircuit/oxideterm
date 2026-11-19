@@ -27,7 +27,13 @@ impl WorkspaceApp {
             .iter()
             .map(std::path::PathBuf::from)
             .collect();
-        self.ai.skills.refresh(self.settings_store.path().to_path_buf(), plugin_roots, disabled_paths);
-        self.ai.state.update(cx, |state, _| state.clear_loaded_skill_versions());
+        self.ai.skills.refresh(
+            self.settings_store.path().to_path_buf(),
+            plugin_roots,
+            disabled_paths,
+        );
+        self.ai
+            .state
+            .update(cx, |state, _| state.clear_loaded_skill_versions());
     }
 }

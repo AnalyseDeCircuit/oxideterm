@@ -1,7 +1,5 @@
 use super::*;
-use oxideterm_gpui_settings_view::mcp_page::{
-    McpSettingsRequest,
-};
+use oxideterm_gpui_settings_view::mcp_page::McpSettingsRequest;
 use oxideterm_gpui_settings_view::proxy_page::ProxyRequest;
 
 #[derive(serde::Serialize)]
@@ -68,10 +66,19 @@ impl WorkspaceApp {
             .read(cx)
             .public_mcp_client_editor
             .is_some()
-            .then(|| self.settings_views.mcp_client_dialog.clone().into_any_element())
+            .then(|| {
+                self.settings_views
+                    .mcp_client_dialog
+                    .clone()
+                    .into_any_element()
+            })
     }
 
-    pub(super) fn handle_mcp_settings_request(&mut self, request: McpSettingsRequest, cx: &mut Context<Self>) {
+    pub(super) fn handle_mcp_settings_request(
+        &mut self,
+        request: McpSettingsRequest,
+        cx: &mut Context<Self>,
+    ) {
         match request {
             McpSettingsRequest::CreateClient => {
                 let mode = self.settings_workspace.read(cx).new_mcp_client_mode;
@@ -210,5 +217,4 @@ mod tests {
         assert_eq!(value["args"], serde_json::json!(["mcp", "bridge"]));
         assert_eq!(value["env"]["OXIDETERM_MCP_TOKEN"], credential);
     }
-
 }

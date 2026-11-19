@@ -481,14 +481,26 @@ fn should_compact(
 }
 
 impl AiCompactionRequest {
-    pub fn compact(conversation_id: String, silent: bool, force: bool, resume_after: Option<AiPendingChatStream>) -> Self {
-        Self { conversation_id, summarize: false, silent, force, resume_after }
+    pub fn compact(
+        conversation_id: String,
+        silent: bool,
+        force: bool,
+        resume_after: Option<AiPendingChatStream>,
+    ) -> Self {
+        Self {
+            conversation_id,
+            summarize: false,
+            silent,
+            force,
+            resume_after,
+        }
     }
 }
 
 impl AiWorkspaceEntity {
     pub fn auto_compaction_request(&self, id: &str) -> Option<AiCompactionRequest> {
-        self.should_auto_compact(id).then(|| AiCompactionRequest::compact(id.to_owned(), true, false, None))
+        self.should_auto_compact(id)
+            .then(|| AiCompactionRequest::compact(id.to_owned(), true, false, None))
     }
 
     pub fn can_resume_compacted_turn(&self, pending: &AiPendingChatStream) -> bool {

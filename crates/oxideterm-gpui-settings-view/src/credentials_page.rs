@@ -102,7 +102,11 @@ impl<'a> Deref for CredentialPage<'a> {
 }
 
 impl CredentialPage<'_> {
-    pub fn section(&self, section: oxideterm_settings_model::SettingsSectionId, cx: &App) -> AnyElement {
+    pub fn section(
+        &self,
+        section: oxideterm_settings_model::SettingsSectionId,
+        cx: &App,
+    ) -> AnyElement {
         use oxideterm_settings_model::SettingsSectionId::*;
         match section {
             PrivilegeCredentials => self.credentials(cx),
@@ -1047,17 +1051,16 @@ impl CredentialPage<'_> {
         placeholder_key: &'static str,
         cx: &App,
     ) -> AnyElement {
-        form_field(
-            self.tokens,
-            self.i18n.t(label_key),
-            {
-                let frame = self.ime.frame(input, value, cx);
-                let scroll = (self.scroll)(&format!("multiline-input-{}", frame.anchor_id.0));
-                crate::components::settings_multiline_patterns_field(
-                    self.tokens, frame, &self.i18n.t(placeholder_key),
-                    &scroll, self.controls.dispatch.clone(),
-                )
-            },
-        )
+        form_field(self.tokens, self.i18n.t(label_key), {
+            let frame = self.ime.frame(input, value, cx);
+            let scroll = (self.scroll)(&format!("multiline-input-{}", frame.anchor_id.0));
+            crate::components::settings_multiline_patterns_field(
+                self.tokens,
+                frame,
+                &self.i18n.t(placeholder_key),
+                &scroll,
+                self.controls.dispatch.clone(),
+            )
+        })
     }
 }

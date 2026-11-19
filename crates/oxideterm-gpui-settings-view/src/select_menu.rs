@@ -6,7 +6,10 @@ mod knowledge;
 pub use knowledge::KnowledgeSelectInputs;
 
 use gpui::{AnyElement, App, Entity, MouseDownEvent, Window, prelude::*};
-use oxideterm_connections::{ConnectionImportDuplicateStrategy, PrivilegePromptType, PrivilegeResponseMode, totp::TotpCredential};
+use oxideterm_connections::{
+    ConnectionImportDuplicateStrategy, PrivilegePromptType, PrivilegeResponseMode,
+    totp::TotpCredential,
+};
 use oxideterm_gpui_platform::vibrancy::available_modes;
 use oxideterm_gpui_ui::{
     modal::overlay_content_boundary,
@@ -18,8 +21,9 @@ use oxideterm_gpui_ui::{
 use oxideterm_i18n::I18n;
 use oxideterm_settings::{
     BackgroundStyle, FrostedGlassMode, HighlightRule, Language, PersistedSettings,
-    RemoteShellIntegrationMode, SettingsApplicationProxyMode, SettingsUpstreamProxyProtocol,
-    SettingsUpstreamProxyAuth, SftpPresentationPreference, TerminalSemanticScheme, UpdateChannel, UpdateProxyMode, UpdateProxyProtocol,
+    RemoteShellIntegrationMode, SettingsApplicationProxyMode, SettingsUpstreamProxyAuth,
+    SettingsUpstreamProxyProtocol, SftpPresentationPreference, TerminalSemanticScheme,
+    UpdateChannel, UpdateProxyMode, UpdateProxyProtocol,
 };
 use oxideterm_settings_model::{
     SEMANTIC_CLASSES, SemanticRuleContext, edit_custom_semantic_scheme,
@@ -32,11 +36,16 @@ use oxideterm_terminal_triggers::{
 use oxideterm_theme::{BUILT_IN_THEMES, ThemeTokens};
 
 use crate::{
-    connections_page::{connection_import_duplicate_strategy_label, connection_import_source_label, connection_import_source_options},
-    credentials_page::{settings_privilege_prompt_type_label, settings_privilege_response_mode_label},
+    connections_page::{
+        connection_import_duplicate_strategy_label, connection_import_source_label,
+        connection_import_source_options,
+    },
+    credentials_page::{
+        settings_privilege_prompt_type_label, settings_privilege_response_mode_label,
+    },
     entity::SettingsWorkspaceEntity,
-    proxy_page::{NetworkProxyAuthMode, network_proxy_auth_label},
     highlight_page::{semantic_class_label, semantic_context_label},
+    proxy_page::{NetworkProxyAuthMode, network_proxy_auth_label},
     terminal_triggers::TerminalTriggersSettingsState,
     *,
 };
@@ -60,7 +69,6 @@ pub enum SelectMenuRequest {
     SftpPresentation(SftpPresentationPreference),
 }
 
-
 pub fn settings_select_popover(
     tokens: &ThemeTokens,
     select: SettingsSelect,
@@ -68,7 +76,9 @@ pub fn settings_select_popover(
     content: AnyElement,
     dismiss: impl Fn(&mut Window, &mut App) + Clone + 'static,
 ) -> AnyElement {
-    use gpui::{AnchoredPositionMode, Corner, MouseButton, SharedString, anchored, deferred, div, point, px};
+    use gpui::{
+        AnchoredPositionMode, Corner, MouseButton, SharedString, anchored, deferred, div, point, px,
+    };
     use oxideterm_gpui_ui::modal::{TAURI_POPOVER_LAYER_PRIORITY, popover_backdrop};
     popover_backdrop()
         .on_mouse_down(MouseButton::Left, {
@@ -82,18 +92,23 @@ pub fn settings_select_popover(
             dismiss(window, cx);
             cx.stop_propagation();
         })
-        .child(deferred(
-            anchored()
-                .anchor(Corner::TopLeft)
-                .position(anchor.bounds.bottom_left())
-                .offset(point(px(0.0), px(tokens.metrics.settings_select_popup_gap)))
-                .position_mode(AnchoredPositionMode::Window)
-                .child(oxideterm_gpui_ui::motion::popover_zoom_enter(
-                    tokens,
-                    SharedString::from(format!("settings-select-popup-{select:?}")),
-                    div().child(content), -6.0, point(0.5, 0.0),
-                )),
-        ).with_priority(TAURI_POPOVER_LAYER_PRIORITY))
+        .child(
+            deferred(
+                anchored()
+                    .anchor(Corner::TopLeft)
+                    .position(anchor.bounds.bottom_left())
+                    .offset(point(px(0.0), px(tokens.metrics.settings_select_popup_gap)))
+                    .position_mode(AnchoredPositionMode::Window)
+                    .child(oxideterm_gpui_ui::motion::popover_zoom_enter(
+                        tokens,
+                        SharedString::from(format!("settings-select-popup-{select:?}")),
+                        div().child(content),
+                        -6.0,
+                        point(0.5, 0.0),
+                    )),
+            )
+            .with_priority(TAURI_POPOVER_LAYER_PRIORITY),
+        )
         .into_any_element()
 }
 
@@ -152,14 +167,20 @@ impl SettingsSelectMenu<'_> {
         let settings = self.settings;
         let popup = match (active_tab, open_select) {
             (_, SettingsSelect::PluginMarketplaceSort)
-            | (SettingsTab::Ai, SettingsSelect::IdeAgentMode | SettingsSelect::AiProviderTemplate
-                | SettingsSelect::AiWebSearchProvider | SettingsSelect::AiMcpTransport
-                | SettingsSelect::AiMcpAuthMode) => self.external_popup(open_select, width),
-            (SettingsTab::Knowledge, SettingsSelect::AiEmbeddingProvider
-                | SettingsSelect::KnowledgeCollectionScope | SettingsSelect::KnowledgeDocumentFormat) =>
-            {
-                self.knowledge_popup(open_select, width)
-            }
+            | (
+                SettingsTab::Ai,
+                SettingsSelect::IdeAgentMode
+                | SettingsSelect::AiProviderTemplate
+                | SettingsSelect::AiWebSearchProvider
+                | SettingsSelect::AiMcpTransport
+                | SettingsSelect::AiMcpAuthMode,
+            ) => self.external_popup(open_select, width),
+            (
+                SettingsTab::Knowledge,
+                SettingsSelect::AiEmbeddingProvider
+                | SettingsSelect::KnowledgeCollectionScope
+                | SettingsSelect::KnowledgeDocumentFormat,
+            ) => self.knowledge_popup(open_select, width),
             (SettingsTab::Privilege, SettingsSelect::LocalPrivilegePromptType) => {
                 let mut popup = select_overlay_popup(&self.tokens, width);
                 let current = self.settings_workspace.read(cx).privilege_prompt_type();
@@ -283,7 +304,9 @@ impl SettingsSelectMenu<'_> {
                         false,
                         self.action(move |this, _event, _window, cx| {
                             this.send(SelectMenuRequest::Close, _window, cx);
-                            this.settings_workspace.update(cx, |settings, cx| settings.set_connection_import_source(source, cx));
+                            this.settings_workspace.update(cx, |settings, cx| {
+                                settings.set_connection_import_source(source, cx)
+                            });
                             cx.stop_propagation();
                         }),
                     ));
@@ -321,15 +344,24 @@ impl SettingsSelectMenu<'_> {
             }
             (SettingsTab::Network, SettingsSelect::NetworkProxyAuth) => {
                 let mut popup = select_overlay_popup(self.tokens, width);
-                let current = settings.network.upstream_proxy.as_ref().map(|proxy| {
-                    match proxy.auth {
+                let current = settings
+                    .network
+                    .upstream_proxy
+                    .as_ref()
+                    .map(|proxy| match proxy.auth {
                         SettingsUpstreamProxyAuth::None => NetworkProxyAuthMode::None,
-                        SettingsUpstreamProxyAuth::Password {..} => NetworkProxyAuthMode::Password,
-                    }
-                }).unwrap_or(NetworkProxyAuthMode::None);
+                        SettingsUpstreamProxyAuth::Password { .. } => {
+                            NetworkProxyAuthMode::Password
+                        }
+                    })
+                    .unwrap_or(NetworkProxyAuthMode::None);
                 for mode in [NetworkProxyAuthMode::None, NetworkProxyAuthMode::Password] {
                     popup = popup.child(select_option_action(
-                        select_option(self.tokens, network_proxy_auth_label(mode, self.i18n), mode == current),
+                        select_option(
+                            self.tokens,
+                            network_proxy_auth_label(mode, self.i18n),
+                            mode == current,
+                        ),
                         false,
                         false,
                         self.action(move |this, _, window, cx| {
@@ -343,9 +375,17 @@ impl SettingsSelectMenu<'_> {
             }
             (SettingsTab::Sftp, SettingsSelect::SftpPresentation) => {
                 let mut popup = select_overlay_popup(self.tokens, width);
-                for preference in [SftpPresentationPreference::Ask, SftpPresentationPreference::Tab, SftpPresentationPreference::Sidebar] {
+                for preference in [
+                    SftpPresentationPreference::Ask,
+                    SftpPresentationPreference::Tab,
+                    SftpPresentationPreference::Sidebar,
+                ] {
                     popup = popup.child(select_option_action(
-                        select_option(self.tokens, crate::sftp_page::sftp_presentation_label(preference, self.i18n), preference == settings.sftp.presentation),
+                        select_option(
+                            self.tokens,
+                            crate::sftp_page::sftp_presentation_label(preference, self.i18n),
+                            preference == settings.sftp.presentation,
+                        ),
                         false,
                         false,
                         self.action(move |this, _, window, cx| {

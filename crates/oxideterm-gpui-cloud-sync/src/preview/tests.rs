@@ -1,7 +1,6 @@
 use oxideterm_cloud_sync::{
-    StructuredDirtyInfo, StructuredDirtySections,
-    StructuredLocalState, StructuredSectionRevisions, SyncScope, service::CloudSyncLocalSnapshot,
-    state::CloudSyncPersistedState,
+    StructuredDirtyInfo, StructuredDirtySections, StructuredLocalState, StructuredSectionRevisions,
+    SyncScope, service::CloudSyncLocalSnapshot, state::CloudSyncPersistedState,
 };
 
 use super::*;

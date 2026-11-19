@@ -21,7 +21,8 @@ impl WorkspaceApp {
                         dispatch(app, action, cx);
                     });
                 }),
-            }.render(content, cx)
+            }
+            .render(content, cx)
         })
     }
 
@@ -30,20 +31,22 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let ai = self.knowledge_page(cx).read(cx);
-        ai.knowledge_create_dialog_open().then(|| self.render_knowledge_dialog(
-            KnowledgeDialogContent::Collection {
-                name: ai.knowledge_new_collection_name(),
-                scope_label: self.knowledge_collection_scope_label(cx),
-                phase: ai.knowledge_create_presence().phase(),
-            },
-            |app, action, cx| {
-                if matches!(action, KnowledgeDialogAction::Confirm) {
-                    app.knowledge_create_collection(cx);
-                }
-                app.close_knowledge_create_dialog(cx);
-            },
-            cx,
-        ))
+        ai.knowledge_create_dialog_open().then(|| {
+            self.render_knowledge_dialog(
+                KnowledgeDialogContent::Collection {
+                    name: ai.knowledge_new_collection_name(),
+                    scope_label: self.knowledge_collection_scope_label(cx),
+                    phase: ai.knowledge_create_presence().phase(),
+                },
+                |app, action, cx| {
+                    if matches!(action, KnowledgeDialogAction::Confirm) {
+                        app.knowledge_create_collection(cx);
+                    }
+                    app.close_knowledge_create_dialog(cx);
+                },
+                cx,
+            )
+        })
     }
 
     pub(in crate::workspace) fn render_knowledge_new_document_dialog(
@@ -51,20 +54,24 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let ai = self.knowledge_page(cx).read(cx);
-        ai.knowledge_document_dialog_open().then(|| self.render_knowledge_dialog(
-            KnowledgeDialogContent::Document {
-                title: ai.knowledge_new_document_title(),
-                format_label: self.knowledge_document_format_label(cx),
-                error: ai.knowledge_new_document_error(),
-                phase: ai.knowledge_document_presence().phase(),
-            },
-            |app, action, cx| {
-                if !matches!(action, KnowledgeDialogAction::Confirm) || app.knowledge_create_blank_document(cx) {
-                    app.close_knowledge_document_dialog(cx);
-                }
-            },
-            cx,
-        ))
+        ai.knowledge_document_dialog_open().then(|| {
+            self.render_knowledge_dialog(
+                KnowledgeDialogContent::Document {
+                    title: ai.knowledge_new_document_title(),
+                    format_label: self.knowledge_document_format_label(cx),
+                    error: ai.knowledge_new_document_error(),
+                    phase: ai.knowledge_document_presence().phase(),
+                },
+                |app, action, cx| {
+                    if !matches!(action, KnowledgeDialogAction::Confirm)
+                        || app.knowledge_create_blank_document(cx)
+                    {
+                        app.close_knowledge_document_dialog(cx);
+                    }
+                },
+                cx,
+            )
+        })
     }
 
     pub(in crate::workspace) fn open_knowledge_create_dialog(&mut self, cx: &mut Context<Self>) {
@@ -133,7 +140,10 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let confirm = self.knowledge_page(cx).read(cx).knowledge_delete_confirm()?;
+        let confirm = self
+            .knowledge_page(cx)
+            .read(cx)
+            .knowledge_delete_confirm()?;
         Some(self.render_knowledge_dialog(
             KnowledgeDialogContent::Delete(confirm),
             |app, action, cx| {

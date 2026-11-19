@@ -149,7 +149,8 @@ impl TerminalPrivilegePromptStream {
                     bytes = rest;
                 }
                 ControlSequenceState::Csi => {
-                    let Some(end) = bytes.iter().position(|byte| matches!(byte, b'@'..=b'~')) else {
+                    let Some(end) = bytes.iter().position(|byte| matches!(byte, b'@'..=b'~'))
+                    else {
                         return &[];
                     };
                     // UTF-8 cannot conceal an ASCII CSI final byte.

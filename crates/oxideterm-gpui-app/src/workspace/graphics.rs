@@ -1299,7 +1299,6 @@ impl WorkspaceApp {
         .into_any_element()
     }
 
-
     fn render_graphics_toolbar(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
         let session = self.graphics.read(cx).session.clone();

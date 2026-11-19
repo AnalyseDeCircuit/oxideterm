@@ -353,14 +353,13 @@ impl Render for SettingsSurfaceView {
                     }
                 };
                 let padding = tokens.metrics.settings_content_padding;
-                let section = index.checked_sub(SETTINGS_SECTION_HEADER_ITEM_COUNT)
+                let section = index
+                    .checked_sub(SETTINGS_SECTION_HEADER_ITEM_COUNT)
                     .and_then(|index| settings_tab_section_at(tab, index, frame.counts));
                 div()
                     .w_full()
                     .min_w(px(0.0))
-                    .debug_selector(move || {
-                        format!("{section:?}")
-                    })
+                    .debug_selector(move || format!("{section:?}"))
                     .px(px(padding))
                     .pb(px(if index + 1 == count {
                         padding

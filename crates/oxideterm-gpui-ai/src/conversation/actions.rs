@@ -24,7 +24,8 @@ pub trait AiChatActions {
         references: &[AiReferenceMatch],
         cx: &mut Self::Cx<'_>,
     ) -> AiDraftContext;
-    fn resolve_ai_sidebar_system_prompt_segment(&mut self, cx: &mut Self::Cx<'_>) -> Option<String>;
+    fn resolve_ai_sidebar_system_prompt_segment(&mut self, cx: &mut Self::Cx<'_>)
+    -> Option<String>;
     fn resolve_ai_stream_config(&self, cx: &App) -> Result<AiChatStreamConfig, String>;
     fn ensure_ai_chat_initialized(&mut self, cx: &mut App);
     fn clear_chat_composition(&mut self);
@@ -35,7 +36,10 @@ pub trait AiChatActions {
     fn cancel_ai_chat_stream(&mut self, cx: &mut Self::Cx<'_>);
     fn launch_prepared_queued_turn(&mut self, pending: AiPendingChatStream, cx: &mut Self::Cx<'_>);
     fn launch_chat_turn(&mut self, pending: AiPendingChatStream, cx: &mut Self::Cx<'_>);
-    fn chat_launcher(&self, cx: &Self::Cx<'_>) -> impl FnOnce(AiPendingChatStream, &mut App) + 'static;
+    fn chat_launcher(
+        &self,
+        cx: &Self::Cx<'_>,
+    ) -> impl FnOnce(AiPendingChatStream, &mut App) + 'static;
     fn record_ai_memory_usage(&mut self, ids: &[String], cx: &mut Self::Cx<'_>);
 
     fn handle_transcript_action(
@@ -120,7 +124,11 @@ pub trait AiChatActions {
         }
     }
 
-    fn send_next_queued_ai_message(&mut self, conversation_id: &str, cx: &mut Self::Cx<'_>) -> bool {
+    fn send_next_queued_ai_message(
+        &mut self,
+        conversation_id: &str,
+        cx: &mut Self::Cx<'_>,
+    ) -> bool {
         let enabled = self.chat_settings().enabled;
         let Some(pending) = self.chat_state().update(&mut **cx, |ai, _| {
             ai.prepare_next_queued_turn(conversation_id, enabled)

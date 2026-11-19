@@ -6,8 +6,8 @@ use std::{
 
 use gpui::{AnyElement, App, Context, KeyDownEvent, Window};
 use oxideterm_forwarding::{
-    ForwardEvent, ForwardRule, ForwardStats, ForwardStatus, ForwardUpdate,
-    ForwardingManager, ForwardingRegistry, PortDetectionSnapshot,
+    ForwardEvent, ForwardRule, ForwardStats, ForwardStatus, ForwardUpdate, ForwardingManager,
+    ForwardingRegistry, PortDetectionSnapshot,
 };
 use oxideterm_gpui_forwards::{
     FORWARDS_PORT_SCAN_INTERVAL, ForwardingQuickAction, ForwardingRuntimeSnapshot,

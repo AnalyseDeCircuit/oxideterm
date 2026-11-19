@@ -63,13 +63,20 @@ impl WorkspaceApp {
             let providers = ai_provider_views(self.settings_store.settings());
             self.settings_workspace.update(cx, |state, cx| {
                 state.ai_context_windows.expanded = true;
-                state.ai_context_windows.expanded_providers.extend(providers.into_iter().map(|provider| provider.id));
+                state
+                    .ai_context_windows
+                    .expanded_providers
+                    .extend(providers.into_iter().map(|provider| provider.id));
                 cx.notify();
             });
         }
         if result.section == SettingsSectionId::AiProvidersSettings {
-            let ids = ai_provider_views(self.settings_store.settings()).into_iter().map(|provider| provider.id);
-            self.settings_views.ai_providers.update(cx, |view, cx| view.expand_for_search(ids, cx));
+            let ids = ai_provider_views(self.settings_store.settings())
+                .into_iter()
+                .map(|provider| provider.id);
+            self.settings_views
+                .ai_providers
+                .update(cx, |view, cx| view.expand_for_search(ids, cx));
         }
         if result.section == SettingsSectionId::KnowledgeEmbeddingConfig {
             self.knowledge_page(cx).update(cx, |ai, cx| {
@@ -78,7 +85,9 @@ impl WorkspaceApp {
             });
         }
         let tab = result.tab;
-        self.settings_workspace.update(cx, |settings, cx| settings.navigate_to_search_result(&result, cx));
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.navigate_to_search_result(&result, cx)
+        });
         let dismissed_select = self.open_settings_select.is_some();
         self.close_settings_select();
         self.focused_settings_input = None;
@@ -86,9 +95,14 @@ impl WorkspaceApp {
         self.ime_marked_text = None;
         self.refresh_settings_tab_services(tab, cx);
         self.sync_settings_section_list_state(cx);
-        self.settings_workspace.read(cx).section_list.scroll_to_section(
-            tab, result.section, self.settings_dynamic_section_counts(cx),
-        );
+        self.settings_workspace
+            .read(cx)
+            .section_list
+            .scroll_to_section(
+                tab,
+                result.section,
+                self.settings_dynamic_section_counts(cx),
+            );
         if dismissed_select {
             cx.notify();
         }

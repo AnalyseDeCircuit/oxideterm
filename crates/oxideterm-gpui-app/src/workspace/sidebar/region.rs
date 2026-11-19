@@ -392,9 +392,13 @@ impl WorkspaceApp {
             )
             .when(
                 panel_section == SidebarSection::Connections
-                    && self
-                        .disclosure_motions
-                        .retained("session-manager-search", self.connections.session_manager.read(cx).sidebar_search_open),
+                    && self.disclosure_motions.retained(
+                        "session-manager-search",
+                        self.connections
+                            .session_manager
+                            .read(cx)
+                            .sidebar_search_open,
+                    ),
                 |panel| {
                     panel.child(
                         self.disclosure_motions.render(
@@ -660,9 +664,9 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-
     pub(in crate::workspace) fn render_session_manager_search_input(
-        &self, _cx: &mut Context<Self>,
+        &self,
+        _cx: &mut Context<Self>,
     ) -> AnyElement {
         self.connections.session_manager_sidebar_search()
     }

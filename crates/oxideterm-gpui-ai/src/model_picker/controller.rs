@@ -24,13 +24,23 @@ pub fn active_model_picker_provider(settings: &AiSettings) -> Option<String> {
 }
 
 pub enum AiPickerSelection {
-    AcpSession { agent_id: String, config_id: String, value_id: String },
+    AcpSession {
+        agent_id: String,
+        config_id: String,
+        value_id: String,
+    },
     AcpAgent(String),
     Provider,
 }
 
 impl AiWorkspaceEntity {
-    pub fn update_model_switch_warning(&mut self, settings: &AiSettings, provider_id: &str, model: &str, total_tokens: usize) {
+    pub fn update_model_switch_warning(
+        &mut self,
+        settings: &AiSettings,
+        provider_id: &str,
+        model: &str,
+        total_tokens: usize,
+    ) {
         use oxideterm_ai::stream_state::{
             AI_COMPACTION_DEFAULT_CONTEXT_WINDOW, AI_CONTEXT_WARNING_PERCENT,
             ai_context_percentage, ai_context_window_from_maps,
@@ -68,7 +78,10 @@ impl AiWorkspaceEntity {
         AiPickerSelection::AcpAgent(agent_id.to_owned())
     }
 
-    pub fn validated_picker_highlight(&mut self, rows: &[(String, String)]) -> Option<(String, String)> {
+    pub fn validated_picker_highlight(
+        &mut self,
+        rows: &[(String, String)],
+    ) -> Option<(String, String)> {
         let row = self.model_selector_highlight()?.clone();
         if rows.contains(&row) {
             Some(row)
@@ -120,11 +133,14 @@ impl AiWorkspaceEntity {
         if self.acp_model_discovery_is_pending(conversation, agent_id) {
             return None;
         }
-        let agent = settings.acp_agents.iter().find(|agent| agent.id == agent_id && agent.enabled)?;
+        let agent = settings
+            .acp_agents
+            .iter()
+            .find(|agent| agent.id == agent_id && agent.enabled)?;
         // Other ACP agents discover models after the first prompt or use an explicit model.
         (agent.plugin_id.as_deref() == Some("com.oxideterm.acp.codex")
             || oxideterm_ai::acp_model_report_is_available_during_session_start(&agent.args))
-            .then(|| (conversation.clone(), agent.clone()))
+        .then(|| (conversation.clone(), agent.clone()))
     }
 
     pub fn picker_refresh_index(
@@ -142,7 +158,9 @@ impl AiWorkspaceEntity {
         if ai_acp_agent_id_from_provider_id(&provider.id).is_some() {
             return Ok(None);
         }
-        Ok(ai_provider_views(&settings.providers).iter().position(|candidate| candidate.id == provider.id))
+        Ok(ai_provider_views(&settings.providers)
+            .iter()
+            .position(|candidate| candidate.id == provider.id))
     }
 
     pub fn active_ai_acp_session_state(&self, agent_id: &str) -> Option<AiAcpSessionState> {

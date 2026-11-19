@@ -8,8 +8,8 @@ use oxideterm_connections::{
 use oxideterm_remote_desktop::RemoteDesktopProtocol;
 use oxideterm_session_adapter::{auth_method_from_saved_auth, proxy_command_from_value};
 use oxideterm_ssh::{
-    AuthMethod, NativeSessionTreeConnectEndpoint, NodeId, NodeRouter, ProxyHopConfig, SshConfig, UpstreamProxyAuth,
-    UpstreamProxyProtocol, X11ForwardPolicy, X11ForwardTrust,
+    AuthMethod, NativeSessionTreeConnectEndpoint, NodeId, NodeRouter, ProxyHopConfig, SshConfig,
+    UpstreamProxyAuth, UpstreamProxyProtocol, X11ForwardPolicy, X11ForwardTrust,
 };
 
 pub fn runtime_proxy_hops_for_parent_path(
@@ -20,22 +20,38 @@ pub fn runtime_proxy_hops_for_parent_path(
     let mut configs = Vec::new();
     let mut next = Some(parent.clone());
     while let Some(node) = next {
-        let snapshot = router.node_runtime_snapshot(&node)
-            .ok_or_else(|| anyhow::anyhow!("{}: {}", i18n.t("ssh.form.runtime_node_missing"), node.0))?;
+        let snapshot = router.node_runtime_snapshot(&node).ok_or_else(|| {
+            anyhow::anyhow!("{}: {}", i18n.t("ssh.form.runtime_node_missing"), node.0)
+        })?;
         configs.push(snapshot.config);
         next = snapshot.parent_id;
     }
-    Ok(configs.into_iter().rev().flat_map(|config| {
-        config.proxy_chain.unwrap_or_default().into_iter()
-            .chain(std::iter::once(ProxyHopConfig {
-                totp: config.totp, host: config.host, port: config.port, username: config.username,
-                auth: config.auth, agent_forwarding: config.agent_forwarding, identity_agent: config.identity_agent,
-                agent_forwarding_socket: config.agent_forwarding_socket, legacy_ssh_compatibility: config.legacy_ssh_compatibility,
-                ssh_algorithms: config.ssh_algorithms, strict_host_key_checking: true,
-                trust_host_key: None, expected_host_key_fingerprint: None,
-            }))
-            .map(proxy_hop_form_from_runtime_config)
-    }).collect())
+    Ok(configs
+        .into_iter()
+        .rev()
+        .flat_map(|config| {
+            config
+                .proxy_chain
+                .unwrap_or_default()
+                .into_iter()
+                .chain(std::iter::once(ProxyHopConfig {
+                    totp: config.totp,
+                    host: config.host,
+                    port: config.port,
+                    username: config.username,
+                    auth: config.auth,
+                    agent_forwarding: config.agent_forwarding,
+                    identity_agent: config.identity_agent,
+                    agent_forwarding_socket: config.agent_forwarding_socket,
+                    legacy_ssh_compatibility: config.legacy_ssh_compatibility,
+                    ssh_algorithms: config.ssh_algorithms,
+                    strict_host_key_checking: true,
+                    trust_host_key: None,
+                    expected_host_key_fingerprint: None,
+                }))
+                .map(proxy_hop_form_from_runtime_config)
+        })
+        .collect())
 }
 
 pub fn form_for_runtime_node(
@@ -45,9 +61,11 @@ pub fn form_for_runtime_node(
     save: bool,
     i18n: &oxideterm_i18n::I18n,
 ) -> anyhow::Result<NewConnectionForm> {
-    let snapshot = router.node_runtime_snapshot(node)
+    let snapshot = router
+        .node_runtime_snapshot(node)
         .ok_or_else(|| anyhow::anyhow!(i18n.t("ssh.form.runtime_node_missing")))?;
-    let mut form = form_from_runtime_config(snapshot.config, Some(title), i18n.t("ssh.form.ungrouped"));
+    let mut form =
+        form_from_runtime_config(snapshot.config, Some(title), i18n.t("ssh.form.ungrouped"));
     if save && let Some(parent) = snapshot.parent_id.as_ref() {
         form.proxy_hops = runtime_proxy_hops_for_parent_path(router, parent, i18n)?;
         form.proxy_chain_expanded = !form.proxy_hops.is_empty();

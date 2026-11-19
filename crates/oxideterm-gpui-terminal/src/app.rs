@@ -6289,7 +6289,9 @@ mod tests {
     }
 
     #[gpui::test]
-    fn theme_change_animates_visual_colors_across_vsync_frames_and_settles(cx: &mut TestAppContext) {
+    fn theme_change_animates_visual_colors_across_vsync_frames_and_settles(
+        cx: &mut TestAppContext,
+    ) {
         let (_, cx) = cx.add_window_view(|_window, _cx| TerminalTestRoot);
         let dark = TerminalUiTheme::from_tokens(oxideterm_theme::ThemeTokens::from_builtin(
             oxideterm_theme::theme_by_id("default"),

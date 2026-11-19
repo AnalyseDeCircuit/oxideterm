@@ -8,12 +8,12 @@ pub(super) use oxideterm_plugin_host_api::settings::{
     native_normalize_syncable_settings_payload, native_syncable_settings_apply_plan,
     native_syncable_settings_payload_arg,
 };
-use serde_json::Value;
 use oxideterm_settings::PersistedSettings;
 use oxideterm_settings_model::ThemeTarget;
+use serde_json::Value;
 
-use crate::workspace::WorkspaceApp;
 use super::plugin_host;
+use crate::workspace::WorkspaceApp;
 
 impl WorkspaceApp {
     pub(in crate::workspace) fn emit_native_plugin_settings_events(

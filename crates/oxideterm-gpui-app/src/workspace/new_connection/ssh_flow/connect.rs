@@ -59,7 +59,9 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         for result in results {
-            let request = self.connections.flow.update(cx, |flow, cx| flow.apply_ssh_worker_result(result, &self.i18n, cx));
+            let request = self.connections.flow.update(cx, |flow, cx| {
+                flow.apply_ssh_worker_result(result, &self.i18n, cx)
+            });
             if let Some(request) = request {
                 self.dispatch_connections_request(request, Some(window), cx);
             }
@@ -72,34 +74,57 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let mut adopt = |endpoint: oxideterm_gpui_connections::views::SftpConnectedEndpoint| {
-            self.standalone_sftp_sessions.insert(endpoint.id.clone(), crate::workspace::sftp::StandaloneSftpRuntime {
-                connection_id: endpoint.handle.connection_id().to_string(),
-                consumer: endpoint.consumer,
-                handle: endpoint.handle,
-                title: sftp.title.clone(),
-            });
+            self.standalone_sftp_sessions.insert(
+                endpoint.id.clone(),
+                crate::workspace::sftp::StandaloneSftpRuntime {
+                    connection_id: endpoint.handle.connection_id().to_string(),
+                    consumer: endpoint.consumer,
+                    handle: endpoint.handle,
+                    title: sftp.title.clone(),
+                },
+            );
             (endpoint.id, endpoint.path)
         };
         let (primary, primary_path) = adopt(sftp.primary);
         let secondary = sftp.secondary.map(adopt);
         if let Some(profile_id) = sftp.saved_profile_id {
-            let _ = self.connection_store.mark_standalone_sftp_profile_used(&profile_id);
+            let _ = self
+                .connection_store
+                .mark_standalone_sftp_profile_used(&profile_id);
         }
         self.set_connection_status(None, cx);
         if let Some((secondary, secondary_path)) = secondary {
-            self.open_standalone_sftp_pair_tab_surface(primary, secondary, sftp.title, primary_path, secondary_path, cx);
+            self.open_standalone_sftp_pair_tab_surface(
+                primary,
+                secondary,
+                sftp.title,
+                primary_path,
+                secondary_path,
+                cx,
+            );
         } else {
             self.open_standalone_sftp_tab_surface(primary, sftp.title, primary_path, cx);
         }
     }
 
-    pub(in crate::workspace::new_connection) fn set_connection_status(&self, message: Option<String>, cx: &mut Context<Self>) {
-        self.connections.session_manager.update(cx, |manager, cx| manager.set_status(message, cx));
+    pub(in crate::workspace::new_connection) fn set_connection_status(
+        &self,
+        message: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        self.connections
+            .session_manager
+            .update(cx, |manager, cx| manager.set_status(message, cx));
     }
 
     pub(super) fn start_proxy_session_tree_connect(
-        &mut self, mut config: SshConfig, title: String, intent: SshConnectionIntent,
-        save: Option<SaveConnectionRequest>, window: &mut Window, cx: &mut Context<Self>,
+        &mut self,
+        mut config: SshConfig,
+        title: String,
+        intent: SshConnectionIntent,
+        save: Option<SaveConnectionRequest>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
     ) {
         if !config.pre_connect_completed
             && let Some(command) = config.pre_connect_command.clone()
@@ -148,16 +173,24 @@ impl WorkspaceApp {
         save: Option<SaveConnectionRequest>, window: &mut Window, cx: &mut Context<Self>,
     ) {
         use oxideterm_gpui_connections::proxy_launch::{CHAIN_LOCK_BUSY, ProxyExpansion};
-        if self.connections.flow.read(cx).has_active_proxy_connect_run() {
+        if self
+            .connections
+            .flow
+            .read(cx)
+            .has_active_proxy_connect_run()
+        {
             return self.report_proxy_session_tree_error(CHAIN_LOCK_BUSY.to_owned(), cx);
         }
         let request = ProxyExpansion::prepare(&mut config, title, intent, save);
         let id = request.expansion_id(self.next_ssh_node_id);
-        let expansion = match self.expand_saved_connection_tree(&id, config, request.title().to_owned()) {
-            Ok(expansion) => expansion,
-            Err(error) => return self.report_proxy_session_tree_error(error.to_string(), cx),
-        };
-        let result = self.connections.flow.update(cx, |flow, cx| flow.stage_proxy_expansion(request, &expansion, cx));
+        let expansion =
+            match self.expand_saved_connection_tree(&id, config, request.title().to_owned()) {
+                Ok(expansion) => expansion,
+                Err(error) => return self.report_proxy_session_tree_error(error.to_string(), cx),
+            };
+        let result = self.connections.flow.update(cx, |flow, cx| {
+            flow.stage_proxy_expansion(request, &expansion, cx)
+        });
         match result {
             Ok(consent) => self.arm_saved_auth_save(&expansion.target_node_id, consent),
             Err(error) => return self.report_proxy_session_tree_error(error, cx),
@@ -166,17 +199,34 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn start_existing_session_tree_connect(
-        &mut self, target: NodeId, title: String, intent: SshConnectionIntent,
-        save: &mut Option<SaveConnectionRequest>, window: &mut Window, cx: &mut Context<Self>,
+        &mut self,
+        target: NodeId,
+        title: String,
+        intent: SshConnectionIntent,
+        save: &mut Option<SaveConnectionRequest>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
     ) -> bool {
         let runtime = self.workspace_runtime.read(cx);
         let chain_locked = runtime.has_active_connection_chain();
         let node_locks = runtime.connecting_node_locks().clone();
         let result = self.connections.flow.update(cx, |flow, cx| {
             flow.stage_existing_proxy_chain(
-                &self.node_router, target, title, intent, save, chain_locked,
+                &self.node_router,
+                target,
+                title,
+                intent,
+                save,
+                chain_locked,
                 |nodes| nodes.iter().any(|node| node_locks.contains(node)),
-                |id| self.ssh_nodes.get(id).map(|node| NativeSessionTreeConnectEndpoint::new(node.endpoint.host.clone(), node.endpoint.port)),
+                |id| {
+                    self.ssh_nodes.get(id).map(|node| {
+                        NativeSessionTreeConnectEndpoint::new(
+                            node.endpoint.host.clone(),
+                            node.endpoint.port,
+                        )
+                    })
+                },
                 cx,
             )
         });
@@ -194,7 +244,9 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn continue_active_proxy_session_tree_connect(
-        &mut self, window: &mut Window, cx: &mut Context<Self>,
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
     ) {
         let request = self.connections.flow.update(cx, |flow, cx| {
             flow.next_proxy_chain_request(&self.node_router, &self.connection_store, &self.i18n, cx)
@@ -205,16 +257,23 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace::new_connection) fn finish_proxy_session_tree_connect(
-        &mut self, plan: NativeSessionTreeConnectPlan,
+        &mut self,
+        plan: NativeSessionTreeConnectPlan,
         terminal: Option<oxideterm_gpui_connections::proxy_launch::ReadyProxyTerminal>,
-        report: Option<String>, window: &mut Window, cx: &mut Context<Self>,
+        report: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
     ) {
         self.release_proxy_session_tree_locks(&plan, cx);
         if let Some(report) = report {
             return self.report_proxy_session_tree_error(report, cx);
         }
-        let Some(terminal) = terminal else { return; };
-        if let Some(options) = terminal.options && let Some(node) = self.ssh_nodes.get_mut(&terminal.node_id) {
+        let Some(terminal) = terminal else {
+            return;
+        };
+        if let Some(options) = terminal.options
+            && let Some(node) = self.ssh_nodes.get_mut(&terminal.node_id)
+        {
             node.terminal_options = options.terminal;
             node.dedicated_new_terminal_connection = options.dedicated_new_terminal_connection;
             node.ssh_channel_strategy = options.ssh_channel_strategy;
@@ -223,8 +282,16 @@ impl WorkspaceApp {
             self.set_connection_status(None, cx);
         }
         let _ = self.queue_ssh_terminal_tab_for_node_with_mark_used(
-            terminal.node_id, terminal.config.post_connect_command.clone(), terminal.config, terminal.title,
-            terminal.saved_id.clone(), terminal.saved_id, terminal.save_after_open, terminal.open_sftp, window, cx,
+            terminal.node_id,
+            terminal.config.post_connect_command.clone(),
+            terminal.config,
+            terminal.title,
+            terminal.saved_id.clone(),
+            terminal.saved_id,
+            terminal.save_after_open,
+            terminal.open_sftp,
+            window,
+            cx,
         );
     }
 
@@ -288,7 +355,6 @@ impl WorkspaceApp {
         }
         self.continue_active_proxy_session_tree_connect(window, cx);
     }
-
 
     pub(in crate::workspace) fn cancel_active_proxy_connect_run(&mut self, cx: &mut Context<Self>) {
         let Some(run) = self.connections.flow.update(cx, |connection_flow, cx| {
@@ -430,7 +496,8 @@ impl WorkspaceApp {
                         &SshConnectionIntent::Mosh(options),
                         message.clone(),
                     );
-                    self.connections.session_manager
+                    self.connections
+                        .session_manager
                         .update(cx, |manager, cx| manager.set_status(Some(message), cx));
                     return;
                 };
@@ -515,22 +582,36 @@ impl WorkspaceApp {
                                 cx,
                             );
                         }
-                        self.connections.session_manager.update(cx, |session_manager, cx| {
-                            session_manager.set_status(Some(error), cx);
-                        });
+                        self.connections
+                            .session_manager
+                            .update(cx, |session_manager, cx| {
+                                session_manager.set_status(Some(error), cx);
+                            });
                     }
                 }
             }
-            intent @ (SshConnectionIntent::StandaloneSftp { .. } | SshConnectionIntent::StandaloneSftpSecondary { .. }) => {
+            intent @ (SshConnectionIntent::StandaloneSftp { .. }
+            | SshConnectionIntent::StandaloneSftpSecondary { .. }) => {
                 let surface = self.connections.flow.update(cx, |flow, cx| {
                     flow.open_verified_sftp(
-                        config, title, intent, |id| self.standalone_sftp_sessions.contains_key(id),
-                        &self.connection_store, self.ssh_registry.clone(), self.forwarding_runtime.as_ref(),
-                        &self.i18n, cx,
+                        config,
+                        title,
+                        intent,
+                        |id| self.standalone_sftp_sessions.contains_key(id),
+                        &self.connection_store,
+                        self.ssh_registry.clone(),
+                        self.forwarding_runtime.as_ref(),
+                        &self.i18n,
+                        cx,
                     )
                 });
                 if let Some(surface) = surface {
-                    self.open_standalone_sftp_tab_surface(surface.endpoint_id, surface.title, surface.path, cx);
+                    self.open_standalone_sftp_tab_surface(
+                        surface.endpoint_id,
+                        surface.title,
+                        surface.path,
+                        cx,
+                    );
                 }
             }
             SshConnectionIntent::DrillDown {

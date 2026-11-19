@@ -23,7 +23,9 @@ impl SettingsSurfaceHost for WorkspaceApp {
     fn ai_mcp(&self) -> Entity<oxideterm_gpui_settings_view::ai::mcp::AiMcpSettingsView> {
         self.settings_views.ai_mcp.clone()
     }
-    fn ai_providers(&self) -> Entity<oxideterm_gpui_settings_view::ai::providers::AiProviderSettingsView> {
+    fn ai_providers(
+        &self,
+    ) -> Entity<oxideterm_gpui_settings_view::ai::providers::AiProviderSettingsView> {
         self.settings_views.ai_providers.clone()
     }
     fn ai_skills(&self) -> oxideterm_gpui_settings_view::ai::AiSkillData {

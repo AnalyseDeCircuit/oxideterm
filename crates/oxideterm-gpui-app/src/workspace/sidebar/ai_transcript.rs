@@ -1,5 +1,5 @@
-use oxideterm_gpui_ai::model_picker::host::AiModelPickerHost as _;
 use oxideterm_gpui_ai::conversation::actions::AiChatActions as _;
+use oxideterm_gpui_ai::model_picker::host::AiModelPickerHost as _;
 use std::rc::Rc;
 
 use gpui::{App, AppContext, Context, Entity, IntoElement};
@@ -7,9 +7,9 @@ use oxideterm_gpui_ai::{
     sidebar::{
         editor::AiEditorView,
         transcript::{
-            AiAssistantSidebarView, AiRenameFrame,
-            AiSidebarChildren, AiSidebarLayer, AiSidebarLayerKind, AiTranscriptBindings,
-            AiTranscriptFrame, AiTranscriptPolicy, AiTranscriptRequest, SelectableTextRole as TranscriptTextRole,
+            AiAssistantSidebarView, AiRenameFrame, AiSidebarChildren, AiSidebarLayer,
+            AiSidebarLayerKind, AiTranscriptBindings, AiTranscriptFrame, AiTranscriptPolicy,
+            AiTranscriptRequest, SelectableTextRole as TranscriptTextRole,
         },
     },
     state::AiWorkspaceEntity,
@@ -17,9 +17,7 @@ use oxideterm_gpui_ai::{
 use oxideterm_gpui_markdown::render::MarkdownCodeBlockActions;
 use oxideterm_gpui_ui::tauri_ui_font_family;
 
-use super::super::{
-    SelectableTextRole, WorkspaceApp, settings_mono_font_family,
-};
+use super::super::{SelectableTextRole, WorkspaceApp, settings_mono_font_family};
 
 impl WorkspaceApp {
     pub(in crate::workspace) fn ai_sidebar_layer(
@@ -54,18 +52,31 @@ impl WorkspaceApp {
                 let settings = app.settings_store.settings();
                 let text = app.selectable_text_render_state_for_entity(entity.clone(), cx);
                 let ai = app.ai.state.read(cx);
-                let auth = ai.conversation_state().active_conversation_id.as_deref()
+                let auth = ai
+                    .conversation_state()
+                    .active_conversation_id
+                    .as_deref()
                     .and_then(|id| app.ai.acp.read(cx).authentication_methods(id));
                 let (composer, overlay, agent_models) = AiTranscriptPolicy::compose(
-                    &settings.ai, ai, || app.resolve_ai_stream_config(cx).ok(),
-                    || app.ai_context_message_usage_counts(cx), || app.ai_context_token_breakdown(cx),
-                    [app.ai_active_terminal_context_available(cx), app.ai_active_tab_has_split_panes(cx),
-                     app.ai_has_ide_context(cx), app.ai_has_sftp_context(cx)],
-                    app.ai_tool_indicator_info(cx), auth,
+                    &settings.ai,
+                    ai,
+                    || app.resolve_ai_stream_config(cx).ok(),
+                    || app.ai_context_message_usage_counts(cx),
+                    || app.ai_context_token_breakdown(cx),
+                    [
+                        app.ai_active_terminal_context_available(cx),
+                        app.ai_active_tab_has_split_panes(cx),
+                        app.ai_has_ide_context(cx),
+                        app.ai_has_sftp_context(cx),
+                    ],
+                    app.ai_tool_indicator_info(cx),
+                    auth,
                     AiRenameFrame {
                         anchor: rename_target.anchor_id(),
                         viewport: app.text_input_anchors.viewport(rename_target.anchor_id()),
-                        marked: app.marked_text_for_target(rename_target, cx).map(str::to_owned),
+                        marked: app
+                            .marked_text_for_target(rename_target, cx)
+                            .map(str::to_owned),
                         selected_range: app.ime_selected_range_for_target(rename_target, cx),
                         active_offset: app.ime_active_offset_for_target(rename_target, cx),
                         caret_visible: app.input_caret.visible(),
@@ -73,7 +84,9 @@ impl WorkspaceApp {
                     app.standard_confirm_focus(),
                 );
                 Some(AiTranscriptFrame {
-                    composer, overlay, agent_models,
+                    composer,
+                    overlay,
+                    agent_models,
                     tokens: app.tokens,
                     i18n: app.i18n.clone(),
                     font: tauri_ui_font_family(&settings.appearance.ui_font_family),
@@ -106,106 +119,108 @@ impl WorkspaceApp {
             }),
             request: Rc::new(move |request, window, cx| {
                 let _ = action_owner.update(cx, |app, cx| {
-                    let Some(request) = app.handle_transcript_action(request, cx) else { return };
+                    let Some(request) = app.handle_transcript_action(request, cx) else {
+                        return;
+                    };
                     match request {
-                    AiTranscriptRequest::CancelEdit => app.cancel_edit_ai_message(cx),
-                    AiTranscriptRequest::AcpPermission(a0, a1, a2) => {
-                        app.resolve_ai_acp_permission(a0, a1, a2, cx)
-                    }
-                    AiTranscriptRequest::InsertCommand(a0) => {
-                        app.insert_ai_code_block_command(a0, cx)
-                    }
-                    AiTranscriptRequest::BeginRename(id, title) => {
-                        if let Some(window) = window {
-                            app.begin_ai_conversation_rename(id, title, window, cx);
+                        AiTranscriptRequest::CancelEdit => app.cancel_edit_ai_message(cx),
+                        AiTranscriptRequest::AcpPermission(a0, a1, a2) => {
+                            app.resolve_ai_acp_permission(a0, a1, a2, cx)
                         }
-                    }
-                    AiTranscriptRequest::RenamePointer(event) => {
-                        if let Some(window) = window {
+                        AiTranscriptRequest::InsertCommand(a0) => {
+                            app.insert_ai_code_block_command(a0, cx)
+                        }
+                        AiTranscriptRequest::BeginRename(id, title) => {
+                            if let Some(window) = window {
+                                app.begin_ai_conversation_rename(id, title, window, cx);
+                            }
+                        }
+                        AiTranscriptRequest::RenamePointer(event) => {
+                            if let Some(window) = window {
+                                app.ime_marked_text = None;
+                                window.focus(&app.focus_handle, cx);
+                                app.begin_ime_selection_from_mouse_down(
+                                    rename_target,
+                                    &event,
+                                    window,
+                                    cx,
+                                );
+                            }
+                        }
+                        AiTranscriptRequest::RenameDrag(event) => {
+                            if let Some(window) = window {
+                                app.update_ime_selection_drag_from_mouse_move(&event, window, cx);
+                            }
+                        }
+                        AiTranscriptRequest::SaveRename => app.save_ai_conversation_rename(cx),
+                        AiTranscriptRequest::DeleteConversation(id) => {
+                            app.delete_ai_conversation(&id, cx)
+                        }
+                        AiTranscriptRequest::SafetyDefault => app.set_ai_safety_mode_default(cx),
+                        AiTranscriptRequest::SafetyReadOnly => app.set_ai_safety_mode_read_only(cx),
+                        AiTranscriptRequest::SafetyConfirm => app.open_ai_safety_confirm(cx),
+                        AiTranscriptRequest::ConfirmSafety(confirmed) => {
+                            if app.begin_ai_safety_confirm_exit(cx) && confirmed {
+                                app.confirm_ai_safety_bypass(cx);
+                            }
+                        }
+                        AiTranscriptRequest::ConfirmSummary(confirmed) => {
+                            if app.begin_ai_summarize_confirm_exit(cx) && confirmed {
+                                app.start_ai_summarize_conversation(cx);
+                            }
+                        }
+                        AiTranscriptRequest::ConfirmClearAll(confirmed) => {
+                            app.begin_ai_clear_all_confirm_exit(confirmed, cx);
+                        }
+                        AiTranscriptRequest::ConfirmDeleteMessage(confirmed) => {
+                            app.begin_ai_delete_message_confirm_exit(confirmed, cx);
+                        }
+                        AiTranscriptRequest::Autocomplete(candidate) => {
+                            app.apply_ai_chat_autocomplete_candidate(&candidate, cx)
+                        }
+                        AiTranscriptRequest::SelectReasoning(provider, kind, model, level) => {
+                            app.select_ai_reasoning_level(provider, kind, model, level, cx);
+                        }
+                        AiTranscriptRequest::OpenSettings => {
+                            if let Some(window) = window {
+                                app.open_ai_settings(window, cx);
+                            }
+                        }
+                        AiTranscriptRequest::ClosePopovers => {
+                            app.close_ai_sidebar_popovers(cx);
+                            // The floating layer is mounted by the window, so closing it invalidates that layer.
+                            cx.notify();
+                        }
+                        AiTranscriptRequest::NewConversation => {
+                            app.create_ai_sidebar_conversation(None, cx);
+                        }
+                        AiTranscriptRequest::Summarize => app.open_ai_summarize_confirm(cx),
+                        AiTranscriptRequest::SelectImages => app.select_ai_images(cx),
+                        AiTranscriptRequest::ContinueTextOnly(id) => {
+                            app.continue_ai_image_text_only(&id, cx)
+                        }
+                        AiTranscriptRequest::ImportImages(paths) => {
+                            app.import_ai_image_paths(paths, cx)
+                        }
+                        AiTranscriptRequest::Authenticate(id, method) => {
+                            app.ai.acp.update(cx, |acp, _| {
+                                acp.authenticate(&id, method);
+                            });
+                        }
+                        AiTranscriptRequest::EditMessage(id) => {
+                            app.start_edit_ai_message(id, cx);
+                            if let Some(window) = window {
+                                window.focus(&app.focus_handle, cx);
+                            }
+                        }
+                        AiTranscriptRequest::FocusComposer => {
                             app.ime_marked_text = None;
-                            window.focus(&app.focus_handle, cx);
-                            app.begin_ime_selection_from_mouse_down(
-                                rename_target,
-                                &event,
-                                window,
-                                cx,
-                            );
+                            if let Some(window) = window {
+                                window.focus(&app.focus_handle, cx);
+                            }
+                            gpui::App::notify(cx, app.ai.transcript.entity_id());
                         }
-                    }
-                    AiTranscriptRequest::RenameDrag(event) => {
-                        if let Some(window) = window {
-                            app.update_ime_selection_drag_from_mouse_move(&event, window, cx);
-                        }
-                    }
-                    AiTranscriptRequest::SaveRename => app.save_ai_conversation_rename(cx),
-                    AiTranscriptRequest::DeleteConversation(id) => {
-                        app.delete_ai_conversation(&id, cx)
-                    }
-                    AiTranscriptRequest::SafetyDefault => app.set_ai_safety_mode_default(cx),
-                    AiTranscriptRequest::SafetyReadOnly => app.set_ai_safety_mode_read_only(cx),
-                    AiTranscriptRequest::SafetyConfirm => app.open_ai_safety_confirm(cx),
-                    AiTranscriptRequest::ConfirmSafety(confirmed) => {
-                        if app.begin_ai_safety_confirm_exit(cx) && confirmed {
-                            app.confirm_ai_safety_bypass(cx);
-                        }
-                    }
-                    AiTranscriptRequest::ConfirmSummary(confirmed) => {
-                        if app.begin_ai_summarize_confirm_exit(cx) && confirmed {
-                            app.start_ai_summarize_conversation(cx);
-                        }
-                    }
-                    AiTranscriptRequest::ConfirmClearAll(confirmed) => {
-                        app.begin_ai_clear_all_confirm_exit(confirmed, cx);
-                    }
-                    AiTranscriptRequest::ConfirmDeleteMessage(confirmed) => {
-                        app.begin_ai_delete_message_confirm_exit(confirmed, cx);
-                    }
-                    AiTranscriptRequest::Autocomplete(candidate) => {
-                        app.apply_ai_chat_autocomplete_candidate(&candidate, cx)
-                    }
-                    AiTranscriptRequest::SelectReasoning(provider, kind, model, level) => {
-                        app.select_ai_reasoning_level(provider, kind, model, level, cx);
-                    }
-                    AiTranscriptRequest::OpenSettings => {
-                        if let Some(window) = window {
-                            app.open_ai_settings(window, cx);
-                        }
-                    }
-                    AiTranscriptRequest::ClosePopovers => {
-                        app.close_ai_sidebar_popovers(cx);
-                        // The floating layer is mounted by the window, so closing it invalidates that layer.
-                        cx.notify();
-                    }
-                    AiTranscriptRequest::NewConversation => {
-                        app.create_ai_sidebar_conversation(None, cx);
-                    }
-                    AiTranscriptRequest::Summarize => app.open_ai_summarize_confirm(cx),
-                    AiTranscriptRequest::SelectImages => app.select_ai_images(cx),
-                    AiTranscriptRequest::ContinueTextOnly(id) => {
-                        app.continue_ai_image_text_only(&id, cx)
-                    }
-                    AiTranscriptRequest::ImportImages(paths) => {
-                        app.import_ai_image_paths(paths, cx)
-                    }
-                    AiTranscriptRequest::Authenticate(id, method) => {
-                        app.ai.acp.update(cx, |acp, _| {
-                            acp.authenticate(&id, method);
-                        });
-                    }
-                    AiTranscriptRequest::EditMessage(id) => {
-                        app.start_edit_ai_message(id, cx);
-                        if let Some(window) = window {
-                            window.focus(&app.focus_handle, cx);
-                        }
-                    }
-                    AiTranscriptRequest::FocusComposer => {
-                        app.ime_marked_text = None;
-                        if let Some(window) = window {
-                            window.focus(&app.focus_handle, cx);
-                        }
-                        gpui::App::notify(cx, app.ai.transcript.entity_id());
-                    }
-                    _ => unreachable!("feature action already dispatched"),
+                        _ => unreachable!("feature action already dispatched"),
                     }
                 });
             }),

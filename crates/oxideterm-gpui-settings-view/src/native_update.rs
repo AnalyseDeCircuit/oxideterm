@@ -164,22 +164,31 @@ impl SettingsWorkspaceEntity {
         i18n: &oxideterm_i18n::I18n,
         cx: &mut Context<Self>,
     ) {
-        let install_context = || oxideterm_update::NativeInstallContext::current(self.native_update_is_portable())
-            .map_err(|error| error.to_string());
-        let download_directory = || environment.settings_path.parent()
-            .map(|parent| parent.join("updates"))
-            .unwrap_or_else(|| PathBuf::from("updates"));
+        let install_context = || {
+            oxideterm_update::NativeInstallContext::current(self.native_update_is_portable())
+                .map_err(|error| error.to_string())
+        };
+        let download_directory = || {
+            environment
+                .settings_path
+                .parent()
+                .map(|parent| parent.join("updates"))
+                .unwrap_or_else(|| PathBuf::from("updates"))
+        };
         match action {
             NativeUpdateAction::Check(kind) => {
                 let install_flavor = install_context().map(|context| context.install_flavor);
-                self.start_native_update_check(NativeUpdateCheckRequest {
-                    kind,
-                    channel: environment.general.update_channel,
-                    current_version: environment.current_version.to_owned(),
-                    install_flavor,
-                    update_proxy: environment.general.update_proxy.clone(),
-                    runtime: environment.runtime,
-                }, cx);
+                self.start_native_update_check(
+                    NativeUpdateCheckRequest {
+                        kind,
+                        channel: environment.general.update_channel,
+                        current_version: environment.current_version.to_owned(),
+                        install_flavor,
+                        update_proxy: environment.general.update_proxy.clone(),
+                        runtime: environment.runtime,
+                    },
+                    cx,
+                );
             }
             NativeUpdateAction::Download => {
                 self.start_native_update_download(
@@ -192,7 +201,12 @@ impl SettingsWorkspaceEntity {
             }
             NativeUpdateAction::Install => {
                 let context = install_context();
-                self.start_native_update_install(context, download_directory(), environment.runtime, cx);
+                self.start_native_update_install(
+                    context,
+                    download_directory(),
+                    environment.runtime,
+                    cx,
+                );
             }
             NativeUpdateAction::Cancel => {
                 self.cancel_native_update(cx);

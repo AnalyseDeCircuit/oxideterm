@@ -634,7 +634,10 @@ mod knowledge_dialog_key_tests {
                 oxideterm_ai::rag_list_documents(&store, &collection_id, None, None).unwrap();
             assert_eq!(documents.documents.len(), 1);
             assert_eq!(
-                workspace.knowledge_page(cx).read(cx).focused_settings_input(),
+                workspace
+                    .knowledge_page(cx)
+                    .read(cx)
+                    .focused_settings_input(),
                 Some(SettingsInput::KnowledgeDocumentTitle),
                 "a modified Enter must keep focus in the dialog input"
             );
@@ -649,7 +652,13 @@ mod knowledge_dialog_key_tests {
                 workspace.standard_confirm_focus_owner(),
                 Some(ConfirmDialogAction::Cancel)
             );
-            assert_eq!(workspace.knowledge_page(cx).read(cx).focused_settings_input(), None);
+            assert_eq!(
+                workspace
+                    .knowledge_page(cx)
+                    .read(cx)
+                    .focused_settings_input(),
+                None
+            );
         });
         cx.simulate_keystrokes("tab");
         cx.run_until_parked();
@@ -664,7 +673,10 @@ mod knowledge_dialog_key_tests {
         workspace.read_with(cx, |workspace, cx| {
             assert_eq!(workspace.standard_confirm_focus_owner(), None);
             assert_eq!(
-                workspace.knowledge_page(cx).read(cx).focused_settings_input(),
+                workspace
+                    .knowledge_page(cx)
+                    .read(cx)
+                    .focused_settings_input(),
                 Some(SettingsInput::KnowledgeDocumentTitle)
             );
         });
@@ -675,7 +687,13 @@ mod knowledge_dialog_key_tests {
                 workspace.standard_confirm_focus_owner(),
                 Some(ConfirmDialogAction::Confirm)
             );
-            assert_eq!(workspace.knowledge_page(cx).read(cx).focused_settings_input(), None);
+            assert_eq!(
+                workspace
+                    .knowledge_page(cx)
+                    .read(cx)
+                    .focused_settings_input(),
+                None
+            );
         });
         cx.simulate_keystrokes("shift-tab");
         cx.run_until_parked();
@@ -689,7 +707,10 @@ mod knowledge_dialog_key_tests {
         cx.run_until_parked();
         workspace.read_with(cx, |workspace, cx| {
             assert_eq!(
-                workspace.knowledge_page(cx).read(cx).focused_settings_input(),
+                workspace
+                    .knowledge_page(cx)
+                    .read(cx)
+                    .focused_settings_input(),
                 Some(SettingsInput::KnowledgeDocumentTitle)
             );
             assert_eq!(workspace.standard_confirm_focus_owner(), None);
@@ -721,7 +742,10 @@ mod knowledge_dialog_key_tests {
                     .knowledge_document_dialog_open()
             );
             assert_eq!(
-                workspace.knowledge_page(cx).read(cx).focused_settings_input(),
+                workspace
+                    .knowledge_page(cx)
+                    .read(cx)
+                    .focused_settings_input(),
                 Some(SettingsInput::KnowledgeDocumentTitle),
                 "an empty title must keep keyboard ownership in the input"
             );
@@ -783,7 +807,10 @@ mod knowledge_dialog_key_tests {
 
         workspace.read_with(cx, |workspace, cx| {
             assert_eq!(
-                workspace.knowledge_page(cx).read(cx).focused_settings_input(),
+                workspace
+                    .knowledge_page(cx)
+                    .read(cx)
+                    .focused_settings_input(),
                 None,
                 "Escape must release the focused dialog input"
             );
@@ -1705,7 +1732,8 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.active_window_modal_owner(cx).is_some() || self.audit.read(cx).owns_keyboard(window) {
+        if self.active_window_modal_owner(cx).is_some() || self.audit.read(cx).owns_keyboard(window)
+        {
             return;
         }
         if self.session_sort_menu_open {
@@ -1897,7 +1925,11 @@ impl WorkspaceApp {
                 .read(cx)
                 .settings_entity_focused_input()
                 .is_some()
-            || self.knowledge_page(cx).read(cx).focused_settings_input().is_some()
+            || self
+                .knowledge_page(cx)
+                .read(cx)
+                .focused_settings_input()
+                .is_some()
         {
             let _ = self.handle_settings_input_key(event, cx);
             return;
@@ -2232,7 +2264,11 @@ impl WorkspaceApp {
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
     ) -> bool {
-        if !self.knowledge_page(cx).read(cx).knowledge_create_dialog_open() {
+        if !self
+            .knowledge_page(cx)
+            .read(cx)
+            .knowledge_create_dialog_open()
+        {
             return false;
         }
         let Some(action) = self.knowledge_dialog_input_key_action(
@@ -2298,7 +2334,11 @@ impl WorkspaceApp {
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
     ) -> bool {
-        if !self.knowledge_page(cx).read(cx).knowledge_document_dialog_open() {
+        if !self
+            .knowledge_page(cx)
+            .read(cx)
+            .knowledge_document_dialog_open()
+        {
             return false;
         }
         let Some(action) = self.knowledge_dialog_input_key_action(
@@ -2369,7 +2409,8 @@ impl WorkspaceApp {
         if event.keystroke.modifiers.platform || event.keystroke.modifiers.control {
             return None;
         }
-        let input_focused = self.knowledge_page(cx).read(cx).focused_settings_input() == Some(input);
+        let input_focused =
+            self.knowledge_page(cx).read(cx).focused_settings_input() == Some(input);
         browser_behavior::modal_footer_input_key_action(
             event.keystroke.key.as_str(),
             event.keystroke.modifiers.shift,
@@ -2417,7 +2458,12 @@ impl WorkspaceApp {
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.knowledge_page(cx).read(cx).knowledge_delete_confirm().is_none() {
+        if self
+            .knowledge_page(cx)
+            .read(cx)
+            .knowledge_delete_confirm()
+            .is_none()
+        {
             return false;
         }
         match self.handle_standard_confirm_key(event, cx) {
@@ -2558,7 +2604,8 @@ impl WorkspaceApp {
             return false;
         }
         if self
-            .ai.state
+            .ai
+            .state
             .read(cx)
             .chat_ui()
             .safety_confirm_presence
@@ -2593,7 +2640,8 @@ impl WorkspaceApp {
             return false;
         }
         if self
-            .ai.state
+            .ai
+            .state
             .read(cx)
             .chat_ui()
             .summarize_confirm_presence
@@ -2819,7 +2867,12 @@ impl WorkspaceApp {
         };
         let runtime = self.forwarding_runtime.handle().clone();
         self.settings_workspace.update(cx, |settings, cx| {
-            settings.start_keybinding_import(selection, runtime, crate::keybindings::sanitize_imported_overrides, cx);
+            settings.start_keybinding_import(
+                selection,
+                runtime,
+                crate::keybindings::sanitize_imported_overrides,
+                cx,
+            );
         });
     }
 

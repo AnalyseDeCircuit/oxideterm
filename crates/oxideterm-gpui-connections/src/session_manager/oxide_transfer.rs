@@ -78,7 +78,9 @@ impl SessionManagerState {
             files: true,
             directories: false,
             multiple: false,
-            prompt: Some(gpui::SharedString::from(i18n.t("modals.import.select_file"))),
+            prompt: Some(gpui::SharedString::from(
+                i18n.t("modals.import.select_file"),
+            )),
         });
         let selection = async move {
             match receiver.await {
@@ -148,7 +150,13 @@ impl SessionManagerState {
             );
             result
         };
-        self.start_export_file_picker(save, settings_path, i18n.t("export.success"), exported_count, cx);
+        self.start_export_file_picker(
+            save,
+            settings_path,
+            i18n.t("export.success"),
+            exported_count,
+            cx,
+        );
     }
 
     pub fn show_oxide_import_dialog(

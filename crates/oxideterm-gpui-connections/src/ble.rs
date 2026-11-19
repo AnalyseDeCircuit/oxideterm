@@ -188,10 +188,9 @@ impl BleOpenRequest {
             service_uuid: profile.service_uuid.clone(),
             title: format!("BLE {}", profile.name),
             terminal_options: profile.terminal.clone(),
-            runtime_options:
-                crate::form_state::terminal_serial_runtime_options_from_ble_profile(
-                    &profile,
-                ),
+            runtime_options: crate::form_state::terminal_serial_runtime_options_from_ble_profile(
+                &profile,
+            ),
             mtu: profile.mtu,
             write_without_response: profile.write_without_response,
             pre_connect_command: profile.pre_connect_command.clone(),
@@ -231,7 +230,12 @@ impl crate::entity::ConnectionFlowEntity {
             standalone: _,
         } = request;
         let cancellation = tokio_util::sync::CancellationToken::new();
-        if let Some(form) = self.form.form.as_mut().filter(|form| Some(form.ble.instance_id) == form_id) {
+        if let Some(form) = self
+            .form
+            .form
+            .as_mut()
+            .filter(|form| Some(form.ble.instance_id) == form_id)
+        {
             form.ble.open_cancel = Some(cancellation.clone().drop_guard());
             cx.notify();
         }
@@ -294,11 +298,17 @@ impl crate::entity::ConnectionFlowEntity {
                 }
             }
         });
-        BlePendingOpen { cancellation, _worker: worker }
+        BlePendingOpen {
+            cancellation,
+            _worker: worker,
+        }
     }
 
     pub fn is_ble_form_current(&self, form_id: Option<uuid::Uuid>) -> bool {
-        self.form.form.as_ref().is_some_and(|form| Some(form.ble.instance_id) == form_id)
+        self.form
+            .form
+            .as_ref()
+            .is_some_and(|form| Some(form.ble.instance_id) == form_id)
     }
 
     pub fn finish_ble_form_open(
@@ -314,7 +324,10 @@ impl crate::entity::ConnectionFlowEntity {
         if let Some(detail) = error {
             if let Some(form) = self.form.form.as_mut() {
                 form.pending = false;
-                form.error = Some(format!("{}: {detail}", i18n.t("modals.new_connection.ble_open_failed")));
+                form.error = Some(format!(
+                    "{}: {detail}",
+                    i18n.t("modals.new_connection.ble_open_failed")
+                ));
             }
         } else {
             self.form.clear();
@@ -326,7 +339,10 @@ impl crate::entity::ConnectionFlowEntity {
 /// Maps a resolver failure to the current locale's sentence. The raw
 /// underlying error text stays as reported by btleplug inside the
 /// `{error}` slot.
-pub fn localize_ble_resolve_error(i18n: &oxideterm_i18n::I18n, error: &oxideterm_terminal::BleResolveError) -> String {
+pub fn localize_ble_resolve_error(
+    i18n: &oxideterm_i18n::I18n,
+    error: &oxideterm_terminal::BleResolveError,
+) -> String {
     use oxideterm_terminal::BleResolveError;
     match error {
         BleResolveError::Cancelled => i18n.t("connections.ble.resolve.cancelled"),
@@ -339,8 +355,9 @@ pub fn localize_ble_resolve_error(i18n: &oxideterm_i18n::I18n, error: &oxideterm
             "connections.ble.resolve.device_enumeration_failed",
             &[("error", error)],
         ),
-        BleResolveError::Scan(error) => i18n
-            .t_with("connections.ble.resolve.scan_failed", &[("error", error)]),
+        BleResolveError::Scan(error) => {
+            i18n.t_with("connections.ble.resolve.scan_failed", &[("error", error)])
+        }
         BleResolveError::NoDeviceMatched { identity } => i18n.t_with(
             "connections.ble.resolve.no_device_matched",
             &[("identity", identity)],
@@ -349,8 +366,9 @@ pub fn localize_ble_resolve_error(i18n: &oxideterm_i18n::I18n, error: &oxideterm
             "connections.ble.resolve.ambiguous_device",
             &[("identity", identity)],
         ),
-        BleResolveError::DeviceBusy { device } => i18n
-            .t_with("connections.ble.resolve.device_busy", &[("device", device)]),
+        BleResolveError::DeviceBusy { device } => {
+            i18n.t_with("connections.ble.resolve.device_busy", &[("device", device)])
+        }
         BleResolveError::Connect(error) => i18n.t_with(
             "connections.ble.resolve.connect_failed",
             &[("error", error)],

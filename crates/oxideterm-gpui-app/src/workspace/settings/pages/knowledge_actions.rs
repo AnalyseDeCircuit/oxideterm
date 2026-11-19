@@ -159,9 +159,18 @@ impl WorkspaceApp {
         });
     }
 
-    pub(in crate::workspace) fn knowledge_generate_embeddings(&mut self, collection_id: String, cx: &mut Context<Self>) {
-        let job = oxideterm_gpui_ai::knowledge::page::EmbeddingJob::prepare(self.settings_store.settings(), &self.i18n);
-        self.knowledge_page(cx).update(cx, |page, cx| page.request_embeddings(collection_id, job, cx));
+    pub(in crate::workspace) fn knowledge_generate_embeddings(
+        &mut self,
+        collection_id: String,
+        cx: &mut Context<Self>,
+    ) {
+        let job = oxideterm_gpui_ai::knowledge::page::EmbeddingJob::prepare(
+            self.settings_store.settings(),
+            &self.i18n,
+        );
+        self.knowledge_page(cx).update(cx, |page, cx| {
+            page.request_embeddings(collection_id, job, cx)
+        });
     }
 
     pub(in crate::workspace) fn knowledge_open_external(

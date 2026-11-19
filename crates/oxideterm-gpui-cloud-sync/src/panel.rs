@@ -1,7 +1,7 @@
 use gpui::{
     AnchoredPositionMode, AnyElement, App, Context, Corner, CursorStyle, Div, Entity, FontWeight,
-    MouseButton, MouseDownEvent, MouseMoveEvent, Render, Rgba, SharedString, Subscription, Window, anchored, deferred,
-    div, point, prelude::*, px, rgb, rgba, svg,
+    MouseButton, MouseDownEvent, MouseMoveEvent, Render, Rgba, SharedString, Subscription, Window,
+    anchored, deferred, div, point, prelude::*, px, rgb, rgba, svg,
 };
 use oxideterm_cloud_sync::{
     AuthMode, BackendType, CloudSyncSettings, CloudSyncStatus, ConflictStrategy,

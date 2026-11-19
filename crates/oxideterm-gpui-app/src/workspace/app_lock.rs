@@ -763,7 +763,11 @@ impl WorkspaceApp {
     }
 
     pub(super) fn settings_app_lock_state(&self) -> (bool, bool, Option<String>) {
-        (self.app_lock.configured, self.app_lock.pending, self.app_lock.error.clone())
+        (
+            self.app_lock.configured,
+            self.app_lock.pending,
+            self.app_lock.error.clone(),
+        )
     }
 
     pub(in crate::workspace) fn render_app_lock_dialog(
@@ -1194,7 +1198,11 @@ impl WorkspaceApp {
     }
 
     fn app_lock_error_message(&self, error: String) -> AnyElement {
-        oxideterm_gpui_settings_view::app_lock_page::render_app_lock_error(&self.tokens, &self.i18n, error)
+        oxideterm_gpui_settings_view::app_lock_page::render_app_lock_error(
+            &self.tokens,
+            &self.i18n,
+            error,
+        )
     }
 }
 

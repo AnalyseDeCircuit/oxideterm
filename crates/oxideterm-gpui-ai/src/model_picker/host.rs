@@ -195,7 +195,11 @@ pub trait AiModelPickerHost: AiChatActions {
         }
     }
 
-    fn refresh_ai_provider_from_selector(&mut self, provider: AiProviderView, cx: &mut Self::Cx<'_>) {
+    fn refresh_ai_provider_from_selector(
+        &mut self,
+        provider: AiProviderView,
+        cx: &mut Self::Cx<'_>,
+    ) {
         match self.chat_state().read(cx).picker_refresh_index(
             &provider,
             self.chat_settings(),

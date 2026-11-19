@@ -418,13 +418,19 @@ pub enum AiLiveResourceRequest<'a> {
 
 impl AiOrchestratorRuntimeSnapshot {
     pub fn decode_live_resource<'a>(
-        &self, operation: super::AiLiveResourceOperation, args: &'a Value,
+        &self,
+        operation: super::AiLiveResourceOperation,
+        args: &'a Value,
     ) -> Result<AiLiveResourceRequest<'a>, AiActionResultLite> {
         use super::AiLiveResourceOperation::*;
         match operation {
             SftpRead | IdeRead => self.decode_file_read(args).map(AiLiveResourceRequest::Read),
-            SftpWrite | IdeWrite => self.decode_file_write(args).map(AiLiveResourceRequest::Write),
-            SftpStartTransfer => self.decode_file_transfer(args).map(AiLiveResourceRequest::Transfer),
+            SftpWrite | IdeWrite => self
+                .decode_file_write(args)
+                .map(AiLiveResourceRequest::Write),
+            SftpStartTransfer => self
+                .decode_file_transfer(args)
+                .map(AiLiveResourceRequest::Transfer),
         }
     }
 
@@ -441,7 +447,10 @@ impl AiOrchestratorRuntimeSnapshot {
             _ = sender.closed() => return,
         };
         let _ = sender.send(self.to_executed_tool_result(
-            call_id, name, action, started.elapsed().as_millis(),
+            call_id,
+            name,
+            action,
+            started.elapsed().as_millis(),
         ));
     }
 
@@ -455,11 +464,21 @@ impl AiOrchestratorRuntimeSnapshot {
     }
 
     pub fn sftp_read_failed(&self, error: impl std::fmt::Display) -> AiActionResultLite {
-        self.fail("Resource read failed.", "resource_read_failed", error.to_string(), "read")
+        self.fail(
+            "Resource read failed.",
+            "resource_read_failed",
+            error.to_string(),
+            "read",
+        )
     }
 
     pub fn sftp_transfer_failed(&self, error: String) -> AiActionResultLite {
-        self.fail("SFTP transfer failed.", "sftp_transfer_failed", error, "write")
+        self.fail(
+            "SFTP transfer failed.",
+            "sftp_transfer_failed",
+            error,
+            "write",
+        )
     }
 }
 
@@ -481,10 +500,7 @@ mod tests {
     }
 }
 
-pub fn acp_file_write_preview(
-    existing: &str,
-    proposed: &str,
-) -> zeroize::Zeroizing<String> {
+pub fn acp_file_write_preview(existing: &str, proposed: &str) -> zeroize::Zeroizing<String> {
     use oxideterm_sftp::TextDiffLineKind;
 
     const MAX_PREVIEW_LINES: usize = 400;

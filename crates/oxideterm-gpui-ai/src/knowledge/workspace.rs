@@ -84,7 +84,9 @@ pub enum KnowledgeRequest {
 
 impl KnowledgeRequest {
     pub fn deliver(
-        self, window: Option<&mut Window>, cx: &mut App,
+        self,
+        window: Option<&mut Window>,
+        cx: &mut App,
         dispatch: impl FnOnce(Self, Option<&mut Window>, &mut App) + 'static,
     ) {
         if let Some(window) = window {
@@ -126,48 +128,72 @@ pub struct KnowledgeViews {
     pub state: Entity<KnowledgeWorkspaceEntity>,
 }
 
-
 impl KnowledgeViews {
     pub fn open_tab(&self, exists: impl FnOnce(TabId) -> bool, cx: &App) -> Option<TabId> {
         self.state.read(cx).tab_id().filter(|id| exists(*id))
     }
 
     pub fn register_tab(&self, tab: TabId, cx: &mut App) {
-        self.state.update(cx, |workspace, _| workspace.register_tab(tab));
+        self.state
+            .update(cx, |workspace, _| workspace.register_tab(tab));
     }
 
     pub fn refresh(&self, cx: &mut App) {
-        self.view.update(cx, |view, cx| view.refresh_knowledge_navigator(true, cx));
+        self.view
+            .update(cx, |view, cx| view.refresh_knowledge_navigator(true, cx));
     }
 
     pub fn guard_tab_close(
-        &self, closing: TabId, window: AnyWindowHandle,
-        container: impl FnOnce(TabId, &App) -> TabId, cx: &mut App,
+        &self,
+        closing: TabId,
+        window: AnyWindowHandle,
+        container: impl FnOnce(TabId, &App) -> TabId,
+        cx: &mut App,
     ) -> Option<TabId> {
         let tab = self.state.read(cx).tab_id()?;
         if closing != tab && closing != container(tab, cx) {
             return None;
         }
-        self.state.update(cx, |knowledge, cx| knowledge.request_close_if_dirty(closing, window, cx))
+        self.state
+            .update(cx, |knowledge, cx| {
+                knowledge.request_close_if_dirty(closing, window, cx)
+            })
             .then_some(tab)
     }
 
     pub fn sync_visibility(&self, visible: impl FnOnce(TabId, &App) -> bool, cx: &mut App) {
-        let visible = self.state.read(cx).tab_id().is_some_and(|id| visible(id, cx));
-        self.view.update(cx, |view, cx| view.set_cache_visible(visible, cx));
+        let visible = self
+            .state
+            .read(cx)
+            .tab_id()
+            .is_some_and(|id| visible(id, cx));
+        self.view
+            .update(cx, |view, cx| view.set_cache_visible(visible, cx));
     }
 
-    pub fn handle_key(&self, owned: bool, ime: Option<KnowledgeInput>, key: &KeyDownEvent,
-        window: &mut Window, cx: &mut App,
+    pub fn handle_key(
+        &self,
+        owned: bool,
+        ime: Option<KnowledgeInput>,
+        key: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut App,
     ) -> bool {
-        owned && ime.is_none() && self.view.update(cx, |view, cx| view.handle_knowledge_workspace_key(key, window, cx))
+        owned
+            && ime.is_none()
+            && self.view.update(cx, |view, cx| {
+                view.handle_knowledge_workspace_key(key, window, cx)
+            })
     }
 
     pub fn notify_preview_selection(&self, group: u64, cx: &mut App) -> bool {
-        self.state.read(cx).preview_editor_for_group(group, cx).is_some_and(|editor| {
-            cx.notify(editor.entity_id());
-            true
-        })
+        self.state
+            .read(cx)
+            .preview_editor_for_group(group, cx)
+            .is_some_and(|editor| {
+                cx.notify(editor.entity_id());
+                true
+            })
     }
 }
 
@@ -416,7 +442,13 @@ impl KnowledgeWorkspaceView {
             false,
             false,
             move |this, _, window, cx| {
-                this.confirm_knowledge_delete(false, delete_id.clone(), document.title.clone(), window, cx);
+                this.confirm_knowledge_delete(
+                    false,
+                    delete_id.clone(),
+                    document.title.clone(),
+                    window,
+                    cx,
+                );
                 cx.stop_propagation();
             },
             cx,
@@ -1459,7 +1491,14 @@ fn knowledge_document_matches(title: &str, content: &str, terms: &[String]) -> b
 mod tests;
 
 impl KnowledgeWorkspaceView {
-    fn confirm_knowledge_delete(&mut self, notebook: bool, id: String, title: String, window: &mut Window, cx: &mut Context<Self>) {
+    fn confirm_knowledge_delete(
+        &mut self,
+        notebook: bool,
+        id: String,
+        title: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.bindings.page.update(cx, |page, cx| {
             if notebook {
                 page.request_delete_knowledge_collection(id, title);

@@ -1320,15 +1320,33 @@ mod tests {
 impl KnowledgePreviewFrame {
     pub fn from_renderer(
         options: MarkdownOptions,
-        render: impl Fn(u64, MarkdownTextFragmentId, usize, gpui::SharedString, Vec<gpui::TextRun>, Vec<MarkdownTextLink>) -> AnyElement + 'static,
+        render: impl Fn(
+            u64,
+            MarkdownTextFragmentId,
+            usize,
+            gpui::SharedString,
+            Vec<gpui::TextRun>,
+            Vec<MarkdownTextLink>,
+        ) -> AnyElement
+        + 'static,
         zoom: oxideterm_gpui_markdown::render::MarkdownMermaidZoomHandler,
     ) -> Self {
         Self {
             options,
             text: Some(Rc::new(move |document, key, order, text, runs, links| {
-                render(super::workspace::knowledge_preview_group(document), key, order, text, runs, links)
+                render(
+                    super::workspace::knowledge_preview_group(document),
+                    key,
+                    order,
+                    text,
+                    runs,
+                    links,
+                )
             })),
-            actions: Some(MarkdownCodeBlockActions { on_run: None, on_mermaid_zoom: Some(zoom) }),
+            actions: Some(MarkdownCodeBlockActions {
+                on_run: None,
+                on_mermaid_zoom: Some(zoom),
+            }),
         }
     }
 }

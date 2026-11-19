@@ -8,11 +8,9 @@ use gpui::{
     prelude::*, px, rgb, rgba,
 };
 use oxideterm_ai::RagDocumentResponse;
-use oxideterm_gpui_ui::{
-    button::{
-        ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, IconButtonOptions,
-        ToolbarButtonOptions, icon_button, toolbar_button,
-    },
+use oxideterm_gpui_ui::button::{
+    ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, IconButtonOptions,
+    ToolbarButtonOptions, icon_button, toolbar_button,
 };
 use oxideterm_i18n::Locale;
 use oxideterm_settings_model::ai_provider_views;

@@ -42,7 +42,12 @@ pub struct AiChatStreamFrame {
 
 impl AiChatStreamFrame {
     pub fn from_settings(ai: &oxideterm_settings::AiSettings, i18n: oxideterm_i18n::I18n) -> Self {
-        Self { i18n, tool_use_enabled: ai.tool_use.enabled, provider_id: ai.active_provider_id.clone(), model: ai.active_model.clone() }
+        Self {
+            i18n,
+            tool_use_enabled: ai.tool_use.enabled,
+            provider_id: ai.active_provider_id.clone(),
+            model: ai.active_model.clone(),
+        }
     }
 
     pub fn diagnostic(&self, data: serde_json::Value) -> serde_json::Value {

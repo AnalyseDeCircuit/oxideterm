@@ -15,10 +15,16 @@ impl WorkspaceApp {
             self.saved_ssh_tunnels(),
             include_items,
         );
-        let tunnel_status = catalog.items.iter().filter_map(|item| match item {
-            SessionManagerDisplayItem::Tunnel(_) => Some((item.id().to_owned(), self.ssh_tunnel_status(item.id()))),
-            _ => None,
-        }).collect();
+        let tunnel_status = catalog
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                SessionManagerDisplayItem::Tunnel(_) => {
+                    Some((item.id().to_owned(), self.ssh_tunnel_status(item.id())))
+                }
+                _ => None,
+            })
+            .collect();
         let settings = self.settings_store.settings();
         let mut horizontal_chrome_width = self.context_sidebar_occupied_width(cx);
         if !settings.sidebar_ui.zen_mode {
@@ -79,9 +85,11 @@ impl WorkspaceApp {
                 return self.move_selected_connections(group.as_deref(), cx);
             }
             CatalogAction::CloseSidebarSort => {
-                if self.connections.session_manager.update(cx, |manager, cx| {
-                    manager.set_sidebar_sort_open(false, cx)
-                }) {
+                if self
+                    .connections
+                    .session_manager
+                    .update(cx, |manager, cx| manager.set_sidebar_sort_open(false, cx))
+                {
                     cx.notify();
                 }
                 return;

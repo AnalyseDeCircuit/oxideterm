@@ -32,7 +32,10 @@ impl WorkspaceApp {
         &self,
         cx: &App,
     ) -> Option<SessionManagerInput> {
-        self.connections.session_manager.read(cx).active_input(false, false)
+        self.connections
+            .session_manager
+            .read(cx)
+            .active_input(false, false)
     }
 
     pub(in crate::workspace) fn open_oxide_export_portable_migration_dialog(

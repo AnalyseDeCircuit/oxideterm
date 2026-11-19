@@ -24,7 +24,8 @@ impl WorkspaceApp {
         match event {
             ai_state::AiWorkspaceEvent::AcpAgentProbeDeliveryReady => {
                 let intents = self
-                    .ai.state
+                    .ai
+                    .state
                     .update(cx, |ai, _cx| ai.take_acp_agent_probe_intents());
                 self.edit_settings(
                     move |settings| {
@@ -47,11 +48,13 @@ impl WorkspaceApp {
             }
             ai_state::AiWorkspaceEvent::AcpModelDiscoveryDeliveryReady => {
                 let intents = self
-                    .ai.state
+                    .ai
+                    .state
                     .update(cx, |ai, _cx| ai.take_acp_model_discovery_intents());
                 for intent in intents {
                     let conversation_exists = self
-                        .ai.state
+                        .ai
+                        .state
                         .read(cx)
                         .conversation_state()
                         .conversations
@@ -64,15 +67,21 @@ impl WorkspaceApp {
                 cx.notify();
             }
             ai_state::AiWorkspaceEvent::ChatStreamDeliveryReady => {
-                let request = self.ai.state.update(cx, |ai, cx| ai.take_chat_window_request(cx));
+                let request = self
+                    .ai
+                    .state
+                    .update(cx, |ai, cx| ai.take_chat_window_request(cx));
                 if let Some((ticket, request)) = request {
                     self.apply_ai_chat_window_request(request, window, cx);
-                    self.ai.state.update(cx, |ai, cx| ai.acknowledge_chat_window_request(ticket, cx));
+                    self.ai
+                        .state
+                        .update(cx, |ai, cx| ai.acknowledge_chat_window_request(ticket, cx));
                 }
             }
             ai_state::AiWorkspaceEvent::CompactionDeliveryReady => {
                 let deliveries = self
-                    .ai.state
+                    .ai
+                    .state
                     .update(cx, |ai, _cx| ai.take_compaction_deliveries());
                 self.apply_ai_compaction_deliveries(deliveries, cx);
                 cx.notify();
@@ -80,7 +89,8 @@ impl WorkspaceApp {
             ai_state::AiWorkspaceEvent::CompactionStateChanged => cx.notify(),
             ai_state::AiWorkspaceEvent::CredentialOperationReady => {
                 let intents = self
-                    .ai.state
+                    .ai
+                    .state
                     .update(cx, |ai, _cx| ai.take_credential_intents());
                 for intent in intents {
                     match intent {
@@ -157,7 +167,8 @@ impl WorkspaceApp {
             }
             ai_state::AiWorkspaceEvent::ModelRefreshDeliveryReady => {
                 let intents = self
-                    .ai.state
+                    .ai
+                    .state
                     .update(cx, |ai, _cx| ai.take_model_refresh_intents());
                 for intent in intents {
                     match intent {

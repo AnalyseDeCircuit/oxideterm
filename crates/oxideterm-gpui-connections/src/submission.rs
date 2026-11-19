@@ -70,28 +70,57 @@ pub enum SavedSftpOpen {
 
 impl ConnectionFlowEntity {
     pub fn prepare_saved_sftp_open(
-        &mut self, id: &str, store: &ConnectionStore, settings: &PersistedSettings,
-        existing: impl Fn(&str) -> bool, i18n: &I18n,
+        &mut self,
+        id: &str,
+        store: &ConnectionStore,
+        settings: &PersistedSettings,
+        existing: impl Fn(&str) -> bool,
+        i18n: &I18n,
     ) -> Result<Option<SavedSftpOpen>, String> {
-        let Some(profile) = store.get_standalone_sftp_profile(id) else { return Ok(None); };
+        let Some(profile) = store.get_standalone_sftp_profile(id) else {
+            return Ok(None);
+        };
         if existing(id) {
             let secondary_id = format!("{id}:secondary");
-            let secondary = (profile.transfer_mode == StandaloneSftpTransferMode::RemoteRemote && existing(&secondary_id))
-                .then(|| (secondary_id, profile.secondary_endpoint.as_ref().and_then(|endpoint| endpoint.initial_remote_path.clone())));
+            let secondary = (profile.transfer_mode == StandaloneSftpTransferMode::RemoteRemote
+                && existing(&secondary_id))
+            .then(|| {
+                (
+                    secondary_id,
+                    profile
+                        .secondary_endpoint
+                        .as_ref()
+                        .and_then(|endpoint| endpoint.initial_remote_path.clone()),
+                )
+            });
             return Ok(Some(SavedSftpOpen::Existing {
-                title: profile.name.clone(), primary: (id.to_owned(), profile.initial_remote_path.clone()), secondary,
+                title: profile.name.clone(),
+                primary: (id.to_owned(), profile.initial_remote_path.clone()),
+                secondary,
             }));
         }
-        let secrets = store.load_standalone_sftp_profile_runtime_secrets(id).map_err(|error| error.to_string())?;
-        let (config, intent) = self.prepare_standalone_sftp_launch(store, settings, profile, secrets, None, None)
+        let secrets = store
+            .load_standalone_sftp_profile_runtime_secrets(id)
+            .map_err(|error| error.to_string())?;
+        let (config, intent) = self
+            .prepare_standalone_sftp_launch(store, settings, profile, secrets, None, None)
             .ok_or_else(|| i18n.t("sftp.standalone.missing_credentials"))?;
-        Ok(Some(SavedSftpOpen::Preflight((config, profile.name.clone(), intent))))
+        Ok(Some(SavedSftpOpen::Preflight((
+            config,
+            profile.name.clone(),
+            intent,
+        ))))
     }
 }
 
 impl ConnectionFlowEntity {
     pub fn default_submit_action(&self) -> NewConnectionSubmitAction {
-        if self.form.form.as_ref().is_some_and(|form| form.standalone_connection_id.is_some()) {
+        if self
+            .form
+            .form
+            .as_ref()
+            .is_some_and(|form| form.standalone_connection_id.is_some())
+        {
             NewConnectionSubmitAction::Connect
         } else {
             NewConnectionSubmitAction::SaveAndConnect
@@ -128,7 +157,8 @@ impl ConnectionFlowEntity {
         cx: &mut Context<Self>,
     ) {
         if self.form.editing_saved_connection_id.as_deref() == Some(connection_id) {
-            self.form.editing_saved_connection_connect_after_save_node_id = Some(node_id);
+            self.form
+                .editing_saved_connection_connect_after_save_node_id = Some(node_id);
             cx.notify();
         }
     }
@@ -141,8 +171,10 @@ impl ConnectionFlowEntity {
         i18n: &I18n,
         cx: &mut Context<Self>,
     ) {
-        use crate::form_state::{NewConnectionTransport, NewConnectionUpstreamProxyPolicy, TELNET_DEFAULT_PORT_TEXT};
         use crate::NewConnectionField as Field;
+        use crate::form_state::{
+            NewConnectionTransport, NewConnectionUpstreamProxyPolicy, TELNET_DEFAULT_PORT_TEXT,
+        };
         let mut form = NewConnectionForm::default();
         form.transport = transport;
         form.group = i18n.t("ssh.form.ungrouped");
@@ -523,36 +555,34 @@ impl ConnectionFlowEntity {
         Some(self.finish_profile_save(
             action,
             profile_id.is_some(),
-            || {
-                BleOpenRequest {
-                    target: BleTraceTarget {
-                        node_id: format!(
+            || BleOpenRequest {
+                target: BleTraceTarget {
+                    node_id: format!(
                             "ble-form:{}",
                             open.device_mac
                                 .as_deref()
                                 .or(open.device_name.as_deref())
                                 .unwrap_or("")
                         ),
-                        label: open.label,
-                        endpoint: open.device_name.clone().or_else(|| open.device_mac.clone()),
-                    },
-                    adapter_guard: open.adapter_guard,
-                    selected_device: open.selected_device,
-                    adapter_mac: open.adapter_mac,
-                    device_mac: open.device_mac,
-                    device_name: open.device_name,
-                    platform_identifier: open.platform_identifier,
-                    service_uuid: open.service_uuid,
-                    title: open.title,
-                    terminal_options: open.terminal_options,
-                    runtime_options: open.runtime_options,
-                    mtu: open.mtu,
-                    write_without_response: open.write_without_response,
-                    pre_connect_command: open.pre_connect_command,
-                    profile_id,
-                    form_id: Some(open.form_id),
-                    standalone: BleStandaloneTarget::New,
-                }
+                    label: open.label,
+                    endpoint: open.device_name.clone().or_else(|| open.device_mac.clone()),
+                },
+                adapter_guard: open.adapter_guard,
+                selected_device: open.selected_device,
+                adapter_mac: open.adapter_mac,
+                device_mac: open.device_mac,
+                device_name: open.device_name,
+                platform_identifier: open.platform_identifier,
+                service_uuid: open.service_uuid,
+                title: open.title,
+                terminal_options: open.terminal_options,
+                runtime_options: open.runtime_options,
+                mtu: open.mtu,
+                write_without_response: open.write_without_response,
+                pre_connect_command: open.pre_connect_command,
+                profile_id,
+                form_id: Some(open.form_id),
+                standalone: BleStandaloneTarget::New,
             },
             cx,
         ))
@@ -878,27 +908,46 @@ pub enum SavedMoshOpen {
 }
 
 pub fn prepare_saved_mosh_open(
-    store: &ConnectionStore, id: &str, attempt: Option<String>, reconnect_id: Option<String>, i18n: &I18n,
+    store: &ConnectionStore,
+    id: &str,
+    attempt: Option<String>,
+    reconnect_id: Option<String>,
+    i18n: &I18n,
 ) -> SavedMoshOpen {
     use crate::NewConnectionField as Field;
-    let Some(profile) = store.get_mosh_profile(id) else { return SavedMoshOpen::Missing; };
+    let Some(profile) = store.get_mosh_profile(id) else {
+        return SavedMoshOpen::Missing;
+    };
     let load = store.load_mosh_profile_runtime_secrets(id);
     let load_failed = load.is_err();
-    match load.ok().and_then(|secrets| runtime_mosh_config_from_saved(store, profile, secrets, None)) {
+    match load
+        .ok()
+        .and_then(|secrets| runtime_mosh_config_from_saved(store, profile, secrets, None))
+    {
         Some(config) => {
             let mut options = mosh_options_from_profile(profile);
             options.runtime_connection_attempt_id = attempt;
-            SavedMoshOpen::Connect(PreparedMoshConnect { config, title: profile.name.clone(), options })
+            SavedMoshOpen::Connect(PreparedMoshConnect {
+                config,
+                title: profile.name.clone(),
+                options,
+            })
         }
         None => {
-            let mut draft = crate::form_state::form_from_mosh_profile(profile, i18n.t("ssh.form.ungrouped"));
+            let mut draft =
+                crate::form_state::form_from_mosh_profile(profile, i18n.t("ssh.form.ungrouped"));
             draft.standalone_connection_id = reconnect_id;
             draft.error = Some(i18n.t("sessionManager.mosh_profiles.missing_credentials"));
             // Store-load failure can involve any protected hop; otherwise point at the primary auth field.
-            draft.focused_field = if load_failed { Field::Name } else {
+            draft.focused_field = if load_failed {
+                Field::Name
+            } else {
                 match draft.auth_tab {
                     SshAuthTab::Password => Field::Password,
-                    SshAuthTab::DefaultKey | SshAuthTab::SshKey | SshAuthTab::ManagedKey | SshAuthTab::Certificate => Field::Passphrase,
+                    SshAuthTab::DefaultKey
+                    | SshAuthTab::SshKey
+                    | SshAuthTab::ManagedKey
+                    | SshAuthTab::Certificate => Field::Passphrase,
                     SshAuthTab::Agent | SshAuthTab::TwoFactor => Field::Name,
                 }
             };
@@ -2037,19 +2086,32 @@ pub fn prepare_saved_desktop_open(
         return Ok(None);
     };
     let password = store.get_remote_desktop_credential(id).map_err(|error| {
-        format!("{}: {error}", i18n.t("sessionManager.remote_desktop_profiles.open_failed"))
+        format!(
+            "{}: {error}",
+            i18n.t("sessionManager.remote_desktop_profiles.open_failed")
+        )
     })?;
     let socks_proxy = if saved.protocol == RemoteDesktopProtocol::Rdp {
         if password.is_none() {
             // Imported and synced profiles may lack device-local credentials.
-            let mut form = crate::form_state::form_from_remote_desktop_profile(&saved, String::new());
+            let mut form =
+                crate::form_state::form_from_remote_desktop_profile(&saved, String::new());
             form.error = Some(i18n.t("modals.new_connection.remote_desktop_password_required"));
             form.focused_field = crate::NewConnectionField::Password;
             return Ok(Some(SavedDesktopOpen::Prompt(Box::new(form))));
         }
         oxideterm_session_adapter::rdp_socks_proxy_from_saved_policy(
-            store, settings, &saved.upstream_proxy, saved.ssh_gateway_connection_id.is_some(),
-        ).map_err(|error| format!("{}: {error}", i18n.t("modals.new_connection.remote_desktop_proxy_failed")))?
+            store,
+            settings,
+            &saved.upstream_proxy,
+            saved.ssh_gateway_connection_id.is_some(),
+        )
+        .map_err(|error| {
+            format!(
+                "{}: {error}",
+                i18n.t("modals.new_connection.remote_desktop_proxy_failed")
+            )
+        })?
     } else {
         None
     };

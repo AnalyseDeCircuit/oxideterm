@@ -1,13 +1,18 @@
-use oxideterm_gpui_settings_view::select_menu::{
-    ExternalSelect, ExternalSelectInputs, KnowledgeSelectInputs, LocalShellOption, SelectMenuRequest, SettingsSelectMenu,
-    settings_select_popover,
-};
 use super::*;
 use oxideterm_gpui_settings_view::components::{SettingsWindowDispatch, SettingsWindowRequest};
-use oxideterm_gpui_settings_view::theme_picker::{SettingsThemePickerFrame};
+use oxideterm_gpui_settings_view::select_menu::{
+    ExternalSelect, ExternalSelectInputs, KnowledgeSelectInputs, LocalShellOption,
+    SelectMenuRequest, SettingsSelectMenu, settings_select_popover,
+};
+use oxideterm_gpui_settings_view::theme_picker::SettingsThemePickerFrame;
 
 impl WorkspaceApp {
-    pub(in crate::workspace) fn theme_picker_bindings(cx: &Context<Self>) -> (Rc<dyn Fn(&Window, &App) -> Option<SettingsThemePickerFrame>>, Rc<dyn Fn(SettingsSelect, String, &mut App)>) {
+    pub(in crate::workspace) fn theme_picker_bindings(
+        cx: &Context<Self>,
+    ) -> (
+        Rc<dyn Fn(&Window, &App) -> Option<SettingsThemePickerFrame>>,
+        Rc<dyn Fn(SettingsSelect, String, &mut App)>,
+    ) {
         let owner = cx.entity().downgrade();
         let frame = Rc::new({
             let owner = owner.clone();
@@ -20,20 +25,30 @@ impl WorkspaceApp {
                 if app.open_settings_select_owner_window_id != Some(window_id) {
                     return None;
                 }
-                let anchor = app.settings_select_anchors.get(&(window_id, select.anchor_id()))?;
+                let anchor = app
+                    .settings_select_anchors
+                    .get(&(window_id, select.anchor_id()))?;
                 Some(SettingsThemePickerFrame {
                     tokens: app.tokens,
                     i18n: app.i18n.clone(),
-                    width: f32::from(anchor.bounds.size.width).max(app.tokens.metrics.ui_select_min_width),
+                    width: f32::from(anchor.bounds.size.width)
+                        .max(app.tokens.metrics.ui_select_min_width),
                     select,
                 })
             }
         });
         let apply = Rc::new(move |select: SettingsSelect, id, cx: &mut App| {
             let _ = owner.update(cx, |app, cx| {
-                if app.open_settings_select == Some(select) && let Some(target) = select.theme_target() {
+                if app.open_settings_select == Some(select)
+                    && let Some(target) = select.theme_target()
+                {
                     app.close_settings_select();
-                    app.edit_settings(|settings| target.apply_for_scheme(settings, select.theme_system_dark(), id), cx);
+                    app.edit_settings(
+                        |settings| {
+                            target.apply_for_scheme(settings, select.theme_system_dark(), id)
+                        },
+                        cx,
+                    );
                 }
             });
         });
@@ -44,7 +59,9 @@ impl WorkspaceApp {
         Self::settings_window_dispatch_for(cx.entity().downgrade())
     }
 
-    pub(super) fn settings_window_dispatch_for(owner: gpui::WeakEntity<Self>) -> SettingsWindowDispatch {
+    pub(super) fn settings_window_dispatch_for(
+        owner: gpui::WeakEntity<Self>,
+    ) -> SettingsWindowDispatch {
         Rc::new(move |request, window, cx| {
             let _ = owner.update(cx, |app, cx| match request {
                 SettingsWindowRequest::ProbeAcpAgent(agent_id) => app.test_ai_acp_agent(agent_id, cx),
@@ -147,11 +164,17 @@ impl WorkspaceApp {
         };
 
         let owner = cx.entity().downgrade();
-        Some(settings_select_popover(&self.tokens, open_select, anchor, popup, move |window, cx| {
-            let _ = owner.update(cx, |app, cx| {
-                app.dismiss_transient_workspace_overlays_from_outside_pointer(window, cx);
-            });
-        }))
+        Some(settings_select_popover(
+            &self.tokens,
+            open_select,
+            anchor,
+            popup,
+            move |window, cx| {
+                let _ = owner.update(cx, |app, cx| {
+                    app.dismiss_transient_workspace_overlays_from_outside_pointer(window, cx);
+                });
+            },
+        ))
     }
 
     fn render_settings_select_popup(
@@ -187,8 +210,12 @@ impl WorkspaceApp {
                 }
                 SelectMenuRequest::Edit(edit) => app.edit_settings(edit, cx),
                 SelectMenuRequest::Background(edit) => app.edit_background_style(edit, cx),
-                SelectMenuRequest::RemoteShell(mode) => app.remote_shell_integration_mode_changed(mode, cx),
-                SelectMenuRequest::Trigger(clear_input, edit) => app.edit_terminal_trigger(clear_input, edit, cx),
+                SelectMenuRequest::RemoteShell(mode) => {
+                    app.remote_shell_integration_mode_changed(mode, cx)
+                }
+                SelectMenuRequest::Trigger(clear_input, edit) => {
+                    app.edit_terminal_trigger(clear_input, edit, cx)
+                }
                 SelectMenuRequest::KnowledgeCollectionScope(scope) => {
                     app.knowledge_page(cx).update(cx, |entity, cx| {
                         entity.set_knowledge_collection_connection_id(scope);
@@ -202,27 +229,49 @@ impl WorkspaceApp {
                     });
                 }
                 SelectMenuRequest::External(action) => match action {
-                    ExternalSelect::MarketplaceSort(sort) => app.set_plugin_marketplace_sort(sort, cx),
+                    ExternalSelect::MarketplaceSort(sort) => {
+                        app.set_plugin_marketplace_sort(sort, cx)
+                    }
                     ExternalSelect::ProviderType(provider_type) => {
-                        app.settings_views.ai_providers.update(cx, |view, cx| view.select_type(provider_type, cx));
+                        app.settings_views
+                            .ai_providers
+                            .update(cx, |view, cx| view.select_type(provider_type, cx));
                     }
                     ExternalSelect::McpTransport(transport) => {
-                        app.settings_workspace.update(cx, |state, cx| state.update_ai_mcp(|draft| draft.transport = transport, cx));
+                        app.settings_workspace.update(cx, |state, cx| {
+                            state.update_ai_mcp(|draft| draft.transport = transport, cx)
+                        });
                     }
                     ExternalSelect::McpAuth(mode) => {
-                        app.settings_workspace.update(cx, |state, cx| state.update_ai_mcp(|draft| draft.auth_header_mode = mode, cx));
+                        app.settings_workspace.update(cx, |state, cx| {
+                            state.update_ai_mcp(|draft| draft.auth_header_mode = mode, cx)
+                        });
                     }
                 },
                 SelectMenuRequest::CloseSemantic => app.close_semantic_scheme_editor(cx),
                 SelectMenuRequest::CloseHighlight => app.close_highlight_rule_editor(cx),
-                SelectMenuRequest::Highlight(index, edit) => app.edit_settings(|settings| {
-                    let _ = oxideterm_gpui_settings_view::highlight_page::HighlightEdit::Rule(index, edit).apply(settings);
-                }, cx),
-                SelectMenuRequest::HighlightPreset(rules) => app.edit_settings(|settings| {
-                    let _ = oxideterm_gpui_settings_view::highlight_page::HighlightEdit::Preset(rules).apply(settings);
-                }, cx),
+                SelectMenuRequest::Highlight(index, edit) => app.edit_settings(
+                    |settings| {
+                        let _ = oxideterm_gpui_settings_view::highlight_page::HighlightEdit::Rule(
+                            index, edit,
+                        )
+                        .apply(settings);
+                    },
+                    cx,
+                ),
+                SelectMenuRequest::HighlightPreset(rules) => app.edit_settings(
+                    |settings| {
+                        let _ =
+                            oxideterm_gpui_settings_view::highlight_page::HighlightEdit::Preset(
+                                rules,
+                            )
+                            .apply(settings);
+                    },
+                    cx,
+                ),
                 SelectMenuRequest::ProxyAuth(mode) => app.handle_proxy_request(
-                    oxideterm_gpui_settings_view::proxy_page::ProxyRequest::Auth(mode), cx,
+                    oxideterm_gpui_settings_view::proxy_page::ProxyRequest::Auth(mode),
+                    cx,
                 ),
                 SelectMenuRequest::SftpPresentation(preference) => {
                     app.edit_settings(|settings| settings.sftp.presentation = preference, cx);
@@ -234,18 +283,29 @@ impl WorkspaceApp {
                 }
             });
         });
-        let shells = if matches!(open_select, SettingsSelect::LocalShell | SettingsSelect::LocalShellSemanticScheme(_)) {
-            self.effective_local_shells_for_settings(settings).into_iter().map(|shell| LocalShellOption {
-                id: shell.id, label: shell.label,
-            }).collect()
+        let shells = if matches!(
+            open_select,
+            SettingsSelect::LocalShell | SettingsSelect::LocalShellSemanticScheme(_)
+        ) {
+            self.effective_local_shells_for_settings(settings)
+                .into_iter()
+                .map(|shell| LocalShellOption {
+                    id: shell.id,
+                    label: shell.label,
+                })
+                .collect()
         } else {
             Vec::new()
         };
         let commands = &self.terminal.read(cx).quick_commands.store.commands;
         let trigger_commands = if open_select == SettingsSelect::TerminalTriggerQuickCommand {
-            commands.iter()
-                .filter(|command| oxideterm_quick_commands::quick_command_can_run_non_interactively(command))
-                .map(|command| (command.id.clone(), command.name.clone())).collect()
+            commands
+                .iter()
+                .filter(|command| {
+                    oxideterm_quick_commands::quick_command_can_run_non_interactively(command)
+                })
+                .map(|command| (command.id.clone(), command.name.clone()))
+                .collect()
         } else {
             Vec::new()
         };
@@ -257,8 +317,18 @@ impl WorkspaceApp {
             settings_workspace: &self.settings_workspace,
             external: ExternalSelectInputs {
                 provider_type: self.settings_views.ai_providers.read(cx).provider_type(),
-                mcp_transport: self.settings_workspace.read(cx).ai_mcp.draft().map(|draft| draft.transport),
-                mcp_auth: self.settings_workspace.read(cx).ai_mcp.draft().map(|draft| draft.auth_header_mode),
+                mcp_transport: self
+                    .settings_workspace
+                    .read(cx)
+                    .ai_mcp
+                    .draft()
+                    .map(|draft| draft.transport),
+                mcp_auth: self
+                    .settings_workspace
+                    .read(cx)
+                    .ai_mcp
+                    .draft()
+                    .map(|draft| draft.auth_header_mode),
             },
             knowledge: KnowledgeSelectInputs {
                 connections: self.connection_store.connections(),
@@ -267,7 +337,10 @@ impl WorkspaceApp {
             },
             totp_credentials: self.connection_store.totp_credentials(),
             shells,
-            first_command: commands.first().map(|command| command.id.clone()).unwrap_or_default(),
+            first_command: commands
+                .first()
+                .map(|command| command.id.clone())
+                .unwrap_or_default(),
             trigger_commands,
             dispatch,
         };
@@ -284,7 +357,10 @@ impl WorkspaceApp {
         // ring. Keep the origin and open/toggle rule in one place so settings,
         // AI provider, and knowledge selects do not drift apart.
         self.clear_terminal_trigger_input_focus(cx);
-        self.blur_highlight_input(oxideterm_gpui_settings_view::highlight_page::is_highlight_input, cx);
+        self.blur_highlight_input(
+            oxideterm_gpui_settings_view::highlight_page::is_highlight_input,
+            cx,
+        );
         self.focused_settings_input = None;
         self.knowledge_page(cx).update(cx, |entity, cx| {
             entity.blur_settings_input(cx);
@@ -297,7 +373,9 @@ impl WorkspaceApp {
         }
         if select_id.theme_target().is_some() {
             let settings = self.settings_store.settings();
-            self.settings_views.theme_picker.update(cx, |picker, cx| picker.open(select_id, settings, cx));
+            self.settings_views
+                .theme_picker
+                .update(cx, |picker, cx| picker.open(select_id, settings, cx));
         }
         self.open_settings_select = Some(select_id);
         self.open_settings_select_owner_window_id = Some(owner_window_id);
@@ -331,7 +409,13 @@ impl WorkspaceApp {
                 true
             }
             "enter" | "space" | " " => {
-                if let Some(id) = self.settings_views.theme_picker.read(cx).preview().map(str::to_owned) {
+                if let Some(id) = self
+                    .settings_views
+                    .theme_picker
+                    .read(cx)
+                    .preview()
+                    .map(str::to_owned)
+                {
                     self.close_settings_select();
                     self.edit_settings(
                         |settings| target.apply_for_scheme(settings, system_dark, id),
@@ -341,7 +425,9 @@ impl WorkspaceApp {
                 true
             }
             "up" | "arrowup" | "down" | "arrowdown" | "home" | "end" => {
-                self.settings_views.theme_picker.update(cx, |picker, cx| picker.navigate(&event.keystroke.key, cx));
+                self.settings_views
+                    .theme_picker
+                    .update(cx, |picker, cx| picker.navigate(&event.keystroke.key, cx));
                 true
             }
             _ => false,
@@ -357,7 +443,10 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let control = self.settings_components().toggle_control(
-            label_key, checked, setter, Self::settings_window_dispatch(cx),
+            label_key,
+            checked,
+            setter,
+            Self::settings_window_dispatch(cx),
         );
         self.setting_row(label_key, hint_key, control, cx)
     }

@@ -1260,7 +1260,10 @@ pub struct EmbeddingJob {
 }
 
 impl EmbeddingJob {
-    pub fn prepare(settings: &oxideterm_settings::PersistedSettings, i18n: &oxideterm_i18n::I18n) -> Result<Self, String> {
+    pub fn prepare(
+        settings: &oxideterm_settings::PersistedSettings,
+        i18n: &oxideterm_i18n::I18n,
+    ) -> Result<Self, String> {
         let resolved = oxideterm_ai::resolve_ai_embedding_provider(
             &settings.ai.providers,
             settings.ai.active_provider_id.as_deref(),
@@ -1278,7 +1281,8 @@ impl EmbeddingJob {
             oxideterm_ai::AiEmbeddingProviderReason::MissingModel => {
                 return Err(i18n.t("settings_view.knowledge.error_no_embedding_model"));
             }
-            oxideterm_ai::AiEmbeddingProviderReason::Ready | oxideterm_ai::AiEmbeddingProviderReason::MissingApiKey => {}
+            oxideterm_ai::AiEmbeddingProviderReason::Ready
+            | oxideterm_ai::AiEmbeddingProviderReason::MissingApiKey => {}
         }
         Ok(Self {
             requires_api_key: oxideterm_ai::ai_embedding_requires_api_key(&provider),
@@ -1292,12 +1296,23 @@ impl EmbeddingJob {
 }
 
 impl KnowledgePage {
-    pub fn request_embeddings(&mut self, collection_id: String, job: Result<EmbeddingJob, String>, cx: &mut Context<Self>) {
+    pub fn request_embeddings(
+        &mut self,
+        collection_id: String,
+        job: Result<EmbeddingJob, String>,
+        cx: &mut Context<Self>,
+    ) {
         match job {
             Ok(job) => {
                 self.start_knowledge_embeddings(
-                    collection_id, job.provider, job.model, job.requires_api_key, job.missing_key_error,
-                    job.retrieval_error, job.partial_failure, cx,
+                    collection_id,
+                    job.provider,
+                    job.model,
+                    job.requires_api_key,
+                    job.missing_key_error,
+                    job.retrieval_error,
+                    job.partial_failure,
+                    cx,
                 );
             }
             Err(message) => {

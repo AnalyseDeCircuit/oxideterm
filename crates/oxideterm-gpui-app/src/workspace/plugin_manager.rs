@@ -2982,7 +2982,8 @@ impl WorkspaceApp {
                     settings.add_background_pack_images(&imported_backgrounds, cx);
                 });
                 if was_installing && self.plugin_manager_state(cx).active_install.is_none() {
-                    self.ai.acp
+                    self.ai
+                        .acp
                         .update(cx, |entity, _| entity.finish_plugin_update());
                 }
                 if bootstrap_runtime {

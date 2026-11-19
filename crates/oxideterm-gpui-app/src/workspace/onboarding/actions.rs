@@ -154,9 +154,7 @@ mod tests {
 
 impl WorkspaceApp {
     pub(in crate::workspace) fn onboarding_disclaimer_locked(&self) -> bool {
-        self.onboarding.open
-            && !self.onboarding.disclaimer_accepted
-            && !self.version_migration.open
+        self.onboarding.open && !self.onboarding.disclaimer_accepted && !self.version_migration.open
     }
 
     pub(in crate::workspace) fn ensure_onboarding_tab(

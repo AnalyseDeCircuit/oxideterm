@@ -17,12 +17,14 @@ use crate::{SettingsInput, SettingsSelect, SettingsSelectAnchorExt, SettingsSlid
 
 pub trait SettingsImeSource {
     fn frame<'a>(
-        &'a self, input: SettingsInput, value: &'a str, cx: &'a App,
+        &'a self,
+        input: SettingsInput,
+        value: &'a str,
+        cx: &'a App,
     ) -> SettingsImeFrame<'a>;
 }
 
-pub type SettingsControlsSource =
-    Rc<dyn for<'a> Fn(&'a App) -> Option<SettingsControls<'a>>>;
+pub type SettingsControlsSource = Rc<dyn for<'a> Fn(&'a App) -> Option<SettingsControls<'a>>>;
 
 pub type SettingsLabelRenderer = Rc<dyn Fn(&str, &str, String, u32, &App) -> AnyElement>;
 
@@ -99,10 +101,12 @@ impl SettingsControls<'_> {
             placeholder,
             align,
             secret,
-            |input| input
-                .when_some(width, |input, width| input.w(px(width)).max_w_full())
-                .when(width.is_none(), |input| input.w_full())
-                .min_w(px(0.0)),
+            |input| {
+                input
+                    .when_some(width, |input, width| input.w(px(width)).max_w_full())
+                    .when(width.is_none(), |input| input.w_full())
+                    .min_w(px(0.0))
+            },
             self.dispatch.clone(),
         )
     }
@@ -463,7 +467,15 @@ impl SettingsComponents<'_> {
         style: impl FnOnce(Div) -> Div,
         dispatch: SettingsWindowDispatch,
     ) -> AnyElement {
-        render_settings_text_field(self.tokens, frame, placeholder, align, secret, style, dispatch)
+        render_settings_text_field(
+            self.tokens,
+            frame,
+            placeholder,
+            align,
+            secret,
+            style,
+            dispatch,
+        )
     }
 
     pub fn toggle_control(

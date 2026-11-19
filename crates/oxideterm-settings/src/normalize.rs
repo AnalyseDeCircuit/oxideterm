@@ -775,9 +775,8 @@ pub fn sanitize_settings_value(raw: Value) -> Result<SanitizedSettings> {
         && raw.pointer("/terminal/characterSpacing").is_some()
         && migrate_legacy_terminal_character_spacing(&mut settings)
     {
-        migration_warnings.push(
-            "Migrated legacy terminal.characterSpacing to compact 0.93 baseline".to_string(),
-        );
+        migration_warnings
+            .push("Migrated legacy terminal.characterSpacing to compact 0.93 baseline".to_string());
     }
 
     for (path, fallback, min, max) in [

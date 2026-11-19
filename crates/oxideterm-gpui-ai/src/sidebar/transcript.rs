@@ -110,30 +110,71 @@ impl AiTranscriptPolicy {
         let providers = oxideterm_ai::provider_views(&ai.providers);
         let acp = ai.active_backend == AiActiveBackend::Acp;
         let selected = active_model_selection(ai.active_model.as_deref());
-        let reasoning = (!acp).then(|| {
-            let provider = active_provider_view(&providers, ai.active_provider_id.as_deref())?;
-            let model = selected.as_ref()?;
-            if oxideterm_ai::model_reasoning_capability(&provider.provider_type, model).levels.is_empty() {
-                return None;
-            }
-            let override_value = state.conversation_state().active_conversation()
-                .and_then(|conversation| crate::state::ai_conversation_reasoning_effort(conversation, &provider.id, model))
-                .or_else(|| ai.reasoning_model_overrides.get(&provider.id)
-                    .and_then(|models| models.get(model)).and_then(serde_json::Value::as_str))
-                .unwrap_or("auto");
-            let level = oxideterm_ai::normalize_reasoning_level_for_model(&provider.provider_type, model, override_value);
-            Some((provider.clone(), model.clone(), level))
-        }).flatten();
-        let model_selected = if acp { ai.active_acp_agent_id.is_some() }
-            else { ai.active_provider_id.is_some() && selected.is_some() };
-        let images_allowed = state.chat_ui().images.is_empty() || stream_config().is_some_and(|config| {
-            config.execution_backend == oxideterm_ai::AiExecutionBackend::Acp
-                || oxideterm_ai::model_image_input(&config.provider_type, &config.model, config.image_input) != Some(false)
-        });
-        let agent_models = providers.into_iter().filter(|provider| provider.enabled)
-            .flat_map(|provider| provider.models.into_iter().map(move |model| AgentModel { provider_id: provider.id.clone(), model }))
+        let reasoning = (!acp)
+            .then(|| {
+                let provider = active_provider_view(&providers, ai.active_provider_id.as_deref())?;
+                let model = selected.as_ref()?;
+                if oxideterm_ai::model_reasoning_capability(&provider.provider_type, model)
+                    .levels
+                    .is_empty()
+                {
+                    return None;
+                }
+                let override_value = state
+                    .conversation_state()
+                    .active_conversation()
+                    .and_then(|conversation| {
+                        crate::state::ai_conversation_reasoning_effort(
+                            conversation,
+                            &provider.id,
+                            model,
+                        )
+                    })
+                    .or_else(|| {
+                        ai.reasoning_model_overrides
+                            .get(&provider.id)
+                            .and_then(|models| models.get(model))
+                            .and_then(serde_json::Value::as_str)
+                    })
+                    .unwrap_or("auto");
+                let level = oxideterm_ai::normalize_reasoning_level_for_model(
+                    &provider.provider_type,
+                    model,
+                    override_value,
+                );
+                Some((provider.clone(), model.clone(), level))
+            })
+            .flatten();
+        let model_selected = if acp {
+            ai.active_acp_agent_id.is_some()
+        } else {
+            ai.active_provider_id.is_some() && selected.is_some()
+        };
+        let images_allowed = state.chat_ui().images.is_empty()
+            || stream_config().is_some_and(|config| {
+                config.execution_backend == oxideterm_ai::AiExecutionBackend::Acp
+                    || oxideterm_ai::model_image_input(
+                        &config.provider_type,
+                        &config.model,
+                        config.image_input,
+                    ) != Some(false)
+            });
+        let agent_models = providers
+            .into_iter()
+            .filter(|provider| provider.enabled)
+            .flat_map(|provider| {
+                provider.models.into_iter().map(move |model| AgentModel {
+                    provider_id: provider.id.clone(),
+                    model,
+                })
+            })
             .collect();
-        Self { model_selected, images_allowed, reasoning, agent_models }
+        Self {
+            model_selected,
+            images_allowed,
+            reasoning,
+            agent_models,
+        }
     }
 }
 
@@ -554,7 +595,11 @@ impl AiAssistantSidebarView {
     fn copy_ai_message(&self, a0: String, cx: &mut App) {
         let request = self.bindings.request.clone();
         self.state.update(cx, |ai, cx| {
-            ai.copy_ai_message(a0, move |cx| request(AiTranscriptRequest::ClipboardReadFailed, None, cx), cx);
+            ai.copy_ai_message(
+                a0,
+                move |cx| request(AiTranscriptRequest::ClipboardReadFailed, None, cx),
+                cx,
+            );
         });
     }
 
@@ -563,7 +608,8 @@ impl AiAssistantSidebarView {
     }
 
     fn request_delete_ai_message(&self, a0: String, cx: &mut App) {
-        self.state.update(cx, |ai, cx| ai.request_delete_ai_message(a0, cx));
+        self.state
+            .update(cx, |ai, cx| ai.request_delete_ai_message(a0, cx));
     }
 
     fn cancel_edit_ai_message(&self, cx: &mut App) {
@@ -575,14 +621,21 @@ impl AiAssistantSidebarView {
     }
 
     fn switch_ai_message_branch(&self, a0: String, a1: usize, cx: &mut App) {
-        self.state.update(cx, |ai, cx| ai.switch_ai_message_branch(a0, a1, cx));
+        self.state
+            .update(cx, |ai, cx| ai.switch_ai_message_branch(a0, a1, cx));
     }
 
     fn send_ai_follow_up_suggestion(&self, a0: String, cx: &mut App) {
         (self.bindings.request)(AiTranscriptRequest::FollowUp(a0), None, cx);
     }
 
-    fn resolve_ai_tool_approval(&self, generation: u64, call: String, approved: bool, cx: &mut App) {
+    fn resolve_ai_tool_approval(
+        &self,
+        generation: u64,
+        call: String,
+        approved: bool,
+        cx: &mut App,
+    ) {
         self.state.update(cx, |state, cx| {
             state.resolve_tool_approval(generation, &call, approved);
             cx.notify();
@@ -609,15 +662,37 @@ impl AiAssistantSidebarView {
     fn resolve_ai_cursor_request(&self, generation: u64, call: &str, accepted: bool, cx: &mut App) {
         let frame = self.state.read(cx).chat_stream_environment(cx);
         self.state.update(cx, |state, cx| {
-            let Some((conversation, assistant, method)) = state.pending_cursor_requests
+            let Some((conversation, assistant, method)) = state
+                .pending_cursor_requests
                 .get(&(generation, call.into()))
-                .map(|pending| (pending.conversation_id.clone(), pending.assistant_id.clone(), pending.request.method()))
-            else { return };
+                .map(|pending| {
+                    (
+                        pending.conversation_id.clone(),
+                        pending.assistant_id.clone(),
+                        pending.request.method(),
+                    )
+                })
+            else {
+                return;
+            };
             if state.resolve_cursor_request(generation, call, accepted) {
                 state.apply_ai_tool_status(
-                    generation, &conversation, &assistant, call, method, "{}",
-                    if accepted { "completed" } else { "rejected" }, None, Some("read".into()),
-                    None, false, None, None, None, |data| frame.diagnostic(data), cx,
+                    generation,
+                    &conversation,
+                    &assistant,
+                    call,
+                    method,
+                    "{}",
+                    if accepted { "completed" } else { "rejected" },
+                    None,
+                    Some("read".into()),
+                    None,
+                    false,
+                    None,
+                    None,
+                    None,
+                    |data| frame.diagnostic(data),
+                    cx,
                 );
                 cx.notify();
             }
@@ -816,14 +891,23 @@ impl AiTranscriptPolicy {
         let policy = Self::from_settings(settings, ai, config);
         (
             AiComposerFrame {
-                enabled: settings.enabled, model_selected: policy.model_selected, images_allowed: policy.images_allowed,
-                backend: settings.active_backend, context_counts: settings.enabled.then(context_counts).flatten(),
-                terminal_context, split_context, ide_context, sftp_context, tools,
+                enabled: settings.enabled,
+                model_selected: policy.model_selected,
+                images_allowed: policy.images_allowed,
+                backend: settings.active_backend,
+                context_counts: settings.enabled.then(context_counts).flatten(),
+                terminal_context,
+                split_context,
+                ide_context,
+                sftp_context,
+                tools,
                 reasoning: policy.reasoning.as_ref().map(|(_, _, level)| *level),
                 auth_methods,
             },
             AiOverlayFrame {
-                rename, confirm_focus, reasoning: policy.reasoning,
+                rename,
+                confirm_focus,
+                reasoning: policy.reasoning,
                 breakdown: ai.chat_ui().context_popover_open.then(token_breakdown),
             },
             policy.agent_models,

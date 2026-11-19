@@ -6,9 +6,7 @@ use crate::workspace::{
     WorkspaceNotificationKind, WorkspaceNotificationScope, WorkspaceNotificationSeverity,
     standalone_connections::{StandaloneConnectionKind, StandaloneConnectionLaunch},
 };
-use oxideterm_gpui_connections::profiles::{
-    SavedSshOpen, prepare_saved_ssh_open,
-};
+use oxideterm_gpui_connections::profiles::{SavedSshOpen, prepare_saved_ssh_open};
 use oxideterm_gpui_terminal::TerminalNoticeVariant;
 
 impl WorkspaceApp {
@@ -418,18 +416,41 @@ impl WorkspaceApp {
         });
     }
 
-    pub(in crate::workspace) fn open_runtime_node_reconnect_editor(&mut self, node_id: NodeId, window: &mut Window, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn open_runtime_node_reconnect_editor(
+        &mut self,
+        node_id: NodeId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.open_runtime_node_form(node_id, false, window, cx);
     }
 
-    fn open_runtime_node_form(&mut self, node_id: NodeId, save: bool, window: &mut Window, cx: &mut Context<Self>) {
-        let draft = self.ssh_nodes.get(&node_id)
+    fn open_runtime_node_form(
+        &mut self,
+        node_id: NodeId,
+        save: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let draft = self
+            .ssh_nodes
+            .get(&node_id)
             .ok_or_else(|| anyhow::anyhow!(self.i18n.t("ssh.form.runtime_node_missing")))
-            .and_then(|node| oxideterm_gpui_connections::conversion::form_for_runtime_node(&self.node_router, &node_id, &node.title, save, &self.i18n));
+            .and_then(|node| {
+                oxideterm_gpui_connections::conversion::form_for_runtime_node(
+                    &self.node_router,
+                    &node_id,
+                    &node.title,
+                    save,
+                    &self.i18n,
+                )
+            });
         match draft {
             Ok(draft) => {
                 self.prepare_modal_interaction_boundary(cx);
-                self.connections.flow.update(cx, |flow, cx| flow.replace_form(draft, cx));
+                self.connections
+                    .flow
+                    .update(cx, |flow, cx| flow.replace_form(draft, cx));
                 self.focus_connection_form(window, cx);
             }
             Err(error) if save => self.set_connection_status(Some(error.to_string()), cx),
@@ -564,19 +585,38 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn open_saved_standalone_sftp_profile(
-        &mut self, id: &str, _window: &mut Window, cx: &mut Context<Self>,
+        &mut self,
+        id: &str,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
     ) {
         use oxideterm_gpui_connections::submission::SavedSftpOpen;
-        let open = self.connections.flow.update(cx, |flow, _| flow.prepare_saved_sftp_open(
-            id, &self.connection_store, self.settings_store.settings(),
-            |id| self.standalone_sftp_sessions.contains_key(id), &self.i18n,
-        ));
+        let open = self.connections.flow.update(cx, |flow, _| {
+            flow.prepare_saved_sftp_open(
+                id,
+                &self.connection_store,
+                self.settings_store.settings(),
+                |id| self.standalone_sftp_sessions.contains_key(id),
+                &self.i18n,
+            )
+        });
         match open {
             Ok(None) => {}
             Err(error) => self.set_connection_status(Some(error), cx),
-            Ok(Some(SavedSftpOpen::Existing { title, primary: (id, path), secondary })) => {
+            Ok(Some(SavedSftpOpen::Existing {
+                title,
+                primary: (id, path),
+                secondary,
+            })) => {
                 if let Some((secondary, secondary_path)) = secondary {
-                    self.open_standalone_sftp_pair_tab_surface(id, secondary, title, path, secondary_path, cx);
+                    self.open_standalone_sftp_pair_tab_surface(
+                        id,
+                        secondary,
+                        title,
+                        path,
+                        secondary_path,
+                        cx,
+                    );
                 } else {
                     self.open_standalone_sftp_tab_surface(id, title, path, cx);
                 }
@@ -599,14 +639,31 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn open_saved_mosh_profile_for_connection(
-        &mut self, id: &str, attempt: Option<String>, window: &mut Window, cx: &mut Context<Self>,
+        &mut self,
+        id: &str,
+        attempt: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
     ) {
         use oxideterm_gpui_connections::submission::{SavedMoshOpen, prepare_saved_mosh_open};
-        let reconnect = attempt.as_deref().and_then(|id| self.standalone_connections.connection_id_for_attempt(id));
-        let draft = match prepare_saved_mosh_open(&self.connection_store, id, attempt.clone(), reconnect, &self.i18n) {
+        let reconnect = attempt
+            .as_deref()
+            .and_then(|id| self.standalone_connections.connection_id_for_attempt(id));
+        let draft = match prepare_saved_mosh_open(
+            &self.connection_store,
+            id,
+            attempt.clone(),
+            reconnect,
+            &self.i18n,
+        ) {
             SavedMoshOpen::Connect(open) => {
                 self.set_connection_status(Some(self.i18n.t("ssh.form.checking_host_key")), cx);
-                self.start_ssh_preflight(open.config, open.title, SshConnectionIntent::Mosh(open.options), cx);
+                self.start_ssh_preflight(
+                    open.config,
+                    open.title,
+                    SshConnectionIntent::Mosh(open.options),
+                    cx,
+                );
                 cx.notify();
                 return;
             }
@@ -618,7 +675,9 @@ impl WorkspaceApp {
         }
         if let Some(draft) = draft {
             self.open_new_connection_form(window, cx);
-            self.connections.flow.update(cx, |flow, cx| flow.replace_form(draft, cx));
+            self.connections
+                .flow
+                .update(cx, |flow, cx| flow.replace_form(draft, cx));
         }
     }
 

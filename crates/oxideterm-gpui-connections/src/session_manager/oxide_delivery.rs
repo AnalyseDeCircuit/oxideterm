@@ -54,7 +54,11 @@ pub struct OxideClientStateImportResult {
 }
 
 impl OxideClientStateImportResult {
-    pub fn audit_counts(&self, plugin_settings_failed: bool, app_settings_requested: bool) -> (usize, usize) {
+    pub fn audit_counts(
+        &self,
+        plugin_settings_failed: bool,
+        app_settings_requested: bool,
+    ) -> (usize, usize) {
         let applied = self.envelope.imported
             + self.envelope.merged
             + self.envelope.replaced

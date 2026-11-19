@@ -273,7 +273,9 @@ impl TerminalTriggerStream {
         sink: &mut impl FnMut(TriggerMatched),
     ) {
         while !span.is_empty() {
-            let mut end = span.len().min(MAX_LOGICAL_LINE_BYTES + 1 - self.current_line.len());
+            let mut end = span
+                .len()
+                .min(MAX_LOGICAL_LINE_BYTES + 1 - self.current_line.len());
             // Scan at exactly the same code point that would first exceed the limit.
             while !span.is_char_boundary(end) {
                 end += 1;

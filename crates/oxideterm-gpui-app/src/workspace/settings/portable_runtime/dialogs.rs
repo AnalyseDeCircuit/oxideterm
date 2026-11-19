@@ -3,7 +3,12 @@ use crate::workspace::ime::WorkspaceImeTarget;
 use oxideterm_gpui_settings_view::portable_runtime::dialog::PortablePasswordFrame;
 
 impl WorkspaceApp {
-    pub(in crate::workspace) fn portable_password_bindings(cx: &Context<Self>) -> (Rc<dyn Fn(&App) -> Option<PortablePasswordFrame>>, Rc<dyn Fn(bool, &mut App)>) {
+    pub(in crate::workspace) fn portable_password_bindings(
+        cx: &Context<Self>,
+    ) -> (
+        Rc<dyn Fn(&App) -> Option<PortablePasswordFrame>>,
+        Rc<dyn Fn(bool, &mut App)>,
+    ) {
         let owner = cx.entity().downgrade();
         let frame = Rc::new({
             let owner = owner.clone();

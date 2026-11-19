@@ -1179,17 +1179,21 @@ fn lerp_u8_channel(from: u8, to: u8, progress: f32) -> u8 {
 }
 
 fn lerp_hex_color(from: u32, to: u32, progress: f32) -> u32 {
-    let r = lerp_u8_channel(((from >> 16) & 0xff) as u8, ((to >> 16) & 0xff) as u8, progress);
-    let g = lerp_u8_channel(((from >> 8) & 0xff) as u8, ((to >> 8) & 0xff) as u8, progress);
+    let r = lerp_u8_channel(
+        ((from >> 16) & 0xff) as u8,
+        ((to >> 16) & 0xff) as u8,
+        progress,
+    );
+    let g = lerp_u8_channel(
+        ((from >> 8) & 0xff) as u8,
+        ((to >> 8) & 0xff) as u8,
+        progress,
+    );
     let b = lerp_u8_channel((from & 0xff) as u8, (to & 0xff) as u8, progress);
     ((r as u32) << 16) | ((g as u32) << 8) | (b as u32)
 }
 
-fn lerp_terminal_color(
-    from: TerminalColor,
-    to: TerminalColor,
-    progress: f32,
-) -> TerminalColor {
+fn lerp_terminal_color(from: TerminalColor, to: TerminalColor, progress: f32) -> TerminalColor {
     TerminalColor::rgb(
         lerp_u8_channel(from.r, to.r, progress),
         lerp_u8_channel(from.g, to.g, progress),
@@ -1713,24 +1717,25 @@ mod tests {
     #[test]
     fn character_spacing_scales_cell_width_and_derives_matching_letter_spacing() {
         let base_width = px(10.0);
-        let assert_scaled = |input: f32, expected_cell: f32, expected_letter_spacing: Option<f32>| {
-            let (cell_width, letter_spacing) =
-                scaled_cell_width_and_letter_spacing(base_width, input);
-            assert!(
-                (f32::from(cell_width) - expected_cell).abs() < 1e-4,
-                "input {input}: cell_width={cell_width:?}, expected {expected_cell}"
-            );
-            match (letter_spacing, expected_letter_spacing) {
-                (Some(actual), Some(expected)) => assert!(
-                    (f32::from(actual) - expected).abs() < 1e-4,
-                    "input {input}: letter_spacing={actual:?}, expected {expected}"
-                ),
-                (None, None) => {}
-                (actual, expected) => panic!(
-                    "input {input}: letter_spacing={actual:?}, expected={expected:?}"
-                ),
-            }
-        };
+        let assert_scaled =
+            |input: f32, expected_cell: f32, expected_letter_spacing: Option<f32>| {
+                let (cell_width, letter_spacing) =
+                    scaled_cell_width_and_letter_spacing(base_width, input);
+                assert!(
+                    (f32::from(cell_width) - expected_cell).abs() < 1e-4,
+                    "input {input}: cell_width={cell_width:?}, expected {expected_cell}"
+                );
+                match (letter_spacing, expected_letter_spacing) {
+                    (Some(actual), Some(expected)) => assert!(
+                        (f32::from(actual) - expected).abs() < 1e-4,
+                        "input {input}: letter_spacing={actual:?}, expected {expected}"
+                    ),
+                    (None, None) => {}
+                    (actual, expected) => {
+                        panic!("input {input}: letter_spacing={actual:?}, expected={expected:?}")
+                    }
+                }
+            };
 
         assert_scaled(1.0, 9.3, Some(-0.7));
         assert_scaled(1.1, 10.23, Some(0.23));

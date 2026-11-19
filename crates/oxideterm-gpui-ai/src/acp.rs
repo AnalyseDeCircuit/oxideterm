@@ -2,9 +2,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use gpui::{Context, EventEmitter};
 
-use crate::{
-    stream::{AiStreamDelivery, AiStreamDeliveryEvent},
-};
+use crate::stream::{AiStreamDelivery, AiStreamDeliveryEvent};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AcpPluginRevision {
@@ -71,11 +69,19 @@ impl AcpThreadSnapshot {
 }
 
 pub fn missing_acp_plugins(
-    plugins: &[AcpPluginRevision], settings: &oxideterm_settings::AiSettings,
+    plugins: &[AcpPluginRevision],
+    settings: &oxideterm_settings::AiSettings,
 ) -> Vec<(String, String)> {
-    plugins.iter().filter(|plugin| {
-        !settings.acp_agents.iter().any(|agent| agent.plugin_id.as_deref() == Some(&plugin.plugin_id))
-    }).map(|plugin| (plugin.plugin_id.clone(), plugin.name.clone())).collect()
+    plugins
+        .iter()
+        .filter(|plugin| {
+            !settings
+                .acp_agents
+                .iter()
+                .any(|agent| agent.plugin_id.as_deref() == Some(&plugin.plugin_id))
+        })
+        .map(|plugin| (plugin.plugin_id.clone(), plugin.name.clone()))
+        .collect()
 }
 
 pub fn reset_acp_plugin_agent_status(settings: &mut oxideterm_settings::AiSettings, id: &str) {

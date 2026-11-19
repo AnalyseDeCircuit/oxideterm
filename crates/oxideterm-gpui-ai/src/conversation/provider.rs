@@ -38,14 +38,24 @@ impl super::AiConversationPrompt<'_> {
         pending: crate::state::AiPendingChatStream,
         allow_pre_send_compaction: bool,
     ) -> Option<AiProviderSendPlan> {
-        if allow_pre_send_compaction && self.should_force_ai_pre_send_compaction(
-            &pending.conversation_id, &pending.config, pending.request_content.as_deref(),
-            pending.task_system_prompt.as_deref(), pending.rag_system_prompt.as_deref(),
-        ) {
+        if allow_pre_send_compaction
+            && self.should_force_ai_pre_send_compaction(
+                &pending.conversation_id,
+                &pending.config,
+                pending.request_content.as_deref(),
+                pending.task_system_prompt.as_deref(),
+                pending.rag_system_prompt.as_deref(),
+            )
+        {
             return Some(AiProviderSendPlan::Compact(pending));
         }
         let crate::state::AiPendingChatStream {
-            conversation_id, config, request_content, task_system_prompt, rag_system_prompt, ..
+            conversation_id,
+            config,
+            request_content,
+            task_system_prompt,
+            rag_system_prompt,
+            ..
         } = pending;
         let (history, trimmed_count) = self.build_ai_stream_history(
             &conversation_id,
@@ -54,7 +64,11 @@ impl super::AiConversationPrompt<'_> {
             task_system_prompt.clone(),
             rag_system_prompt.clone(),
         )?;
-        let context_window = super::ai_model_context_window(self.settings, config.provider_id.as_deref(), &config.model);
+        let context_window = super::ai_model_context_window(
+            self.settings,
+            config.provider_id.as_deref(),
+            &config.model,
+        );
         let (budget_decision, budget_diagnostic_payload) = self.state
             .conversation_state()
             .conversations
@@ -92,7 +106,12 @@ impl super::AiConversationPrompt<'_> {
                 (decision, payload)
             });
         Some(AiProviderSendPlan::Launch(Box::new(AiProviderTurn {
-            conversation_id, config, request_content, history, trimmed_count, context_window,
+            conversation_id,
+            config,
+            request_content,
+            history,
+            trimmed_count,
+            context_window,
             budget_level: budget_decision.map_or(0, |decision| decision.level),
             budget_diagnostic_payload,
         })))
@@ -419,7 +438,10 @@ fn record_prompt_usage(
 }
 
 impl AiWorkspaceEntity {
-    pub fn model_backend_services(&self, settings: &oxideterm_settings::AiSettings) -> AiModelBackendServices {
+    pub fn model_backend_services(
+        &self,
+        settings: &oxideterm_settings::AiSettings,
+    ) -> AiModelBackendServices {
         AiModelBackendServices {
             rag_store: self.rag_store(),
             ai_mcp_registry: self.mcp_registry().clone(),
@@ -430,7 +452,8 @@ impl AiWorkspaceEntity {
                 .into_iter()
                 .flat_map(|provider| {
                     provider.models.into_iter().map(move |model| {
-                        let context = super::ai_model_context_window(settings, Some(&provider.id), &model);
+                        let context =
+                            super::ai_model_context_window(settings, Some(&provider.id), &model);
                         let response: Option<i64> = None;
                         let reasoning = settings
                             .reasoning_model_overrides
@@ -451,22 +474,28 @@ impl AiWorkspaceEntity {
                 .collect(),
         }
     }
-
 }
 
 impl AiWorkspaceEntity {
     pub fn prepare_provider_send(
-        &mut self, mut pending: crate::state::AiPendingChatStream, cx: &mut Context<Self>,
+        &mut self,
+        mut pending: crate::state::AiPendingChatStream,
+        cx: &mut Context<Self>,
     ) -> Option<crate::state::AiPendingChatStream> {
         pending.launch_id = self.chat_launches.get(&pending.conversation_id).cloned();
         self.defer_for_unsupported_images(pending, cx)
     }
 
     pub fn fail_acp_launch(
-        &mut self, pending: &crate::state::AiPendingChatStream,
+        &mut self,
+        pending: &crate::state::AiPendingChatStream,
         settings: &oxideterm_settings::AiSettings,
     ) -> Option<oxideterm_settings::AcpAgentConfig> {
         self.set_conversation_loading(&pending.conversation_id, false);
-        settings.acp_agents.iter().find(|agent| Some(&agent.id) == pending.config.acp_agent_id.as_ref()).cloned()
+        settings
+            .acp_agents
+            .iter()
+            .find(|agent| Some(&agent.id) == pending.config.acp_agent_id.as_ref())
+            .cloned()
     }
 }

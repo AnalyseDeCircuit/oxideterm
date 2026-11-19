@@ -138,8 +138,17 @@ pub struct OxideDialogEnvironment {
 impl OxideDialogEnvironment {
     pub fn from_store(store: &oxideterm_connections::ConnectionStore) -> Self {
         Self {
-            saved_ids: store.connections().iter().map(|record| record.id.clone())
-                .chain(store.plugin_profiles().iter().map(|profile| profile.id.clone())).collect(),
+            saved_ids: store
+                .connections()
+                .iter()
+                .map(|record| record.id.clone())
+                .chain(
+                    store
+                        .plugin_profiles()
+                        .iter()
+                        .map(|profile| profile.id.clone()),
+                )
+                .collect(),
             serial_count: store.serial_profiles().len(),
             telnet_count: store.telnet_profiles().len(),
             mosh_count: store.mosh_profiles().len(),

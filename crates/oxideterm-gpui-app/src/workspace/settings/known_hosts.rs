@@ -5,8 +5,8 @@ mod tests {
     use super::*;
     use crate::workspace::window_shell::WorkspaceWindowShell;
     use gpui::TestAppContext;
-    use oxideterm_ssh::list_known_hosts;
     use oxideterm_settings_model::settings_section_list_item_index;
+    use oxideterm_ssh::list_known_hosts;
 
     #[gpui::test]
     fn known_hosts_search_and_confirmed_delete_use_the_selected_endpoint(cx: &mut TestAppContext) {

@@ -311,6 +311,8 @@ pub fn delete_catalog_selection<C: DerefMut<Target = App>>(
             }
         }
     }
-    manager.update(&mut **cx, |state, cx| state.finish_batch_delete(deleted, i18n, cx));
+    manager.update(&mut **cx, |state, cx| {
+        state.finish_batch_delete(deleted, i18n, cx)
+    });
     deleted > 0
 }

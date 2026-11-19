@@ -162,7 +162,8 @@ impl WorkspaceApp {
         if self.onboarding_disclaimer_locked() {
             return;
         }
-        self.audit.update(cx, |audit, cx| audit.dismiss_transients(cx));
+        self.audit
+            .update(cx, |audit, cx| audit.dismiss_transients(cx));
         if self.focus_detached_tab_window(tab_id, cx) {
             return;
         }
@@ -210,7 +211,8 @@ impl WorkspaceApp {
             }
             Some(TabKind::Forwards) => {
                 if let Some(id) = self.active_content_tab_id(cx) {
-                    self.forwarding.update(cx, |state, cx| state.select_page(id, cx));
+                    self.forwarding
+                        .update(cx, |state, cx| state.select_page(id, cx));
                 }
                 self.active_surface = ActiveSurface::Terminal;
                 if let Some(active_tab_id) = self.active_content_tab_id(cx)
@@ -1078,7 +1080,8 @@ impl WorkspaceApp {
         }
         // Final tab removal revokes focus authority before any deferred UI work
         // can observe a replacement tab with the same presentation kind.
-        self.ai.authority
+        self.ai
+            .authority
             .update(cx, |runtime, _cx| runtime.revoke_app_surface(tab.id));
         self.apply_tab_mount_cleanup(mount_cleanup, window.as_deref_mut(), cx);
         self.sync_host_tools_lifecycle(false, cx);

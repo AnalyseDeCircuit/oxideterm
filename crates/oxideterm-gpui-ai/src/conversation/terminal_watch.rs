@@ -356,8 +356,11 @@ pub fn wait_for_connected_target(
     started: std::time::Instant,
     cx: &mut gpui::App,
     mut sample: impl FnMut(
-        Option<&AiExecutedToolResult>, u128, &mut gpui::AsyncApp,
-    ) -> Option<Option<AiExecutedToolResult>> + 'static,
+        Option<&AiExecutedToolResult>,
+        u128,
+        &mut gpui::AsyncApp,
+    ) -> Option<Option<AiExecutedToolResult>>
+    + 'static,
 ) {
     const MAX_SAMPLES: usize = 900;
     const SAMPLE_INTERVAL: Duration = Duration::from_millis(100);
@@ -386,7 +389,8 @@ pub fn wait_for_connected_target(
             .flatten()
             .unwrap_or(base);
         let _ = sender.send(result);
-    }).detach();
+    })
+    .detach();
 }
 
 impl crate::state::AiWorkspaceEntity {
@@ -401,7 +405,11 @@ impl crate::state::AiWorkspaceEntity {
         let mut data = serde_json::json!({"waiting": true, "waitDeadline": deadline_ms});
         if run {
             if let Some(agent) = self.agent_run(generation) {
-                let _ = self.agents.services.runtime.set_state(&agent, status.agent_state());
+                let _ = self
+                    .agents
+                    .services
+                    .runtime
+                    .set_state(&agent, status.agent_state());
             }
             data["commandId"] = serde_json::json!(command_id);
         }
@@ -444,9 +452,13 @@ impl crate::state::AiWorkspaceEntity {
                     let Some(record) = &record else { return };
                     if let Some(evidence) = evidence(require_closed, cx) {
                         let output = oxideterm_ai::terminal_observation::terminal_delta_output(
-                            &before, &evidence.buffer,
+                            &before,
+                            &evidence.buffer,
                         );
-                        record.outcome(&serde_json::json!({"exitCode":evidence.exit_code,"output":output}).to_string());
+                        record.outcome(
+                            &serde_json::json!({"exitCode":evidence.exit_code,"output":output})
+                                .to_string(),
+                        );
                         record.finish(OwnedResourceState::Completed);
                     } else {
                         record.finish(OwnedResourceState::OutcomeUnknown);
@@ -454,7 +466,9 @@ impl crate::state::AiWorkspaceEntity {
                 };
                 loop {
                     Timer::after(SAMPLE_INTERVAL).await;
-                    if weak.upgrade().is_none() { break; }
+                    if weak.upgrade().is_none() {
+                        break;
+                    }
                     let finished = cx.update(|cx| {
                         if !lease.is_current() {
                             // Preserve confirmed evidence without changing the next request's lease.
@@ -467,7 +481,9 @@ impl crate::state::AiWorkspaceEntity {
                                 resources.invalidate(&monitor_key);
                                 true
                             }
-                            AiCommandMonitorSample::Current(status) if lease.response_finished() => {
+                            AiCommandMonitorSample::Current(status)
+                                if lease.response_finished() =>
+                            {
                                 match status {
                                     Some(AiTerminalCommandStatus::Completed) => {
                                         lease.command_finished();
@@ -487,9 +503,13 @@ impl crate::state::AiWorkspaceEntity {
                             AiCommandMonitorSample::Current(_) => false,
                         }
                     });
-                    if finished { break; }
+                    if finished {
+                        break;
+                    }
                 }
-                let _ = weak.update(cx, |ai, _| { ai.agents.command_monitors.remove(&monitor_key); });
+                let _ = weak.update(cx, |ai, _| {
+                    ai.agents.command_monitors.remove(&monitor_key);
+                });
             });
             self.agents.command_monitors.insert(key, task);
         }
@@ -497,5 +517,10 @@ impl crate::state::AiWorkspaceEntity {
 }
 
 pub fn connection_needs_wait(result: &AiExecutedToolResult) -> bool {
-    result.success && result.envelope.get("summary").and_then(serde_json::Value::as_str) != Some("Target is already live.")
+    result.success
+        && result
+            .envelope
+            .get("summary")
+            .and_then(serde_json::Value::as_str)
+            != Some("Target is already live.")
 }

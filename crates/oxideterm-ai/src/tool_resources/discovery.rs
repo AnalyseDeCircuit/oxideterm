@@ -275,12 +275,18 @@ impl<'a> AiTargetCapture<'a> {
     }
 
     pub fn surface(tab: &oxideterm_workspace::Tab, visible: bool) -> Self {
-        let session_id = tab.root_pane.as_ref().and_then(|root| root.session_id_for_pane(tab.active_pane_id?));
+        let session_id = tab
+            .root_pane
+            .as_ref()
+            .and_then(|root| root.session_id_for_pane(tab.active_pane_id?));
         Self::Surface {
-            tab_id: tab.id, kind: tab.kind.clone(), title: tab.title.clone(), session_id, visible,
+            tab_id: tab.id,
+            kind: tab.kind.clone(),
+            title: tab.title.clone(),
+            session_id,
+            visible,
         }
     }
-
 
     fn append_targets(self, targets: &mut Vec<AiOrchestratorTarget>) {
         match self {
@@ -542,7 +548,14 @@ pub fn ai_ssh_node_target(input: AiSshNodeTargetInput<'_>) -> Option<AiOrchestra
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub enum AiTransferState { Pending, Active, Paused, Completed, Cancelled, Error }
+pub enum AiTransferState {
+    Pending,
+    Active,
+    Paused,
+    Completed,
+    Cancelled,
+    Error,
+}
 
 pub struct AiTransferCapture<'a> {
     pub id: &'a str,
@@ -555,9 +568,7 @@ pub struct AiTransferCapture<'a> {
     pub end_time: Option<u64>,
 }
 
-fn ai_background_transfer_state_label(
-    state: AiTransferState,
-) -> &'static str {
+fn ai_background_transfer_state_label(state: AiTransferState) -> &'static str {
     match state {
         AiTransferState::Pending => "pending",
         AiTransferState::Active => "active",

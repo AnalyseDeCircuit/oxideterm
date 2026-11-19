@@ -69,7 +69,9 @@ impl WorkspaceApp {
         };
         let target = match confirm {
             CatalogDeletion::Single(target) => target,
-            CatalogDeletion::Batch(targets) => return self.delete_selected_session_items(targets, cx),
+            CatalogDeletion::Batch(targets) => {
+                return self.delete_selected_session_items(targets, cx);
+            }
             CatalogDeletion::Group(group) => return self.delete_session_group(&group, cx),
         };
         let result = self.remove_catalog_target(&target, true, cx);
@@ -206,12 +208,21 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        use oxideterm_gpui_connections::submission::{SavedDesktopOpen, prepare_saved_desktop_open};
+        use oxideterm_gpui_connections::submission::{
+            SavedDesktopOpen, prepare_saved_desktop_open,
+        };
         let plan = prepare_saved_desktop_open(
-            &self.connection_store, self.settings_store.settings(), id, &self.i18n,
+            &self.connection_store,
+            self.settings_store.settings(),
+            id,
+            &self.i18n,
         );
         match plan {
-            Ok(Some(SavedDesktopOpen::Launch { profile, password, gateway })) => {
+            Ok(Some(SavedDesktopOpen::Launch {
+                profile,
+                password,
+                gateway,
+            })) => {
                 self.open_remote_desktop_connection_for_connection(
                     profile,
                     password.map(|secret| RemoteDesktopSecret::from(secret.into_zeroizing())),
@@ -278,7 +289,9 @@ impl WorkspaceApp {
             return;
         };
         self.open_new_connection_form(window, cx);
-        self.connections.flow.update(cx, |flow, cx| flow.replace_form(form, cx));
+        self.connections
+            .flow
+            .update(cx, |flow, cx| flow.replace_form(form, cx));
         // Refresh discovery without replacing the persisted device selected for editing.
         match target {
             SessionManagerOpenTarget::Serial(_) => self.refresh_serial_ports(cx),

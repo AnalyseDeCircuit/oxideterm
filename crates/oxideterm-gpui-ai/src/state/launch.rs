@@ -206,25 +206,31 @@ pub fn start_chat_launch(
     let bindings = AiLaunchBindings {
         i18n,
         backend_services: Rc::new(backend_services),
-        dispatch: Rc::new(move |effect, cx| {
-            match effect {
-                AiLaunchEffect::Error(message) => on_error(message, cx),
-                AiLaunchEffect::Ready(pending) => {
-                    let Some(state) = current_state.upgrade() else { return };
-                    if !state.read(cx).chat_launch_matches(&pending.conversation_id, pending.launch_id.as_deref()) {
-                        return;
-                    }
-                    let ready = if pending.config.execution_backend == oxideterm_ai::AiExecutionBackend::Acp {
+        dispatch: Rc::new(move |effect, cx| match effect {
+            AiLaunchEffect::Error(message) => on_error(message, cx),
+            AiLaunchEffect::Ready(pending) => {
+                let Some(state) = current_state.upgrade() else {
+                    return;
+                };
+                if !state
+                    .read(cx)
+                    .chat_launch_matches(&pending.conversation_id, pending.launch_id.as_deref())
+                {
+                    return;
+                }
+                let ready =
+                    if pending.config.execution_backend == oxideterm_ai::AiExecutionBackend::Acp {
                         IntentReady::Acp(pending)
                     } else {
                         IntentReady::Provider(pending)
                     };
-                    on_ready(ready, cx);
-                }
+                on_ready(ready, cx);
             }
         }),
     };
-    state.update(cx, |ai, cx| ai.prepare_chat_launch(pending, context_window, bindings, cx));
+    state.update(cx, |ai, cx| {
+        ai.prepare_chat_launch(pending, context_window, bindings, cx)
+    });
 }
 
 pub enum IntentReady {

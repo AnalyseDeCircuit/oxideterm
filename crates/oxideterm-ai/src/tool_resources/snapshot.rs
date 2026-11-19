@@ -44,63 +44,95 @@ impl AiOrchestratorRuntimeSnapshot {
     }
 }
 
-pub fn recent_runtime_health(events: impl IntoIterator<Item = (std::time::SystemTime, Option<bool>)>) -> (usize, usize, usize) {
+pub fn recent_runtime_health(
+    events: impl IntoIterator<Item = (std::time::SystemTime, Option<bool>)>,
+) -> (usize, usize, usize) {
     let cutoff = std::time::SystemTime::now() - std::time::Duration::from_secs(10 * 60);
-    events.into_iter().filter(|(timestamp, _)| *timestamp >= cutoff)
+    events
+        .into_iter()
+        .filter(|(timestamp, _)| *timestamp >= cutoff)
         .fold((0, 0, 0), |(total, warnings, errors), (_, severity)| {
-            (total + 1, warnings + usize::from(severity == Some(false)), errors + usize::from(severity == Some(true)))
+            (
+                total + 1,
+                warnings + usize::from(severity == Some(false)),
+                errors + usize::from(severity == Some(true)),
+            )
         })
 }
 
 impl AiOrchestratorRuntimeSnapshot {
     pub fn tool_owner_rejected(
-        &self, call: String, name: String, error: &crate::RuntimeValidationError,
-        approved: bool, elapsed: u128, file: bool,
+        &self,
+        call: String,
+        name: String,
+        error: &crate::RuntimeValidationError,
+        approved: bool,
+        elapsed: u128,
+        file: bool,
     ) -> crate::AiExecutedToolResult {
         let (summary, risk) = if file {
             ("Runtime resource is unavailable.", "write")
         } else {
             ("Runtime target is unavailable.", "interactive")
         };
-        self.to_executed_tool_result(call, name, self.fail(
-            summary, super::ai_runtime_validation_public_code(error, approved),
-            super::ai_runtime_validation_recovery_message(approved), risk,
-        ), elapsed)
+        self.to_executed_tool_result(
+            call,
+            name,
+            self.fail(
+                summary,
+                super::ai_runtime_validation_public_code(error, approved),
+                super::ai_runtime_validation_recovery_message(approved),
+                risk,
+            ),
+            elapsed,
+        )
     }
 }
 
 impl AiOrchestratorRuntimeSnapshot {
-    pub fn tool_preflight_rejection(&self, call: String, name: String, error: &crate::RuntimeValidationError) -> crate::AiExecutedToolResult {
-        self.to_executed_tool_result(call, name, self.fail(
-            "Runtime target is unavailable.", error.public_code(),
-            "Rediscover the current terminal target before retrying.", "interactive",
-        ), 0)
+    pub fn tool_preflight_rejection(
+        &self,
+        call: String,
+        name: String,
+        error: &crate::RuntimeValidationError,
+    ) -> crate::AiExecutedToolResult {
+        self.to_executed_tool_result(
+            call,
+            name,
+            self.fail(
+                "Runtime target is unavailable.",
+                error.public_code(),
+                "Rediscover the current terminal target before retrying.",
+                "interactive",
+            ),
+            0,
+        )
     }
 }
 
 /// Native tools whose live or saved owner must already be valid before approval.
 pub fn ai_tool_preflights_runtime_owner(tool_name: &str) -> bool {
     matches!(
-    tool_name,
-    "connect_target"
-        | "run_command"
-        | "observe_terminal"
-        | "send_terminal_input"
-        | "get_transport_session_state"
-        | "manage_serial_session"
-        | "manage_telnet_session"
-        | "wait_terminal_output"
-        | "get_terminal_command_status"
-        | "read_resource"
-        | "write_resource"
-        | "transfer_resource"
-        | "open_app_surface"
-        | "get_state"
-        | "inspect_host_tools"
-        | "control_host_tool"
-        | "list_forwards"
-        | "manage_forward"
-)
+        tool_name,
+        "connect_target"
+            | "run_command"
+            | "observe_terminal"
+            | "send_terminal_input"
+            | "get_transport_session_state"
+            | "manage_serial_session"
+            | "manage_telnet_session"
+            | "wait_terminal_output"
+            | "get_terminal_command_status"
+            | "read_resource"
+            | "write_resource"
+            | "transfer_resource"
+            | "open_app_surface"
+            | "get_state"
+            | "inspect_host_tools"
+            | "control_host_tool"
+            | "list_forwards"
+            | "manage_forward"
+    )
 }
 
 pub enum AiAuthorizedExecutionRoute {
@@ -118,7 +150,10 @@ pub fn ai_authorized_execution_route(
     match tool_name {
         "connect_target" => AiAuthorizedExecutionRoute::Connect,
         "read_resource" | "write_resource" | "transfer_resource"
-            if args.get("handle_id").is_some() => AiAuthorizedExecutionRoute::LiveFile,
+            if args.get("handle_id").is_some() =>
+        {
+            AiAuthorizedExecutionRoute::LiveFile
+        }
         "run_command" => AiAuthorizedExecutionRoute::RunCommand,
         "wait_terminal_output" => AiAuthorizedExecutionRoute::WaitOutput,
         _ => AiAuthorizedExecutionRoute::Application,

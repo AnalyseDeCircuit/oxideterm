@@ -469,7 +469,6 @@ where
     }
 }
 
-
 #[cfg(test)]
 mod inline_footer_tests {
     #[test]
@@ -507,6 +506,4 @@ mod inline_footer_tests {
             Some(super::InlineFooterInputKeyAction::ClearFocus)
         );
     }
-
-
 }

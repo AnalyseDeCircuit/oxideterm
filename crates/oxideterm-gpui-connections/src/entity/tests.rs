@@ -14,10 +14,7 @@ use oxideterm_ssh::{
 };
 use tokio::sync::oneshot;
 
-
-use super::{
-    ConnectionFlowEntity, ConnectionFlowEvent, NativeProxyConnectRun,
-};
+use super::{ConnectionFlowEntity, ConnectionFlowEvent, NativeProxyConnectRun};
 use crate::{
     HostKeyChallenge, NewConnectionField, NewConnectionForm, NewConnectionProxyHop,
     SavedConnectionPromptAction, SshConnectionIntent, SshConnectionWorkerResult,

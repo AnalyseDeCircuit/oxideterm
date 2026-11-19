@@ -316,7 +316,9 @@ fn parse_result(name: &str, args: &Value, payload: Value) -> Result<WebResult, W
     })
 }
 
-pub fn configured_provider_id(settings: &oxideterm_settings::AiSettings) -> Result<String, WebError> {
+pub fn configured_provider_id(
+    settings: &oxideterm_settings::AiSettings,
+) -> Result<String, WebError> {
     if !settings.web_search.enabled {
         return Err(WebError::Disabled);
     }
@@ -327,9 +329,7 @@ pub fn configured_provider_id(settings: &oxideterm_settings::AiSettings) -> Resu
         .ok_or(WebError::Configuration)?;
     crate::provider_views(&settings.providers)
         .into_iter()
-        .find(|provider| {
-            provider.id == id && official_deepseek_provider(provider)
-        })
+        .find(|provider| provider.id == id && official_deepseek_provider(provider))
         .map(|provider| provider.id)
         .ok_or(WebError::Configuration)
 }
@@ -347,7 +347,8 @@ pub async fn complete_authorized_request(
     let operation = async {
         validate_arguments(&tool_name, &args)?;
         let key = tokio::task::spawn_blocking(move || key_store.get_provider_key(&provider_id))
-            .await.map_err(|_| WebError::Authentication)?
+            .await
+            .map_err(|_| WebError::Authentication)?
             .map_err(|_| WebError::Authentication)?
             .ok_or(WebError::Authentication)?;
         execute(&tool_name, &args, &key).await
@@ -356,16 +357,29 @@ pub async fn complete_authorized_request(
         _ = sender.closed() => return,
         result = crate::tool_loop::ai_pending_dispatch(dispatch.as_ref(), operation) => result,
     };
-    let snapshot = crate::tool_resources::AiOrchestratorRuntimeSnapshot::background_result_projection();
+    let snapshot =
+        crate::tool_resources::AiOrchestratorRuntimeSnapshot::background_result_projection();
     let action = match result {
         Ok(Ok(result)) => {
             let data = serde_json::json!({"sources":result.sources,"truncated":result.truncated});
-            snapshot.ok("Web request completed.", result.output, data, "read").with_verified(false)
+            snapshot
+                .ok("Web request completed.", result.output, data, "read")
+                .with_verified(false)
         }
         Ok(Err(error)) => snapshot.fail(error.to_string(), error.code(), error.to_string(), "read"),
-        Err(_) => snapshot.fail("Web request cancelled.", "operation_cancelled", "Web request cancelled.", "read"),
+        Err(_) => snapshot.fail(
+            "Web request cancelled.",
+            "operation_cancelled",
+            "Web request cancelled.",
+            "read",
+        ),
     };
-    let _ = sender.send(snapshot.to_executed_tool_result(tool_call_id, tool_name, action, started.elapsed().as_millis()));
+    let _ = sender.send(snapshot.to_executed_tool_result(
+        tool_call_id,
+        tool_name,
+        action,
+        started.elapsed().as_millis(),
+    ));
 }
 
 #[cfg(test)]

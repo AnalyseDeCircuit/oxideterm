@@ -219,12 +219,11 @@ fn feature_category(
                 .flex()
                 .items_start()
                 .gap(px(10.0))
-                .child(
-                    div()
-                        .pt(px(2.0))
-                        .flex_none()
-                        .child(render_icon(icon, 13.5, rgb(theme.accent))),
-                )
+                .child(div().pt(px(2.0)).flex_none().child(render_icon(
+                    icon,
+                    13.5,
+                    rgb(theme.accent),
+                )))
                 .child(
                     div()
                         .min_w(px(0.0))

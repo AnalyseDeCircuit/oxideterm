@@ -2644,8 +2644,14 @@ mod tests {
                     let shoulder_outer = image.get_pixel(24, 8).0[3];
                     let shoulder_entry = image.get_pixel(32, 8).0[3];
                     if corner_shape == 0 {
-                        assert_eq!(shoulder_outer, 0, "path={path}, shoulder_outer={shoulder_outer}");
-                        assert_eq!(shoulder_entry, 255, "path={path}, shoulder_entry={shoulder_entry}");
+                        assert_eq!(
+                            shoulder_outer, 0,
+                            "path={path}, shoulder_outer={shoulder_outer}"
+                        );
+                        assert_eq!(
+                            shoulder_entry, 255,
+                            "path={path}, shoulder_entry={shoulder_entry}"
+                        );
                     } else {
                         assert!(
                             (1..=128).contains(&shoulder_outer),

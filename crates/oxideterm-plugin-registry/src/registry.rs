@@ -115,7 +115,8 @@ impl NativePluginRegistry {
     }
 
     pub fn ai_tool_inventory(&self) -> serde_json::Value {
-        let plugins = self.plugins
+        let plugins = self
+            .plugins
             .iter()
             .map(|plugin| {
                 serde_json::json!({

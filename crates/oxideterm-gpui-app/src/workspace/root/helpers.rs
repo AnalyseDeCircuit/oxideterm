@@ -346,7 +346,13 @@ impl WorkspaceApp {
         options: oxideterm_gpui_ui::button::ToolbarButtonOptions,
         listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
     ) -> gpui::Div {
-        oxideterm_gpui_ui::button::toolbar_action_button(&self.tokens, label, icon, options, listener)
+        oxideterm_gpui_ui::button::toolbar_action_button(
+            &self.tokens,
+            label,
+            icon,
+            options,
+            listener,
+        )
     }
 
     pub(in crate::workspace) fn workspace_confirm_footer_action_button(
@@ -405,7 +411,6 @@ impl WorkspaceApp {
             cx.listener(listener),
         )
     }
-
 
     pub(in crate::workspace) fn workspace_context_menu_backdrop(
         &self,
@@ -875,12 +880,14 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        self.audit.update(cx, |audit, cx| audit.dismiss_transients(cx));
+        self.audit
+            .update(cx, |audit, cx| audit.dismiss_transients(cx));
         self.prepare_other_modal_interactions(cx);
     }
 
     pub(in crate::workspace) fn prepare_other_modal_interactions(
-        &mut self, cx: &mut Context<Self>,
+        &mut self,
+        cx: &mut Context<Self>,
     ) {
         self.session_sort_menu_open = false;
         self.context_tools_menu = None;
@@ -904,7 +911,8 @@ impl WorkspaceApp {
         // active IME-owned value before the modal replaces the focus owner.
         self.apply_focused_cloud_sync_input_draft(cx);
         self.focused_settings_input = None;
-        self.settings_workspace.update(cx, |settings, _| settings.set_slider_drag(None));
+        self.settings_workspace
+            .update(cx, |settings, _| settings.set_slider_drag(None));
         self.ime_marked_text = None;
         self.clear_all_workspace_tooltips(cx);
     }
@@ -950,31 +958,39 @@ impl WorkspaceApp {
         {
             changed = true;
         }
-        if self.connections.session_manager.update(cx, |session_manager, cx| {
-            if !session_manager.show_batch_move {
-                return false;
-            }
-            session_manager.show_batch_move = false;
-            cx.notify();
-            true
-        }) {
+        if self
+            .connections
+            .session_manager
+            .update(cx, |session_manager, cx| {
+                if !session_manager.show_batch_move {
+                    return false;
+                }
+                session_manager.show_batch_move = false;
+                cx.notify();
+                true
+            })
+        {
             changed = true;
         }
-        if self.connections.session_manager.update(cx, |session_manager, cx| {
-            let Some(dialog) = session_manager.batch_add.as_mut() else {
-                return false;
-            };
-            if !dialog.template_menu_open && !dialog.key_menu_open {
-                return false;
-            }
-            dialog.template_menu_open = false;
-            dialog.key_menu_open = false;
-            dialog.renaming_id = None;
-            dialog.new_template_naming = false;
-            dialog.rename_draft.clear();
-            cx.notify();
-            true
-        }) {
+        if self
+            .connections
+            .session_manager
+            .update(cx, |session_manager, cx| {
+                let Some(dialog) = session_manager.batch_add.as_mut() else {
+                    return false;
+                };
+                if !dialog.template_menu_open && !dialog.key_menu_open {
+                    return false;
+                }
+                dialog.template_menu_open = false;
+                dialog.key_menu_open = false;
+                dialog.renaming_id = None;
+                dialog.new_template_naming = false;
+                dialog.rename_draft.clear();
+                cx.notify();
+                true
+            })
+        {
             changed = true;
         }
         if self.dismiss_workspace_context_menus(cx) {
@@ -988,7 +1004,8 @@ impl WorkspaceApp {
             self.close_ai_sidebar_popovers(cx);
             changed = true;
         } else if self
-            .ai.state
+            .ai
+            .state
             .read(cx)
             .model_selector_is_open(AiModelSelectorScope::TerminalInline)
         {
@@ -1047,7 +1064,10 @@ impl WorkspaceApp {
         if self.dismiss_terminal_highlight_popover() {
             changed = true;
         }
-        if self.remote_desktop.update(cx, |desktops, _| desktops.close_resize_menu()) {
+        if self
+            .remote_desktop
+            .update(cx, |desktops, _| desktops.close_resize_menu())
+        {
             changed = true;
         }
         if self.close_terminal_git_branch_picker(cx) {

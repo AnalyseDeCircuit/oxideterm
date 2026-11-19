@@ -216,8 +216,12 @@ impl<'a> SettingsPageFrame<'a> {
         let state = host.settings_state().read(cx);
         let data = match section {
             AiGeneralSettings | AiGeneralPrivacy | AiToolsWebSearch => SettingsPageData::AiBasic,
-            AiContextControls | AiContextSystemPrompt | AiContextMemory | AiToolsToolUse => SettingsPageData::AiContext,
-            AiContextModelWindows => SettingsPageData::AiContextWindows(settings_controls_source(weak.clone())),
+            AiContextControls | AiContextSystemPrompt | AiContextMemory | AiToolsToolUse => {
+                SettingsPageData::AiContext
+            }
+            AiContextModelWindows => {
+                SettingsPageData::AiContextWindows(settings_controls_source(weak.clone()))
+            }
             AiProvidersSettings => SettingsPageData::AiProviders(host.ai_providers()),
             AiToolsMcpServers => SettingsPageData::AiMcp(host.ai_mcp()),
             AiToolsAgents => SettingsPageData::AiSubagents,

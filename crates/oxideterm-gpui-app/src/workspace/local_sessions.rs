@@ -99,7 +99,6 @@ impl WorkspaceApp {
             .unwrap_or_else(|| "Local".to_string())
     }
 
-
     fn local_profile_config(
         &self,
         shell_id: Option<&str>,

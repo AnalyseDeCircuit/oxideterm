@@ -508,7 +508,11 @@ impl ConnectionFlowEntity {
         true
     }
 
-    pub fn replace_form(&mut self, form: crate::form_state::NewConnectionForm, cx: &mut Context<Self>) {
+    pub fn replace_form(
+        &mut self,
+        form: crate::form_state::NewConnectionForm,
+        cx: &mut Context<Self>,
+    ) {
         self.form.replace_with_new_form(form);
         cx.notify();
     }

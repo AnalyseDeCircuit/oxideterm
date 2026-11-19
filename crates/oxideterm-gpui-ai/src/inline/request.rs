@@ -26,7 +26,10 @@ impl AiWorkspaceEntity {
     ) -> AiInlineKey {
         use AiInlineKey::*;
         let panel = self.terminal_inline_panel();
-        if !panel.open || !panel.prompt_focused || (keystroke.modifiers.platform && !submit && !insert) {
+        if !panel.open
+            || !panel.prompt_focused
+            || (keystroke.modifiers.platform && !submit && !insert)
+        {
             return Pass;
         }
         if self.model_selector_is_open(crate::state::AiModelSelectorScope::TerminalInline)
@@ -38,7 +41,13 @@ impl AiWorkspaceEntity {
         match keystroke.key.as_str() {
             "escape" => Close,
             "enter" if composing => Handled,
-            _ if submit && !panel.loading => if has_response { Execute } else { Submit },
+            _ if submit && !panel.loading => {
+                if has_response {
+                    Execute
+                } else {
+                    Submit
+                }
+            }
             _ if !submit && insert && has_response && !panel.loading => Insert,
             _ => Handled,
         }
@@ -46,7 +55,10 @@ impl AiWorkspaceEntity {
 
     pub fn start_inline_panel(
         &mut self,
-        target: (oxideterm_workspace::PaneId, oxideterm_workspace::TerminalSessionId),
+        target: (
+            oxideterm_workspace::PaneId,
+            oxideterm_workspace::TerminalSessionId,
+        ),
         selected_text: &str,
         context_budget: usize,
     ) {
@@ -213,9 +225,7 @@ pub fn truncate_ai_inline_context(mut context: String, max_chars: i64) -> String
     context
 }
 
-fn terminal_ai_inline_os_context(
-    kind: oxideterm_terminal::TerminalSessionKind,
-) -> String {
+fn terminal_ai_inline_os_context(kind: oxideterm_terminal::TerminalSessionKind) -> String {
     let local_os = if cfg!(target_os = "macos") {
         "macOS"
     } else if cfg!(target_os = "windows") {
@@ -254,7 +264,13 @@ impl crate::state::AiWorkspaceEntity {
         i18n: &oxideterm_i18n::I18n,
         cx: &mut gpui::Context<Self>,
     ) {
-        self.submit_inline_prompt(regenerate, terminal_ai_inline_os_context(kind), settings, i18n, cx);
+        self.submit_inline_prompt(
+            regenerate,
+            terminal_ai_inline_os_context(kind),
+            settings,
+            i18n,
+            cx,
+        );
     }
 }
 
@@ -267,7 +283,11 @@ pub fn apply_inline_command(
     let Some(pane) = pane else { return };
     pane.update(cx, |pane, cx| {
         if execute {
-            pane.begin_command_mark(&command, oxideterm_terminal::TerminalCommandMarkDetectionSource::Ai, cx);
+            pane.begin_command_mark(
+                &command,
+                oxideterm_terminal::TerminalCommandMarkDetectionSource::Ai,
+                cx,
+            );
             pane.send_command_line(&command, cx);
         } else {
             pane.send_ai_input_bytes(command.as_bytes(), cx);
@@ -278,13 +298,17 @@ pub fn apply_inline_command(
 impl crate::state::AiWorkspaceEntity {
     pub fn open_inline_for_pane(
         &mut self,
-        target: (oxideterm_workspace::PaneId, oxideterm_workspace::TerminalSessionId),
+        target: (
+            oxideterm_workspace::PaneId,
+            oxideterm_workspace::TerminalSessionId,
+        ),
         pane: Option<&gpui::Entity<oxideterm_gpui_terminal::TerminalPane>>,
         budget: usize,
         cx: &mut gpui::Context<Self>,
     ) {
         let selection = zeroize::Zeroizing::new(
-            pane.and_then(|pane| pane.read(cx).selected_text_snapshot()).unwrap_or_default(),
+            pane.and_then(|pane| pane.read(cx).selected_text_snapshot())
+                .unwrap_or_default(),
         );
         self.start_inline_panel(target, &selection, budget);
     }

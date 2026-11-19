@@ -1,8 +1,6 @@
 use super::*;
+use oxideterm_gpui_settings_view::terminal_triggers::TerminalTriggerRequest as TriggerRequest;
 pub(in crate::workspace) use oxideterm_gpui_settings_view::terminal_triggers::TerminalTriggersSettingsState;
-use oxideterm_gpui_settings_view::terminal_triggers::{
-    TerminalTriggerRequest as TriggerRequest,
-};
 
 impl WorkspaceApp {
     pub(in crate::workspace) fn open_terminal_trigger_settings(
@@ -30,9 +28,14 @@ impl WorkspaceApp {
             settings.set_terminal_page(TerminalSettingsPage::Awareness, cx);
         });
         self.sync_settings_section_list_state(cx);
-        self.settings_workspace.read(cx).section_list.scroll_to_section(
-            SettingsTab::Terminal, SettingsSectionId::TerminalAwarenessTriggers, self.settings_dynamic_section_counts(cx),
-        );
+        self.settings_workspace
+            .read(cx)
+            .section_list
+            .scroll_to_section(
+                SettingsTab::Terminal,
+                SettingsSectionId::TerminalAwarenessTriggers,
+                self.settings_dynamic_section_counts(cx),
+            );
         self.open_settings(window, cx);
     }
 
@@ -40,7 +43,10 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        if self.settings_workspace.update(cx, |settings, cx| settings.blur_terminal_trigger_input(cx)) {
+        if self
+            .settings_workspace
+            .update(cx, |settings, cx| settings.blur_terminal_trigger_input(cx))
+        {
             self.clear_ime_selection();
             self.ime_marked_text = None;
         }
@@ -123,11 +129,20 @@ impl WorkspaceApp {
             return;
         }
         let opening = request.opens_editor();
-        let structural = opening || matches!(request, TriggerRequest::CloseEditor | TriggerRequest::SaveEditor);
+        let structural = opening
+            || matches!(
+                request,
+                TriggerRequest::CloseEditor | TriggerRequest::SaveEditor
+            );
         if opening {
             self.prepare_modal_interaction_boundary(cx);
         }
-        let shell_enabled = self.settings_store.settings().terminal.triggers.explicit_shell_enabled;
+        let shell_enabled = self
+            .settings_store
+            .settings()
+            .terminal
+            .triggers
+            .explicit_shell_enabled;
         let outcome = self.settings_workspace.update(cx, |settings, cx| {
             settings.apply_terminal_trigger_request(request, shell_enabled, cx)
         });
@@ -148,5 +163,4 @@ impl WorkspaceApp {
             cx.notify();
         }
     }
-
 }

@@ -169,21 +169,21 @@ impl WorkspaceApp {
         )
     }
 
-    pub(super) fn handle_remote_shell_request(&mut self, request: RemoteShellRequest, cx: &mut Context<Self>) {
+    pub(super) fn handle_remote_shell_request(
+        &mut self,
+        request: RemoteShellRequest,
+        cx: &mut Context<Self>,
+    ) {
         match request {
-                RemoteShellRequest::ToggleSuppression => {
-                    self.workspace_runtime.update(cx, |runtime, _cx| {
-                        runtime.toggle_remote_shell_integration_prompt_suppression();
-                    });
-                    cx.notify();
-                }
-                RemoteShellRequest::Defer => self.resolve_remote_shell_integration_prompt(false, cx),
-                RemoteShellRequest::Confirm => {
-                    self.resolve_remote_shell_integration_prompt(true, cx)
-                }
-                RemoteShellRequest::Run(action) => {
-                    self.run_remote_shell_integration_action(action, cx)
-                }
+            RemoteShellRequest::ToggleSuppression => {
+                self.workspace_runtime.update(cx, |runtime, _cx| {
+                    runtime.toggle_remote_shell_integration_prompt_suppression();
+                });
+                cx.notify();
+            }
+            RemoteShellRequest::Defer => self.resolve_remote_shell_integration_prompt(false, cx),
+            RemoteShellRequest::Confirm => self.resolve_remote_shell_integration_prompt(true, cx),
+            RemoteShellRequest::Run(action) => self.run_remote_shell_integration_action(action, cx),
         }
     }
 

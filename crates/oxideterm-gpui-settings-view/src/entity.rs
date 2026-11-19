@@ -29,9 +29,9 @@ use oxideterm_settings_model::CliCompanionStatus;
 
 mod cli;
 mod completion;
-pub mod picker;
 #[cfg(test)]
 mod ownership_tests;
+pub mod picker;
 pub use completion::SettingsCompletion;
 mod connections;
 mod known_hosts;
@@ -2224,7 +2224,10 @@ impl SettingsWorkspaceEntity {
                 .then_some(self.trigger_input_draft.as_str());
         }
         match input {
-            SettingsInput::TerminalCommandSpecsJson => self.command_specs.as_ref().map(|draft| draft.value.as_str()),
+            SettingsInput::TerminalCommandSpecsJson => self
+                .command_specs
+                .as_ref()
+                .map(|draft| draft.value.as_str()),
             SettingsInput::SettingsSearch => Some(&self.settings_search_query),
             SettingsInput::CustomThemeName => self
                 .theme_editor
@@ -2366,7 +2369,12 @@ impl SettingsWorkspaceEntity {
         true
     }
 
-    pub fn focus_highlight_input(&mut self, input: SettingsInput, value: String, cx: &mut Context<Self>) {
+    pub fn focus_highlight_input(
+        &mut self,
+        input: SettingsInput,
+        value: String,
+        cx: &mut Context<Self>,
+    ) {
         if self.settings_focused_input != Some(input) {
             self.provider_input_draft.zeroize();
             self.trigger_input_draft.zeroize();
@@ -2378,7 +2386,9 @@ impl SettingsWorkspaceEntity {
 
     pub fn queue_highlight_preferences_refresh(&mut self, cx: &mut Context<Self>) {
         self.highlight.refresh_task = Some(cx.spawn(async |settings, cx| {
-            cx.background_executor().timer(Duration::from_millis(150)).await;
+            cx.background_executor()
+                .timer(Duration::from_millis(150))
+                .await;
             let _ = settings.update(cx, |settings, cx| {
                 settings.highlight.refresh_task = None;
                 cx.emit(SettingsWorkspaceEvent::RefreshTerminalHighlightPreferences);
@@ -2397,8 +2407,14 @@ impl SettingsWorkspaceEntity {
         changed
     }
 
-    pub fn take_provider_key(&mut self, input: SettingsInput, cx: &mut Context<Self>) -> Option<Zeroizing<String>> {
-        if !matches!(input, SettingsInput::AiProviderApiKey(_)) || self.settings_focused_input != Some(input) {
+    pub fn take_provider_key(
+        &mut self,
+        input: SettingsInput,
+        cx: &mut Context<Self>,
+    ) -> Option<Zeroizing<String>> {
+        if !matches!(input, SettingsInput::AiProviderApiKey(_))
+            || self.settings_focused_input != Some(input)
+        {
             return None;
         }
         self.settings_focused_input = None;
@@ -2408,7 +2424,9 @@ impl SettingsWorkspaceEntity {
     }
 
     pub fn clear_provider_model_draft(&mut self, input: SettingsInput, cx: &mut Context<Self>) {
-        if matches!(input, SettingsInput::AiProviderNewModel(_)) && self.settings_focused_input == Some(input) {
+        if matches!(input, SettingsInput::AiProviderNewModel(_))
+            && self.settings_focused_input == Some(input)
+        {
             self.provider_input_draft.zeroize();
             cx.notify();
         }
@@ -2472,7 +2490,10 @@ impl SettingsWorkspaceEntity {
     pub fn apply_active_trigger_input(&mut self) -> bool {
         self.settings_focused_input
             .filter(|input| crate::terminal_triggers::is_terminal_trigger_input(*input))
-            .is_none_or(|input| self.terminal_triggers.apply_editor_input(input, &self.trigger_input_draft))
+            .is_none_or(|input| {
+                self.terminal_triggers
+                    .apply_editor_input(input, &self.trigger_input_draft)
+            })
     }
 
     fn clear_settings_entity_input_error(&mut self, input: SettingsInput) {
@@ -2520,7 +2541,9 @@ impl SettingsWorkspaceEntity {
             return Some(&mut self.trigger_input_draft);
         }
         match input {
-            SettingsInput::TerminalCommandSpecsJson => self.command_specs.as_mut().map(|draft| &mut *draft.value),
+            SettingsInput::TerminalCommandSpecsJson => {
+                self.command_specs.as_mut().map(|draft| &mut *draft.value)
+            }
             SettingsInput::SettingsSearch => Some(&mut self.settings_search_query),
             SettingsInput::CustomThemeName => self
                 .theme_editor

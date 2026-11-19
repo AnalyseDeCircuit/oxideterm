@@ -144,7 +144,9 @@ fn responses_history_delivery_ignores_cancelled_generations(cx: &mut gpui::TestA
 
 #[gpui::test]
 fn chat_batch_leaves_deliveries_after_the_host_boundary_unapplied(cx: &mut gpui::TestAppContext) {
-    use crate::stream::{AiChatDeliveryBatch, AiChatWindowDelivery, AiStreamDelivery, AiStreamDeliveryEvent};
+    use crate::stream::{
+        AiChatDeliveryBatch, AiChatWindowDelivery, AiStreamDelivery, AiStreamDeliveryEvent,
+    };
 
     let runtime = Arc::new(
         tokio::runtime::Builder::new_current_thread()
@@ -196,13 +198,17 @@ fn chat_batch_leaves_deliveries_after_the_host_boundary_unapplied(cx: &mut gpui:
                 ..
             }) if active == generation
         ));
-        assert_eq!(approval_rx.try_recv(), Err(tokio::sync::oneshot::error::TryRecvError::Empty));
+        assert_eq!(
+            approval_rx.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+        );
         assert!(ai.resolve_tool_approval(generation, "approval", false));
         assert_eq!(approval_rx.try_recv().unwrap(), false);
         assert!(matches!(
             batch.next_window_delivery(ai, &oxideterm_i18n::I18n::default(), |data| data, cx),
             Some(AiChatWindowDelivery::Host(AiStreamDelivery {
-                event: AiStreamDeliveryEvent::Stream(AiStreamEvent::Done), ..
+                event: AiStreamDeliveryEvent::Stream(AiStreamEvent::Done),
+                ..
             }))
         ));
         assert_eq!(
@@ -215,7 +221,11 @@ fn chat_batch_leaves_deliveries_after_the_host_boundary_unapplied(cx: &mut gpui:
         );
 
         ai.apply_stream_event_state(generation, &id, "assistant", AiStreamEvent::Done, None);
-        assert!(batch.next_window_delivery(ai, &oxideterm_i18n::I18n::default(), |data| data, cx).is_none());
+        assert!(
+            batch
+                .next_window_delivery(ai, &oxideterm_i18n::I18n::default(), |data| data, cx)
+                .is_none()
+        );
         let message = &ai
             .conversation_state()
             .active_conversation()

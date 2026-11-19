@@ -158,9 +158,7 @@ pub async fn run_local_ai_command(
     result
 }
 
-fn configure_ai_local_command_process(
-    process: &mut tokio::process::Command,
-) {
+fn configure_ai_local_command_process(process: &mut tokio::process::Command) {
     #[cfg(windows)]
     {
         // AI local commands capture stdout/stderr in the app. Hide the bridge

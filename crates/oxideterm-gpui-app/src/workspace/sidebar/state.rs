@@ -631,7 +631,8 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn finish_ai_sidebar_resize(&mut self, cx: &mut Context<Self>) {
         if self.ai.state.read(cx).chat_ui().sidebar_resizing {
             let sidebar_width = self
-                .ai.state
+                .ai
+                .state
                 .update(cx, |ai, _cx| ai.finish_chat_sidebar_resize());
             self.settings_store
                 .settings_mut()

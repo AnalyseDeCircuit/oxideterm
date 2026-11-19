@@ -220,19 +220,31 @@ include!("model_picker/models.rs");
 
 mod controller;
 pub use controller::AiPickerSelection;
-pub use controller::{active_model_picker_provider, ai_acp_agent_id_from_provider_id, ai_acp_provider_id};
+pub use controller::{
+    active_model_picker_provider, ai_acp_agent_id_from_provider_id, ai_acp_provider_id,
+};
 
 impl AiModelPickerFrame {
     pub fn from_state(
-        ai: &AiWorkspaceEntity, settings: &oxideterm_settings::AiSettings, tokens: ThemeTokens,
-        i18n: I18n, marked: Option<String>, search_anchor: TextInputAnchorId, caret_visible: bool,
+        ai: &AiWorkspaceEntity,
+        settings: &oxideterm_settings::AiSettings,
+        tokens: ThemeTokens,
+        i18n: I18n,
+        marked: Option<String>,
+        search_anchor: TextInputAnchorId,
+        caret_visible: bool,
         plugin_available: impl Fn(&str) -> bool,
     ) -> Self {
         let providers = ai.picker_providers(settings, &i18n);
-        let status = providers.iter().map(|provider| {
-            (provider.id.clone(), ai.picker_status(provider, settings, &i18n,
-                &plugin_available))
-        }).collect();
+        let status = providers
+            .iter()
+            .map(|provider| {
+                (
+                    provider.id.clone(),
+                    ai.picker_status(provider, settings, &i18n, &plugin_available),
+                )
+            })
+            .collect();
         Self {
             tokens,
             i18n,
@@ -240,8 +252,7 @@ impl AiModelPickerFrame {
             status,
             active_provider: active_model_picker_provider(settings),
             active_model: settings.active_model.clone(),
-            acp_active: settings.active_backend
-                == oxideterm_settings::AiActiveBackend::Acp,
+            acp_active: settings.active_backend == oxideterm_settings::AiActiveBackend::Acp,
             active_acp_agent_id: settings.active_acp_agent_id.clone(),
             marked,
             search_anchor,
@@ -250,11 +261,17 @@ impl AiModelPickerFrame {
     }
 }
 
-
 impl AiModelPickerViews {
-    pub fn mount(state: &Entity<AiWorkspaceEntity>, bindings: AiModelPickerBindings, cx: &mut App) -> Self {
-        let mut mount =
-            |part| gpui::AppContext::new(cx, |_| AiModelPickerView::new(state.clone(), bindings.clone(), part));
+    pub fn mount(
+        state: &Entity<AiWorkspaceEntity>,
+        bindings: AiModelPickerBindings,
+        cx: &mut App,
+    ) -> Self {
+        let mut mount = |part| {
+            gpui::AppContext::new(cx, |_| {
+                AiModelPickerView::new(state.clone(), bindings.clone(), part)
+            })
+        };
         Self {
             sidebar: mount(AiModelPickerPart::Trigger(
                 AiModelSelectorScope::Sidebar,

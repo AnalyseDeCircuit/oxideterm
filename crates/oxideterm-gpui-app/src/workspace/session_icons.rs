@@ -1,5 +1,7 @@
 use super::WorkspaceApp;
-pub(super) use oxideterm_gpui_connections::icons::{SessionIcon, resolved_session_icon, session_icon_from_id};
+pub(super) use oxideterm_gpui_connections::icons::{
+    SessionIcon, resolved_session_icon, session_icon_from_id,
+};
 
 impl WorkspaceApp {
     pub(in crate::workspace) fn node_session_icon(

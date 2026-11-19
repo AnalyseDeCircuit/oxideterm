@@ -7,8 +7,8 @@ use oxideterm_gpui_ui::checkbox;
 use crate::{
     OnboardingFrame, OnboardingRequest, OnboardingViewBindings,
     widgets::{
-        ONBOARDING_ACCENT_BORDER_ALPHA, ONBOARDING_ACCENT_SUBTLE_ALPHA, ONBOARDING_CARD_BORDER_ALPHA,
-        card_bg, grouped_surface, render_icon, section_header,
+        ONBOARDING_ACCENT_BORDER_ALPHA, ONBOARDING_ACCENT_SUBTLE_ALPHA,
+        ONBOARDING_CARD_BORDER_ALPHA, card_bg, grouped_surface, render_icon, section_header,
     },
 };
 
@@ -58,7 +58,11 @@ pub(crate) fn render_disclaimer_step(
                 dispatch_legal(OnboardingRequest::OpenLegalNotice, window, cx);
                 cx.stop_propagation();
             })
-            .child(render_icon("lucide/external-link.svg", 13.0, rgb(theme.accent)))
+            .child(render_icon(
+                "lucide/external-link.svg",
+                13.0,
+                rgb(theme.accent),
+            ))
             .child(
                 div()
                     .flex_1()
@@ -137,7 +141,11 @@ pub(crate) fn render_disclaimer_step(
                                 .child(frame.i18n.t("onboarding.disclaimer_desc")),
                         ),
                 )
-                .child(grouped_surface(&frame.tokens, frame.has_background, notice_rows))
+                .child(grouped_surface(
+                    &frame.tokens,
+                    frame.has_background,
+                    notice_rows,
+                ))
                 .child(accept_row),
         )
         .into_any_element()

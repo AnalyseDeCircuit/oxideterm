@@ -278,34 +278,58 @@ fn cli_agent_sessions(records: &[AiRuntimeCommandRecord]) -> Vec<AiCliAgentSessi
     sessions
 }
 
-use oxideterm_ai::{AiReferenceMatch, ai_reference_context_block, extract_ai_error_context, infer_ai_cwd};
+use oxideterm_ai::{
+    AiReferenceMatch, ai_reference_context_block, extract_ai_error_context, infer_ai_cwd,
+};
 use oxideterm_workspace::{PaneId, TerminalSessionId};
 
 #[derive(Clone, Copy)]
-pub enum AiTerminalReferenceSource { ActiveBuffer, ActiveSelection, Pane(usize) }
+pub enum AiTerminalReferenceSource {
+    ActiveBuffer,
+    ActiveSelection,
+    Pane(usize),
+}
 
 pub fn build_reference_context(
-    references: &[AiReferenceMatch], mut snapshot: impl FnMut(AiTerminalReferenceSource) -> Option<String>,
+    references: &[AiReferenceMatch],
+    mut snapshot: impl FnMut(AiTerminalReferenceSource) -> Option<String>,
 ) -> Option<String> {
     use AiTerminalReferenceSource::*;
-    let blocks = references.iter().filter_map(|reference| {
-        let content = match reference.reference_type.as_str() {
-            "buffer" => snapshot(ActiveBuffer),
-            "selection" => snapshot(ActiveSelection),
-            "error" => snapshot(ActiveBuffer).and_then(|text| extract_ai_error_context(&text)),
-            "pane" => snapshot(Pane(reference.value.as_deref()?.parse::<usize>().ok()?.checked_sub(1)?)),
-            "cwd" => snapshot(ActiveBuffer).and_then(|text| infer_ai_cwd(&text)),
-            _ => None,
-        }?;
-        ai_reference_context_block(reference, &content)
-    }).collect::<Vec<_>>();
+    let blocks = references
+        .iter()
+        .filter_map(|reference| {
+            let content = match reference.reference_type.as_str() {
+                "buffer" => snapshot(ActiveBuffer),
+                "selection" => snapshot(ActiveSelection),
+                "error" => snapshot(ActiveBuffer).and_then(|text| extract_ai_error_context(&text)),
+                "pane" => snapshot(Pane(
+                    reference
+                        .value
+                        .as_deref()?
+                        .parse::<usize>()
+                        .ok()?
+                        .checked_sub(1)?,
+                )),
+                "cwd" => snapshot(ActiveBuffer).and_then(|text| infer_ai_cwd(&text)),
+                _ => None,
+            }?;
+            ai_reference_context_block(reference, &content)
+        })
+        .collect::<Vec<_>>();
     (!blocks.is_empty()).then(|| blocks.join("\n\n"))
 }
 
-pub fn build_ide_code_context(file: Option<&str>, language: Option<&str>, snippet: Option<&str>, first_line: usize) -> Option<String> {
+pub fn build_ide_code_context(
+    file: Option<&str>,
+    language: Option<&str>,
+    snippet: Option<&str>,
+    first_line: usize,
+) -> Option<String> {
     let (file, snippet) = (file?, snippet?);
     let language = language.unwrap_or("text");
-    Some(format!("=== Code: {file} ({language}, lines {first_line}+) ===\n{snippet}"))
+    Some(format!(
+        "=== Code: {file} ({language}, lines {first_line}+) ===\n{snippet}"
+    ))
 }
 
 pub struct AiTerminalPaneContext {
@@ -325,7 +349,11 @@ fn append_selection(parts: &mut Vec<String>, selection: Option<String>) {
     }
 }
 
-pub fn build_single_terminal_context(selection: Option<String>, buffer: Option<&str>, budget: usize) -> Option<String> {
+pub fn build_single_terminal_context(
+    selection: Option<String>,
+    buffer: Option<&str>,
+    budget: usize,
+) -> Option<String> {
     let mut parts = Vec::new();
     append_selection(&mut parts, selection);
     if let Some(buffer) = buffer {
@@ -338,44 +366,47 @@ pub fn build_single_terminal_context(selection: Option<String>, buffer: Option<&
     (!parts.is_empty()).then(|| parts.join("\n"))
 }
 
-pub fn build_split_terminal_context(selection: Option<String>, panes: impl Iterator<Item = AiTerminalPaneContext>) -> Option<String> {
+pub fn build_split_terminal_context(
+    selection: Option<String>,
+    panes: impl Iterator<Item = AiTerminalPaneContext>,
+) -> Option<String> {
     let mut parts = Vec::new();
     append_selection(&mut parts, selection);
     for pane in panes {
         let (buffer, line_count) = limit_terminal_buffer(&pane.buffer, 30, 4000);
-        if buffer.trim().is_empty() { continue; }
+        if buffer.trim().is_empty() {
+            continue;
+        }
         let label = if pane.active { "Active Pane" } else { "Pane" };
         let session = pane.session?;
         let environment = pane.environment;
         let target = oxideterm_ai::sanitize_for_ai(&pane.label);
-        parts.push(format!("=== {label} #{} / session {} ({environment}; {target}) — last {line_count} lines ===", pane.pane.0, session.0));
+        parts.push(format!(
+            "=== {label} #{} / session {} ({environment}; {target}) — last {line_count} lines ===",
+            pane.pane.0, session.0
+        ));
         parts.push(buffer);
         parts.push(String::new());
     }
     (!parts.is_empty()).then(|| parts.join("\n"))
 }
 
-fn limit_terminal_buffer(
-        buffer: &str,
-        max_lines: usize,
-        max_chars: usize,
-    ) -> (String, usize) {
-        let max_lines = max_lines.max(1);
-        let mut lines = buffer.lines().rev().take(max_lines).collect::<Vec<_>>();
-        lines.reverse();
-        let mut text = lines.join("\n");
-        if max_chars > 0 && text.len() > max_chars {
-            let start = text
-                .char_indices()
-                .map(|(index, _)| index)
-                .find(|index| text.len().saturating_sub(*index) <= max_chars)
-                .unwrap_or(0);
-            text = text[start..].to_string();
-        }
-        let line_count = text.lines().count();
-        (text, line_count)
+fn limit_terminal_buffer(buffer: &str, max_lines: usize, max_chars: usize) -> (String, usize) {
+    let max_lines = max_lines.max(1);
+    let mut lines = buffer.lines().rev().take(max_lines).collect::<Vec<_>>();
+    lines.reverse();
+    let mut text = lines.join("\n");
+    if max_chars > 0 && text.len() > max_chars {
+        let start = text
+            .char_indices()
+            .map(|(index, _)| index)
+            .find(|index| text.len().saturating_sub(*index) <= max_chars)
+            .unwrap_or(0);
+        text = text[start..].to_string();
     }
-
+    let line_count = text.lines().count();
+    (text, line_count)
+}
 
 use oxideterm_terminal::TerminalCommandMarkDetectionSource;
 
@@ -389,7 +420,10 @@ pub fn ai_local_os_label() -> &'static str {
     }
 }
 
-pub fn ai_terminal_environment(kind: oxideterm_terminal::TerminalSessionKind, local_os: &str) -> String {
+pub fn ai_terminal_environment(
+    kind: oxideterm_terminal::TerminalSessionKind,
+    local_os: &str,
+) -> String {
     use oxideterm_terminal::TerminalSessionKind;
     // Telnet and serial panes share the local tab kind but run on another target.
     match kind {
@@ -400,15 +434,11 @@ pub fn ai_terminal_environment(kind: oxideterm_terminal::TerminalSessionKind, lo
         TerminalSessionKind::Serial => {
             "Serial device (OS and command interface unverified)".to_string()
         }
-        TerminalSessionKind::Ble => {
-            "BLE device (OS and command interface unverified)".to_string()
-        }
+        TerminalSessionKind::Ble => "BLE device (OS and command interface unverified)".to_string(),
     }
 }
 
-fn ai_ledger_source_from_terminal_source(
-    source: TerminalCommandMarkDetectionSource,
-) -> String {
+fn ai_ledger_source_from_terminal_source(source: TerminalCommandMarkDetectionSource) -> String {
     match source {
         TerminalCommandMarkDetectionSource::Ai => "ai.terminal_input",
         TerminalCommandMarkDetectionSource::Broadcast => "broadcast",

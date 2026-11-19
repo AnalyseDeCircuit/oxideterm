@@ -394,74 +394,83 @@ pub fn ai_manage_memory_entry(
     Ok(serde_json::json!({ "accepted": true, "action": action, "entry": result }))
 }
 
-pub fn ai_remember_preference_payload<'a>(snapshot: &super::AiOrchestratorRuntimeSnapshot, args: &'a serde_json::Value) -> Result<&'a str, super::AiActionResultLite> {
-        let Some(preference) = args
-            .get("preference")
-            .and_then(serde_json::Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        else {
-            return Err(snapshot.fail(
-                "Preference is required.",
-                "missing_preference",
-                "remember_preference requires preference text.",
-                "write",
-            ));
-        };
-        if !crate::preference_is_safe_to_persist(preference) {
-            return Err(snapshot.fail(
-                "Preference was not saved.",
-                "memory_content_rejected",
-                "Long-term memory cannot store credentials or one-time task instructions.",
-                "write",
-            ));
-        }
+pub fn ai_remember_preference_payload<'a>(
+    snapshot: &super::AiOrchestratorRuntimeSnapshot,
+    args: &'a serde_json::Value,
+) -> Result<&'a str, super::AiActionResultLite> {
+    let Some(preference) = args
+        .get("preference")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Err(snapshot.fail(
+            "Preference is required.",
+            "missing_preference",
+            "remember_preference requires preference text.",
+            "write",
+        ));
+    };
+    if !crate::preference_is_safe_to_persist(preference) {
+        return Err(snapshot.fail(
+            "Preference was not saved.",
+            "memory_content_rejected",
+            "Long-term memory cannot store credentials or one-time task instructions.",
+            "write",
+        ));
+    }
 
     Ok(preference)
 }
 
-pub fn save_ai_user_preference(memory: &mut oxideterm_settings::AiMemorySettings, preference: String) {
+pub fn save_ai_user_preference(
+    memory: &mut oxideterm_settings::AiMemorySettings,
+    preference: String,
+) {
     let now_ms = ai_memory_now_ms();
     let normalized = ai_normalized_memory_content(&preference);
-                if let Some(existing) = memory.entries.iter_mut().find(|entry| {
-                    entry.scope_kind == oxideterm_settings::AiMemoryScopeKind::User
-                        && entry.scope_id.is_none()
-                        && ai_normalized_memory_content(&entry.content) == normalized
-                }) {
-                    existing.last_used_at_ms = Some(now_ms);
-                    existing.use_count = existing.use_count.saturating_add(1);
-                    existing.updated_at_ms = now_ms;
-                    existing.revision = existing.revision.saturating_add(1);
-                    return;
-                }
-                memory.entries
-                    .push(oxideterm_settings::AiMemoryEntry {
-                        id: uuid::Uuid::new_v4().to_string(),
-                        content: preference,
-                        scope_kind: oxideterm_settings::AiMemoryScopeKind::User,
-                        scope_id: None,
-                        memory_kind: oxideterm_settings::AiMemoryKind::LongTerm,
-                        source: oxideterm_settings::AiMemorySource::Assistant,
-                        created_at_ms: now_ms,
-                        updated_at_ms: now_ms,
-                        last_used_at_ms: None,
-                        use_count: 0,
-                        expires_at_ms: None,
-                        revision: 1,
-                    });
-
+    if let Some(existing) = memory.entries.iter_mut().find(|entry| {
+        entry.scope_kind == oxideterm_settings::AiMemoryScopeKind::User
+            && entry.scope_id.is_none()
+            && ai_normalized_memory_content(&entry.content) == normalized
+    }) {
+        existing.last_used_at_ms = Some(now_ms);
+        existing.use_count = existing.use_count.saturating_add(1);
+        existing.updated_at_ms = now_ms;
+        existing.revision = existing.revision.saturating_add(1);
+        return;
+    }
+    memory.entries.push(oxideterm_settings::AiMemoryEntry {
+        id: uuid::Uuid::new_v4().to_string(),
+        content: preference,
+        scope_kind: oxideterm_settings::AiMemoryScopeKind::User,
+        scope_id: None,
+        memory_kind: oxideterm_settings::AiMemoryKind::LongTerm,
+        source: oxideterm_settings::AiMemorySource::Assistant,
+        created_at_ms: now_ms,
+        updated_at_ms: now_ms,
+        last_used_at_ms: None,
+        use_count: 0,
+        expires_at_ms: None,
+        revision: 1,
+    });
 }
 
-pub fn ai_preference_saved(snapshot: &super::AiOrchestratorRuntimeSnapshot) -> super::AiActionResultLite {
-        snapshot.ok(
-            "Preference remembered.",
-            "The preference was saved as a user-scoped memory entry.",
-            serde_json::json!({ "scopeKind": "user", "memoryKind": "long_term" }),
-            "write",
-        )
-    }
+pub fn ai_preference_saved(
+    snapshot: &super::AiOrchestratorRuntimeSnapshot,
+) -> super::AiActionResultLite {
+    snapshot.ok(
+        "Preference remembered.",
+        "The preference was saved as a user-scoped memory entry.",
+        serde_json::json!({ "scopeKind": "user", "memoryKind": "long_term" }),
+        "write",
+    )
+}
 
-pub fn record_memory_usage(memory: &mut oxideterm_settings::AiMemorySettings, entry_ids: &[String]) {
+pub fn record_memory_usage(
+    memory: &mut oxideterm_settings::AiMemorySettings,
+    entry_ids: &[String],
+) {
     let now_ms = ai_memory_now_ms();
     let ids: std::collections::HashSet<_> = entry_ids.iter().collect();
     for entry in &mut memory.entries {

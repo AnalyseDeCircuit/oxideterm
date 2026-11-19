@@ -23,11 +23,10 @@ use super::{WorkspaceApp, ime::WorkspaceImeTarget, selectable_text::selectable_t
 pub(super) use entity::{ConnectionFlowEvent, NativeProxyConnectRun};
 pub(super) use form_state::{
     CONNECTION_NOTES_LINE_HEIGHT, CONNECTION_NOTES_VERTICAL_PADDING, NewConnectionField,
-    NewConnectionForm, NewConnectionSelect, NewConnectionTransport,
-    SavedConnectionPromptAction, form_from_mosh_profile, form_from_remote_desktop_profile,
-    terminal_serial_flow_from_profile, terminal_serial_parity_from_profile,
-    terminal_serial_runtime_options_from_ble_profile, terminal_serial_runtime_options_from_profile,
-    terminal_telnet_line_endings_from_profile,
+    NewConnectionForm, NewConnectionSelect, NewConnectionTransport, SavedConnectionPromptAction,
+    form_from_mosh_profile, form_from_remote_desktop_profile, terminal_serial_flow_from_profile,
+    terminal_serial_parity_from_profile, terminal_serial_runtime_options_from_ble_profile,
+    terminal_serial_runtime_options_from_profile, terminal_telnet_line_endings_from_profile,
 };
 pub(super) use oxideterm_gpui_connections::ConnectionFormState;
 pub(super) use oxideterm_gpui_connections::ble::{
@@ -56,15 +55,31 @@ impl WorkspaceApp {
         let manager_text = owner.clone();
         ConnectionsViewBindings {
             manager: SessionManagerViewBindings {
-                catalog: Rc::new(move |include_items, cx| Some(catalog_environment.upgrade()?.read(cx).session_manager_catalog_environment(include_items, cx))),
+                catalog: Rc::new(move |include_items, cx| {
+                    Some(
+                        catalog_environment
+                            .upgrade()?
+                            .read(cx)
+                            .session_manager_catalog_environment(include_items, cx),
+                    )
+                }),
                 oxide_environment: Rc::new(move |cx| {
                     let owner = oxide_environment.upgrade()?;
                     let app = owner.read(cx);
                     let store = &app.connection_store;
                     Some(OxideDialogEnvironment::from_store(store))
                 }),
-                ime: Rc::new(move |input, cx| Some(manager_ime.upgrade()?.read(cx)
-                    .connection_ime_frame_for_target(WorkspaceImeTarget::SessionManager(input), cx))),
+                ime: Rc::new(move |input, cx| {
+                    Some(
+                        manager_ime
+                            .upgrade()?
+                            .read(cx)
+                            .connection_ime_frame_for_target(
+                                WorkspaceImeTarget::SessionManager(input),
+                                cx,
+                            ),
+                    )
+                }),
                 text: Rc::new(move |role, scope, id, value, color, alpha, cx| {
                     use crate::workspace::selectable_text::SelectableTextRole;
                     let role = match role {
@@ -72,7 +87,12 @@ impl WorkspaceApp {
                         ManagerTextRole::RowSafe => SelectableTextRole::RowSafe,
                         ManagerTextRole::NonSelectable => SelectableTextRole::NonSelectable,
                     };
-                    manager_text.update(cx, |app, cx| app.render_display_text_with_role_and_alpha(role, scope, id, value, color, alpha, cx))
+                    manager_text
+                        .update(cx, |app, cx| {
+                            app.render_display_text_with_role_and_alpha(
+                                role, scope, id, value, color, alpha, cx,
+                            )
+                        })
                         .unwrap_or_else(|_| div().into_any_element())
                 }),
             },
@@ -121,13 +141,18 @@ impl WorkspaceApp {
                     .unwrap_or_else(|_| div().into_any_element())
             }),
             dispatch: Rc::new(move |request, window, cx| {
-                let _ = owner.update(cx, |app, cx| app.dispatch_connections_request(request, window, cx));
+                let _ = owner.update(cx, |app, cx| {
+                    app.dispatch_connections_request(request, window, cx)
+                });
             }),
         }
     }
 
     pub(in crate::workspace) fn dispatch_connections_request(
-        &mut self, request: ConnectionsWindowRequest, window: Option<&mut gpui::Window>, cx: &mut gpui::Context<Self>,
+        &mut self,
+        request: ConnectionsWindowRequest,
+        window: Option<&mut gpui::Window>,
+        cx: &mut gpui::Context<Self>,
     ) {
         match request {
             ConnectionsWindowRequest::Catalog(action) => {
@@ -203,9 +228,19 @@ impl WorkspaceApp {
             return;
         };
         match request {
-            ConnectionsWindowRequest::VerifiedSsh { config, title, intent } => self.continue_verified_ssh_flow(config, title, intent, window, cx),
-            ConnectionsWindowRequest::PreflightFailed { intent, message, inline } => {
-                if matches!(&intent, SshConnectionIntent::Mosh(_)) && self.plugin_entity.read(cx).mosh_executable().is_none() {
+            ConnectionsWindowRequest::VerifiedSsh {
+                config,
+                title,
+                intent,
+            } => self.continue_verified_ssh_flow(config, title, intent, window, cx),
+            ConnectionsWindowRequest::PreflightFailed {
+                intent,
+                message,
+                inline,
+            } => {
+                if matches!(&intent, SshConnectionIntent::Mosh(_))
+                    && self.plugin_entity.read(cx).mosh_executable().is_none()
+                {
                     self.show_required_plugin_notice("com.oxideterm.terminal.mosh", "Mosh", cx);
                 }
                 self.fail_public_mcp_mosh_open_for_intent(&intent, message.clone());
@@ -213,17 +248,26 @@ impl WorkspaceApp {
                     self.set_connection_status(Some(message), cx);
                 }
             }
-            ConnectionsWindowRequest::AdvanceProxyChain => self.continue_active_proxy_session_tree_connect(window, cx),
+            ConnectionsWindowRequest::AdvanceProxyChain => {
+                self.continue_active_proxy_session_tree_connect(window, cx)
+            }
             ConnectionsWindowRequest::ConnectProxyNode { node_id, changed } => {
                 if changed {
                     self.persist_session_tree_snapshot();
                 }
                 if !self.ensure_node_connection_started_without_ancestors(&node_id, cx) {
                     self.cancel_active_proxy_connect_run(cx);
-                    self.report_proxy_session_tree_error(format!("failed to start SSH node {}", node_id.0), cx);
+                    self.report_proxy_session_tree_error(
+                        format!("failed to start SSH node {}", node_id.0),
+                        cx,
+                    );
                 }
             }
-            ConnectionsWindowRequest::FinishProxyChain { plan, terminal, report } => {
+            ConnectionsWindowRequest::FinishProxyChain {
+                plan,
+                terminal,
+                report,
+            } => {
                 self.finish_proxy_session_tree_connect(plan, terminal, report, window, cx);
             }
             ConnectionsWindowRequest::AbortProxyChain(message) => {
@@ -243,32 +287,60 @@ impl WorkspaceApp {
                 cx.notify();
             }
             ConnectionsWindowRequest::AdoptSftp(sftp) => self.adopt_connected_sftp(sftp, cx),
-            ConnectionsWindowRequest::ConnectionStatus(status) => self.set_connection_status(status, cx),
-            ConnectionsWindowRequest::GetSecurityKeyProvider(response) => {
-                let provider = self.plugin_entity.update(cx, |plugins, _| plugins.security_key_provider());
-                let _ = response.send(provider.ok_or_else(|| self.i18n.t("ssh.fido.errors.unavailable")));
+            ConnectionsWindowRequest::ConnectionStatus(status) => {
+                self.set_connection_status(status, cx)
             }
-            ConnectionsWindowRequest::PasswordPrompt { node_id, prompt, response_tx } => self.open_password_prompt(node_id, prompt, response_tx, window, cx),
-            ConnectionsWindowRequest::SaveAuthenticatedPassword { target, password } => self.save_authenticated_prompt_password(target, password, cx),
-            ConnectionsWindowRequest::SaveConfirmedAuthentication { node_id, connection_id, configured_credentials_confirmed } => {
-                self.save_confirmed_connection_auth(node_id, connection_id, configured_credentials_confirmed, cx);
+            ConnectionsWindowRequest::GetSecurityKeyProvider(response) => {
+                let provider = self
+                    .plugin_entity
+                    .update(cx, |plugins, _| plugins.security_key_provider());
+                let _ = response
+                    .send(provider.ok_or_else(|| self.i18n.t("ssh.fido.errors.unavailable")));
+            }
+            ConnectionsWindowRequest::PasswordPrompt {
+                node_id,
+                prompt,
+                response_tx,
+            } => self.open_password_prompt(node_id, prompt, response_tx, window, cx),
+            ConnectionsWindowRequest::SaveAuthenticatedPassword { target, password } => {
+                self.save_authenticated_prompt_password(target, password, cx)
+            }
+            ConnectionsWindowRequest::SaveConfirmedAuthentication {
+                node_id,
+                connection_id,
+                configured_credentials_confirmed,
+            } => {
+                self.save_confirmed_connection_auth(
+                    node_id,
+                    connection_id,
+                    configured_credentials_confirmed,
+                    cx,
+                );
             }
             ConnectionsWindowRequest::ToggleCatalogSidebarSearch => {
-            self.prepare_modal_interaction_boundary(cx);
-            if self.connections.session_manager.read(cx).sidebar_search_open {
-                self.close_session_manager_sidebar_search(cx);
-            } else {
-                self.begin_disclosure_motion("session-manager-search".into(), true, cx);
-                self.clear_ime_selection();
-                self.selected_ime_target = Some(WorkspaceImeTarget::SessionManager(
-                    super::SessionManagerInput::Search,
-                ));
-                self.connections.session_manager.update(cx, super::session_manager::SessionManagerState::open_sidebar_search);
-                window.focus(&self.focus_handle, cx);
-                self.show_active_input_caret(cx);
-            }
-            cx.stop_propagation();
-            cx.notify();
+                self.prepare_modal_interaction_boundary(cx);
+                if self
+                    .connections
+                    .session_manager
+                    .read(cx)
+                    .sidebar_search_open
+                {
+                    self.close_session_manager_sidebar_search(cx);
+                } else {
+                    self.begin_disclosure_motion("session-manager-search".into(), true, cx);
+                    self.clear_ime_selection();
+                    self.selected_ime_target = Some(WorkspaceImeTarget::SessionManager(
+                        super::SessionManagerInput::Search,
+                    ));
+                    self.connections.session_manager.update(
+                        cx,
+                        super::session_manager::SessionManagerState::open_sidebar_search,
+                    );
+                    window.focus(&self.focus_handle, cx);
+                    self.show_active_input_caret(cx);
+                }
+                cx.stop_propagation();
+                cx.notify();
             }
             ConnectionsWindowRequest::FocusForm => window.focus(&self.focus_handle, cx),
             ConnectionsWindowRequest::FocusSessionInput(input, event) => {
@@ -280,7 +352,12 @@ impl WorkspaceApp {
                 self.ime_marked_text = None;
                 self.show_active_input_caret(cx);
                 window.focus(&self.focus_handle, cx);
-                self.begin_ime_selection_from_mouse_down(WorkspaceImeTarget::SessionManager(input), &event, window, cx);
+                self.begin_ime_selection_from_mouse_down(
+                    WorkspaceImeTarget::SessionManager(input),
+                    &event,
+                    window,
+                    cx,
+                );
             }
             ConnectionsWindowRequest::FocusFormSelect => {
                 self.ime_marked_text = None;
@@ -312,39 +389,31 @@ impl WorkspaceApp {
             ConnectionsWindowRequest::AcceptHostKey { persist } => {
                 self.accept_host_key_challenge(persist, window, cx);
             }
-            ConnectionsWindowRequest::CancelHostKey => {
-                self.cancel_host_key_challenge(cx)
-            }
+            ConnectionsWindowRequest::CancelHostKey => self.cancel_host_key_challenge(cx),
             ConnectionsWindowRequest::SubmitAuthentication => {
                 self.submit_keyboard_interactive_challenge(window, cx);
             }
             ConnectionsWindowRequest::CancelAuthentication => {
                 self.cancel_keyboard_interactive_challenge(cx);
             }
-            ConnectionsWindowRequest::CloseForm => {
-                self.close_new_connection_form(window, cx)
-            }
+            ConnectionsWindowRequest::CloseForm => self.close_new_connection_form(window, cx),
             ConnectionsWindowRequest::SubmitForm(action) => {
                 self.submit_new_connection_form_with_action(action, window, cx)
             }
             ConnectionsWindowRequest::TestForm(intent) => {
                 self.start_new_connection_flow(intent, window, cx)
             }
-            ConnectionsWindowRequest::OpenTunnel => {
-                self.open_ssh_tunnel_form(None, window, cx)
-            }
-            ConnectionsWindowRequest::LeaveTunnel => {
-                self.open_new_connection_form(window, cx)
-            }
+            ConnectionsWindowRequest::OpenTunnel => self.open_ssh_tunnel_form(None, window, cx),
+            ConnectionsWindowRequest::LeaveTunnel => self.open_new_connection_form(window, cx),
             ConnectionsWindowRequest::CloseTunnel => self.close_ssh_tunnel_form(window, cx),
-            ConnectionsWindowRequest::SaveTunnel { start } => self.save_ssh_tunnel(start, window, cx),
+            ConnectionsWindowRequest::SaveTunnel { start } => {
+                self.save_ssh_tunnel(start, window, cx)
+            }
             ConnectionsWindowRequest::OpenPluginForm { plugin, type_id } => {
                 self.ssh_tunnels.form = None;
                 self.open_plugin_connection_form(&plugin, &type_id, None, window, cx);
             }
-            ConnectionsWindowRequest::OpenMoshPlugin => {
-                self.open_mosh_plugin(window, cx)
-            }
+            ConnectionsWindowRequest::OpenMoshPlugin => self.open_mosh_plugin(window, cx),
             ConnectionsWindowRequest::OpenRemoteDesktopPlugin(protocol) => {
                 self.open_remote_desktop_plugin(protocol, window, cx)
             }
@@ -352,12 +421,7 @@ impl WorkspaceApp {
                 parent,
                 connection_id,
             } => {
-                self.connect_saved_connection_as_next_hop(
-                    parent,
-                    connection_id,
-                    window,
-                    cx,
-                );
+                self.connect_saved_connection_as_next_hop(parent, connection_id, window, cx);
             }
             _ => unreachable!("application-only request was already dispatched"),
         }
@@ -374,16 +438,20 @@ impl WorkspaceApp {
                 .iter()
                 .map(|(id, node)| (id.clone(), node.title.clone()))
                 .collect(),
-            tunnel: self.ssh_tunnels.form.as_ref().map(|form| TunnelFormEnvironment {
-                host_id: form.host_id.clone(),
-                editing: form.saved.is_some(),
-                startup: form.startup,
-                kind: match form.kind {
-                    ForwardType::Local => TunnelKind::Local,
-                    ForwardType::Remote => TunnelKind::Remote,
-                    ForwardType::Dynamic => TunnelKind::Dynamic,
-                },
-            }),
+            tunnel: self
+                .ssh_tunnels
+                .form
+                .as_ref()
+                .map(|form| TunnelFormEnvironment {
+                    host_id: form.host_id.clone(),
+                    editing: form.saved.is_some(),
+                    startup: form.startup,
+                    kind: match form.kind {
+                        ForwardType::Local => TunnelKind::Local,
+                        ForwardType::Remote => TunnelKind::Remote,
+                        ForwardType::Dynamic => TunnelKind::Dynamic,
+                    },
+                }),
             local_shells: self.effective_local_shells_for_settings(settings),
             plugin_types: self
                 .plugin_connection_types(cx)
@@ -414,6 +482,8 @@ impl WorkspaceApp {
     }
 
     fn reveal_edit_saved_password(&self, cx: &mut gpui::Context<Self>) {
-        self.connections.flow.update(cx, |flow, cx| flow.reveal_saved_password(&self.connection_store, cx));
+        self.connections.flow.update(cx, |flow, cx| {
+            flow.reveal_saved_password(&self.connection_store, cx)
+        });
     }
 }

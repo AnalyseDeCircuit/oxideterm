@@ -158,7 +158,10 @@ impl WorkspaceApp {
                 let owner = owner.clone();
                 move |cx| {
                     let app = owner.upgrade()?.read(cx);
-                    Some(oxideterm_gpui_ai::knowledge::page::EmbeddingJob::prepare(app.settings_store.settings(), &app.i18n))
+                    Some(oxideterm_gpui_ai::knowledge::page::EmbeddingJob::prepare(
+                        app.settings_store.settings(),
+                        &app.i18n,
+                    ))
                 }
             }),
             request: Rc::new(move |request, window, cx| {
@@ -221,7 +224,8 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn sync_knowledge_cache_visibility(&self, cx: &mut App) {
         let locked = self.app_lock.locked;
         let host = self.tab_host.clone();
-        self.knowledge_workspace.sync_visibility(|id, cx| !locked && host.read(cx).surface_is_visible(id), cx);
+        self.knowledge_workspace
+            .sync_visibility(|id, cx| !locked && host.read(cx).surface_is_visible(id), cx);
     }
 
     pub(in crate::workspace) fn handle_knowledge_workspace_key(
@@ -230,9 +234,14 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        let owned = self.keyboard_content_tab(cx).is_some_and(|tab| tab.kind == TabKind::Knowledge);
-        let ime = self.active_ime_target_for_window(window.window_handle().window_id(), cx).and_then(knowledge_input);
-        self.knowledge_workspace.handle_key(owned, ime, event, window, cx)
+        let owned = self
+            .keyboard_content_tab(cx)
+            .is_some_and(|tab| tab.kind == TabKind::Knowledge);
+        let ime = self
+            .active_ime_target_for_window(window.window_handle().window_id(), cx)
+            .and_then(knowledge_input);
+        self.knowledge_workspace
+            .handle_key(owned, ime, event, window, cx)
     }
 
     pub(in crate::workspace) fn knowledge_text_editor_focused(
@@ -330,8 +339,13 @@ impl WorkspaceApp {
     ) -> bool {
         let host = self.tab_host.clone();
         let Some(knowledge_tab) = self.knowledge_workspace.guard_tab_close(
-            tab_id, window.window_handle(), |id, cx| host.read(cx).container_tab_id(id), cx,
-        ) else { return false };
+            tab_id,
+            window.window_handle(),
+            |id, cx| host.read(cx).container_tab_id(id),
+            cx,
+        ) else {
+            return false;
+        };
         if self.tab_host.read(cx).is_detached(knowledge_tab) {
             self.tab_host
                 .update(cx, |host, _| host.focus_content_page(knowledge_tab));
@@ -344,7 +358,10 @@ impl WorkspaceApp {
     }
 
     pub(crate) fn guard_dirty_knowledge_app_quit(&mut self, cx: &mut Context<Self>) -> bool {
-        if !self.knowledge_state().update(cx, |knowledge, cx| knowledge.request_quit_if_dirty(cx)) {
+        if !self
+            .knowledge_state()
+            .update(cx, |knowledge, cx| knowledge.request_quit_if_dirty(cx))
+        {
             return false;
         }
         let knowledge_tab_id = self.knowledge_state().read(cx).tab_id();
@@ -395,10 +412,18 @@ impl WorkspaceApp {
             let state = workspace.selectable_text_render_state_for_entity(entity.clone(), cx);
             Some(KnowledgePreviewFrame::from_renderer(
                 options,
-                move |group, key, order, text, runs, links| state.render_styled_text_in_group(
-                    SelectableTextRole::PlainDocument, group, selectable_text_id("notes-preview-fragment", (group, &key)),
-                    order, text, runs, links, key.join_previous,
-                ),
+                move |group, key, order, text, runs, links| {
+                    state.render_styled_text_in_group(
+                        SelectableTextRole::PlainDocument,
+                        group,
+                        selectable_text_id("notes-preview-fragment", (group, &key)),
+                        order,
+                        text,
+                        runs,
+                        links,
+                        key.join_previous,
+                    )
+                },
                 Self::mermaid_zoom_handler_for_workspace(entity),
             ))
         })
@@ -435,7 +460,9 @@ pub(in crate::workspace) mod tests {
         cx.update(|window, cx| {
             workspace.update(cx, |workspace, cx| {
                 workspace.open_knowledge_workspace_tab(window, cx);
-                workspace.knowledge_workspace.view.update(cx, |view, cx| view.select_knowledge_document(document.id.clone(), cx));
+                workspace.knowledge_workspace.view.update(cx, |view, cx| {
+                    view.select_knowledge_document(document.id.clone(), cx)
+                });
             })
         });
         cx.run_until_parked();

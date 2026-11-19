@@ -151,11 +151,7 @@ impl WorkspaceApp {
         }
     }
 
-    pub(in crate::workspace) fn advance_theme_transition(
-        &mut self,
-        window: &mut Window,
-        cx: &App,
-    ) {
+    pub(in crate::workspace) fn advance_theme_transition(&mut self, window: &mut Window, cx: &App) {
         let Some(transition) = self.theme_transition else {
             return;
         };

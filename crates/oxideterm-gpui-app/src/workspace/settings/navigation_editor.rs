@@ -1,10 +1,13 @@
 use super::*;
-use oxideterm_gpui_settings_view::navigation_editor::{
-    SettingsNavigationEditorFrame,
-};
+use oxideterm_gpui_settings_view::navigation_editor::SettingsNavigationEditorFrame;
 
 impl WorkspaceApp {
-    pub(in crate::workspace) fn navigation_editor_bindings(cx: &Context<Self>) -> (Rc<dyn Fn(&App) -> Option<SettingsNavigationEditorFrame>>, Rc<dyn Fn(bool, &mut App)>) {
+    pub(in crate::workspace) fn navigation_editor_bindings(
+        cx: &Context<Self>,
+    ) -> (
+        Rc<dyn Fn(&App) -> Option<SettingsNavigationEditorFrame>>,
+        Rc<dyn Fn(bool, &mut App)>,
+    ) {
         let owner = cx.entity().downgrade();
         let frame = Rc::new({
             let owner = owner.clone();

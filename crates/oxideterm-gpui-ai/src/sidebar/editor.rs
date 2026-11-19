@@ -4,11 +4,9 @@ use gpui::{
     App, Context, CursorStyle, Div, Entity, MouseButton, MouseDownEvent, MouseMoveEvent, Render,
     SharedString, Window, div, prelude::*, px, rgb, rgba,
 };
-use oxideterm_gpui_ui::{
-    text_input::{
-        TextInputAnchor, TextInputAnchorId, text_caret, text_input_anchor_probe,
-        text_input_value_segments_with_color, text_input_value_segments_with_marked_range,
-    },
+use oxideterm_gpui_ui::text_input::{
+    TextInputAnchor, TextInputAnchorId, text_caret, text_input_anchor_probe,
+    text_input_value_segments_with_color, text_input_value_segments_with_marked_range,
 };
 use oxideterm_i18n::I18n;
 use oxideterm_theme::ThemeTokens;
@@ -499,7 +497,6 @@ mod input_render_tests {
             vec![("W中😀", 0..4), ("", 5..5), ("Z", 6..7)]
         );
     }
-
 }
 
 impl AiEditorView {
@@ -513,10 +510,16 @@ impl AiEditorView {
     }
 
     pub fn mount_pair(
-        state: &Entity<AiWorkspaceEntity>, bindings: AiEditorBindings, cx: &mut App,
+        state: &Entity<AiWorkspaceEntity>,
+        bindings: AiEditorBindings,
+        cx: &mut App,
     ) -> (Entity<Self>, Entity<Self>) {
-        let composer = gpui::AppContext::new(cx, |_| Self::new(AiEditorKind::Composer, state.clone(), bindings.clone()));
-        let edit = gpui::AppContext::new(cx, |_| Self::new(AiEditorKind::MessageEdit, state.clone(), bindings));
+        let composer = gpui::AppContext::new(cx, |_| {
+            Self::new(AiEditorKind::Composer, state.clone(), bindings.clone())
+        });
+        let edit = gpui::AppContext::new(cx, |_| {
+            Self::new(AiEditorKind::MessageEdit, state.clone(), bindings)
+        });
         (composer, edit)
     }
 }

@@ -67,12 +67,28 @@ impl AppearancePageData {
         dispatch: Rc<dyn Fn(AppearanceAction, &mut App)>,
     ) -> AppearancePage<'a> {
         let Self {
-            system_dark, edit_scheme, onboarding, render_policy, vibrancy_mode,
-            vibrancy_support, icon_variants, icon_size, icon_source,
+            system_dark,
+            edit_scheme,
+            onboarding,
+            render_policy,
+            vibrancy_mode,
+            vibrancy_support,
+            icon_variants,
+            icon_size,
+            icon_source,
         } = self;
         AppearancePage {
-            controls, system_dark, edit_scheme, onboarding, render_policy, vibrancy_mode,
-            vibrancy_support, icon_variants, icon_size, icon_source, dispatch,
+            controls,
+            system_dark,
+            edit_scheme,
+            onboarding,
+            render_policy,
+            vibrancy_mode,
+            vibrancy_support,
+            icon_variants,
+            icon_size,
+            icon_source,
+            dispatch,
         }
     }
 }

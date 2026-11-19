@@ -103,19 +103,27 @@ pub struct KeyboardInteractiveChallenge {
 
 impl crate::entity::ConnectionFlowEntity {
     pub fn start_host_key_cancellation(
-        &mut self, delay: Duration, cx: &mut gpui::Context<Self>,
+        &mut self,
+        delay: Duration,
+        cx: &mut gpui::Context<Self>,
     ) -> (Option<crate::launch::SshConnectionIntent>, Option<bool>) {
         let intent = self.host_key_challenge_intent();
-        if let Some(token) = intent.as_ref().and_then(|intent| intent.standalone_sftp_pair_launch_token()) {
+        if let Some(token) = intent
+            .as_ref()
+            .and_then(|intent| intent.standalone_sftp_pair_launch_token())
+        {
             self.take_sftp_pair_launch(token);
         }
-        let inline = self.begin_host_key_challenge_exit(delay, cx)
+        let inline = self
+            .begin_host_key_challenge_exit(delay, cx)
             .then(|| self.set_form_feedback(Some(false), None, cx));
         (intent, inline)
     }
 
     pub fn paste_interactive_clipboard(&mut self, cx: &mut gpui::Context<Self>) -> bool {
-        let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else { return false; };
+        let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else {
+            return false;
+        };
         let text = zeroize::Zeroizing::new(text);
         let normalized = zeroize::Zeroizing::new(text.replace("\r\n", "\n"));
         let normalized = zeroize::Zeroizing::new(normalized.replace('\r', "\n"));

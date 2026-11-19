@@ -217,7 +217,9 @@ impl SettingsPageFrame<'_> {
                     controls,
                     state,
                     data,
-                    dispatch: Rc::new(move |request, cx| action(SettingsPageAction::AiSkills(request), cx)),
+                    dispatch: Rc::new(move |request, cx| {
+                        action(SettingsPageAction::AiSkills(request), cx)
+                    }),
                 };
                 crate::ai::available(page.render(cx), enabled)
             }

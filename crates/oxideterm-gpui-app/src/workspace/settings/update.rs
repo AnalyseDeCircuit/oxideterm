@@ -1,6 +1,8 @@
 use super::*;
 use oxideterm_gpui_settings_view::entity::SettingsCompletion;
-use oxideterm_gpui_settings_view::native_update::{NativeUpdateAction, NativeUpdateCheckKind, NativeUpdateEnvironment};
+use oxideterm_gpui_settings_view::native_update::{
+    NativeUpdateAction, NativeUpdateCheckKind, NativeUpdateEnvironment,
+};
 
 impl WorkspaceApp {
     pub(in crate::workspace) fn handle_settings_workspace_event(
@@ -57,7 +59,10 @@ impl WorkspaceApp {
             }
             SettingsWorkspaceEvent::ShowNativeUpdateNotification => {}
             SettingsWorkspaceEvent::RequestAutomaticNativeUpdateCheck => {
-                self.apply_native_update_action(NativeUpdateAction::Check(NativeUpdateCheckKind::Automatic), cx);
+                self.apply_native_update_action(
+                    NativeUpdateAction::Check(NativeUpdateCheckKind::Automatic),
+                    cx,
+                );
             }
             SettingsWorkspaceEvent::RequestQuitAfterNativeUpdate => {
                 self.schedule_native_update_quit(cx);
@@ -77,7 +82,11 @@ impl WorkspaceApp {
                             let mut message = None;
                             self.edit_settings(|settings| message = save(settings), cx);
                             if let Some(message) = message {
-                                self.send_settings_notice(message, TerminalNoticeVariant::Success, cx);
+                                self.send_settings_notice(
+                                    message,
+                                    TerminalNoticeVariant::Success,
+                                    cx,
+                                );
                             }
                         }
                         SettingsCompletion::ApplyKeybindings(overrides) => {
@@ -91,7 +100,9 @@ impl WorkspaceApp {
                             };
                             self.send_settings_notice(message, variant, cx);
                         }
-                        SettingsCompletion::RefreshPortableStatus => self.refresh_portable_settings_snapshot(true, cx),
+                        SettingsCompletion::RefreshPortableStatus => {
+                            self.refresh_portable_settings_snapshot(true, cx)
+                        }
                     }
                 }
             }
@@ -99,22 +110,32 @@ impl WorkspaceApp {
     }
 
     fn apply_settings_keybinding_import(
-        &mut self, overrides: serde_json::Map<String, serde_json::Value>, cx: &mut Context<Self>,
+        &mut self,
+        overrides: serde_json::Map<String, serde_json::Value>,
+        cx: &mut Context<Self>,
     ) {
-        use crate::keybindings::{ACTION_DEFINITIONS, KeybindingSide, effective_combo, runtime_rebind_key_bindings};
+        use crate::keybindings::{
+            ACTION_DEFINITIONS, KeybindingSide, effective_combo, runtime_rebind_key_bindings,
+        };
         let side = KeybindingSide::current();
         let previous = &self.settings_store.settings().keybindings.overrides;
-        let bindings = ACTION_DEFINITIONS.iter().flat_map(|definition| {
-            let old = effective_combo(definition, previous, side);
-            let new = effective_combo(definition, &overrides, side);
-            runtime_rebind_key_bindings(&definition.id, old.as_ref(), new.as_ref())
-        }).collect::<Vec<_>>();
+        let bindings = ACTION_DEFINITIONS
+            .iter()
+            .flat_map(|definition| {
+                let old = effective_combo(definition, previous, side);
+                let new = effective_combo(definition, &overrides, side);
+                runtime_rebind_key_bindings(&definition.id, old.as_ref(), new.as_ref())
+            })
+            .collect::<Vec<_>>();
         self.edit_settings(|settings| settings.keybindings.overrides = overrides, cx);
         Self::apply_runtime_key_bindings(bindings, cx);
     }
 
     pub(in crate::workspace) fn check_native_update(&mut self, cx: &mut Context<Self>) {
-        self.apply_native_update_action(NativeUpdateAction::Check(NativeUpdateCheckKind::Manual), cx);
+        self.apply_native_update_action(
+            NativeUpdateAction::Check(NativeUpdateCheckKind::Manual),
+            cx,
+        );
     }
 
     pub(in crate::workspace) fn schedule_automatic_native_update_check(

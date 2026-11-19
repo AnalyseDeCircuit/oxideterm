@@ -1,5 +1,7 @@
 use crate::{SettingsTab, TerminalSettingsPage, entity::SettingsWorkspaceEntity};
-use oxideterm_connections::{ConnectionStore, LOCAL_SHELL_PRIVILEGE_CONNECTION_ID, SSH_COMMON_PRIVILEGE_SCOPE_ID};
+use oxideterm_connections::{
+    ConnectionStore, LOCAL_SHELL_PRIVILEGE_CONNECTION_ID, SSH_COMMON_PRIVILEGE_SCOPE_ID,
+};
 use oxideterm_settings::{BackgroundScope, PersistedSettings, SettingsUpstreamProxyAuth};
 use oxideterm_settings_model::{
     SETTINGS_SECTION_HEADER_ITEM_COUNT, SettingsDynamicSectionCounts, SettingsSectionId,
@@ -29,12 +31,20 @@ impl SettingsSectionLayout<'_> {
         let tab = self.state.route_snapshot().active_tab;
         (0..settings_section_list_item_count(tab, counts))
             .map(|index| {
-                let section = index.checked_sub(SETTINGS_SECTION_HEADER_ITEM_COUNT)
+                let section = index
+                    .checked_sub(SETTINGS_SECTION_HEADER_ITEM_COUNT)
                     .and_then(|index| settings_tab_section_at(tab, index, counts));
                 let mut hasher = DefaultHasher::new();
                 tab.hash(&mut hasher);
                 index.hash(&mut hasher);
-                hash_settings_section_layout(self.state, self.settings, section, self.app_lock_configured, self.shell_count, &mut hasher);
+                hash_settings_section_layout(
+                    self.state,
+                    self.settings,
+                    section,
+                    self.app_lock_configured,
+                    self.shell_count,
+                    &mut hasher,
+                );
                 self.hash_page(tab, index, section, &mut hasher);
                 extend(tab, section, &mut hasher);
                 hasher.finish()
@@ -42,7 +52,13 @@ impl SettingsSectionLayout<'_> {
             .collect()
     }
 
-    fn hash_page(&self, tab: SettingsTab, index: usize, section: Option<SettingsSectionId>, hasher: &mut DefaultHasher) {
+    fn hash_page(
+        &self,
+        tab: SettingsTab,
+        index: usize,
+        section: Option<SettingsSectionId>,
+        hasher: &mut DefaultHasher,
+    ) {
         let state = self.state;
         let store = self.connections;
         let settings = self.settings;
@@ -62,9 +78,7 @@ impl SettingsSectionLayout<'_> {
                 settings.network.application_proxy_mode.hash(hasher);
                 settings.general.update_proxy.mode.hash(hasher);
                 settings.general.update_proxy.protocol.hash(hasher);
-                state
-                    .network_proxy_layout_flags()
-                    .hash(hasher);
+                state.network_proxy_layout_flags().hash(hasher);
                 for client in self.mcp_clients.iter() {
                     client.client_ref.as_str().hash(hasher);
                     client.label.hash(hasher);
@@ -78,8 +92,7 @@ impl SettingsSectionLayout<'_> {
                     // A different frozen action can have a different wrapped command height.
                     approval.approval_ref.as_str().hash(hasher);
                 }
-                self.mcp_credential_ready
-                    .hash(hasher);
+                self.mcp_credential_ready.hash(hasher);
                 self.mcp_startup_error.hash(hasher);
             }
             SettingsTab::Connections => {
@@ -100,20 +113,12 @@ impl SettingsSectionLayout<'_> {
                         .hash(hasher);
                 }
                 store.connections().len().hash(hasher);
-                store
-                    .managed_ssh_keys()
-                    .len()
-                    .hash(hasher);
-                state
-                    .managed_key_status()
-                    .is_some()
-                    .hash(hasher);
+                store.managed_ssh_keys().len().hash(hasher);
+                state.managed_key_status().is_some().hash(hasher);
                 if section == Some(SettingsSectionId::ConnectionsImporters) {
                     // Importer state only changes the importer card. Invalidating
                     // earlier measured rows makes GPUI move the current scroll anchor.
-                    state
-                        .connection_import_list_signature()
-                        .hash(hasher);
+                    state.connection_import_list_signature().hash(hasher);
                 }
             }
             SettingsTab::Privilege => {
@@ -122,18 +127,9 @@ impl SettingsSectionLayout<'_> {
                     .map(|credentials| credentials.len())
                     .unwrap_or(0)
                     .hash(hasher);
-                store
-                    .totp_credentials()
-                    .len()
-                    .hash(hasher);
-                state
-                    .totp_draft
-                    .is_some()
-                    .hash(hasher);
-                state
-                    .totp_error
-                    .is_some()
-                    .hash(hasher);
+                store.totp_credentials().len().hash(hasher);
+                state.totp_draft.is_some().hash(hasher);
+                state.totp_error.is_some().hash(hasher);
                 store.connections().len().hash(hasher);
                 store
                     .connections()
@@ -146,9 +142,7 @@ impl SettingsSectionLayout<'_> {
                     .map(|credentials| credentials.len())
                     .unwrap_or(0)
                     .hash(hasher);
-                state
-                    .privilege_layout_flags()
-                    .hash(hasher);
+                state.privilege_layout_flags().hash(hasher);
             }
             SettingsTab::Keybindings => {
                 // Keep the search control mounted while scope filtering replaces tables.

@@ -1,6 +1,5 @@
 use super::*;
 
-
 impl WorkspaceApp {
     pub(in crate::workspace) fn open_appearance_settings(
         &mut self,
@@ -15,10 +14,14 @@ impl WorkspaceApp {
         });
         self.close_settings_select();
         self.focused_settings_input = None;
-        self.settings_workspace.update(cx, |settings, _| settings.set_slider_drag(None));
+        self.settings_workspace
+            .update(cx, |settings, _| settings.set_slider_drag(None));
         self.clear_ime_selection();
         self.sync_settings_section_list_state(cx);
-        self.settings_workspace.read(cx).section_list.state()
+        self.settings_workspace
+            .read(cx)
+            .section_list
+            .state()
             .scroll_to(gpui::ListOffset {
                 item_ix: 0,
                 offset_in_item: px(0.0),
@@ -47,14 +50,20 @@ impl WorkspaceApp {
         });
         self.close_settings_select();
         self.focused_settings_input = None;
-        self.settings_workspace.update(cx, |settings, _| settings.set_slider_drag(None));
+        self.settings_workspace
+            .update(cx, |settings, _| settings.set_slider_drag(None));
         self.clear_ime_selection();
         self.sync_settings_section_list_state(cx);
         // Target the importer row directly so callers do not merely land at
         // the top of a long Connections settings page.
-        self.settings_workspace.read(cx).section_list.scroll_to_section(
-            SettingsTab::Connections, SettingsSectionId::ConnectionsImporters, self.settings_dynamic_section_counts(cx),
-        );
+        self.settings_workspace
+            .read(cx)
+            .section_list
+            .scroll_to_section(
+                SettingsTab::Connections,
+                SettingsSectionId::ConnectionsImporters,
+                self.settings_dynamic_section_counts(cx),
+            );
         self.open_settings(window, cx);
     }
 
@@ -68,7 +77,8 @@ impl WorkspaceApp {
         });
         self.close_settings_select();
         self.focused_settings_input = None;
-        self.settings_workspace.update(cx, |settings, _| settings.set_slider_drag(None));
+        self.settings_workspace
+            .update(cx, |settings, _| settings.set_slider_drag(None));
         self.clear_ime_selection();
         self.sync_settings_section_list_state(cx);
         self.open_settings(window, cx);
@@ -84,7 +94,10 @@ impl WorkspaceApp {
             .is_some_and(|tab| tab.kind == TabKind::Settings);
         self.active_surface = ActiveSurface::Terminal;
         self.clear_terminal_trigger_input_focus(cx);
-        self.blur_highlight_input(oxideterm_gpui_settings_view::highlight_page::is_highlight_input, cx);
+        self.blur_highlight_input(
+            oxideterm_gpui_settings_view::highlight_page::is_highlight_input,
+            cx,
+        );
         self.close_settings_select();
         self.settings_workspace.update(cx, |settings, cx| {
             settings.terminal_triggers.pane = None;
@@ -96,7 +109,8 @@ impl WorkspaceApp {
             settings.close_settings_search(true, cx);
         });
         self.focused_settings_input = None;
-        self.settings_workspace.update(cx, |settings, _| settings.set_slider_drag(None));
+        self.settings_workspace
+            .update(cx, |settings, _| settings.set_slider_drag(None));
         if close_active_settings_tab {
             if let Some(tab_id) = self.active_content_tab_id(cx) {
                 self.close_tab_by_id(tab_id, window, cx);
@@ -107,7 +121,11 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    pub(super) fn refresh_settings_tab_services(&mut self, tab: SettingsTab, cx: &mut Context<Self>) {
+    pub(super) fn refresh_settings_tab_services(
+        &mut self,
+        tab: SettingsTab,
+        cx: &mut Context<Self>,
+    ) {
         match tab {
             SettingsTab::General => {
                 self.refresh_cli_companion_status(cx);
@@ -122,7 +140,6 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn render_settings_surface(&self) -> AnyElement {
         self.settings_views.surface.clone().into_any_element()
     }
-
 
     pub(in crate::workspace) fn sync_settings_section_list_state(&self, cx: &App) {
         let state = self.settings_workspace.read(cx);
@@ -153,12 +170,21 @@ impl WorkspaceApp {
             mcp_credential_ready: self.public_mcp.revealed_credential().is_some(),
             mcp_startup_error: self.public_mcp.startup_error().is_some(),
         }
-        .signatures(self.settings_dynamic_section_counts(cx), |tab, section, hasher| {
-            self.hash_runtime_settings_layout(tab, section, hasher, cx);
-        })
+        .signatures(
+            self.settings_dynamic_section_counts(cx),
+            |tab, section, hasher| {
+                self.hash_runtime_settings_layout(tab, section, hasher, cx);
+            },
+        )
     }
 
-    fn hash_runtime_settings_layout(&self, tab: SettingsTab, section: Option<SettingsSectionId>, hasher: &mut DefaultHasher, cx: &App) {
+    fn hash_runtime_settings_layout(
+        &self,
+        tab: SettingsTab,
+        section: Option<SettingsSectionId>,
+        hasher: &mut DefaultHasher,
+        cx: &App,
+    ) {
         match tab {
             SettingsTab::Ai => {
                 oxideterm_gpui_settings_view::ai::hash_section_layout(
@@ -257,7 +283,6 @@ impl WorkspaceApp {
         });
     }
 
-
     pub(in crate::workspace) fn edit_settings(
         &mut self,
         edit: impl FnOnce(&mut PersistedSettings),
@@ -268,7 +293,8 @@ impl WorkspaceApp {
         let settings = self.settings_store.settings().clone();
         self.apply_loaded_settings_to_runtime(&previous_settings, &settings, cx);
         let _ = self.settings_store.save();
-        self.settings_workspace.update(cx, |state, _| state.acknowledge_external_store_state());
+        self.settings_workspace
+            .update(cx, |state, _| state.acknowledge_external_store_state());
         self.refresh_ai_settings_views(&previous_settings, &settings, cx);
         self.emit_native_plugin_settings_events(&previous_settings, &settings, cx);
         self.sync_tab_titles(cx);
@@ -355,5 +381,4 @@ impl WorkspaceApp {
             self.settings_views.ai_mcp.update(cx, |_, cx| cx.notify());
         }
     }
-
 }

@@ -92,7 +92,9 @@ impl WorkspaceApp {
             CatalogInputAction::Handled => {}
             CatalogInputAction::ClearComposition => self.ime_marked_text = None,
             CatalogInputAction::CloseSidebarSearch => self.close_session_manager_sidebar_search(cx),
-            CatalogInputAction::PruneSelection => self.clear_session_selection_for_invisible_rows(cx),
+            CatalogInputAction::PruneSelection => {
+                self.clear_session_selection_for_invisible_rows(cx)
+            }
             CatalogInputAction::SubmitGroup => self.submit_session_group_editor(cx),
             CatalogInputAction::CommitTemplateName => self.commit_batch_template_name(cx),
             CatalogInputAction::CancelTemplateName => {
@@ -156,7 +158,11 @@ impl WorkspaceApp {
         let enabled = self.settings_store.settings().ssh_config.auto_load_hosts;
         self.connections.session_manager.update(cx, |manager, cx| {
             manager.refresh_ssh_config_hosts(
-                enabled, self.forwarding_runtime.clone(), &self.connection_store, &self.i18n, cx,
+                enabled,
+                self.forwarding_runtime.clone(),
+                &self.connection_store,
+                &self.i18n,
+                cx,
             );
         });
     }

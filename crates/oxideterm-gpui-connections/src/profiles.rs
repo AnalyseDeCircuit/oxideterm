@@ -4,8 +4,8 @@
 use oxideterm_connections::{
     ConnectionStore, MoshUdpPortSelection as SavedMoshUdpPortSelection, SaveConnectionRequest,
     SavedAuth, SavedConnection, SavedMoshProfileRuntimeSecrets, SavedProxyCommand, SavedProxyHop,
-    SavedUpstreamProxyAuth, SavedUpstreamProxyConfig, SavedUpstreamProxyPolicy,
-    SecretString, StandaloneSftpEndpoint,
+    SavedUpstreamProxyAuth, SavedUpstreamProxyConfig, SavedUpstreamProxyPolicy, SecretString,
+    StandaloneSftpEndpoint,
 };
 use oxideterm_ssh::{AuthMethod, ProxyHopConfig, SshConfig};
 use zeroize::Zeroize;
@@ -873,12 +873,15 @@ pub fn prepare_saved_ssh_open(
 ) -> Option<(SavedSshOpen, bool)> {
     let connection = store.get(id)?;
     let open_sftp = open_sftp_override || connection.options.open_sftp_on_connect;
-    let config = oxideterm_session_adapter::ssh_config_from_saved_connection(store, settings, connection);
+    let config =
+        oxideterm_session_adapter::ssh_config_from_saved_connection(store, settings, connection);
     let plan = match config {
-        Some(config) if !saved_connection_requires_credentials(Some(&config)) => SavedSshOpen::Connect {
-            config,
-            title: connection.name.clone(),
-        },
+        Some(config) if !saved_connection_requires_credentials(Some(&config)) => {
+            SavedSshOpen::Connect {
+                config,
+                title: connection.name.clone(),
+            }
+        }
         _ => SavedSshOpen::Authenticate(connection.clone()),
     };
     Some((plan, open_sftp))

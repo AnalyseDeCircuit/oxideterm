@@ -2,10 +2,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use gpui::{
-    AnyElement, App, FontWeight, SharedString, Styled, WeakEntity, div, prelude::*, px, rgb,
-    rgba, svg,
+    AnyElement, App, FontWeight, SharedString, Styled, WeakEntity, div, prelude::*, px, rgb, rgba,
+    svg,
 };
-use oxideterm_gpui_ui::button::{ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, button_with};
+use oxideterm_gpui_ui::button::{
+    ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, button_with,
+};
 use oxideterm_gpui_ui::motion::{self, UserSegmentedControlMotionState};
 use oxideterm_settings::{AnimationSpeed, AppearanceScheme, CornerStyle, FontFamily};
 use oxideterm_theme::UiMotionProfile;
@@ -14,9 +16,9 @@ use crate::{
     ONBOARDING_FONT_OPTIONS, OnboardingFrame, OnboardingRequest, OnboardingThemeTarget,
     OnboardingView, OnboardingViewBindings,
     widgets::{
-        ONBOARDING_ACCENT_BORDER_ALPHA, ONBOARDING_ACCENT_SUBTLE_ALPHA, ONBOARDING_CARD_BORDER_ALPHA,
-        ONBOARDING_HAIRLINE_ALPHA, compact_pill_bar, compact_pill_item, grouped_surface,
-        render_icon, section_header, sunken_bg,
+        ONBOARDING_ACCENT_BORDER_ALPHA, ONBOARDING_ACCENT_SUBTLE_ALPHA,
+        ONBOARDING_CARD_BORDER_ALPHA, ONBOARDING_HAIRLINE_ALPHA, compact_pill_bar,
+        compact_pill_item, grouped_surface, render_icon, section_header, sunken_bg,
     },
 };
 
@@ -203,14 +205,17 @@ pub(crate) fn render_appearance_step(
                     )
                     .id("onboarding-assign-scheme")
                     .cursor_pointer()
-                    .on_mouse_down(gpui::MouseButton::Left, move |_, window, cx| {
-                        dispatch(
-                            OnboardingRequest::AssignCurrentScheme(edit_dark),
-                            window,
-                            cx,
-                        );
-                        cx.stop_propagation();
-                    }),
+                    .on_mouse_down(
+                        gpui::MouseButton::Left,
+                        move |_, window, cx| {
+                            dispatch(
+                                OnboardingRequest::AssignCurrentScheme(edit_dark),
+                                window,
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        },
+                    ),
                 )
                 .into_any_element(),
         );
@@ -451,7 +456,8 @@ pub(crate) fn render_appearance_step(
                 frame.has_background,
                 anim_active_index,
                 control_motion,
-                frame.animation_options
+                frame
+                    .animation_options
                     .iter()
                     .enumerate()
                     .map(|(index, (speed, label))| {
@@ -496,14 +502,26 @@ pub(crate) fn render_appearance_step(
             frame.i18n.t("onboarding.appearance_title"),
             None,
         ))
-        .child(grouped_surface(&frame.tokens, frame.has_background, theme_rows))
+        .child(grouped_surface(
+            &frame.tokens,
+            frame.has_background,
+            theme_rows,
+        ))
         .child(section_header(
             &frame.tokens,
             frame.i18n.t("onboarding.select_font"),
             None,
         ))
-        .child(grouped_surface(&frame.tokens, frame.has_background, font_rows))
-        .child(grouped_surface(&frame.tokens, frame.has_background, detail_rows));
+        .child(grouped_surface(
+            &frame.tokens,
+            frame.has_background,
+            font_rows,
+        ))
+        .child(grouped_surface(
+            &frame.tokens,
+            frame.has_background,
+            detail_rows,
+        ));
 
     let preview_col = div()
         .min_w(px(0.0))
@@ -812,7 +830,11 @@ fn render_unified_workbench_preview(frame: &OnboardingFrame) -> AnyElement {
                 .child(div().text_color(rgb(term.bright_green)).child("● active"))
                 .child(div().text_color(rgb(term.blue)).child("sftp+tunnel"))
                 .child(div().text_color(rgb(term.yellow)).child("12ms RTT"))
-                .child(div().text_color(rgb(term.magenta)).child("Aa 01 => 中文对齐")),
+                .child(
+                    div()
+                        .text_color(rgb(term.magenta))
+                        .child("Aa 01 => 中文对齐"),
+                ),
         )
         .child(div().h(px(6.0)))
         .child(
@@ -823,9 +845,21 @@ fn render_unified_workbench_preview(frame: &OnboardingFrame) -> AnyElement {
                 .child(div().text_color(rgb(term.cyan)).child("~/project"))
                 .child(div().text_color(rgb(term.foreground)).child("git status")),
         )
-        .child(div().text_color(rgb(term.green)).child("  new: src/theme.rs"))
-        .child(div().text_color(rgb(term.yellow)).child("  mod: Cargo.toml"))
-        .child(div().text_color(rgb(term.red)).child("  del: old-theme.toml"))
+        .child(
+            div()
+                .text_color(rgb(term.green))
+                .child("  new: src/theme.rs"),
+        )
+        .child(
+            div()
+                .text_color(rgb(term.yellow))
+                .child("  mod: Cargo.toml"),
+        )
+        .child(
+            div()
+                .text_color(rgb(term.red))
+                .child("  del: old-theme.toml"),
+        )
         .child(
             div()
                 .flex()

@@ -202,12 +202,7 @@ impl<T> MarkdownPreviewCache<T> {
             scroll.invalidate_document_cache();
         }
         self.document
-            .get_or_insert_with(|| {
-                parser::parse_with_smart_punctuation(
-                    source,
-                    smart_punctuation,
-                )
-            })
+            .get_or_insert_with(|| parser::parse_with_smart_punctuation(source, smart_punctuation))
             .clone()
     }
 
@@ -216,5 +211,3 @@ impl<T> MarkdownPreviewCache<T> {
         scroll.release_document_cache();
     }
 }
-
-

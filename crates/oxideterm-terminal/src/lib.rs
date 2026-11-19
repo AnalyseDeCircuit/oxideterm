@@ -25,6 +25,7 @@ mod logical_context;
 pub use history::{
     TerminalHistoryCapture, TerminalHistoryError, TerminalHistoryRow, TerminalHistoryStamp,
 };
+pub mod command_completion;
 mod editor_integration;
 mod integration_scripts;
 mod local_command;
@@ -43,7 +44,6 @@ mod search;
 mod selection;
 mod session;
 mod shell_channel;
-pub mod command_completion;
 mod shell_completion;
 pub use shell_channel::{ShellChannel, ShellChannelAcquisition};
 mod shell_integration;

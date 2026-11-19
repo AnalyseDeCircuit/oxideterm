@@ -76,22 +76,47 @@ impl WorkspaceApp {
         })
     }
 
-    pub(in crate::workspace) fn open_new_connection_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn open_new_connection_form(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.open_connection_form(NewConnectionTransport::Ssh, None, window, cx);
     }
 
-    pub(in crate::workspace) fn open_serial_connection_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn open_serial_connection_form(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.open_connection_form(NewConnectionTransport::Serial, None, window, cx);
         self.refresh_serial_ports(cx);
     }
 
-    pub(in crate::workspace) fn open_telnet_connection_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn open_telnet_connection_form(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.open_connection_form(NewConnectionTransport::Telnet, None, window, cx);
     }
 
-    pub(in crate::workspace) fn open_drill_down_form(&mut self, parent: NodeId, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.node_router.node_metadata(&parent).is_some_and(|node| node.readiness == NodeReadiness::Ready) {
-            let message = format!("{}: {}", self.i18n.t("sessions.tree.actions.drill_in"), self.i18n.t("ssh.drill_down.parent_not_ready"));
+    pub(in crate::workspace) fn open_drill_down_form(
+        &mut self,
+        parent: NodeId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self
+            .node_router
+            .node_metadata(&parent)
+            .is_some_and(|node| node.readiness == NodeReadiness::Ready)
+        {
+            let message = format!(
+                "{}: {}",
+                self.i18n.t("sessions.tree.actions.drill_in"),
+                self.i18n.t("ssh.drill_down.parent_not_ready")
+            );
             self.set_connection_status(Some(message), cx);
             return;
         }
@@ -99,12 +124,22 @@ impl WorkspaceApp {
     }
 
     fn open_connection_form(
-        &mut self, transport: NewConnectionTransport, parent: Option<NodeId>, window: &mut Window, cx: &mut Context<Self>,
+        &mut self,
+        transport: NewConnectionTransport,
+        parent: Option<NodeId>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
     ) {
         self.prepare_modal_interaction_boundary(cx);
         self.ssh_tunnels.form = None;
         self.connections.flow.update(cx, |flow, cx| {
-            flow.begin_connection_form(transport, parent, self.settings_store.settings(), &self.i18n, cx);
+            flow.begin_connection_form(
+                transport,
+                parent,
+                self.settings_store.settings(),
+                &self.i18n,
+                cx,
+            );
         });
         self.focus_connection_form(window, cx);
     }
@@ -172,9 +207,11 @@ impl WorkspaceApp {
         });
         self.update_connection_form_state(cx, ConnectionFormState::clear);
         let message = self.i18n.t("ssh.drill_down.connecting");
-        self.connections.session_manager.update(cx, |session_manager, cx| {
-            session_manager.set_status(Some(message), cx);
-        });
+        self.connections
+            .session_manager
+            .update(cx, |session_manager, cx| {
+                session_manager.set_status(Some(message), cx);
+            });
         self.ensure_node_connection_started(&target_node_id, cx);
         let _ = self.connection_store.mark_used(&saved_connection_id);
         self.persist_session_tree_snapshot();

@@ -71,16 +71,21 @@ impl CatalogEnvironment {
             .row_action_menu
             .as_ref()
             .and_then(|menu| match &menu.target {
-                SessionManagerRowActionTarget::Group(group) => {
-                    Some((group.clone(), connection_count_for_group(group, store, &tunnels)))
-                }
+                SessionManagerRowActionTarget::Group(group) => Some((
+                    group.clone(),
+                    connection_count_for_group(group, store, &tunnels),
+                )),
                 _ => None,
             })
             .into_iter()
             .collect();
         let groups = session_group_tree(store, &tunnels);
         Self {
-            items: if include_items { manager.display_catalog(store, tunnels) } else { Vec::new() },
+            items: if include_items {
+                manager.display_catalog(store, tunnels)
+            } else {
+                Vec::new()
+            },
             group_counts,
             groups,
             stored_groups: store.groups().to_vec(),

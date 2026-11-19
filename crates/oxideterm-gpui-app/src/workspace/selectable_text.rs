@@ -214,7 +214,8 @@ impl WorkspaceApp {
     ) -> bool {
         let mut scrolled = false;
         if let Some(delta) = self.selectable_text_ai_chat_autoscroll_delta(position, cx) {
-            self.ai.state
+            self.ai
+                .state
                 .read(cx)
                 .chat_ui()
                 .message_list_state
@@ -259,7 +260,8 @@ impl WorkspaceApp {
             return None;
         }
         let bounds = self
-            .ai.state
+            .ai
+            .state
             .read(cx)
             .chat_ui()
             .message_list_state
@@ -1134,7 +1136,9 @@ impl SelectableTextRenderState {
                         .and_modify(|fragment| fragment.text = value.clone());
                     this.begin_selectable_text_group_from_mouse_down(group_id, event, window, cx)
                 });
-                if selection_started.unwrap_or(false) && selectable_text_should_stop_propagation(role) {
+                if selection_started.unwrap_or(false)
+                    && selectable_text_should_stop_propagation(role)
+                {
                     // Standalone document text owns a successful selection;
                     // row-safe cells continue bubbling to their parent row.
                     cx.stop_propagation();
@@ -1155,7 +1159,8 @@ impl SelectableTextRenderState {
                     if event.click_count != 1 || links.is_empty() {
                         return;
                     }
-                    let selecting = link_workspace.upgrade()
+                    let selecting = link_workspace
+                        .upgrade()
                         .and_then(|owner| owner.read(cx).ime_selected_range_for_target(target, cx))
                         .is_some_and(|range| range.start != range.end);
                     if selecting {

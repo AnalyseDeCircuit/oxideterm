@@ -112,14 +112,7 @@ pub(super) fn append_terminal_semantics_with_palette(
         if let Some(emphasis) = semantic_line_emphasis(text, role)
             && spans.iter().any(|span| span.class == emphasis)
         {
-            append_semantic_line_band(
-                snapshot,
-                line_range,
-                ui_error,
-                ui_warning,
-                emphasis,
-                layout,
-            );
+            append_semantic_line_band(snapshot, line_range, ui_error, ui_warning, emphasis, layout);
         }
         for span in spans {
             let start = columns.partition_point(|&(byte, _, _)| byte < span.range.start);
@@ -182,7 +175,8 @@ fn append_semantic_line_band(
     layout: &mut TerminalHighlightLayout,
 ) {
     // Bands are intentionally quieter than token colors and remain behind selection/search paint.
-    let Some((color, opacity)) = terminal_semantic_line_band_from_colors(ui_error, ui_warning, class)
+    let Some((color, opacity)) =
+        terminal_semantic_line_band_from_colors(ui_error, ui_warning, class)
     else {
         return;
     };
@@ -646,9 +640,8 @@ mod tests {
     fn semantic_colors_do_not_replace_manual_foregrounds() {
         let snapshot = snapshot("failed", 0..0);
         let mut layout = TerminalHighlightLayout::empty();
-        let manual_color = TerminalHighlightForeground::static_color(to_hsla(
-            terminal_color_from_hex(0x123456),
-        ));
+        let manual_color =
+            TerminalHighlightForeground::static_color(to_hsla(terminal_color_from_hex(0x123456)));
         layout.foregrounds.insert((0, 0), manual_color);
 
         append_terminal_semantics_for_rows(

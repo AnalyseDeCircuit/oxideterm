@@ -450,7 +450,10 @@ impl<Node: Clone + Eq + Hash + 'static, Terminal: Clone + 'static>
 
 pub fn inactive_tool_result(call: String, name: String) -> oxideterm_ai::AiExecutedToolResult {
     oxideterm_ai::tool_result_protocol::rejected_ai_tool_result(
-        call, name, "operation_cancelled", "The AI tool session is no longer active.",
+        call,
+        name,
+        "operation_cancelled",
+        "The AI tool session is no longer active.",
     )
 }
 
@@ -458,34 +461,63 @@ impl<Node: Clone + Eq + std::hash::Hash + 'static, Terminal: Clone + 'static>
     super::AiConversationController<Node, Terminal>
 {
     pub fn admit_tool_execution(
-        &self, generation: u64, conversation_id: String, assistant_id: String,
-        turn: &oxideterm_ai::ToolSessionId, call: &str, name: &str, args: &serde_json::Value,
-        dispatch: Option<oxideterm_ai::agent::AgentDispatch>, leases: Vec<oxideterm_ai::agent::AgentToolLease>,
-        receiver_closed: impl FnOnce() -> bool, cx: &mut gpui::App,
-    ) -> Result<crate::state::local_command::AiToolRunContext, oxideterm_ai::AiExecutedToolResult> {
-        if dispatch.as_ref().is_some_and(|guard| guard.check().is_err()) {
+        &self,
+        generation: u64,
+        conversation_id: String,
+        assistant_id: String,
+        turn: &oxideterm_ai::ToolSessionId,
+        call: &str,
+        name: &str,
+        args: &serde_json::Value,
+        dispatch: Option<oxideterm_ai::agent::AgentDispatch>,
+        leases: Vec<oxideterm_ai::agent::AgentToolLease>,
+        receiver_closed: impl FnOnce() -> bool,
+        cx: &mut gpui::App,
+    ) -> Result<crate::state::local_command::AiToolRunContext, oxideterm_ai::AiExecutedToolResult>
+    {
+        if dispatch
+            .as_ref()
+            .is_some_and(|guard| guard.check().is_err())
+        {
             return Err(oxideterm_ai::tool_result_protocol::rejected_ai_tool_result(
-                call.to_owned(), name.to_owned(), "agent_direction_changed", "Task direction changed before dispatch.",
+                call.to_owned(),
+                name.to_owned(),
+                "agent_direction_changed",
+                "Task direction changed before dispatch.",
             ));
         }
-        let active = self.authority.read(cx).is_active_tool_session(generation, turn);
-        if !active || !self.state.read(cx).run_accepts_tools(generation)
-            || leases.iter().any(|lease| !lease.is_current()) || receiver_closed()
+        let active = self
+            .authority
+            .read(cx)
+            .is_active_tool_session(generation, turn);
+        if !active
+            || !self.state.read(cx).run_accepts_tools(generation)
+            || leases.iter().any(|lease| !lease.is_current())
+            || receiver_closed()
         {
             return Err(inactive_tool_result(call.to_owned(), name.to_owned()));
         }
         if name != "run_command" {
-            for lease in &leases { lease.dispatched(); }
+            for lease in &leases {
+                lease.dispatched();
+            }
         }
         if !leases.is_empty() {
             self.state.update(cx, |ai, _| {
-                ai.agents.tool_leases.insert((turn.clone(), call.to_owned()), leases);
+                ai.agents
+                    .tool_leases
+                    .insert((turn.clone(), call.to_owned()), leases);
             });
         }
         let raw = zeroize::Zeroizing::new(args.to_string());
         Ok(crate::state::local_command::AiToolRunContext {
-            arguments: zeroize::Zeroizing::new(crate::state::sanitize_ai_tool_arguments_for_approval(&raw)),
-            generation, conversation_id, assistant_id, dispatch,
+            arguments: zeroize::Zeroizing::new(
+                crate::state::sanitize_ai_tool_arguments_for_approval(&raw),
+            ),
+            generation,
+            conversation_id,
+            assistant_id,
+            dispatch,
         })
     }
 }

@@ -116,7 +116,10 @@ impl OnboardingView {
         cx.spawn(async move |view, cx| {
             Timer::after(duration).await;
             let _ = view.update(cx, |this, cx| {
-                if this.step_motion.finish(ONBOARDING_STEPS_MOTION_ID, generation) {
+                if this
+                    .step_motion
+                    .finish(ONBOARDING_STEPS_MOTION_ID, generation)
+                {
                     cx.notify();
                 }
             });
@@ -126,7 +129,10 @@ impl OnboardingView {
 
     fn render_header(&self, frame: &OnboardingFrame, wide: bool, cx: &mut App) -> AnyElement {
         let theme = frame.tokens.ui;
-        let mut rail = div().flex().items_center().gap(px(if wide { 8.0 } else { 4.0 }));
+        let mut rail = div()
+            .flex()
+            .items_center()
+            .gap(px(if wide { 8.0 } else { 4.0 }));
 
         for index in 0..ONBOARDING_TOTAL_STEPS {
             let step = OnboardingStep::from_index(index);
@@ -209,16 +215,13 @@ impl OnboardingView {
                         ),
                 )
                 .when(index + 1 < ONBOARDING_TOTAL_STEPS, |row| {
-                    row.child(
-                        div()
-                            .w(px(if wide { 20.0 } else { 10.0 }))
-                            .h(px(1.0))
-                            .bg(if completed {
-                                rgba((theme.accent << 8) | ONBOARDING_ACCENT_BORDER_ALPHA)
-                            } else {
-                                rgba((theme.border << 8) | ONBOARDING_HEADER_BORDER_ALPHA)
-                            }),
-                    )
+                    row.child(div().w(px(if wide { 20.0 } else { 10.0 })).h(px(1.0)).bg(
+                        if completed {
+                            rgba((theme.accent << 8) | ONBOARDING_ACCENT_BORDER_ALPHA)
+                        } else {
+                            rgba((theme.border << 8) | ONBOARDING_HEADER_BORDER_ALPHA)
+                        },
+                    ))
                 });
         }
 
@@ -354,9 +357,9 @@ impl Render for OnboardingView {
             OnboardingStep::Launch => render_launch_step(&frame, &self.bindings, wide),
         };
 
-        let animated_body = if let Some((generation, _)) =
-            self.step_motion
-                .transition_for(ONBOARDING_STEPS_MOTION_ID, frame.step)
+        let animated_body = if let Some((generation, _)) = self
+            .step_motion
+            .transition_for(ONBOARDING_STEPS_MOTION_ID, frame.step)
         {
             let previous = self
                 .step_motion
@@ -453,7 +456,10 @@ mod tests {
         assert_eq!(OnboardingStep::from_index(2), OnboardingStep::Appearance);
         assert_eq!(OnboardingStep::from_index(3), OnboardingStep::Launch);
         assert_eq!(OnboardingStep::from_index(99), OnboardingStep::Launch);
-        assert_eq!(OnboardingStep::Overview.title_key(), "onboarding.step_overview");
+        assert_eq!(
+            OnboardingStep::Overview.title_key(),
+            "onboarding.step_overview"
+        );
         assert_eq!(
             OnboardingStep::Disclaimer.title_key(),
             "onboarding.step_disclaimer"
@@ -532,13 +538,21 @@ mod tests {
                 }
             }),
             language_select: Rc::new(|_, label, _| {
-                div().w(px(140.0)).child(label.to_owned()).into_any_element()
+                div()
+                    .w(px(140.0))
+                    .child(label.to_owned())
+                    .into_any_element()
             }),
             theme_select: Rc::new(|target: OnboardingThemeTarget, _, _| {
-                div().w(px(180.0)).child(format!("{target:?}")).into_any_element()
+                div()
+                    .w(px(180.0))
+                    .child(format!("{target:?}"))
+                    .into_any_element()
             }),
             custom_font_input: Rc::new(|_, _| div().h(px(30.0)).into_any_element()),
-            radius_slider: Rc::new(|radius, _| div().child(format!("{radius}px")).into_any_element()),
+            radius_slider: Rc::new(|radius, _| {
+                div().child(format!("{radius}px")).into_any_element()
+            }),
         };
 
         let (view, cx) = cx.add_window_view(|_, _| OnboardingView::new(bindings));
@@ -565,7 +579,10 @@ mod tests {
             window.refresh();
             window.draw(app).clear(app);
         });
-        assert!(cx.debug_bounds("onboarding-disclaimer-accept-row").is_some());
+        assert!(
+            cx.debug_bounds("onboarding-disclaimer-accept-row")
+                .is_some()
+        );
 
         *accepted.borrow_mut() = true;
         *step.borrow_mut() = 2;

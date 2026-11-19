@@ -159,35 +159,69 @@ impl ConnectionFlowEntity {
     ) -> Option<ExistingSftpSurface> {
         self.clear_host_key_challenge(cx);
         match intent {
-            SshConnectionIntent::StandaloneSftp { pair_launch_token: Some(token), .. } => {
+            SshConnectionIntent::StandaloneSftp {
+                pair_launch_token: Some(token),
+                ..
+            } => {
                 if let Some(config) = self.accept_sftp_pair_primary(&token, config) {
                     crate::workers::preflight(
-                        config, title, SshConnectionIntent::StandaloneSftpSecondary { pair_launch_token: token },
-                        self.ssh_worker_sender(), managed_key_resolver_from_store(store),
+                        config,
+                        title,
+                        SshConnectionIntent::StandaloneSftpSecondary {
+                            pair_launch_token: token,
+                        },
+                        self.ssh_worker_sender(),
+                        managed_key_resolver_from_store(store),
                         i18n.clone(),
                     );
                 } else {
                     self.take_sftp_pair_launch(&token);
-                    self.set_form_feedback(None, Some(i18n.t("sftp.standalone.missing_credentials")), cx);
+                    self.set_form_feedback(
+                        None,
+                        Some(i18n.t("sftp.standalone.missing_credentials")),
+                        cx,
+                    );
                 }
             }
-            SshConnectionIntent::StandaloneSftp { saved_profile_id, initial_remote_path, pair_launch_token: None } => {
-                let endpoint_id = saved_profile_id.clone().unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+            SshConnectionIntent::StandaloneSftp {
+                saved_profile_id,
+                initial_remote_path,
+                pair_launch_token: None,
+            } => {
+                let endpoint_id = saved_profile_id
+                    .clone()
+                    .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
                 if existing_endpoint(&endpoint_id) {
                     self.clear_form_after_submit(cx);
-                    return Some(ExistingSftpSurface { endpoint_id, title, path: initial_remote_path });
+                    return Some(ExistingSftpSurface {
+                        endpoint_id,
+                        title,
+                        path: initial_remote_path,
+                    });
                 }
                 crate::workers::connect_standalone_sftp(
-                    config, endpoint_id, saved_profile_id, title, initial_remote_path,
-                    self.ssh_worker_sender(), managed_key_resolver_from_store(store), registry, runtime,
+                    config,
+                    endpoint_id,
+                    saved_profile_id,
+                    title,
+                    initial_remote_path,
+                    self.ssh_worker_sender(),
+                    managed_key_resolver_from_store(store),
+                    registry,
+                    runtime,
                 );
             }
             SshConnectionIntent::StandaloneSftpSecondary { pair_launch_token } => {
                 let mut launch = self.take_sftp_pair_launch(&pair_launch_token)?;
                 let primary = launch.primary_config.take()?;
                 crate::workers::connect_standalone_sftp_pair(
-                    primary, config, launch, self.ssh_worker_sender(),
-                    managed_key_resolver_from_store(store), registry, runtime,
+                    primary,
+                    config,
+                    launch,
+                    self.ssh_worker_sender(),
+                    managed_key_resolver_from_store(store),
+                    registry,
+                    runtime,
                 );
             }
             _ => unreachable!("SSH launch must be a standalone SFTP endpoint"),

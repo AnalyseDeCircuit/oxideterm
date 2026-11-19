@@ -18,13 +18,13 @@ const CONTEXT: &str = "Workspace";
 #[cfg(target_os = "macos")]
 const WINDOW_ACTION_CONTEXT: &str = "!KeybindingRecording";
 
-pub(crate) use oxideterm_gpui_settings_view::keybindings::{
-    ActionDefinition, ActionScope, KeyCombo, KeybindingSide, TerminalBehavior, combo_from_keystroke,
-    effective_combo, effective_combos, format_combo,
-};
-use oxideterm_gpui_settings_view::keybindings::{normalize_combo, override_binding};
 #[cfg(test)]
 use oxideterm_gpui_settings_view::keybindings::conflicts_in_definitions;
+pub(crate) use oxideterm_gpui_settings_view::keybindings::{
+    ActionDefinition, ActionScope, KeyCombo, KeybindingSide, TerminalBehavior,
+    combo_from_keystroke, effective_combo, effective_combos, format_combo,
+};
+use oxideterm_gpui_settings_view::keybindings::{normalize_combo, override_binding};
 
 pub(crate) static ACTION_DEFINITIONS: LazyLock<Vec<ActionDefinition>> = LazyLock::new(|| {
     let mut actions = vec![
@@ -716,7 +716,6 @@ pub(crate) fn action_definition(id: &str) -> Option<&'static ActionDefinition> {
     ACTION_DEFINITIONS.iter().find(|action| action.id == id)
 }
 
-
 pub(crate) fn set_unbound_override(
     overrides: &mut Map<String, Value>,
     action_id: &str,
@@ -838,7 +837,6 @@ pub(crate) fn conflicts_for_combo(
 ) -> Vec<&'static ActionDefinition> {
     conflicts_in_definitions(action_id, combo, overrides, side, &ACTION_DEFINITIONS)
 }
-
 
 pub(crate) fn keystroke_matches_action(
     keystroke: &Keystroke,

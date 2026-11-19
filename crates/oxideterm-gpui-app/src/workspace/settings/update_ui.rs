@@ -5,7 +5,9 @@ use oxideterm_gpui_settings_view::update_view::{
 };
 
 impl WorkspaceApp {
-    pub(in crate::workspace) fn native_update_notice_bindings(cx: &Context<Self>) -> NativeUpdateNoticeBindings {
+    pub(in crate::workspace) fn native_update_notice_bindings(
+        cx: &Context<Self>,
+    ) -> NativeUpdateNoticeBindings {
         let owner = cx.entity().downgrade();
         NativeUpdateNoticeBindings {
             frame: Rc::new({
@@ -13,13 +15,20 @@ impl WorkspaceApp {
                 move |cx| {
                     let owner = owner.upgrade()?;
                     let app = owner.read(cx);
-                    if app.version_migration.open || app.onboarding.open
-                        || app.overlay.read(cx).confirm_snapshot().is_some_and(|snapshot| {
-                            matches!(snapshot.kind,
-                                WorkspaceOverlayConfirmKind::LegalNotice
-                                | WorkspaceOverlayConfirmKind::ThirdPartyNotices
-                                | WorkspaceOverlayConfirmKind::NativeUpdateReleaseNotes)
-                        })
+                    if app.version_migration.open
+                        || app.onboarding.open
+                        || app
+                            .overlay
+                            .read(cx)
+                            .confirm_snapshot()
+                            .is_some_and(|snapshot| {
+                                matches!(
+                                    snapshot.kind,
+                                    WorkspaceOverlayConfirmKind::LegalNotice
+                                        | WorkspaceOverlayConfirmKind::ThirdPartyNotices
+                                        | WorkspaceOverlayConfirmKind::NativeUpdateReleaseNotes
+                                )
+                            })
                     {
                         return None;
                     }
@@ -33,10 +42,18 @@ impl WorkspaceApp {
             dispatch: Rc::new(move |action, cx| {
                 let _ = owner.update(cx, |app, cx| match action {
                     NativeUpdateNotificationAction::Dismiss => {}
-                    NativeUpdateNotificationAction::ReleaseNotes => app.open_native_update_release_notes(cx),
-                    NativeUpdateNotificationAction::Download => app.apply_native_update_action(NativeUpdateAction::Download, cx),
-                    NativeUpdateNotificationAction::Cancel => app.apply_native_update_action(NativeUpdateAction::Cancel, cx),
-                    NativeUpdateNotificationAction::Install => app.apply_native_update_action(NativeUpdateAction::Install, cx),
+                    NativeUpdateNotificationAction::ReleaseNotes => {
+                        app.open_native_update_release_notes(cx)
+                    }
+                    NativeUpdateNotificationAction::Download => {
+                        app.apply_native_update_action(NativeUpdateAction::Download, cx)
+                    }
+                    NativeUpdateNotificationAction::Cancel => {
+                        app.apply_native_update_action(NativeUpdateAction::Cancel, cx)
+                    }
+                    NativeUpdateNotificationAction::Install => {
+                        app.apply_native_update_action(NativeUpdateAction::Install, cx)
+                    }
                     NativeUpdateNotificationAction::Retry => app.check_native_update(cx),
                 });
             }),
@@ -127,15 +144,22 @@ impl WorkspaceApp {
         }
         let owner = cx.entity().downgrade();
         let frame = oxideterm_gpui_settings_view::help_page::SettingsMarkdownDialog {
-            tokens: &self.tokens, i18n: &self.i18n, phase: snapshot.phase,
-            focus: self.standard_confirm_focus(), options: self.localized_markdown_options(),
+            tokens: &self.tokens,
+            i18n: &self.i18n,
+            phase: snapshot.phase,
+            focus: self.standard_confirm_focus(),
+            options: self.localized_markdown_options(),
             actions: self.markdown_mermaid_actions(cx),
         };
-        frame.release_notes(self.settings_workspace.read(cx), &self.settings_views.release_notes_scroll, move |cx| {
-            let _ = owner.update(cx, |app, cx| {
-                app.clear_standard_confirm_focus();
-                app.close_native_update_release_notes(cx);
-            });
-        })
+        frame.release_notes(
+            self.settings_workspace.read(cx),
+            &self.settings_views.release_notes_scroll,
+            move |cx| {
+                let _ = owner.update(cx, |app, cx| {
+                    app.clear_standard_confirm_focus();
+                    app.close_native_update_release_notes(cx);
+                });
+            },
+        )
     }
 }

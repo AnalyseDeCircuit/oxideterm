@@ -1,4 +1,7 @@
-use oxideterm_connections::{ConnectionStore, SecretString, totp::{TotpError, TotpParameters}};
+use oxideterm_connections::{
+    ConnectionStore, SecretString,
+    totp::{TotpError, TotpParameters},
+};
 
 use super::*;
 use oxideterm_connections::totp::{DEFAULT_TOTP_PROMPT, TotpAlgorithm, TotpCredential};
@@ -64,9 +67,12 @@ impl SettingsWorkspaceEntity {
         cx.notify();
     }
 
-    pub(crate) fn save_totp_draft(&mut self, store: &mut ConnectionStore, cx: &mut Context<Self>) -> bool {
-        let Some(mut draft) = self.totp_draft.take()
-        else {
+    pub(crate) fn save_totp_draft(
+        &mut self,
+        store: &mut ConnectionStore,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(mut draft) = self.totp_draft.take() else {
             return false;
         };
         let secret = SecretString::from(std::mem::take(&mut *draft.secret));

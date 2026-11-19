@@ -24,7 +24,9 @@ fn ai_now_ms() -> i64 {
 }
 
 mod acp;
-pub use acp::{AcpApplicationToolTurn, acp_session_cwd_from_agent, handle_acp_application_tool_call};
+pub use acp::{
+    AcpApplicationToolTurn, acp_session_cwd_from_agent, handle_acp_application_tool_call,
+};
 mod delivery;
 pub use delivery::{AiStreamDelivery, AiStreamDeliveryEvent, AiStreamDeliverySender};
 

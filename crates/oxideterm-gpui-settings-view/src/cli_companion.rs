@@ -303,8 +303,7 @@ mod cli_companion_tests {
     #[cfg(unix)]
     use super::remove_managed_cli;
     use super::{
-        CliCompanionOperation,
-        cli_companion_migrate_at_paths, cli_path_present,
+        CliCompanionOperation, cli_companion_migrate_at_paths, cli_path_present,
         installed_cli_matches_bundle, run_cli_companion_operation,
     };
 

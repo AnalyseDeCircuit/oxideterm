@@ -567,9 +567,7 @@ impl WorkspaceApp {
             .and_then(|rule| rule.owner_connection_id.as_ref())
             .and_then(|host| self.saved_ssh_nodes.get(host))
             .and_then(|node| self.forwarding.read(cx).tab_for_node(node))
-            .is_some_and(|tab| {
-                self.forwarding.read(cx).operation_pending(tab, cx)
-            });
+            .is_some_and(|tab| self.forwarding.read(cx).operation_pending(tab, cx));
         if busy || self.ssh_tunnels.jobs.contains_key(id) {
             self.ssh_tunnels
                 .pending_stops
@@ -612,5 +610,4 @@ impl WorkspaceApp {
             self.stop_ssh_tunnel(&id, delete, cx);
         }
     }
-
 }

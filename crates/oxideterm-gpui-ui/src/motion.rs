@@ -10,8 +10,8 @@ use oxideterm_theme::ThemeTokens;
 mod auto_height;
 pub use auto_height::auto_height;
 
-mod sidebar;
 mod segmented_state;
+mod sidebar;
 pub use segmented_state::UserSegmentedControlMotionState;
 pub use sidebar::{DrawerEdge, SidebarMotion};
 

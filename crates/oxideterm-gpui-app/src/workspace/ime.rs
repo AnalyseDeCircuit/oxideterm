@@ -42,8 +42,8 @@ use oxideterm_gpui_ui::{
 };
 use zeroize::{Zeroize, Zeroizing};
 
-mod history;
 mod focus;
+mod history;
 use history::{InputHistory, InputSnapshot};
 
 const READ_ONLY_TEXT_EM_WIDTH: f32 = 16.0;
@@ -813,7 +813,8 @@ impl InputHandler for WorkspaceInputHandler {
                 let byte = byte_index_for_utf16(&line, range_utf16.end.saturating_sub(range.start));
                 let x = view.shape_ime_text(target, &line, window).x_for_index(byte);
                 let scroll = view
-                    .ai.state
+                    .ai
+                    .state
                     .read(cx)
                     .chat_ui()
                     .editing_message_scroll
@@ -906,12 +907,18 @@ impl WorkspaceApp {
 
         let target = match input {
             ConnectionsInput::Form(field) => WorkspaceImeTarget::NewConnection(field),
-            ConnectionsInput::KeyboardInteractive(index) => WorkspaceImeTarget::KeyboardInteractive(index),
+            ConnectionsInput::KeyboardInteractive(index) => {
+                WorkspaceImeTarget::KeyboardInteractive(index)
+            }
         };
         self.connection_ime_frame_for_target(target, cx)
     }
 
-    pub(super) fn connection_ime_frame_for_target(&self, target: WorkspaceImeTarget, cx: &App) -> oxideterm_gpui_connections::views::ConnectionImeFrame {
+    pub(super) fn connection_ime_frame_for_target(
+        &self,
+        target: WorkspaceImeTarget,
+        cx: &App,
+    ) -> oxideterm_gpui_connections::views::ConnectionImeFrame {
         use oxideterm_gpui_connections::views::ConnectionImeFrame;
         let anchor_id = target.anchor_id();
         let anchors = self.text_input_anchors.clone();
@@ -920,19 +927,28 @@ impl WorkspaceApp {
             viewport: anchors.viewport(anchor_id),
             caret_visible: self.input_caret.visible(),
             selected_range: self.ime_selected_range_for_target(target, cx),
-            active_offset: self.ime_selection_for_target(target).map(|selection| selection.active_offset()),
-            marked_text: self.marked_text_for_target(target, cx)
+            active_offset: self
+                .ime_selection_for_target(target)
+                .map(|selection| selection.active_offset()),
+            marked_text: self
+                .marked_text_for_target(target, cx)
                 .map(|text| zeroize::Zeroizing::new(text.to_owned())),
             marked_range: self.ime_marked_virtual_range_for_target(target, cx),
-            notes_with_composition: matches!(target, WorkspaceImeTarget::NewConnection(NewConnectionField::Notes))
-                .then(|| self.ime_text_with_marked_text_for_target(target, cx)).flatten(),
+            notes_with_composition: matches!(
+                target,
+                WorkspaceImeTarget::NewConnection(NewConnectionField::Notes)
+            )
+            .then(|| self.ime_text_with_marked_text_for_target(target, cx))
+            .flatten(),
             update_anchor: Rc::new(move |anchor| anchors.update(anchor)),
         }
     }
 
-
     pub(in crate::workspace) fn forwards_ime_frame(
-        &self, page: super::TabId, input: ForwardInput, cx: &App,
+        &self,
+        page: super::TabId,
+        input: ForwardInput,
+        cx: &App,
     ) -> Option<oxideterm_gpui_forwards::ForwardsImeFrame> {
         let target = WorkspaceImeTarget::Forwards(page, input);
         let anchor = target.anchor_id();
@@ -940,7 +956,9 @@ impl WorkspaceApp {
         Some(oxideterm_gpui_forwards::ForwardsImeFrame {
             anchor,
             viewport: anchors.viewport(anchor),
-            active_offset: self.ime_selection_for_target(target).map(|selection| selection.active_offset()),
+            active_offset: self
+                .ime_selection_for_target(target)
+                .map(|selection| selection.active_offset()),
             selection: self.ime_selected_range_for_target(target, cx),
             composition: self.marked_text_for_target(target, cx).map(str::to_owned),
             caret_visible: self.input_caret.visible(),
@@ -964,7 +982,9 @@ impl WorkspaceApp {
             focused,
             caret_visible: self.input_caret.visible(),
             selected_range: self.ime_selected_range_for_target(target, cx),
-            active_offset: self.ime_selection_for_target(target).map(|selection| selection.active_offset()),
+            active_offset: self
+                .ime_selection_for_target(target)
+                .map(|selection| selection.active_offset()),
             marked_text: self.marked_text_for_target(target, cx),
             anchor_id,
             viewport: anchors.viewport(anchor_id),
@@ -1119,7 +1139,9 @@ impl WorkspaceApp {
             viewport: anchors.viewport(anchor_id),
             caret_visible: self.input_caret.visible(),
             selected_range: self.ime_selected_range_for_target(target, cx),
-            active_offset: self.ime_selection_for_target(target).map(|selection| selection.active_offset()),
+            active_offset: self
+                .ime_selection_for_target(target)
+                .map(|selection| selection.active_offset()),
             marked_text: self.marked_text_for_target(target, cx).map(str::to_owned),
             update_anchor: Rc::new(move |anchor| anchors.update(anchor)),
         }
@@ -1176,8 +1198,9 @@ impl WorkspaceApp {
             _ => {}
         }
         if let WorkspaceImeTarget::ReadOnlyText(group) = target
-            && self.notify_knowledge_preview_selection(group, cx) {
-                return;
+            && self.notify_knowledge_preview_selection(group, cx)
+        {
+            return;
         }
         if let WorkspaceImeTarget::Forwards(tab, _) = target {
             if let Some(state) = self.forwarding.read(cx).page_state(tab) {
@@ -1185,7 +1208,10 @@ impl WorkspaceApp {
             }
             return;
         }
-        if matches!(target, WorkspaceImeTarget::KnowledgeSearch | WorkspaceImeTarget::KnowledgeRename) {
+        if matches!(
+            target,
+            WorkspaceImeTarget::KnowledgeSearch | WorkspaceImeTarget::KnowledgeRename
+        ) {
             App::notify(cx, self.knowledge_workspace.view.entity_id());
             return;
         }
@@ -1235,7 +1261,10 @@ impl WorkspaceApp {
         {
             return Some(WorkspaceImeTarget::Settings(input));
         }
-        if self.knowledge_input_owner(WorkspaceImeTarget::KnowledgeRename, cx).is_some() {
+        if self
+            .knowledge_input_owner(WorkspaceImeTarget::KnowledgeRename, cx)
+            .is_some()
+        {
             return Some(WorkspaceImeTarget::KnowledgeRename);
         }
         if self.tab_rename_dialog.is_some() {
@@ -1243,7 +1272,8 @@ impl WorkspaceApp {
             return Some(WorkspaceImeTarget::TabRename);
         }
         if let Some(focused_prompt) = self
-            .connections.flow
+            .connections
+            .flow
             .read(cx)
             .focused_keyboard_interactive_prompt()
         {
@@ -1270,12 +1300,18 @@ impl WorkspaceApp {
         let onboarding_tab_visible = self
             .keyboard_content_tab(cx)
             .is_some_and(|tab| tab.kind == oxideterm_workspace::TabKind::Onboarding);
-        let onboarding_input_visible =
-            self.onboarding.open && (!self.onboarding.disclaimer_accepted || onboarding_tab_visible);
+        let onboarding_input_visible = self.onboarding.open
+            && (!self.onboarding.disclaimer_accepted || onboarding_tab_visible);
         // Knowledge dialogs may be owned by a detached Knowledge or Settings window. The focused
         // window's WorkspaceImeElement decides which native window receives the shared draft.
-        let knowledge_dialog_visible = self.knowledge_page(cx).read(cx).knowledge_create_dialog_open()
-            || self.knowledge_page(cx).read(cx).knowledge_document_dialog_open();
+        let knowledge_dialog_visible = self
+            .knowledge_page(cx)
+            .read(cx)
+            .knowledge_create_dialog_open()
+            || self
+                .knowledge_page(cx)
+                .read(cx)
+                .knowledge_document_dialog_open();
         if (settings_tab_visible || onboarding_input_visible)
             && let Some(input) = self
                 .settings_workspace
@@ -1295,7 +1331,8 @@ impl WorkspaceApp {
                 .selected_ime_range
                 .as_ref()
                 .is_some_and(|selection| selection.target == WorkspaceImeTarget::KnowledgeSearch))
-            && self.knowledge_input_owner(WorkspaceImeTarget::KnowledgeSearch, cx)
+            && self
+                .knowledge_input_owner(WorkspaceImeTarget::KnowledgeSearch, cx)
                 .is_some_and(|owner| {
                     let main = self
                         .window_registry
@@ -1426,7 +1463,11 @@ impl WorkspaceApp {
 
         if let Some(page) = self.forwarding.read(cx).page_id()
             && self.tab_host.read(cx).surface_is_visible(page)
-            && let Some(input) = self.forwarding.read(cx).page_for(page, cx).and_then(|state| state.focused_input())
+            && let Some(input) = self
+                .forwarding
+                .read(cx)
+                .page_for(page, cx)
+                .and_then(|state| state.focused_input())
         {
             return Some(WorkspaceImeTarget::Forwards(page, input));
         }
@@ -1469,13 +1510,15 @@ impl WorkspaceApp {
 
         if self.ai_sidebar_visible()
             && self
-                .ai.state
+                .ai
+                .state
                 .read(cx)
                 .chat_ui()
                 .renaming_conversation_id
                 .is_some()
             && self
-                .ai.state
+                .ai
+                .state
                 .read(cx)
                 .chat_ui()
                 .renaming_conversation_focused
@@ -1489,7 +1532,8 @@ impl WorkspaceApp {
 
         if self.ai_sidebar_visible()
             && self
-                .ai.state
+                .ai
+                .state
                 .read(cx)
                 .chat_ui()
                 .editing_message_id
@@ -1652,7 +1696,8 @@ impl WorkspaceApp {
     }
 
     pub(super) fn ime_active_selection_offset(&self, target: WorkspaceImeTarget) -> Option<usize> {
-        self.ime_selection_for_target(target).map(|selection| selection.active_offset())
+        self.ime_selection_for_target(target)
+            .map(|selection| selection.active_offset())
     }
 
     fn ime_selection_for_target(
@@ -2057,7 +2102,8 @@ impl WorkspaceApp {
         }
         let line_height = self.ime_target_line_height(target, bounds, lines.len());
         let scroll_y = if target == WorkspaceImeTarget::AiMessageEdit {
-            self.ai.state
+            self.ai
+                .state
                 .read(cx)
                 .chat_ui()
                 .editing_message_scroll
@@ -2508,7 +2554,10 @@ impl WorkspaceApp {
             WorkspaceImeTarget::SessionManager(input) => {
                 session_manager_ime_text(self.connections.session_manager.read(cx), input)
             }
-            WorkspaceImeTarget::Forwards(page, input) => self.forwarding.read(cx).page_for(page, cx)
+            WorkspaceImeTarget::Forwards(page, input) => self
+                .forwarding
+                .read(cx)
+                .page_for(page, cx)
                 .filter(|state| state.focused_input() == Some(input))
                 .map(|state| state.input_value(input).to_owned()),
             WorkspaceImeTarget::FileManager(input) => {
@@ -2532,11 +2581,13 @@ impl WorkspaceApp {
                 .as_ref()
                 .map(|dialog| dialog.draft.clone()),
             WorkspaceImeTarget::AiModelSelectorSearch => self
-                .ai.state
+                .ai
+                .state
                 .read(cx)
                 .model_selector_search_focused()
                 .then(|| {
-                    self.ai.state
+                    self.ai
+                        .state
                         .read(cx)
                         .model_selector_search_query()
                         .to_owned()
@@ -2546,30 +2597,35 @@ impl WorkspaceApp {
                 panel.prompt_focused.then(|| panel.prompt.clone())
             }
             WorkspaceImeTarget::AiChatInput => self
-                .ai.state
+                .ai
+                .state
                 .read(cx)
                 .chat_ui()
                 .input_focused
                 .then(|| self.ai.state.read(cx).chat_ui().draft.clone()),
             WorkspaceImeTarget::AiConversationRename => self
-                .ai.state
+                .ai
+                .state
                 .read(cx)
                 .chat_ui()
                 .renaming_conversation_focused
                 .then(|| {
-                    self.ai.state
+                    self.ai
+                        .state
                         .read(cx)
                         .chat_ui()
                         .renaming_conversation_draft
                         .clone()
                 }),
             WorkspaceImeTarget::AiMessageEdit => self
-                .ai.state
+                .ai
+                .state
                 .read(cx)
                 .chat_ui()
                 .editing_message_focused
                 .then(|| {
-                    self.ai.state
+                    self.ai
+                        .state
                         .read(cx)
                         .chat_ui()
                         .editing_message_draft
@@ -2594,11 +2650,15 @@ impl WorkspaceApp {
                     None
                 }
             }
-            WorkspaceImeTarget::NewConnection(field) => self.connections.flow.read(cx)
+            WorkspaceImeTarget::NewConnection(field) => self
+                .connections
+                .flow
+                .read(cx)
                 .form_input_value(field)
                 .map(|value| ime_text_snapshot(target, value)),
             WorkspaceImeTarget::KeyboardInteractive(index) => self
-                .connections.flow
+                .connections
+                .flow
                 .read(cx)
                 .keyboard_interactive_response(index)
                 .map(|value| ime_text_snapshot(target, value)),
@@ -2619,7 +2679,9 @@ impl WorkspaceApp {
                         .is_some_and(|marked| *range == marked.virtual_range())
                 }))
         {
-            if self.ime_marked_text.take().is_some() && matches!(target, WorkspaceImeTarget::Sftp(..)) {
+            if self.ime_marked_text.take().is_some()
+                && matches!(target, WorkspaceImeTarget::Sftp(..))
+            {
                 self.notify_ime_target(target, cx);
             }
             return;
@@ -3520,21 +3582,25 @@ impl WorkspaceApp {
             }
             WorkspaceImeTarget::SessionManager(input) => {
                 let mut batch_input_changed = false;
-                let search_changed = self.connections.session_manager.update(cx, |session_manager, cx| {
-                    if session_manager.focused_input() != Some(input) {
-                        return false;
-                    }
-                    // The Entity owns secret buffers and applies the platform
-                    // replacement without copying their contents to WorkspaceApp.
-                    if !session_manager.replace_input(input, replacement_range, text, cx) {
-                        return false;
-                    }
-                    batch_input_changed = matches!(
-                        input,
-                        SessionManagerInput::BatchPassword | SessionManagerInput::BatchKeyPath
-                    );
-                    input == SessionManagerInput::Search
-                });
+                let search_changed =
+                    self.connections
+                        .session_manager
+                        .update(cx, |session_manager, cx| {
+                            if session_manager.focused_input() != Some(input) {
+                                return false;
+                            }
+                            // The Entity owns secret buffers and applies the platform
+                            // replacement without copying their contents to WorkspaceApp.
+                            if !session_manager.replace_input(input, replacement_range, text, cx) {
+                                return false;
+                            }
+                            batch_input_changed = matches!(
+                                input,
+                                SessionManagerInput::BatchPassword
+                                    | SessionManagerInput::BatchKeyPath
+                            );
+                            input == SessionManagerInput::Search
+                        });
                 if batch_input_changed {
                     // The batch preview embeds the fallback authentication, so
                     // every committed keystroke must re-resolve the rows.
@@ -3604,7 +3670,8 @@ impl WorkspaceApp {
             }
             WorkspaceImeTarget::AiChatInput => {
                 let changed = self
-                    .ai.state
+                    .ai
+                    .state
                     .update(cx, |ai, _cx| ai.replace_chat_input(replacement_range, text));
                 if changed {
                     self.show_active_input_caret(cx);
@@ -4061,10 +4128,10 @@ mod tests {
         active_ime_should_defer_input_key, copy_shortcut_owner_for_target,
         effective_platform_text_replacement_range, host_tools_dialog_input,
         ime_geometry_uses_secret_mask, ime_target_is_secret, ime_text_snapshot,
-        keystroke_platform_text,
-        normalize_clipboard_text_for_ime_target, path_completion_owns_vertical_navigation,
-        platform_text_commit_is_duplicate, secret_ime_proxy,
-        utf16_offset_for_char_index, workspace_ime_target_for_plain_host_tools_input,
+        keystroke_platform_text, normalize_clipboard_text_for_ime_target,
+        path_completion_owns_vertical_navigation, platform_text_commit_is_duplicate,
+        secret_ime_proxy, utf16_offset_for_char_index,
+        workspace_ime_target_for_plain_host_tools_input,
     };
 
     #[test]

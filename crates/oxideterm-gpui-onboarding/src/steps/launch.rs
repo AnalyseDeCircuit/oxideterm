@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use gpui::{AnyElement, FontWeight, SharedString, Styled, div, prelude::*, px, rgb, rgba};
-use oxideterm_gpui_ui::button::{ButtonVariant};
+use oxideterm_gpui_ui::button::ButtonVariant;
 use oxideterm_gpui_ui::checkbox;
 
 use crate::{
@@ -111,7 +111,11 @@ pub(crate) fn render_launch_step(
             .flex()
             .items_center()
             .gap(px(8.0))
-            .child(render_icon("lucide/shield.svg", 12.5, rgb(theme.text_muted)))
+            .child(render_icon(
+                "lucide/shield.svg",
+                12.5,
+                rgb(theme.text_muted),
+            ))
             .child(
                 div()
                     .flex_1()
@@ -396,7 +400,11 @@ fn utility_action_row(
                         .child(detail),
                 ),
         )
-        .child(render_icon("lucide/chevron-right.svg", 13.0, rgb(theme.text_muted)))
+        .child(render_icon(
+            "lucide/chevron-right.svg",
+            13.0,
+            rgb(theme.text_muted),
+        ))
         .into_any_element()
 }
 
@@ -600,7 +608,11 @@ fn render_cli_card(frame: &OnboardingFrame, bindings: &OnboardingViewBindings) -
                             dispatch_retry(OnboardingRequest::RefreshCliStatus, window, cx);
                             cx.stop_propagation();
                         })
-                        .child(render_icon("lucide/refresh-cw.svg", 12.0, rgb(theme.accent)))
+                        .child(render_icon(
+                            "lucide/refresh-cw.svg",
+                            12.0,
+                            rgb(theme.accent),
+                        ))
                         .child(
                             div()
                                 .text_size(px(frame.tokens.metrics.ui_text_xs))

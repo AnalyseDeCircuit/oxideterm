@@ -759,9 +759,16 @@ impl SessionManagerState {
             self.clear_ssh_config_hosts(cx);
             return;
         }
-        let existing_names = store.connections().iter().map(|saved| saved.name.clone()).collect();
+        let existing_names = store
+            .connections()
+            .iter()
+            .map(|saved| saved.name.clone())
+            .collect();
         self.begin_ssh_config_host_load(
-            runtime, existing_names, i18n.t("settings_view.connections.ssh_config.load_failed"), cx,
+            runtime,
+            existing_names,
+            i18n.t("settings_view.connections.ssh_config.load_failed"),
+            cx,
         );
     }
 
@@ -772,15 +779,26 @@ impl SessionManagerState {
         i18n: &oxideterm_i18n::I18n,
         cx: &mut Context<Self>,
     ) -> bool {
-        let (imported, status) = match oxideterm_connections::import_ssh_config_alias(store, alias) {
+        let (imported, status) = match oxideterm_connections::import_ssh_config_alias(store, alias)
+        {
             Ok(true) => {
                 self.remove_ssh_config_host_alias(alias, cx);
-                (true, i18n.t("settings_view.errors.import_success").replace("{{name}}", alias))
+                (
+                    true,
+                    i18n.t("settings_view.errors.import_success")
+                        .replace("{{name}}", alias),
+                )
             }
-            Ok(false) => (false, i18n.t("settings_view.connections.ssh_config.batch_import_skipped")
-                .replace("{{count}}", "1")),
-            Err(error) => (false, i18n.t("settings_view.errors.import_failed")
-                .replace("{{error}}", &error.to_string())),
+            Ok(false) => (
+                false,
+                i18n.t("settings_view.connections.ssh_config.batch_import_skipped")
+                    .replace("{{count}}", "1"),
+            ),
+            Err(error) => (
+                false,
+                i18n.t("settings_view.errors.import_failed")
+                    .replace("{{error}}", &error.to_string()),
+            ),
         };
         self.set_status(Some(status), cx);
         imported

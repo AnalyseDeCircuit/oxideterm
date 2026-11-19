@@ -2979,7 +2979,8 @@ impl WorkspaceApp {
         // Authentication waits on user input; background animation would keep
         // repainting the window even when the user has not entered anything.
         if self
-            .connections.flow
+            .connections
+            .flow
             .read(cx)
             .has_keyboard_interactive_challenge()
         {

@@ -33,11 +33,13 @@ impl WorkspaceApp {
                     }
                     AiMcpRequest::FinishDialog { submit } => app.finish_ai_mcp_dialog(submit, cx),
                     AiMcpRequest::RefreshTools(id) => {
-                        app.ai.state
+                        app.ai
+                            .state
                             .update(cx, |ai, cx| ai.refresh_mcp_tools(id, cx));
                     }
                     AiMcpRequest::Remove(id) => {
-                        app.ai.state
+                        app.ai
+                            .state
                             .update(cx, |ai, cx| ai.remove_mcp_server(id, cx));
                     }
                     AiMcpRequest::SetConnected { id, was_connected } => {
@@ -149,7 +151,8 @@ impl WorkspaceApp {
             });
             return;
         }
-        self.ai.state
+        self.ai
+            .state
             .update(cx, |ai, cx| ai.start_mcp_server_add(draft, cx));
     }
 }

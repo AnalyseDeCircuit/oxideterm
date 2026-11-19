@@ -2,8 +2,7 @@ use chrono::Utc;
 use gpui::{Keystroke, Modifiers};
 use oxideterm_connections::{
     AuthType, ConnectionInfo, MoshIpFamily, MoshPredictionMode, MoshProfile, MoshUdpPortSelection,
-    RemoteDesktopProfile, SavedAuth, SavedProxyHop, SavedUpstreamProxyPolicy,
-    TelnetProfile,
+    RemoteDesktopProfile, SavedAuth, SavedProxyHop, SavedUpstreamProxyPolicy, TelnetProfile,
 };
 use oxideterm_remote_desktop::{
     RemoteDesktopAudioOptions, RemoteDesktopClipboardOptions, RemoteDesktopDisplayOptions,

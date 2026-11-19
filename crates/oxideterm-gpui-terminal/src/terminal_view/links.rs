@@ -130,8 +130,12 @@ pub(super) fn detect_link_ranges_for_rows_with_path_detection(
         let url_ranges = detect_url_ranges(row_index, &link_text, &links[row_links_start..]);
         links.extend(url_ranges);
         if detect_file_paths {
-            let path_ranges =
-                detect_path_ranges(row_index, row.signature, &link_text, &links[row_links_start..]);
+            let path_ranges = detect_path_ranges(
+                row_index,
+                row.signature,
+                &link_text,
+                &links[row_links_start..],
+            );
             links.extend(path_ranges);
         }
     }

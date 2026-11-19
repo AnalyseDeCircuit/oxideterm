@@ -683,9 +683,17 @@ impl WorkspaceApp {
             use oxideterm_gpui_settings_view::ai::confirm::AiSettingsConfirmIntent;
             let confirmation = self.settings_views.ai_confirm.read(cx).state();
             (
-                confirmation.and_then(|(intent, phase)| matches!(intent, AiSettingsConfirmIntent::Enable).then_some(phase)),
-                confirmation.and_then(|(intent, phase)| matches!(intent, AiSettingsConfirmIntent::RemoveProviderKey { .. }).then_some(phase)),
-                confirmation.and_then(|(intent, phase)| matches!(intent, AiSettingsConfirmIntent::RemoveProvider { .. }).then_some(phase)),
+                confirmation.and_then(|(intent, phase)| {
+                    matches!(intent, AiSettingsConfirmIntent::Enable).then_some(phase)
+                }),
+                confirmation.and_then(|(intent, phase)| {
+                    matches!(intent, AiSettingsConfirmIntent::RemoveProviderKey { .. })
+                        .then_some(phase)
+                }),
+                confirmation.and_then(|(intent, phase)| {
+                    matches!(intent, AiSettingsConfirmIntent::RemoveProvider { .. })
+                        .then_some(phase)
+                }),
                 ai.chat_confirm_owner_snapshot(),
             )
         };
@@ -721,31 +729,36 @@ impl WorkspaceApp {
             jump_server_open,
             host_key_challenge_open: self.connections.flow.read(cx).has_host_key_challenge(),
             keyboard_interactive_challenge_open: self
-                .connections.flow
+                .connections
+                .flow
                 .read(cx)
                 .has_keyboard_interactive_challenge(),
             ai_enable_phase,
             ai_provider_key_remove_phase,
             ai_provider_remove_phase,
             ai_safety_phase: self
-                .ai.state
+                .ai
+                .state
                 .read(cx)
                 .chat_ui()
                 .safety_confirm_open
                 .then_some(
-                    self.ai.state
+                    self.ai
+                        .state
                         .read(cx)
                         .chat_ui()
                         .safety_confirm_presence
                         .phase(),
                 ),
             ai_summarize_phase: self
-                .ai.state
+                .ai
+                .state
                 .read(cx)
                 .chat_ui()
                 .summarize_confirm_open
                 .then_some(
-                    self.ai.state
+                    self.ai
+                        .state
                         .read(cx)
                         .chat_ui()
                         .summarize_confirm_presence
@@ -779,15 +792,17 @@ impl WorkspaceApp {
                     .terminal
                     .active_custom_semantic_scheme()
                     .is_some(),
-            highlight_rule_editor_open: settings_chrome.highlight_rule_editor_index.is_some_and(|index| {
-                index
-                    < self
-                        .settings_store
-                        .settings()
-                        .terminal
-                        .effective_highlight_rules()
-                        .len()
-            }),
+            highlight_rule_editor_open: settings_chrome.highlight_rule_editor_index.is_some_and(
+                |index| {
+                    index
+                        < self
+                            .settings_store
+                            .settings()
+                            .terminal
+                            .effective_highlight_rules()
+                            .len()
+                },
+            ),
             public_mcp_client_editor_open: settings_chrome
                 .public_mcp_client
                 .as_deref()
@@ -853,7 +868,10 @@ impl WorkspaceApp {
         let active_tab = self.active_content_tab(cx)?;
         match active_tab.kind {
             TabKind::Knowledge => {
-                if self.knowledge_input_owner(WorkspaceImeTarget::KnowledgeRename, cx).is_some() {
+                if self
+                    .knowledge_input_owner(WorkspaceImeTarget::KnowledgeRename, cx)
+                    .is_some()
+                {
                     return Some(ActiveTabWindowModalSnapshot {
                         kind: ActiveTabWindowModalKind::KnowledgeRename,
                         phase: visible,
@@ -1295,7 +1313,12 @@ impl WorkspaceApp {
             }
             ActiveWindowModalOwner::TerminalTriggerEditor => {
                 if event.keystroke.key.as_str() == "escape" {
-                    if self.settings_workspace.read(cx).terminal_triggers.scope_picker_open {
+                    if self
+                        .settings_workspace
+                        .read(cx)
+                        .terminal_triggers
+                        .scope_picker_open
+                    {
                         self.close_terminal_trigger_scope_picker(cx);
                     } else {
                         self.close_terminal_trigger_editor(cx);
@@ -1347,7 +1370,9 @@ impl WorkspaceApp {
             }
             ActiveWindowModalOwner::AiTextEditor => {
                 if event.keystroke.key.as_str() == "escape" {
-                    self.settings_views.ai_text_editor.update(cx, |editor, cx| editor.dismiss(cx));
+                    self.settings_views
+                        .ai_text_editor
+                        .update(cx, |editor, cx| editor.dismiss(cx));
                 }
             }
             ActiveWindowModalOwner::OxideImport { .. } => {
@@ -1359,25 +1384,28 @@ impl WorkspaceApp {
             ActiveWindowModalOwner::BatchAdd { .. } => {
                 if event.keystroke.key.as_str() == "escape" {
                     // Esc cancels inline naming, then the dropdowns, then the dialog.
-                    let consumed = self.connections.session_manager.update(cx, |session_manager, cx| {
-                        let Some(dialog) = session_manager.batch_add.as_mut() else {
-                            return false;
-                        };
-                        if dialog.renaming_id.is_some() || dialog.new_template_naming {
-                            dialog.renaming_id = None;
-                            dialog.new_template_naming = false;
-                            dialog.rename_draft.clear();
-                            cx.notify();
-                            return true;
-                        }
-                        let open = dialog.template_menu_open || dialog.key_menu_open;
-                        if open {
-                            dialog.template_menu_open = false;
-                            dialog.key_menu_open = false;
-                            cx.notify();
-                        }
-                        open
-                    });
+                    let consumed =
+                        self.connections
+                            .session_manager
+                            .update(cx, |session_manager, cx| {
+                                let Some(dialog) = session_manager.batch_add.as_mut() else {
+                                    return false;
+                                };
+                                if dialog.renaming_id.is_some() || dialog.new_template_naming {
+                                    dialog.renaming_id = None;
+                                    dialog.new_template_naming = false;
+                                    dialog.rename_draft.clear();
+                                    cx.notify();
+                                    return true;
+                                }
+                                let open = dialog.template_menu_open || dialog.key_menu_open;
+                                if open {
+                                    dialog.template_menu_open = false;
+                                    dialog.key_menu_open = false;
+                                    cx.notify();
+                                }
+                                open
+                            });
                     if !consumed {
                         self.begin_batch_add_dialog_exit(cx);
                     }
@@ -1469,7 +1497,13 @@ impl WorkspaceApp {
                     return true;
                 }
                 if event.keystroke.key.as_str() == "escape" {
-                    if self.connections.session_manager.read(cx).row_action_menu.is_some() {
+                    if self
+                        .connections
+                        .session_manager
+                        .read(cx)
+                        .row_action_menu
+                        .is_some()
+                    {
                         self.close_session_row_menus(cx);
                     } else {
                         self.close_session_group_manager(cx);

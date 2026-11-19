@@ -29,8 +29,13 @@ impl AcpTerminalStatus {
 
 impl AcpTerminalBridge<oxideterm_gpui_terminal::SharedTerminalSession> {
     pub fn for_native_terminal(
-        launch: impl Fn(oxideterm_terminal::LocalPtyConfig, String, &mut gpui::Window, &mut gpui::App)
-            -> Option<oxideterm_gpui_terminal::SharedTerminalSession> + 'static,
+        launch: impl Fn(
+            oxideterm_terminal::LocalPtyConfig,
+            String,
+            &mut gpui::Window,
+            &mut gpui::App,
+        ) -> Option<oxideterm_gpui_terminal::SharedTerminalSession>
+        + 'static,
     ) -> Self {
         use oxideterm_terminal::{LocalPtyConfig, ShellInfo, TerminalLifecycle};
 

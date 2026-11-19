@@ -249,14 +249,9 @@ where
                             }
                         }
                     } else {
-                        shell_integration.advance(
-                            parser,
-                            terminal,
-                            decoded,
-                            |event| {
-                                let _ = event_tx.send(event);
-                            },
-                        );
+                        shell_integration.advance(parser, terminal, decoded, |event| {
+                            let _ = event_tx.send(event);
+                        });
                     }
                     priority_writes.extend(protocol.drain(terminal, size));
                     cursor.set(graphics_cursor_from_term(terminal, size));
@@ -289,7 +284,9 @@ where
         if graphics_changed {
             // Keep screen switches and graphics commands in wire order, and prevent
             // the UI drain budget from exposing half of a frame's delete/put pair.
-            let _ = self.graphics_tx.send(TerminalGraphicsEvent::Batch(graphics_events));
+            let _ = self
+                .graphics_tx
+                .send(TerminalGraphicsEvent::Batch(graphics_events));
         }
         if expire_sync {
             state.parser.stop_sync(terminal);
@@ -637,12 +634,8 @@ where
 
         let mut terminal_lock_wait_duration = Duration::ZERO;
         let processing_started = Instant::now();
-        let (processed, graphics_changed) = self.advance_guarded_bytes(
-            state,
-            &residual,
-            &mut terminal_lock_wait_duration,
-            false,
-        );
+        let (processed, graphics_changed) =
+            self.advance_guarded_bytes(state, &residual, &mut terminal_lock_wait_duration, false);
         let output_processing_duration = processing_started
             .elapsed()
             .saturating_sub(terminal_lock_wait_duration);
@@ -828,12 +821,7 @@ where
                         && !child_exited
                     {
                         let mut lock_wait = Duration::ZERO;
-                        self.advance_guarded_bytes(
-                            &mut state,
-                            &[],
-                            &mut lock_wait,
-                            true,
-                        );
+                        self.advance_guarded_bytes(&mut state, &[], &mut lock_wait, true);
                         self.event_proxy.send_event(Event::Wakeup);
                         // Recording capacity can return through a poll notification
                         // without any fd events. Still refresh PTY interest below;

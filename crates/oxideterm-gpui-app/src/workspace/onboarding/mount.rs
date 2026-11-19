@@ -65,34 +65,32 @@ impl WorkspaceApp {
                             .read(cx)
                             .appearance_edit_dark
                             .unwrap_or(app.system_dark);
-                        let (model_target, select_id) = match (
-                            target,
-                            app.settings_workspace.read(cx).appearance_edit_dark,
-                        ) {
-                            (OnboardingThemeTarget::Application, Some(false)) => (
-                                ThemeTarget::Application,
-                                SettingsSelect::AppearanceThemeLight,
-                            ),
-                            (OnboardingThemeTarget::Application, Some(true)) => (
-                                ThemeTarget::Application,
-                                SettingsSelect::AppearanceThemeDark,
-                            ),
-                            (OnboardingThemeTarget::Application, None) => {
-                                (ThemeTarget::Application, SettingsSelect::AppearanceTheme)
-                            }
-                            (OnboardingThemeTarget::Terminal, Some(false)) => (
-                                ThemeTarget::Terminal,
-                                SettingsSelect::AppearanceTerminalThemeLight,
-                            ),
-                            (OnboardingThemeTarget::Terminal, Some(true)) => (
-                                ThemeTarget::Terminal,
-                                SettingsSelect::AppearanceTerminalThemeDark,
-                            ),
-                            (OnboardingThemeTarget::Terminal, None) => (
-                                ThemeTarget::Terminal,
-                                SettingsSelect::AppearanceTerminalTheme,
-                            ),
-                        };
+                        let (model_target, select_id) =
+                            match (target, app.settings_workspace.read(cx).appearance_edit_dark) {
+                                (OnboardingThemeTarget::Application, Some(false)) => (
+                                    ThemeTarget::Application,
+                                    SettingsSelect::AppearanceThemeLight,
+                                ),
+                                (OnboardingThemeTarget::Application, Some(true)) => (
+                                    ThemeTarget::Application,
+                                    SettingsSelect::AppearanceThemeDark,
+                                ),
+                                (OnboardingThemeTarget::Application, None) => {
+                                    (ThemeTarget::Application, SettingsSelect::AppearanceTheme)
+                                }
+                                (OnboardingThemeTarget::Terminal, Some(false)) => (
+                                    ThemeTarget::Terminal,
+                                    SettingsSelect::AppearanceTerminalThemeLight,
+                                ),
+                                (OnboardingThemeTarget::Terminal, Some(true)) => (
+                                    ThemeTarget::Terminal,
+                                    SettingsSelect::AppearanceTerminalThemeDark,
+                                ),
+                                (OnboardingThemeTarget::Terminal, None) => (
+                                    ThemeTarget::Terminal,
+                                    SettingsSelect::AppearanceTerminalTheme,
+                                ),
+                            };
                         let selected_id = model_target.scheme_id(&settings, edit_dark);
                         app.settings_select_control(
                             select_id,
@@ -181,7 +179,9 @@ impl WorkspaceApp {
     fn onboarding_frame(&self, cx: &App) -> OnboardingFrame {
         let settings = self.settings_store.settings().clone();
         let edit_scheme = self.settings_workspace.read(cx).appearance_edit_dark;
-        let preview_target = self.open_settings_select.and_then(SettingsSelect::theme_target);
+        let preview_target = self
+            .open_settings_select
+            .and_then(SettingsSelect::theme_target);
         let preview_dark = self
             .open_settings_select
             .and_then(SettingsSelect::theme_system_dark)

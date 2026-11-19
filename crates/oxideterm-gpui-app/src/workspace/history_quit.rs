@@ -100,7 +100,8 @@ fn start_app_quit(cx: &mut App) {
                             for session in &sessions {
                                 session.update(cx, |workspace, cx| {
                                     workspace
-                                        .ai.state
+                                        .ai
+                                        .state
                                         .update(cx, |ai, _| ai.retry_history_write())
                                 });
                             }

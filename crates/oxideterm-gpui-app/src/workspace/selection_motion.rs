@@ -1,8 +1,7 @@
 use super::*;
 
 #[cfg(test)]
-const TERMINAL_SETTINGS_SWITCHER_ID: &str =
-    "terminal-settings-page-switcher";
+const TERMINAL_SETTINGS_SWITCHER_ID: &str = "terminal-settings-page-switcher";
 #[cfg(test)]
 const AI_SETTINGS_SWITCHER_ID: &str = "ai-settings-page-switcher";
 pub(in crate::workspace) use oxideterm_gpui_cloud_sync::panel::CLOUD_SYNC_SWITCHER_ID;
@@ -14,8 +13,7 @@ pub(in crate::workspace) const NOTIFICATION_CENTER_SWITCHER_ID: &str =
 const SETTINGS_NAVIGATION_ID: &str = "settings-navigation";
 pub(in crate::workspace) const FILE_MANAGER_NAVIGATION_ID: &str = "file-manager-navigation";
 #[cfg(test)]
-const NEW_CONNECTION_AUTH_SELECTOR_ID: &str =
-    "new-connection-auth-selector";
+const NEW_CONNECTION_AUTH_SELECTOR_ID: &str = "new-connection-auth-selector";
 pub(in crate::workspace) const VERSION_MIGRATION_MOTION_SWITCHER_ID: &str =
     "version-migration-motion-switcher";
 

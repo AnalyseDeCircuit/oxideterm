@@ -831,12 +831,14 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         if !matches!(state, NodeReadiness::Ready) {
-            self.ai.authority
+            self.ai
+                .authority
                 .update(cx, |runtime, _cx| runtime.revoke_node_connection(node_id));
             return;
         }
         let Some(connection_id) = self.node_router.connection_id_for_node(node_id) else {
-            self.ai.authority
+            self.ai
+                .authority
                 .update(cx, |runtime, _cx| runtime.revoke_node_connection(node_id));
             return;
         };
@@ -868,12 +870,14 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         if !ready {
-            self.ai.authority
+            self.ai
+                .authority
                 .update(cx, |runtime, _cx| runtime.revoke_sftp_session(node_id));
             return;
         }
         let Some(session_generation) = session_generation else {
-            self.ai.authority
+            self.ai
+                .authority
                 .update(cx, |runtime, _cx| runtime.revoke_sftp_session(node_id));
             return;
         };

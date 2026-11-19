@@ -1269,7 +1269,8 @@ impl WorkspaceApp {
                 self.register_ai_runtime_ide_surface_owner(*tab_id, node_id, cx);
             }
             IdeWorkspaceEvent::SurfaceClosed { tab_id } => {
-                self.ai.authority
+                self.ai
+                    .authority
                     .update(cx, |runtime, _cx| runtime.revoke_ide_surface(*tab_id));
             }
             IdeWorkspaceEvent::TransientSurfaceClosed { tab_id } => {

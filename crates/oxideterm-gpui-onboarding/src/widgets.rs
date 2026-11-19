@@ -5,7 +5,9 @@ use gpui::{
     AnyElement, App, CursorStyle, Div, FontWeight, MouseButton, ParentElement, Rgba, SharedString,
     Styled, Window, div, prelude::*, px, relative, rgb, rgba, svg,
 };
-use oxideterm_gpui_ui::button::{ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, button_with};
+use oxideterm_gpui_ui::button::{
+    ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, button_with,
+};
 use oxideterm_gpui_ui::motion::UserSegmentedControlMotionState;
 use oxideterm_gpui_ui::theme_glass_card_background_alpha;
 use oxideterm_theme::ThemeTokens;
@@ -150,7 +152,9 @@ pub(crate) fn action_button(
             .child(render_icon(icon_path, 14.0, icon_color))
     })
     .when(variant == ButtonVariant::Default, |button| {
-        button.bg(rgb(theme.accent)).text_color(rgb(theme.accent_text))
+        button
+            .bg(rgb(theme.accent))
+            .text_color(rgb(theme.accent_text))
     })
     .when(!disabled, |button| {
         button.hover(move |button| {
@@ -225,7 +229,9 @@ pub(crate) fn compact_pill_bar(
         .min_w(px(0.0))
         .rounded(px(tokens.radii.md))
         .border_1()
-        .border_color(rgba((tokens.ui.border << 8) | ONBOARDING_HEADER_BORDER_ALPHA))
+        .border_color(rgba(
+            (tokens.ui.border << 8) | ONBOARDING_HEADER_BORDER_ALPHA,
+        ))
         .bg(sunken_bg(tokens, has_background))
         .p(px(2.0))
         .overflow_hidden()

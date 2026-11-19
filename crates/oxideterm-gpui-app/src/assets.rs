@@ -26,13 +26,23 @@ impl AssetSource for NativeAssets {
             return face.load().map(|bytes| Some(Cow::Owned(bytes)));
         }
         let distro: Option<&'static [u8]> = match path {
-            "distro-icons/ubuntu.svg" => Some(include_bytes!("../resources/distro-icons/ubuntu.svg")),
-            "distro-icons/archlinux.svg" => Some(include_bytes!("../resources/distro-icons/archlinux.svg")),
-            "distro-icons/debian.svg" => Some(include_bytes!("../resources/distro-icons/debian.svg")),
-            "distro-icons/gentoo.svg" => Some(include_bytes!("../resources/distro-icons/gentoo.svg")),
+            "distro-icons/ubuntu.svg" => {
+                Some(include_bytes!("../resources/distro-icons/ubuntu.svg"))
+            }
+            "distro-icons/archlinux.svg" => {
+                Some(include_bytes!("../resources/distro-icons/archlinux.svg"))
+            }
+            "distro-icons/debian.svg" => {
+                Some(include_bytes!("../resources/distro-icons/debian.svg"))
+            }
+            "distro-icons/gentoo.svg" => {
+                Some(include_bytes!("../resources/distro-icons/gentoo.svg"))
+            }
             "distro-icons/nixos.svg" => Some(include_bytes!("../resources/distro-icons/nixos.svg")),
             "distro-icons/rocky.svg" => Some(include_bytes!("../resources/distro-icons/rocky.svg")),
-            "distro-icons/linuxmint.svg" => Some(include_bytes!("../resources/distro-icons/linuxmint.svg")),
+            "distro-icons/linuxmint.svg" => {
+                Some(include_bytes!("../resources/distro-icons/linuxmint.svg"))
+            }
             _ => None,
         };
         if let Some(bytes) = distro {

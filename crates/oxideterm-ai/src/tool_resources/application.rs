@@ -1,8 +1,9 @@
 use serde_json::Value;
 
 use super::{
-    AiActionResultLite, AiOrchestratorRuntimeSnapshot, AiOrchestratorTarget, AiStableResourceOperation,
-    ai_application_action_result, ai_memory_trimmed_content, ai_stable_resource_operation,
+    AiActionResultLite, AiOrchestratorRuntimeSnapshot, AiOrchestratorTarget,
+    AiStableResourceOperation, ai_application_action_result, ai_memory_trimmed_content,
+    ai_stable_resource_operation,
 };
 
 /// Workspace operations requested after authority validation. Their owners receive
@@ -435,9 +436,7 @@ pub enum AiPluginAction<'a> {
     },
 }
 
-pub fn ai_plugin_action(
-    arguments: &Value,
-) -> Result<(&str, AiPluginAction<'_>), String> {
+pub fn ai_plugin_action(arguments: &Value) -> Result<(&str, AiPluginAction<'_>), String> {
     let action = arguments
         .get("action")
         .and_then(Value::as_str)
@@ -527,8 +526,10 @@ pub fn ai_plugin_action(
 impl<'a> AiPluginAction<'a> {
     pub fn plugin_id(&self) -> Option<&'a str> {
         match self {
-            Self::Enable { plugin_id, .. } | Self::Uninstall { plugin_id, .. }
-            | Self::Invoke { plugin_id, .. } | Self::Configure { plugin_id, .. } => Some(plugin_id),
+            Self::Enable { plugin_id, .. }
+            | Self::Uninstall { plugin_id, .. }
+            | Self::Invoke { plugin_id, .. }
+            | Self::Configure { plugin_id, .. } => Some(plugin_id),
             Self::OpenManager | Self::Install { .. } => None,
         }
     }
@@ -784,27 +785,41 @@ impl AiCredentialKind<'_> {
 }
 
 pub fn ai_credential_action(arguments: &Value) -> Result<AiCredentialAction<'_>, String> {
-    let action = arguments.get("action").and_then(Value::as_str)
+    let action = arguments
+        .get("action")
+        .and_then(Value::as_str)
         .ok_or_else(|| "A credential action is required.".to_owned())?;
     let connection_id = arguments.get("connection_id").and_then(Value::as_str);
     if action == "open_manager" {
         return Ok(AiCredentialAction::Open(connection_id));
     }
-    let kind = arguments.get("kind").and_then(Value::as_str)
+    let kind = arguments
+        .get("kind")
+        .and_then(Value::as_str)
         .ok_or_else(|| "A credential kind is required.".to_owned())?;
-    let id = arguments.get("id").and_then(Value::as_str)
+    let id = arguments
+        .get("id")
+        .and_then(Value::as_str)
         .ok_or_else(|| "A credential identifier is required.".to_owned())?;
     let credential = match kind {
         "managed_ssh_key" => AiCredentialKind::ManagedSshKey {
-            force: arguments.get("force").and_then(Value::as_bool).unwrap_or(false),
+            force: arguments
+                .get("force")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
         },
         "privilege" => AiCredentialKind::Privilege {
-            connection_id: connection_id.ok_or_else(|| "A privilege credential scope is required.".to_owned())?,
+            connection_id: connection_id
+                .ok_or_else(|| "A privilege credential scope is required.".to_owned())?,
         },
         "remote_desktop" => AiCredentialKind::RemoteDesktop,
         _ => return Err("Unsupported credential kind.".to_owned()),
     };
-    Ok(AiCredentialAction::Delete { action, id, credential })
+    Ok(AiCredentialAction::Delete {
+        action,
+        id,
+        credential,
+    })
 }
 
 pub enum AiSerialControl {
@@ -820,9 +835,11 @@ pub enum AiSerialControl {
 }
 
 pub fn ai_serial_control(arguments: &Value) -> Result<(&str, AiSerialControl), String> {
-    use oxideterm_connections::{SerialDisplayMode, SerialLineEnding, SerialSendMode};
     use AiSerialControl::*;
-    let action = arguments.get("action").and_then(Value::as_str)
+    use oxideterm_connections::{SerialDisplayMode, SerialLineEnding, SerialSendMode};
+    let action = arguments
+        .get("action")
+        .and_then(Value::as_str)
         .ok_or_else(|| "A serial action is required.".to_owned())?;
     let enabled = arguments.get("enabled").and_then(Value::as_bool);
     let value = arguments.get("value").and_then(Value::as_str);
@@ -835,13 +852,24 @@ pub fn ai_serial_control(arguments: &Value) -> Result<(&str, AiSerialControl), S
     };
     let control = match action {
         "refresh_port" => RefreshPort,
-        "reconnect" => return Err("Serial reconnect must create a new terminal tab from Active Sessions.".to_owned()),
+        "reconnect" => {
+            return Err(
+                "Serial reconnect must create a new terminal tab from Active Sessions.".to_owned(),
+            );
+        }
         "send_break" => SendBreak,
         "set_dtr" => SetDtr(enabled.ok_or_else(|| "The DTR state is required.".to_owned())?),
         "set_rts" => SetRts(enabled.ok_or_else(|| "The RTS state is required.".to_owned())?),
-        "set_local_echo" => SetLocalEcho(enabled.ok_or_else(|| "The local echo state is required.".to_owned())?),
-        "set_line_ending" => SetLineEnding(line_ending().ok_or_else(|| "A valid serial line ending is required.".to_owned())?),
-        "set_output_line_ending" => SetOutputLineEnding(line_ending().ok_or_else(|| "A valid serial output line ending is required.".to_owned())?),
+        "set_local_echo" => {
+            SetLocalEcho(enabled.ok_or_else(|| "The local echo state is required.".to_owned())?)
+        }
+        "set_line_ending" => SetLineEnding(
+            line_ending().ok_or_else(|| "A valid serial line ending is required.".to_owned())?,
+        ),
+        "set_output_line_ending" => SetOutputLineEnding(
+            line_ending()
+                .ok_or_else(|| "A valid serial output line ending is required.".to_owned())?,
+        ),
         "set_display_mode" => SetDisplayMode(match value {
             Some("text") => SerialDisplayMode::Text,
             Some("hex") => SerialDisplayMode::Hex,
@@ -858,7 +886,10 @@ pub fn ai_serial_control(arguments: &Value) -> Result<(&str, AiSerialControl), S
     Ok((action, control))
 }
 
-pub fn ai_transport_session_action_accepted(action: &str, session_id: oxideterm_workspace::TerminalSessionId) -> Value {
+pub fn ai_transport_session_action_accepted(
+    action: &str,
+    session_id: oxideterm_workspace::TerminalSessionId,
+) -> Value {
     serde_json::json!({"accepted": true, "action": action, "sessionId": session_id.0.to_string()})
 }
 
@@ -1047,40 +1078,91 @@ impl AiSerialSessionCapture {
 }
 
 impl AiOrchestratorRuntimeSnapshot {
-    pub fn plan_saved_connection(&self, args: &Value) -> Result<crate::StableResourceRef, AiActionResultLite> {
+    pub fn plan_saved_connection(
+        &self,
+        args: &Value,
+    ) -> Result<crate::StableResourceRef, AiActionResultLite> {
         match ai_stable_resource_operation("connect_target", args) {
             Ok(AiStableResourceOperation::SavedConnection(resource)) => Ok(resource),
-            _ => Err(self.fail("Saved connection is unavailable.", "resource_not_found",
-                "Rediscover the saved connection before connecting.", "write")),
+            _ => Err(self.fail(
+                "Saved connection is unavailable.",
+                "resource_not_found",
+                "Rediscover the saved connection before connecting.",
+                "write",
+            )),
         }
     }
 
-    fn saved_connection_target(&self, resource: &crate::StableResourceRef) -> Option<AiOrchestratorTarget> {
-        self.targets.iter().find(|target| target.kind == "saved-connection"
-            && target.refs.get("connectionId").is_some_and(|id| id == resource.id())).cloned()
+    fn saved_connection_target(
+        &self,
+        resource: &crate::StableResourceRef,
+    ) -> Option<AiOrchestratorTarget> {
+        self.targets
+            .iter()
+            .find(|target| {
+                target.kind == "saved-connection"
+                    && target
+                        .refs
+                        .get("connectionId")
+                        .is_some_and(|id| id == resource.id())
+            })
+            .cloned()
     }
 
     pub fn saved_connection_removed(&self) -> AiActionResultLite {
-        self.fail("Saved connection was removed.", "resource_removed",
-            "The saved connection no longer exists. Rediscover available connections.", "write")
+        self.fail(
+            "Saved connection was removed.",
+            "resource_removed",
+            "The saved connection no longer exists. Rediscover available connections.",
+            "write",
+        )
     }
 
-    pub fn saved_connection_credentials_required(&self, resource: &crate::StableResourceRef) -> AiActionResultLite {
-        self.fail("Saved connection cannot be opened.", "credential_interaction_required",
-            "The saved connection needs valid SSH configuration or credentials.", "write")
-            .with_optional_target(self.saved_connection_target(resource))
+    pub fn saved_connection_credentials_required(
+        &self,
+        resource: &crate::StableResourceRef,
+    ) -> AiActionResultLite {
+        self.fail(
+            "Saved connection cannot be opened.",
+            "credential_interaction_required",
+            "The saved connection needs valid SSH configuration or credentials.",
+            "write",
+        )
+        .with_optional_target(self.saved_connection_target(resource))
     }
 
-    pub fn saved_connection_opened(&self, resource: crate::StableResourceRef, reused: bool) -> AiActionResultLite {
-        let (summary, output) = if reused { ("Target is already live.", "Focused the existing SSH terminal.") }
-            else { ("Connection requested.", "The saved connection flow has started.") };
-        self.ok(summary, output, serde_json::json!({ "resourceRef": resource }), "write")
-            .with_optional_target(self.saved_connection_target(&resource))
+    pub fn saved_connection_opened(
+        &self,
+        resource: crate::StableResourceRef,
+        reused: bool,
+    ) -> AiActionResultLite {
+        let (summary, output) = if reused {
+            (
+                "Target is already live.",
+                "Focused the existing SSH terminal.",
+            )
+        } else {
+            (
+                "Connection requested.",
+                "The saved connection flow has started.",
+            )
+        };
+        self.ok(
+            summary,
+            output,
+            serde_json::json!({ "resourceRef": resource }),
+            "write",
+        )
+        .with_optional_target(self.saved_connection_target(&resource))
     }
 }
 
 pub fn ai_connection_title(name: &str, username: &str, host: &str) -> String {
-    if name.trim().is_empty() { format!("{username}@{host}") } else { name.to_owned() }
+    if name.trim().is_empty() {
+        format!("{username}@{host}")
+    } else {
+        name.to_owned()
+    }
 }
 
 pub fn ai_host_tools_query(arguments: &Value) -> (&str, bool) {
@@ -1095,7 +1177,12 @@ pub fn ai_host_tools_query(arguments: &Value) -> (&str, bool) {
     (resource, refresh_requested)
 }
 
-pub fn ai_host_tools_inspection(resource: &str, refresh_requested: bool, refresh_accepted: bool, snapshot: Value) -> Value {
+pub fn ai_host_tools_inspection(
+    resource: &str,
+    refresh_requested: bool,
+    refresh_accepted: bool,
+    snapshot: Value,
+) -> Value {
     serde_json::json!({
         "node": {
             "state": "connected",
@@ -1128,7 +1215,12 @@ pub fn ai_host_tool_control(arguments: &Value) -> Result<AiHostToolControl<'_>, 
         .and_then(serde_json::Value::as_str)
         .ok_or_else(|| "A Host Tools entity identifier is required.".to_string())?;
     let value = arguments.get("value").and_then(serde_json::Value::as_str);
-    Ok(AiHostToolControl { resource, action, entity_id, value })
+    Ok(AiHostToolControl {
+        resource,
+        action,
+        entity_id,
+        value,
+    })
 }
 
 impl AiHostToolControl<'_> {
@@ -1140,7 +1232,6 @@ impl AiHostToolControl<'_> {
     }
 }
 
-
 pub enum AiCloudSyncAction {
     Open,
     Check,
@@ -1149,7 +1240,9 @@ pub enum AiCloudSyncAction {
 }
 
 pub fn ai_cloud_sync_action(arguments: &Value, busy: bool) -> Result<AiCloudSyncAction, String> {
-    let action = arguments.get("action").and_then(Value::as_str)
+    let action = arguments
+        .get("action")
+        .and_then(Value::as_str)
         .ok_or_else(|| "A Cloud Sync action is required.".to_string())?;
     if action != "open" && busy {
         return Err("Another Cloud Sync operation is already running.".to_string());
@@ -1174,7 +1267,6 @@ impl AiCloudSyncAction {
     }
 }
 
-
 pub enum AiProfileTransport {
     Serial,
     Telnet,
@@ -1193,24 +1285,36 @@ pub fn ai_open_transport_profile<'a>(
     telnet: &[oxideterm_connections::TelnetProfile],
     remote_desktop: &[oxideterm_connections::RemoteDesktopProfile],
 ) -> Result<AiOpenTransportProfile<'a>, String> {
-    let transport = arguments.get("transport").and_then(Value::as_str)
+    let transport = arguments
+        .get("transport")
+        .and_then(Value::as_str)
         .ok_or_else(|| "A transport is required.".to_string())?;
-    let id = arguments.get("profile_id").and_then(Value::as_str)
+    let id = arguments
+        .get("profile_id")
+        .and_then(Value::as_str)
         .ok_or_else(|| "A profile identifier is required.".to_string())?;
     let kind = match transport {
         "serial" if serial.iter().any(|profile| profile.id == id) => AiProfileTransport::Serial,
         "telnet" if telnet.iter().any(|profile| profile.id == id) => AiProfileTransport::Telnet,
         "rdp" | "vnc" => {
-            let profile = remote_desktop.iter().find(|profile| profile.id == id)
+            let profile = remote_desktop
+                .iter()
+                .find(|profile| profile.id == id)
                 .ok_or_else(|| "The remote desktop profile no longer exists.".to_string())?;
             if profile.protocol.provider_id() != transport {
-                return Err("The profile protocol does not match the requested transport.".to_string());
+                return Err(
+                    "The profile protocol does not match the requested transport.".to_string(),
+                );
             }
             AiProfileTransport::RemoteDesktop
         }
         _ => return Err("The selected transport profile no longer exists.".to_string()),
     };
-    Ok(AiOpenTransportProfile { kind, id, transport })
+    Ok(AiOpenTransportProfile {
+        kind,
+        id,
+        transport,
+    })
 }
 
 impl AiOpenTransportProfile<'_> {
@@ -1228,7 +1332,11 @@ pub fn ai_remote_desktop_tab(arguments: &Value) -> Result<oxideterm_workspace::T
         .ok_or_else(|| "A valid remote desktop tab identifier is required.".to_string())
 }
 
-pub fn ai_remote_desktop_disconnect(arguments: &Value, tab_id: oxideterm_workspace::TabId, can_disconnect: impl FnOnce() -> bool) -> Result<Value, String> {
+pub fn ai_remote_desktop_disconnect(
+    arguments: &Value,
+    tab_id: oxideterm_workspace::TabId,
+    can_disconnect: impl FnOnce() -> bool,
+) -> Result<Value, String> {
     let action = arguments
         .get("action")
         .and_then(serde_json::Value::as_str)
@@ -1241,8 +1349,7 @@ pub fn ai_remote_desktop_disconnect(arguments: &Value, tab_id: oxideterm_workspa
         }
         "reconnect" => {
             return Err(
-                "Remote desktop reconnect creates a new tab from Active Sessions."
-                    .to_string(),
+                "Remote desktop reconnect creates a new tab from Active Sessions.".to_string(),
             );
         }
         _ => return Err("Unsupported remote desktop session action.".to_string()),
@@ -1254,24 +1361,47 @@ pub fn ai_remote_desktop_disconnect(arguments: &Value, tab_id: oxideterm_workspa
     }))
 }
 
-pub fn ai_connection_credential_inventory(store: &oxideterm_connections::ConnectionStore, arguments: &Value) -> Result<Value, String> {
-    let scopes = ai_credential_scopes(arguments, store.connections().iter().map(|connection| connection.id.as_str()));
+pub fn ai_connection_credential_inventory(
+    store: &oxideterm_connections::ConnectionStore,
+    arguments: &Value,
+) -> Result<Value, String> {
+    let scopes = ai_credential_scopes(
+        arguments,
+        store
+            .connections()
+            .iter()
+            .map(|connection| connection.id.as_str()),
+    );
     let mut privilege_credentials = Vec::new();
     for scope in &scopes {
-        privilege_credentials.extend(store.list_privilege_credentials(scope).map_err(|error| error.to_string())?);
+        privilege_credentials.extend(
+            store
+                .list_privilege_credentials(scope)
+                .map_err(|error| error.to_string())?,
+        );
     }
-    Ok(ai_list_credential_metadata(store.managed_ssh_keys(), privilege_credentials,
-        store.remote_desktop_profiles()))
+    Ok(ai_list_credential_metadata(
+        store.managed_ssh_keys(),
+        privilege_credentials,
+        store.remote_desktop_profiles(),
+    ))
 }
 
 impl AiCredentialKind<'_> {
-    pub fn delete_from(&self, store: &mut oxideterm_connections::ConnectionStore, id: &str) -> Result<bool, String> {
+    pub fn delete_from(
+        &self,
+        store: &mut oxideterm_connections::ConnectionStore,
+        id: &str,
+    ) -> Result<bool, String> {
         match *self {
             AiCredentialKind::ManagedSshKey { force } => store
-                .delete_managed_ssh_key(id, force).map(|result| result.deleted),
-            AiCredentialKind::Privilege { connection_id } => store
-                .delete_privilege_credential(connection_id, id),
+                .delete_managed_ssh_key(id, force)
+                .map(|result| result.deleted),
+            AiCredentialKind::Privilege { connection_id } => {
+                store.delete_privilege_credential(connection_id, id)
+            }
             AiCredentialKind::RemoteDesktop => store.delete_remote_desktop_credential(id),
-        }.map_err(|error| error.to_string())
+        }
+        .map_err(|error| error.to_string())
     }
 }

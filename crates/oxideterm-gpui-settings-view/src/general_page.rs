@@ -1,7 +1,8 @@
 use std::rc::Rc;
 
 use gpui::{
-    AnyElement, App, Div, Entity, MouseButton, MouseDownEvent, Window, div, prelude::*, px, rgb, rgba,
+    AnyElement, App, Div, Entity, MouseButton, MouseDownEvent, Window, div, prelude::*, px, rgb,
+    rgba,
 };
 use oxideterm_gpui_ui::button::{
     ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, ToolbarButtonIconPosition,
@@ -125,10 +126,12 @@ pub fn render_focus_handoff_commands(
         .gap(px(8.0))
         .child(
             components.card_subsection_header(
-                components.i18n
+                components
+                    .i18n
                     .t("settings_view.terminal.command_bar_focus_handoff_presets"),
                 Some(
-                    components.i18n
+                    components
+                        .i18n
                         .t("settings_view.terminal.command_bar_focus_handoff_presets_hint"),
                 ),
             ),
@@ -137,10 +140,12 @@ pub fn render_focus_handoff_commands(
         .child(components.card_separator())
         .child(
             components.card_subsection_header(
-                components.i18n
+                components
+                    .i18n
                     .t("settings_view.terminal.command_bar_focus_handoff_advanced"),
                 Some(
-                    components.i18n
+                    components
+                        .i18n
                         .t("settings_view.terminal.command_bar_focus_handoff_advanced_hint"),
                 ),
             ),

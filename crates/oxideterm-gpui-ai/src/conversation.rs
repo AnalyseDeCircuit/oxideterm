@@ -1,12 +1,12 @@
 use std::hash::Hash;
 
-pub mod actions;
 pub mod acp_file_review;
 pub mod acp_terminal;
 mod acp_turn;
+pub mod actions;
 pub mod agents;
-pub mod terminal_watch;
 pub mod terminal_tools;
+pub mod terminal_watch;
 pub use acp_turn::{AiAcpChatLaunch, prepare_acp_chat_launch};
 mod provider;
 pub use provider::{AiProviderSendPlan, AiProviderTurn};
@@ -54,26 +54,48 @@ impl<Node: Clone + Eq + Hash + 'static, Terminal: Clone + 'static>
     }
 
     pub fn sync_acp_plugins(
-        &self, revisions: Vec<crate::acp::AcpPluginRevision>,
-        settings: &oxideterm_settings::AiSettings, cx: &mut App,
+        &self,
+        revisions: Vec<crate::acp::AcpPluginRevision>,
+        settings: &oxideterm_settings::AiSettings,
+        cx: &mut App,
     ) -> Vec<String> {
-        let bindings = settings.acp_agents.iter().filter_map(|agent| {
-            Some((agent.id.clone(), agent.plugin_id.clone()?))
-        }).collect::<Vec<_>>();
-        let changed = self.acp.update(cx, |entity, cx| entity.sync_plugins(revisions, &bindings, cx));
+        let bindings = settings
+            .acp_agents
+            .iter()
+            .filter_map(|agent| Some((agent.id.clone(), agent.plugin_id.clone()?)))
+            .collect::<Vec<_>>();
+        let changed = self.acp.update(cx, |entity, cx| {
+            entity.sync_plugins(revisions, &bindings, cx)
+        });
         for id in &changed {
-            self.state.update(cx, |ai, _| ai.invalidate_acp_agent_metadata(id));
+            self.state
+                .update(cx, |ai, _| ai.invalidate_acp_agent_metadata(id));
         }
         changed
     }
 
-    pub fn stop_acp_plugin(&self, plugin_id: Option<&str>, settings: &oxideterm_settings::AiSettings, cx: &mut App) {
-        let ids = settings.acp_agents.iter().filter(|agent| {
-            agent.plugin_id.as_deref().is_some_and(|id| plugin_id.is_none_or(|plugin| plugin == id))
-        }).map(|agent| agent.id.clone()).collect::<Vec<_>>();
-        self.acp.update(cx, |entity, cx| entity.stop_agents(&ids, cx));
+    pub fn stop_acp_plugin(
+        &self,
+        plugin_id: Option<&str>,
+        settings: &oxideterm_settings::AiSettings,
+        cx: &mut App,
+    ) {
+        let ids = settings
+            .acp_agents
+            .iter()
+            .filter(|agent| {
+                agent
+                    .plugin_id
+                    .as_deref()
+                    .is_some_and(|id| plugin_id.is_none_or(|plugin| plugin == id))
+            })
+            .map(|agent| agent.id.clone())
+            .collect::<Vec<_>>();
+        self.acp
+            .update(cx, |entity, cx| entity.stop_agents(&ids, cx));
         for id in &ids {
-            self.state.update(cx, |ai, _| ai.invalidate_acp_agent_metadata(id));
+            self.state
+                .update(cx, |ai, _| ai.invalidate_acp_agent_metadata(id));
         }
     }
 
@@ -355,7 +377,10 @@ pub use prompt::AiConversationPrompt;
 pub mod context;
 
 mod config;
-pub use config::{AiMemoryScope, ai_model_context_window, ai_tool_use_policy_from_settings, build_ai_base_system_prompt};
+pub use config::{
+    AiMemoryScope, ai_model_context_window, ai_tool_use_policy_from_settings,
+    build_ai_base_system_prompt,
+};
 
 impl AiWorkspaceEntity {
     pub fn dismiss_model_selector(&mut self) {

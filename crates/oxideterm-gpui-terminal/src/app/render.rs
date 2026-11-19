@@ -3340,7 +3340,8 @@ mod tests {
         pane.update(cx, |pane, _| {
             let initial = {
                 let mut terminal = pane.terminal.lock();
-                terminal.feed_recording_output(b"line1\r\nline2\r\nline3\r\nline4\r\nline5\r\nline6");
+                terminal
+                    .feed_recording_output(b"line1\r\nline2\r\nline3\r\nline4\r\nline5\r\nline6");
                 terminal.snapshot()
             };
             pane.snapshot = pane.stamp_snapshot(initial);

@@ -78,7 +78,11 @@ impl WorkspaceApp {
             || (anchor.id == SelectAnchorId::TerminalProjectMenu
                 && self.terminal.read(cx).project_panel_open())
             || (anchor.id == SelectAnchorId::SessionManagerViewMode
-                && self.connections.session_manager.read(cx).view_mode_menu_open)
+                && self
+                    .connections
+                    .session_manager
+                    .read(cx)
+                    .view_mode_menu_open)
             || (anchor.id == SelectAnchorId::ActiveSessionSort && self.session_sort_menu_open)
             || (anchor.id == SelectAnchorId::SessionManagerSort
                 && self.connections.session_manager.read(cx).sort_menu_open)
@@ -86,7 +90,8 @@ impl WorkspaceApp {
                 && self.connections.session_manager.read(cx).show_batch_move)
             || (anchor.id == SelectAnchorId::SessionManagerBatchTemplate
                 && self
-                    .connections.session_manager
+                    .connections
+                    .session_manager
                     .read(cx)
                     .batch_add
                     .as_ref()
@@ -101,7 +106,10 @@ impl WorkspaceApp {
                         .as_ref()
                         .is_some_and(|dialog| dialog.key_menu_open)
             })
-            || self.settings_workspace.read(cx).slider_drag()
+            || self
+                .settings_workspace
+                .read(cx)
+                .slider_drag()
                 .is_some_and(|slider| settings_slider_anchor_id(slider) == anchor.id);
         if !should_notify && !select_anchor_tracks_while_closed(anchor.id) {
             self.select_anchors.remove(&anchor.id);
@@ -1534,7 +1542,9 @@ impl WorkspaceOverlayEntity {
                 ),
             }
         });
-        toaster(tokens, standard.chain(plugin)).child(native_update).into_any_element()
+        toaster(tokens, standard.chain(plugin))
+            .child(native_update)
+            .into_any_element()
     }
 
     fn render_connection_cards(
