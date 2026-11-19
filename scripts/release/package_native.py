@@ -7,6 +7,7 @@ import base64
 import json
 import os
 import plistlib
+import re
 import shutil
 import stat
 import subprocess
@@ -630,6 +631,16 @@ def merge_macos_info_plist_extensions(plist: dict) -> dict:
     return merged
 
 
+def macos_bundle_version_fields(version: str) -> dict[str, str]:
+    # macOS bundle version fields use the numeric core, not the release channel.
+    numeric_version = version.partition("+")[0].partition("-")[0]
+    return {
+        "CFBundleShortVersionString": numeric_version,
+        "CFBundleVersion": numeric_version,
+        "OxideTermVersion": version,
+    }
+
+
 def build_macos_info_plist(version: str, identity: ReleaseIdentity) -> dict:
     plist = {
         "CFBundleDevelopmentRegion": "en",
@@ -640,8 +651,7 @@ def build_macos_info_plist(version: str, identity: ReleaseIdentity) -> dict:
         "CFBundleInfoDictionaryVersion": "6.0",
         "CFBundleName": identity.app_name,
         "CFBundlePackageType": "APPL",
-        "CFBundleShortVersionString": version,
-        "CFBundleVersion": version,
+        **macos_bundle_version_fields(version),
         "LSMinimumSystemVersion": MACOS_DEPLOYMENT_TARGET,
         "NSHighResolutionCapable": True,
         "CFBundleURLTypes": [
@@ -840,7 +850,6 @@ def sign_macos_path(path: Path, *, entitlements: Path | None = None) -> None:
     # Ad-hoc signing does not notarize the app, but it keeps stripped preview
     # bundles launchable on Apple Silicon instead of producing a damaged-app error.
     run(macos_codesign_command(codesign, path, entitlements=entitlements))
-    run([codesign, "--verify", "--verbose", str(path)])
 
 
 def is_macos_binary(path: Path) -> bool:
@@ -856,6 +865,30 @@ def is_macos_binary(path: Path) -> bool:
 
 def macos_binary_paths(root: Path) -> list[Path]:
     return [path for path in sorted(root.rglob("*")) if is_macos_binary(path)]
+
+
+def verify_macos_signature(
+    path: Path, *, deep: bool = False, developer_id: bool = True
+) -> None:
+    command = [require_tool("codesign"), "--verify", "--strict"]
+    if deep:
+        command.append("--deep")
+    if developer_id:
+        command.append(
+            "-R=anchor apple generic and certificate leaf[field.1.2.840.113635.100.6.1.13] exists"
+        )
+    result = subprocess.run(
+        [*command, str(path)], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"macOS signature verification failed for {path}:\n{result.stdout.strip()}")
+
+
+def verify_macos_app_signature(app_dir: Path, *, developer_id: bool = True) -> None:
+    verify_macos_signature(app_dir, deep=True, developer_id=developer_id)
+    # Resources code is sealed as data and isn't recursively verified by codesign.
+    for path in macos_binary_paths(app_dir / "Contents" / "Resources"):
+        verify_macos_signature(path, developer_id=developer_id)
 
 
 def sign_macos_app_bundle(app_dir: Path) -> None:
@@ -875,72 +908,93 @@ def sign_macos_app_bundle(app_dir: Path) -> None:
 
     # Signing the bundle signs its main executable. Helpers don't run Wasmtime.
     sign_macos_path(app_dir, entitlements=MACOS_ENTITLEMENTS)
+    verify_macos_app_signature(app_dir, developer_id=macos_signing_identity() != "-")
 
 
 def sign_macos_portable_tree(package_root: Path, main_executable: Path) -> None:
     """Sign every Mach-O payload because a portable directory is not a bundle."""
+    developer_id = macos_signing_identity() != "-"
     for path in macos_binary_paths(package_root):
         entitlements = MACOS_ENTITLEMENTS if path == main_executable else None
         sign_macos_path(path, entitlements=entitlements)
+        verify_macos_signature(path, developer_id=developer_id)
 
 
-def notarize_macos_portable_tree(package_root: Path) -> None:
-    """Submit signed command-line payloads in Apple's supported ZIP container."""
-    submission = DIST_DIR / f".{package_root.name}-notarization.zip"
-    zip_macos_app_bundle(package_root, submission)
-    try:
-        notarize_macos_artifact(submission, staple=False)
-    finally:
-        submission.unlink(missing_ok=True)
-
-
-def notarize_macos_artifact(path: Path, *, staple: bool) -> bool:
-    """Submit an artifact when App Store Connect API credentials are configured."""
+def macos_notary_options() -> list[str] | None:
     key_path = os.environ.get("MACOS_NOTARY_KEY_PATH", "").strip()
     key_id = os.environ.get("MACOS_NOTARY_KEY_ID", "").strip()
     issuer_id = os.environ.get("MACOS_NOTARY_ISSUER_ID", "").strip()
     configured = [bool(key_path), bool(key_id), bool(issuer_id)]
     if not any(configured):
-        return False
+        return None
     if not all(configured):
         raise RuntimeError("macOS notarization requires key path, key id, and issuer id")
     if macos_signing_identity() == "-":
         raise RuntimeError("macOS notarization requires a Developer ID signing identity")
+    return ["--key", key_path, "--key-id", key_id, "--issuer", issuer_id]
 
-    def notary_request(action: str, target: str) -> dict:
+
+def macos_notary_request(action: str, target: str, options: list[str]) -> dict:
+    # An interrupted wait only loses the connection, not the submission.
+    retries = iter((10, 30) if action == "wait" else ())
+    while True:
         response = subprocess.run(
             [
                 "xcrun", "notarytool", action, target,
-                "--key", key_path, "--key-id", key_id, "--issuer", issuer_id,
-                "--output-format", "json",
+                *options, "--output-format", "json",
             ],
             cwd=ROOT_DIR,
             stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
             check=False,
         )
         print(response.stdout, end="", flush=True)
-        if response.returncode != 0:
-            raise RuntimeError(f"notarytool {action} failed (exit {response.returncode})")
-        return json.loads(response.stdout)
+        print(response.stderr, end="", file=sys.stderr, flush=True)
+        if response.returncode == 0:
+            return json.loads(response.stdout)
+        if re.search(r"NSURLErrorDomain Code=-(?:1001|1005|1009)\b", response.stderr):
+            delay = next(retries, None)
+            if delay is not None:
+                print(f"Retrying notarization status for {target} in {delay}s.", flush=True)
+                time.sleep(delay)
+                continue
+        raise RuntimeError(f"notarytool {action} failed (exit {response.returncode})")
 
-    # Log the submission ID before waiting so a timed-out CI job can be checked.
-    print(f"Submitting {path.name} for macOS notarization.", flush=True)
-    submission_id = notary_request("submit", str(path))["id"]
+
+def wait_for_macos_notarization(path: Path, submission_id: str, options: list[str]) -> None:
     try:
-        status = notary_request("wait", submission_id)["status"]
+        status = macos_notary_request("wait", submission_id, options)["status"]
         if status != "Accepted":
             raise RuntimeError(f"macOS notarization for {path.name} ended with status {status}")
     except (RuntimeError, OSError, ValueError, KeyError):
         try:
-            notary_request("log", submission_id)
+            macos_notary_request("log", submission_id, options)
         except (RuntimeError, OSError, ValueError) as log_error:
             print(f"Could not retrieve notarization log for {submission_id}: {log_error}", flush=True)
         raise
 
-    if staple:
+
+def notarize_macos_distribution(
+    app_dir: Path, disk_image: Path, portable_dir: Path, options: list[str]
+) -> None:
+    # Notary accepts ZIP for loose binaries, not the tarball we distribute.
+    portable_zip = DIST_DIR / f".{portable_dir.name}-notarization.zip"
+    try:
+        zip_macos_app_bundle(portable_dir, portable_zip)
+        submissions = []
+        for path in (disk_image, portable_zip):
+            print(f"Submitting {path.name} for macOS notarization.", flush=True)
+            submission_id = macos_notary_request("submit", str(path), options)["id"]
+            submissions.append((path, submission_id))
+        for path, submission_id in submissions:
+            wait_for_macos_notarization(path, submission_id, options)
+    finally:
+        portable_zip.unlink(missing_ok=True)
+
+    # The disk image submission covers the same signed app we ship in the update ZIP.
+    for path in (disk_image, app_dir):
         run(["xcrun", "stapler", "staple", str(path)])
-    return True
 
 
 def find_signtool() -> str | None:
@@ -1028,13 +1082,13 @@ def write_portable_update_manifest(
     )
 
 
-def create_portable_package(
+def stage_portable_package(
     binary: Path,
     update_helper: Path,
     target: str,
     version: str,
     label: str,
-) -> None:
+) -> Path:
     package_root = DIST_DIR / f"OxideTerm_{version}_{label}_portable"
     if package_root.exists():
         shutil.rmtree(package_root)
@@ -1060,18 +1114,27 @@ def create_portable_package(
         # Standalone helpers are outside an app bundle, so each Mach-O file must
         # be signed and included in its own notarization submission.
         sign_macos_portable_tree(package_root, binary_dest)
-        notarize_macos_portable_tree(package_root)
+    return package_root
 
+
+def archive_portable_package(package_root: Path, target: str) -> None:
     if "windows" in target:
         archive_windows_portable(
             package_root,
-            DIST_DIR / f"OxideTerm_{version}_{label}_portable.zip",
+            package_root.with_name(f"{package_root.name}.zip"),
         )
     else:
-        archive_path = DIST_DIR / f"OxideTerm_{version}_{label}_portable.tar.gz"
+        archive_path = package_root.with_name(f"{package_root.name}.tar.gz")
         with tarfile.open(archive_path, "w:gz") as archive:
             archive.add(package_root, arcname=package_root.name)
     shutil.rmtree(package_root)
+
+
+def create_portable_package(
+    binary: Path, update_helper: Path, target: str, version: str, label: str
+) -> None:
+    package_root = stage_portable_package(binary, update_helper, target, version, label)
+    archive_portable_package(package_root, target)
 
 
 def stage_windows_installer_root(
@@ -1379,9 +1442,9 @@ SectionEnd
 """.strip()
 
 
-def create_macos_app(
-    binary: Path, target: str, version: str, label: str, identity: ReleaseIdentity
-) -> None:
+def stage_macos_app(
+    binary: Path, target: str, version: str, identity: ReleaseIdentity
+) -> Path:
     app_dir = DIST_DIR / f"{identity.app_name}.app"
     if app_dir.exists():
         shutil.rmtree(app_dir)
@@ -1405,38 +1468,45 @@ def create_macos_app(
         plistlib.dump(plist, file)
 
     sign_macos_app_bundle(app_dir)
-    app_zip = DIST_DIR / f"OxideTerm_{version}_{label}.app.zip"
-    zip_macos_app_bundle(app_dir, app_zip)
-    if notarize_macos_artifact(app_zip, staple=False):
-        # The ZIP is only the submission container. Staple the accepted ticket
-        # to the application itself, then rebuild the distributable archive.
-        run(["xcrun", "stapler", "staple", str(app_dir)])
-        zip_macos_app_bundle(app_dir, app_zip)
+    return app_dir
 
-    if identity.channel == "stable":
-        # OxideTerm 1.x uses Tauri's app.tar.gz installer contract. Keep this
-        # bridge asset beside the native ZIP until the 1.x population retires.
-        archive_macos_tauri_bundle(
-            app_dir,
-            DIST_DIR / f"OxideTerm_{version}_{label}.app.tar.gz",
-        )
 
-    if shutil.which("hdiutil"):
+def create_macos_distribution(
+    binary: Path, update_helper: Path, target: str, version: str,
+    label: str, identity: ReleaseIdentity,
+) -> None:
+    notary_options = macos_notary_options()
+    if notary_options is not None:
+        require_tool("hdiutil")
+
+    portable_dir = stage_portable_package(binary, update_helper, target, version, label)
+    app_dir = stage_macos_app(binary, target, version, identity)
+    artifact_prefix = f"OxideTerm_{version}_{label}"
+
+    if notary_options is not None or shutil.which("hdiutil"):
         dmg_root = DIST_DIR / f"dmg-{label}"
         if dmg_root.exists():
             shutil.rmtree(dmg_root)
         dmg_root.mkdir()
-        shutil.copytree(app_dir, dmg_root / f"{identity.app_name}.app")
+        ditto = require_tool("ditto")
+        run([ditto, str(app_dir), str(dmg_root / app_dir.name)])
         (dmg_root / "Applications").symlink_to("/Applications")
         copy_macos_unsigned_install_notice(dmg_root, identity)
-        dmg_path = DIST_DIR / f"OxideTerm_{version}_{label}.dmg"
+        dmg_path = DIST_DIR / f"{artifact_prefix}.dmg"
         create_macos_dmg(dmg_root, dmg_path, identity)
+        shutil.rmtree(dmg_root)
         if macos_signing_identity() != "-":
             sign_macos_path(dmg_path)
-        notarize_macos_artifact(dmg_path, staple=True)
-        shutil.rmtree(dmg_root)
+            verify_macos_signature(dmg_path)
+        if notary_options is not None:
+            notarize_macos_distribution(app_dir, dmg_path, portable_dir, notary_options)
 
+    zip_macos_app_bundle(app_dir, DIST_DIR / f"{artifact_prefix}.app.zip")
+    if identity.channel == "stable":
+        # OxideTerm 1.x uses Tauri's app.tar.gz installer contract.
+        archive_macos_tauri_bundle(app_dir, DIST_DIR / f"{artifact_prefix}.app.tar.gz")
     shutil.rmtree(app_dir)
+    archive_portable_package(portable_dir, target)
 
 
 def linux_deb_arch(target: str) -> str:
@@ -1959,12 +2029,9 @@ def main() -> None:
         sign_windows_file(update_helper)
         create_windows_installer(app_binary, update_helper, target, version, label, identity)
     if "apple-darwin" in target:
-        sign_macos_path(app_binary)
-    # Every target should publish a self-contained portable artifact; Windows
-    # additionally ships an NSIS installer for users who prefer installation.
-    create_portable_package(app_binary, update_helper, target, version, label)
-    if "apple-darwin" in target:
-        create_macos_app(app_binary, target, version, label, identity)
+        create_macos_distribution(app_binary, update_helper, target, version, label, identity)
+    else:
+        create_portable_package(app_binary, update_helper, target, version, label)
     if "linux" in target:
         create_linux_appimage(app_binary, target, version, label, identity)
         create_linux_deb(app_binary, target, version, label, identity)

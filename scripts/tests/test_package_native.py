@@ -544,7 +544,9 @@ class ReleaseVersionTests(unittest.TestCase):
 
         self.assertEqual(plist["CFBundleName"], "OxideTerm")
         self.assertEqual(plist["CFBundleIdentifier"], "com.oxideterm.app")
-        self.assertEqual(plist["CFBundleShortVersionString"], version)
+        self.assertEqual(plist["CFBundleShortVersionString"], "2.3.4")
+        self.assertEqual(plist["CFBundleVersion"], "2.3.4")
+        self.assertEqual(plist["OxideTermVersion"], version)
         self.assertEqual(identity.windows_install_dir, r"$LOCALAPPDATA\Programs\OxideTerm")
         self.assertEqual(identity.windows_registry_key, "OxideTerm")
         self.assertEqual(identity.windows_uninstall_key, "OxideTerm")
@@ -613,11 +615,9 @@ class PlatformSigningTests(unittest.TestCase):
 
     def test_macos_notarization_is_optional_for_development_builds(self) -> None:
         with patch.dict(package_native.os.environ, {}, clear=True):
-            submitted = package_native.notarize_macos_artifact(
-                Path("OxideTerm.app.zip"), staple=False
-            )
+            options = package_native.macos_notary_options()
 
-        self.assertFalse(submitted)
+        self.assertIsNone(options)
 
     def test_gatekeeper_artwork_is_copied_only_for_unsigned_standard_images(self) -> None:
         for tag, version, signer, expected in [

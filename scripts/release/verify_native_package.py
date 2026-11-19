@@ -15,7 +15,13 @@ import zipfile
 from pathlib import Path
 
 from conpty_runtime import runtime_files as conpty_runtime_files, verify_digest
-from package_native import macos_binary_paths, macos_signing_identity
+from package_native import (
+    macos_binary_paths,
+    macos_bundle_version_fields,
+    macos_signing_identity,
+    verify_macos_app_signature,
+    verify_macos_signature,
+)
 
 
 REQUIRED_DOCUMENTS = {
@@ -192,7 +198,9 @@ def verify_portable_archive(path: Path, target: str, expected_version: str) -> N
             verify_digest(archive_entry_bytes(path, entry), digest, entry)
 
 
-def verify_macos_app_zip(path: Path, expected_version: str) -> None:
+def verify_macos_app_archive(
+    path: Path, expected_version: str, *, signed: bool, notarized: bool
+) -> None:
     suffixes = {
         ".app/Contents/MacOS/oxideterm-native",
         f".app/Contents/Resources/licenses/{PACKAGE_VERSION_FILENAME}",
@@ -201,47 +209,33 @@ def verify_macos_app_zip(path: Path, expected_version: str) -> None:
     require_archive_suffixes(archive_names(path), suffixes, path)
     verify_embedded_version(path, PACKAGE_VERSION_FILENAME, expected_version)
     plist = plistlib.loads(archive_entry_bytes(path, ".app/Contents/Info.plist"))
-    actual_version = plist.get("CFBundleShortVersionString")
-    if actual_version != expected_version:
-        raise RuntimeError(
-            f"{path.name} Info.plist contains version {actual_version!r}, expected {expected_version!r}"
-        )
+    for key, expected in macos_bundle_version_fields(expected_version).items():
+        actual = plist.get(key)
+        if actual != expected:
+            raise RuntimeError(
+                f"{path.name} Info.plist contains {key}={actual!r}, expected {expected!r}"
+            )
+    if signed:
+        verify_macos_archived_app_signature(path, notarized=notarized)
 
 
-def verify_macos_tauri_archive(path: Path, expected_version: str) -> None:
-    """Validate the legacy Tauri updater archive using the app bundle contract."""
-    verify_macos_app_zip(path, expected_version)
-
-
-def verify_macos_signature(path: Path, *, deep: bool = False) -> None:
-    command = [
-        "codesign", "--verify", "--strict",
-        "-R=anchor apple generic and certificate leaf[field.1.2.840.113635.100.6.1.13] exists",
-    ]
-    if deep:
-        command.append("--deep")
-    run_checked([*command, str(path)])
-
-
-def verify_macos_distribution_signatures(
-    app_zip: Path, disk_image: Path, *, notarized: bool
-) -> None:
+def verify_macos_archived_app_signature(path: Path, *, notarized: bool) -> None:
     with tempfile.TemporaryDirectory() as directory:
-        run_checked(["ditto", "-x", "-k", str(app_zip), directory])
-        bundles = [path for path in Path(directory).glob("*.app") if path.is_dir()]
+        if path.suffix == ".zip":
+            run_checked(["ditto", "-x", "-k", str(path), directory])
+        else:
+            with tarfile.open(path, "r:gz") as archive:
+                archive.extractall(directory, filter="data")
+        bundles = [
+            bundle for bundle in Path(directory).glob("*.app")
+            if bundle.is_dir() and not bundle.is_symlink()
+        ]
         if len(bundles) != 1:
-            raise RuntimeError(f"expected one .app in {app_zip.name}, found {len(bundles)}")
+            raise RuntimeError(f"expected one .app in {path.name}, found {len(bundles)}")
         app = bundles[0]
-        verify_macos_signature(app, deep=True)
-        # Resources code is sealed as data and isn't recursively verified by codesign.
-        for path in macos_binary_paths(app / "Contents" / "Resources"):
-            verify_macos_signature(path)
+        verify_macos_app_signature(app)
         if notarized:
             run_checked(["xcrun", "stapler", "validate", str(app)])
-
-    verify_macos_signature(disk_image)
-    if notarized:
-        run_checked(["xcrun", "stapler", "validate", str(disk_image)])
 
 
 def run_checked(command: list[str], *, cwd: Path | None = None) -> str:
@@ -505,16 +499,19 @@ def verify_release(
         verify_windows_installer(dist / f"OxideTerm_{version}_{label}-setup.exe", version, target)
     elif macos:
         app_zip = dist / f"OxideTerm_{version}_{label}.app.zip"
-        verify_macos_app_zip(app_zip, version)
+        verify_macos_app_archive(
+            app_zip, version, signed=macos_signed, notarized=macos_notarized
+        )
         if macos_signed:
-            verify_macos_distribution_signatures(
-                app_zip,
-                dist / f"OxideTerm_{version}_{label}.dmg",
-                notarized=macos_notarized,
-            )
+            disk_image = dist / f"OxideTerm_{version}_{label}.dmg"
+            verify_macos_signature(disk_image)
+            if macos_notarized:
+                run_checked(["xcrun", "stapler", "validate", str(disk_image)])
         legacy_archive = dist / f"OxideTerm_{version}_{label}.app.tar.gz"
         if legacy_archive.exists():
-            verify_macos_tauri_archive(legacy_archive, version)
+            verify_macos_app_archive(
+                legacy_archive, version, signed=macos_signed, notarized=macos_notarized
+            )
     elif "linux" in target:
         verify_appimage(dist / f"OxideTerm_{version}_{label}.AppImage", version)
         verify_deb(dist / f"OxideTerm_{version}_{label}.deb", version)
