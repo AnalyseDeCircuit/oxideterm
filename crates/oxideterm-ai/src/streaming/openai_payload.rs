@@ -11,6 +11,22 @@ pub(crate) fn openai_chat_body(config: &AiChatStreamConfig, messages: &[AiChatMe
         "messages": openai_chat_messages(config, messages),
         "stream": true,
     });
+    if let Some(object) = body.as_object_mut() {
+        if supports_openai_stream_usage_option(config) {
+            object.insert(
+                "stream_options".to_string(),
+                serde_json::json!({ "include_usage": true }),
+            );
+        }
+        if config.provider_type == "openai"
+            && let Some(key) = config
+                .prompt_cache_key
+                .as_deref()
+                .filter(|key| !key.is_empty())
+        {
+            object.insert("prompt_cache_key".to_string(), serde_json::json!(key));
+        }
+    }
     if let Some(tokens) = config.max_response_tokens.filter(|tokens| *tokens > 0)
         && let Some(object) = body.as_object_mut()
     {
@@ -26,6 +42,15 @@ pub(crate) fn openai_chat_body(config: &AiChatStreamConfig, messages: &[AiChatMe
         apply_tool_options(object, config);
     }
     body
+}
+
+fn supports_openai_stream_usage_option(config: &AiChatStreamConfig) -> bool {
+    matches!(config.provider_type.as_str(), "openai" | "deepseek" | "xai")
+        || (config.provider_type == "openai_compatible"
+            && config
+                .base_url
+                .to_ascii_lowercase()
+                .contains("openrouter.ai"))
 }
 
 fn apply_tool_options(body: &mut serde_json::Map<String, Value>, config: &AiChatStreamConfig) {
@@ -160,7 +185,7 @@ pub(crate) fn openai_chat_messages(
     let mut system_parts = Vec::new();
     let mut non_system = Vec::new();
     for message in messages {
-        if crate::runtime_context::is_runtime_context_message(message) {
+        if crate::runtime_context::is_user_context_system_message(message) {
             non_system.push(message);
             continue;
         }
@@ -219,8 +244,8 @@ pub(crate) fn openai_chat_messages(
 }
 
 fn openai_message_value(config: &AiChatStreamConfig, message: &AiChatMessage) -> Value {
-    // Keep current application data out of the cacheable system prefix.
-    if crate::runtime_context::is_runtime_context_message(message) {
+    // Keep current application and per-turn context out of the cacheable system prefix.
+    if crate::runtime_context::is_user_context_system_message(message) {
         return serde_json::json!({"role": "user", "content": message.content});
     }
     match message.role {
@@ -342,6 +367,7 @@ mod tests {
             profile_id: None,
             memory_context: None,
             memory_entry_ids: Vec::new(),
+            prompt_cache_key: None,
             tool_policy: AiToolUsePolicy::default(),
             tools: Vec::new(),
             tool_choice: AiToolChoice::Auto,
@@ -585,5 +611,79 @@ mod tests {
         );
         assert_eq!(converted[1]["role"].as_str(), Some("tool"));
         assert_eq!(converted[1]["tool_call_id"].as_str(), Some("call-1"));
+    }
+
+    #[test]
+    fn per_turn_context_stays_out_of_static_system_prefix_and_emits_cache_options() {
+        let mut turn1_history: Vec<AiChatMessage> = serde_json::from_value(serde_json::json!([
+            {"id":"u1","role":"user","content":"Check disk","context":"df -h output 1","timestamp_ms":1}
+        ]))
+        .unwrap();
+        let turn1 = crate::stream_state::compose_ai_provider_history(
+            std::mem::take(&mut turn1_history),
+            &config("openai", "auto"),
+            None,
+            "Static system rules".to_string(),
+            Some("RAG hit 1 + env 1".to_string()),
+        );
+        let turn2_raw: Vec<AiChatMessage> = serde_json::from_value(serde_json::json!([
+            {"id":"u1","role":"user","content":"Check disk","context":"df -h output 1","timestamp_ms":1},
+            {"id":"a1","role":"assistant","content":"Disk is 80% full","timestamp_ms":2},
+            {"id":"u2","role":"user","content":"Now check memory","context":"free -m output 2","timestamp_ms":3}
+        ]))
+        .unwrap();
+        let mut cfg = config("openai", "auto");
+        cfg.prompt_cache_key = Some("oxideterm-conv-1".to_string());
+        let turn2 = crate::stream_state::compose_ai_provider_history(
+            turn2_raw,
+            &cfg,
+            None,
+            "Static system rules".to_string(),
+            Some("RAG hit 2 + env 2".to_string()),
+        );
+
+        let wire1 = openai_chat_body(&cfg, &turn1);
+        let wire2 = openai_chat_body(&cfg, &turn2);
+        // System message must remain byte-for-byte identical despite changing RAG/env/terminal context.
+        assert_eq!(
+            wire1["messages"][0],
+            serde_json::json!({"role":"system","content":"Static system rules"})
+        );
+        assert_eq!(wire1["messages"][0], wire2["messages"][0]);
+        assert_eq!(wire1["messages"][1], wire2["messages"][1]);
+        assert_eq!(wire2["prompt_cache_key"], "oxideterm-conv-1");
+        assert_eq!(wire2["stream_options"], serde_json::json!({"include_usage": true}));
+
+        let resp2 = super::super::responses_payload::responses_body(&cfg, &turn2);
+        assert_eq!(resp2["prompt_cache_key"], "oxideterm-conv-1");
+        assert_eq!(resp2["input"][0]["role"], "system");
+        assert_eq!(resp2["input"][0]["content"], "Static system rules");
+        assert_eq!(resp2["input"].as_array().unwrap().last().unwrap()["role"], "user");
+
+        // Verify cached token extraction for OpenAI and DeepSeek formats.
+        let openai_usage = super::super::openai_parse::parse_openai_data_line(
+            r#"data: {"choices":[],"usage":{"prompt_tokens":1000,"completion_tokens":50,"prompt_tokens_details":{"cached_tokens":800}}}"#,
+        );
+        assert_eq!(
+            openai_usage.events,
+            vec![crate::AiStreamEvent::Usage {
+                input_tokens: Some(1000),
+                output_tokens: Some(50),
+                cache_read_tokens: Some(800),
+                cache_write_tokens: None,
+            }]
+        );
+        let deepseek_usage = super::super::openai_parse::parse_openai_data_line(
+            r#"data: {"choices":[],"usage":{"prompt_tokens":1000,"completion_tokens":50,"prompt_cache_hit_tokens":750}}"#,
+        );
+        assert_eq!(
+            deepseek_usage.events,
+            vec![crate::AiStreamEvent::Usage {
+                input_tokens: Some(1000),
+                output_tokens: Some(50),
+                cache_read_tokens: Some(750),
+                cache_write_tokens: None,
+            }]
+        );
     }
 }

@@ -149,6 +149,7 @@ pub fn resolve_terminal_ai_inline_config(
         profile_id: None,
         memory_context: None,
         memory_entry_ids: Vec::new(),
+        prompt_cache_key: None,
         tool_policy: AiToolUsePolicy::default(),
         tools: Vec::new(),
         tool_choice: oxideterm_ai::AiToolChoice::Auto,

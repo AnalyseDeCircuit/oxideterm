@@ -1529,6 +1529,7 @@ impl AiWorkspaceEntity {
     pub fn delete_conversation(&mut self, id: &str) -> bool {
         self.history.deleted_conversations.insert(id.to_owned());
         self.history_deleted(id);
+        self.chat_ui.prompt_cache_stats.remove(id);
         self.queued_chat_turns.remove(id);
         self.chat_launches.remove(id);
         self.chat_drafts.remove(id);
@@ -1645,6 +1646,7 @@ impl AiWorkspaceEntity {
             self.history_deleted(&conversation.id);
         }
         self.conversation_state.clear_conversations();
+        self.chat_ui.prompt_cache_stats.clear();
         self.safety_modes_by_conversation.clear();
         self.clear_conversation_rename();
     }
@@ -4187,6 +4189,7 @@ pub struct AiChatWorkspaceState {
     pub message_signature_cache: RefCell<AiChatMessageSignatureCache>,
     pub context_token_cache: RefCell<AiContextTokenBreakdownCache>,
     pub prepared_prompt_usage: Option<AiPreparedPromptUsage>,
+    pub prompt_cache_stats: HashMap<String, AiPromptCacheStats>,
     pub conversation_list_open: bool,
     pub show_archived_conversations: bool,
     pub menu_open: bool,
@@ -4253,6 +4256,7 @@ impl AiChatWorkspaceState {
             message_signature_cache: RefCell::new(AiChatMessageSignatureCache::default()),
             context_token_cache: RefCell::new(AiContextTokenBreakdownCache::default()),
             prepared_prompt_usage: None,
+            prompt_cache_stats: HashMap::new(),
             conversation_list_open: false,
             show_archived_conversations: false,
             menu_open: false,
@@ -4410,6 +4414,7 @@ mod entity_tests {
                 profile_id: None,
                 memory_context: None,
                 memory_entry_ids: Vec::new(),
+                prompt_cache_key: None,
                 tool_policy: Default::default(),
                 tools: Vec::new(),
                 tool_choice: oxideterm_ai::AiToolChoice::Auto,

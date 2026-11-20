@@ -281,6 +281,8 @@ pub struct AiChatStreamConfig {
     pub memory_context: Option<String>,
     /// Entry identifiers used for local usage accounting; never sent to providers.
     pub memory_entry_ids: Vec<String>,
+    /// Stable per-conversation cache routing key for providers that support it.
+    pub prompt_cache_key: Option<String>,
     pub tool_policy: AiToolUsePolicy,
     pub tools: Vec<AiToolDefinition>,
     pub tool_choice: AiToolChoice,
@@ -291,6 +293,8 @@ pub enum AiStreamEvent {
     Usage {
         input_tokens: Option<u64>,
         output_tokens: Option<u64>,
+        cache_read_tokens: Option<u64>,
+        cache_write_tokens: Option<u64>,
     },
     Content(String),
     Thinking(String),

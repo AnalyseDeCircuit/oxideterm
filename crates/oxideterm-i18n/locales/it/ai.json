@@ -218,7 +218,11 @@
       "user_context": "Contesto utente",
       "messages_label": "Messaggi",
       "tool_results": "Risultati degli strumenti",
-      "compress_dialog": "Comprimi dialogo"
+      "compress_dialog": "Comprimi dialogo",
+      "prompt_cache": "Cache prompt",
+      "cache_last_request": "Ultima richiesta",
+      "cache_session_total": "Totale sessione",
+      "cache_write": "Scrittura cache"
     },
     "model_selector": {
       "ok": "OK",

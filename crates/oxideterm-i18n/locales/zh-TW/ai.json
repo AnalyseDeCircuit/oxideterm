@@ -218,7 +218,11 @@
       "user_context": "使用者上下文",
       "messages_label": "訊息",
       "tool_results": "工具結果",
-      "compress_dialog": "壓縮對話"
+      "compress_dialog": "壓縮對話",
+      "prompt_cache": "提示詞快取",
+      "cache_last_request": "最近請求",
+      "cache_session_total": "本工作階段累計",
+      "cache_write": "快取寫入"
     },
     "model_selector": {
       "ok": "OK",

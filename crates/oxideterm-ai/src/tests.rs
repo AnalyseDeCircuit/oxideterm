@@ -30,6 +30,7 @@ fn test_stream_config(provider_type: &str) -> AiChatStreamConfig {
         profile_id: None,
         memory_context: None,
         memory_entry_ids: Vec::new(),
+        prompt_cache_key: None,
         tool_policy: AiToolUsePolicy::default(),
         tools: Vec::new(),
         tool_choice: AiToolChoice::Auto,

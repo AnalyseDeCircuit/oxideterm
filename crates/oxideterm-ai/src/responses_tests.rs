@@ -165,7 +165,9 @@ fn responses_stream_interleaves_reasoning_and_tools_without_losing_completed_cal
             },
             AiStreamEvent::Usage {
                 input_tokens: Some(12),
-                output_tokens: Some(9)
+                output_tokens: Some(9),
+                cache_read_tokens: None,
+                cache_write_tokens: None,
             },
             AiStreamEvent::Done,
         ]
@@ -427,7 +429,9 @@ async fn responses_http_stream_and_json_use_selected_endpoint_and_preserve_refus
                 AiStreamEvent::Content("无法执行".into()),
                 AiStreamEvent::Usage {
                     input_tokens: Some(12),
-                    output_tokens: Some(9)
+                    output_tokens: Some(9),
+                    cache_read_tokens: None,
+                    cache_write_tokens: None,
                 },
                 AiStreamEvent::Done
             ]
@@ -590,6 +594,8 @@ async fn responses_cancel_drops_http_stream_before_a_followup_request() {
             Some(AiStreamEvent::Usage {
                 input_tokens: Some(12),
                 output_tokens: Some(9),
+                cache_read_tokens: None,
+                cache_write_tokens: None,
             })
         );
         assert_eq!(next.next_event().await, Some(AiStreamEvent::Done));
@@ -748,7 +754,9 @@ async fn xai_stream_uses_responses_and_preserves_reasoning_and_function_calls() 
             },
             AiStreamEvent::Usage {
                 input_tokens: Some(12),
-                output_tokens: Some(9)
+                output_tokens: Some(9),
+                cache_read_tokens: None,
+                cache_write_tokens: None,
             },
             AiStreamEvent::Done,
         ]

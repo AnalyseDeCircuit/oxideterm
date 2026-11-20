@@ -198,6 +198,18 @@ async fn execute_ai_chat_tool_loop(
         }
     }
     crate::scope_responses_history(history, &config);
+    if config.prompt_cache_key.is_none() && !conversation_id.is_empty() {
+        let child_scope = execution
+            .as_ref()
+            .filter(|agent| agent.is_child())
+            .map(|agent| agent.run.agent_id.to_string())
+            .unwrap_or_default();
+        config.prompt_cache_key = Some(prompt_cache_key_for_session(
+            &conversation_id,
+            &child_scope,
+            &config.model,
+        ));
+    }
     let max_rounds = config
         .tool_policy
         .max_rounds
@@ -478,13 +490,23 @@ async fn execute_ai_chat_tool_loop(
         let mut call_ids = HashMap::<String, String>::new();
         let mut completed_calls = Vec::<AiToolCall>::new();
         let mut round_provider_parts = Vec::<serde_json::Value>::new();
+        let mut round_input_tokens: Option<u64> = None;
+        let mut round_output_tokens: Option<u64> = None;
+        let mut round_cache_read_tokens: Option<u64> = None;
+        let mut round_cache_write_tokens: Option<u64> = None;
 
         while let Some(event) = model_request.next_event().await {
             match event {
                 AiStreamEvent::Usage {
                     input_tokens,
                     output_tokens,
+                    cache_read_tokens,
+                    cache_write_tokens,
                 } => {
+                    round_input_tokens = input_tokens.or(round_input_tokens);
+                    round_output_tokens = output_tokens.or(round_output_tokens);
+                    round_cache_read_tokens = cache_read_tokens.or(round_cache_read_tokens);
+                    round_cache_write_tokens = cache_write_tokens.or(round_cache_write_tokens);
                     if let Some((agent, request)) = execution.as_ref().zip(usage_request) {
                         let _ = agent.runtime.record_usage(
                             &agent.run,
@@ -692,6 +714,29 @@ async fn execute_ai_chat_tool_loop(
         // Provider completion can precede a long approval wait. Release the
         // request and its credentials before entering any tool interaction.
         drop(model_request);
+
+        if execution.as_ref().is_none_or(|agent| !agent.is_child())
+            && (round_input_tokens.is_some()
+                || round_cache_read_tokens.is_some()
+                || round_cache_write_tokens.is_some())
+        {
+            // Emit one consolidated Usage event per completed model round so
+            // multi-chunk reporters (Gemini, Anthropic message_start + delta)
+            // never double-count input or cached tokens in conversation stats.
+            let _ = send_ai_loop_delivery(
+                execution.is_some(),
+                &ui_tx,
+                generation,
+                &conversation_id,
+                &assistant_id,
+                AiStreamDeliveryEvent::Stream(AiStreamEvent::Usage {
+                    input_tokens: round_input_tokens,
+                    output_tokens: round_output_tokens,
+                    cache_read_tokens: round_cache_read_tokens,
+                    cache_write_tokens: round_cache_write_tokens,
+                }),
+            );
+        }
 
         if let Some(error) = stream_error {
             assistant_content = error.clone();
@@ -1405,6 +1450,49 @@ async fn request_ai_runtime_context(
     receiver.await.ok().flatten()
 }
 
+fn prompt_cache_key_for_session(conversation_id: &str, child_scope: &str, model: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    for part in [conversation_id, child_scope, model] {
+        hasher.update(part.as_bytes());
+        hasher.update([0]);
+    }
+    let digest = hasher.finalize();
+    let mut key = String::from("oxideterm-");
+    for byte in &digest[..16] {
+        use std::fmt::Write;
+        let _ = write!(&mut key, "{byte:02x}");
+    }
+    key
+}
+
+fn runtime_context_semantically_equal(left: &str, right: &str) -> bool {
+    if left == right {
+        return true;
+    }
+    let (Ok(left_json), Ok(right_json)) = (
+        serde_json::from_str::<serde_json::Value>(left),
+        serde_json::from_str::<serde_json::Value>(right),
+    ) else {
+        return false;
+    };
+    let (Some(left_ctx), Some(right_ctx)) = (
+        left_json
+            .get("runtimeContext")
+            .and_then(serde_json::Value::as_object),
+        right_json
+            .get("runtimeContext")
+            .and_then(serde_json::Value::as_object),
+    ) else {
+        return left_json == right_json;
+    };
+    // Ignore per-round snapshotId and observedAtMs so unchanged handles do not
+    // append redundant observations or bust the tool-loop KV cache.
+    ["protocolVersion", "registryEpoch", "stableResources", "liveHandles"]
+        .into_iter()
+        .all(|field| left_ctx.get(field) == right_ctx.get(field))
+}
+
 fn replace_ai_runtime_context_message(history: &mut Vec<AiChatMessage>, content: String) {
     if !history
         .iter()
@@ -1416,6 +1504,17 @@ fn replace_ai_runtime_context_message(history: &mut Vec<AiChatMessage>, content:
         );
         policy.id = AI_RUNTIME_CONTEXT_POLICY_MESSAGE_ID.to_string();
         history.insert(0, policy);
+    }
+    // Keep prior runtime-context observations in place (append-only) and skip
+    // unchanged observations: deleting an earlier runtime-context message shifts
+    // the wire prefix between Round k and Round k+1 and invalidates KV cache.
+    if history
+        .iter()
+        .rev()
+        .find(|entry| entry.id == AI_RUNTIME_CONTEXT_MESSAGE_ID)
+        .is_some_and(|previous| runtime_context_semantically_equal(&previous.content, &content))
+    {
+        return;
     }
     let message = AiChatMessage {
         id: AI_RUNTIME_CONTEXT_MESSAGE_ID.to_string(),
@@ -1435,9 +1534,6 @@ fn replace_ai_runtime_context_message(history: &mut Vec<AiChatMessage>, content:
         branches: None,
         suggestions: Vec::new(),
     };
-    // Keep one fresh observation after the completed tool round. Retaining its
-    // internal system role keeps it out of persisted user turns and task selection.
-    history.retain(|entry| entry.id != AI_RUNTIME_CONTEXT_MESSAGE_ID);
     history.push(message);
 }
 

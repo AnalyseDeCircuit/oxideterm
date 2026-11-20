@@ -144,7 +144,7 @@ pub(crate) fn gemini_chat_contents(
     let mut contents = Vec::<Value>::new();
     let mut tool_names_by_id = HashMap::<String, String>::new();
     for message in messages {
-        let role = if crate::runtime_context::is_runtime_context_message(message) {
+        let role = if crate::runtime_context::is_user_context_system_message(message) {
             AiChatRole::User
         } else {
             message.role
@@ -327,6 +327,8 @@ pub(crate) fn parse_gemini_data_line(line: &str) -> ParsedStreamLine {
                                 .unwrap_or(0),
                         )
                     }),
+                cache_read_tokens: usage.get("cachedContentTokenCount").and_then(Value::as_u64),
+                cache_write_tokens: None,
             });
         }
         if let Some(parts) = json
@@ -447,6 +449,7 @@ mod tests {
             profile_id: None,
             memory_context: None,
             memory_entry_ids: Vec::new(),
+            prompt_cache_key: None,
             tool_policy: AiToolUsePolicy::default(),
             tools: Vec::new(),
             tool_choice: AiToolChoice::Auto,

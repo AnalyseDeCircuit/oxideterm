@@ -146,7 +146,7 @@ mod ai_turn_order_tests {
     }
 
     #[test]
-    fn second_model_round_replaces_the_previous_runtime_context() {
+    fn second_model_round_preserves_prefix_and_deduplicates_runtime_context() {
         let mut history = vec![
             test_message(
                 "base-system",
@@ -160,11 +160,15 @@ mod ai_turn_order_tests {
             ),
         ];
 
-        replace_ai_runtime_context_message(
-            &mut history,
-            r#"{"runtimeContext":{"snapshotId":"snap_first","observedAtMs":100,"liveHandles":[{"handleId":"rt_first"}]}}"#.to_string(),
-        );
-        let prefix = history[..history.len() - 1].to_vec();
+        let first = r#"{"runtimeContext":{"protocolVersion":2,"snapshotId":"snap_first","observedAtMs":100,"registryEpoch":1,"stableResources":[],"liveHandles":[{"handleId":"rt_first"}]}}"#;
+        replace_ai_runtime_context_message(&mut history, first.to_string());
+        let round0_prefix = history.clone();
+
+        // Identical handles/epoch with new snapshotId/observedAtMs must not append a duplicate.
+        let unchanged = r#"{"runtimeContext":{"protocolVersion":2,"snapshotId":"snap_same","observedAtMs":150,"registryEpoch":1,"stableResources":[],"liveHandles":[{"handleId":"rt_first"}]}}"#;
+        replace_ai_runtime_context_message(&mut history, unchanged.to_string());
+        assert_eq!(history, round0_prefix);
+
         let mut call = test_message("round1-call", AiChatRole::Assistant, "Checking".to_string());
         call.tool_calls =
             vec![serde_json::json!({"id":"call-1","name":"run_command","arguments":"{}"})];
@@ -172,7 +176,7 @@ mod ai_turn_order_tests {
         let mut result = test_message("round1-result", AiChatRole::Tool, "Result".to_string());
         result.tool_call_id = Some("call-1".to_string());
         history.push(result);
-        let latest = r#"{"runtimeContext":{"snapshotId":"snap_second","observedAtMs":200,"liveHandles":[{"handleId":"rt_second"}]}}"#;
+        let latest = r#"{"runtimeContext":{"protocolVersion":2,"snapshotId":"snap_second","observedAtMs":200,"registryEpoch":2,"stableResources":[],"liveHandles":[{"handleId":"rt_second"}]}}"#;
         replace_ai_runtime_context_message(&mut history, latest.to_string());
 
         assert_eq!(
@@ -184,12 +188,14 @@ mod ai_turn_order_tests {
                 "runtime-context-policy",
                 "base-system",
                 "latest-user",
+                "runtime-context-v2",
                 "round1-call",
                 "round1-result",
                 "runtime-context-v2"
             ],
         );
-        assert_eq!(&history[..prefix.len()], prefix.as_slice());
+        // Round 0 must remain an exact byte-for-byte prefix of Round 1 for KV cache reuse.
+        assert_eq!(&history[..round0_prefix.len()], round0_prefix.as_slice());
         assert!(
             history[0]
                 .content

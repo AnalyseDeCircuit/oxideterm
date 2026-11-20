@@ -271,7 +271,25 @@ impl AiWorkspaceEntity {
             return AiStreamApplyOutcome::Stale;
         }
         match event {
-            AiStreamEvent::Usage { .. } => AiStreamApplyOutcome::Applied,
+            AiStreamEvent::Usage {
+                input_tokens,
+                cache_read_tokens,
+                cache_write_tokens,
+                ..
+            } => {
+                if let Some(input) = input_tokens.filter(|tokens| *tokens > 0) {
+                    self.chat_ui
+                        .prompt_cache_stats
+                        .entry(conversation_id.to_string())
+                        .or_default()
+                        .record(
+                            input,
+                            cache_read_tokens.unwrap_or(0),
+                            cache_write_tokens.unwrap_or(0),
+                        );
+                }
+                AiStreamApplyOutcome::Applied
+            }
             AiStreamEvent::Content(chunk) => {
                 self.append_chat_stream_text(conversation_id, message_id, &chunk, false);
                 AiStreamApplyOutcome::Applied

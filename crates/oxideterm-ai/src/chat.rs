@@ -263,5 +263,15 @@ pub fn apply_chat_request_overrides(
             suggestions: Vec::new(),
         });
     }
-    history.splice(0..0, system_messages);
+    if !system_messages.is_empty() {
+        // Place per-turn dynamic context after the latest user message so the
+        // leading static system prompt and prior conversation prefix stay
+        // byte-for-byte identical across turns for provider prompt caching.
+        let insert_at = history
+            .iter()
+            .rposition(|message| message.role == AiChatRole::User)
+            .map(|index| index + 1)
+            .unwrap_or(history.len());
+        history.splice(insert_at..insert_at, system_messages);
+    }
 }

@@ -124,6 +124,51 @@ pub struct AiPreparedPromptUsage {
     pub breakdown: AiContextTokenBreakdown,
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct AiPromptCacheStats {
+    pub requests: u64,
+    pub last_input_tokens: u64,
+    pub last_cache_read_tokens: u64,
+    pub last_cache_write_tokens: u64,
+    pub total_input_tokens: u64,
+    pub total_cache_read_tokens: u64,
+    pub total_cache_write_tokens: u64,
+}
+
+impl AiPromptCacheStats {
+    pub fn record(&mut self, input_tokens: u64, cache_read_tokens: u64, cache_write_tokens: u64) {
+        if input_tokens == 0 {
+            return;
+        }
+        let cache_read = cache_read_tokens.min(input_tokens);
+        self.requests = self.requests.saturating_add(1);
+        self.last_input_tokens = input_tokens;
+        self.last_cache_read_tokens = cache_read;
+        self.last_cache_write_tokens = cache_write_tokens;
+        self.total_input_tokens = self.total_input_tokens.saturating_add(input_tokens);
+        self.total_cache_read_tokens = self.total_cache_read_tokens.saturating_add(cache_read);
+        self.total_cache_write_tokens = self
+            .total_cache_write_tokens
+            .saturating_add(cache_write_tokens);
+    }
+
+    pub fn last_hit_rate(&self) -> f32 {
+        if self.last_input_tokens == 0 {
+            return 0.0;
+        }
+        ((self.last_cache_read_tokens as f64 / self.last_input_tokens as f64) * 100.0)
+            .clamp(0.0, 100.0) as f32
+    }
+
+    pub fn total_hit_rate(&self) -> f32 {
+        if self.total_input_tokens == 0 {
+            return 0.0;
+        }
+        ((self.total_cache_read_tokens as f64 / self.total_input_tokens as f64) * 100.0)
+            .clamp(0.0, 100.0) as f32
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AiModelSelectorScope {
     Sidebar,

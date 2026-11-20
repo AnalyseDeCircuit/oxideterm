@@ -836,8 +836,9 @@ pub fn compose_ai_provider_history(
     config: &AiChatStreamConfig,
     request_content: Option<String>,
     base_system_prompt: String,
+    turn_context_prompt: Option<String>,
 ) -> Vec<AiChatMessage> {
-    crate::apply_chat_request_overrides(&mut history, request_content, None);
+    crate::apply_chat_request_overrides(&mut history, request_content, turn_context_prompt);
     crate::prepare_image_history(&mut history, config);
     crate::scope_responses_history(&mut history, config);
     normalize_ai_stream_history_for_provider(&mut history);

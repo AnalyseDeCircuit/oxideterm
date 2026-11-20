@@ -53,11 +53,11 @@ pub(crate) fn parse_openai_data_line_with_accumulator(
                 saw_frame: true,
             };
         }
-        if let Some(usage) = json.get("usage") {
-            events.push(AiStreamEvent::Usage {
-                input_tokens: usage.get("prompt_tokens").and_then(Value::as_u64),
-                output_tokens: usage.get("completion_tokens").and_then(Value::as_u64),
-            });
+        if let Some(usage) = json
+            .get("usage")
+            .or_else(|| json.pointer("/choices/0/usage"))
+        {
+            events.push(openai_usage_event(usage));
         }
         let delta = json
             .get("choices")
@@ -193,11 +193,11 @@ pub(crate) fn parse_openai_json_events(body: &str, context: &str) -> Result<Vec<
             );
         }
     }
-    if let Some(usage) = json.get("usage") {
-        events.push(AiStreamEvent::Usage {
-            input_tokens: usage.get("prompt_tokens").and_then(Value::as_u64),
-            output_tokens: usage.get("completion_tokens").and_then(Value::as_u64),
-        });
+    if let Some(usage) = json
+        .get("usage")
+        .or_else(|| json.pointer("/choices/0/usage"))
+    {
+        events.push(openai_usage_event(usage));
     }
     if let Some(error) = openai_finish_error(
         json.pointer("/choices/0/finish_reason")
@@ -207,6 +207,28 @@ pub(crate) fn parse_openai_json_events(body: &str, context: &str) -> Result<Vec<
         events.push(AiStreamEvent::Error(error.into()));
     }
     Ok(events)
+}
+
+fn openai_usage_event(usage: &Value) -> AiStreamEvent {
+    let cache_read_tokens = usage
+        .pointer("/prompt_tokens_details/cached_tokens")
+        .and_then(Value::as_u64)
+        .or_else(|| usage.get("prompt_cache_hit_tokens").and_then(Value::as_u64))
+        .or_else(|| usage.get("cached_tokens").and_then(Value::as_u64));
+    let cache_write_tokens = usage
+        .pointer("/prompt_tokens_details/cache_write_tokens")
+        .and_then(Value::as_u64)
+        .or_else(|| {
+            usage
+                .get("cache_creation_input_tokens")
+                .and_then(Value::as_u64)
+        });
+    AiStreamEvent::Usage {
+        input_tokens: usage.get("prompt_tokens").and_then(Value::as_u64),
+        output_tokens: usage.get("completion_tokens").and_then(Value::as_u64),
+        cache_read_tokens,
+        cache_write_tokens,
+    }
 }
 
 fn openai_tool_call_complete_event(call: &Value, index: usize) -> AiStreamEvent {

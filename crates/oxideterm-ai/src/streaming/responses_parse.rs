@@ -127,6 +127,9 @@ impl ResponsesStream {
                 events.push(AiStreamEvent::Usage {
                     input_tokens: response["usage"]["input_tokens"].as_u64(),
                     output_tokens: response["usage"]["output_tokens"].as_u64(),
+                    cache_read_tokens: response["usage"]["input_tokens_details"]["cached_tokens"]
+                        .as_u64(),
+                    cache_write_tokens: None,
                 });
                 events.push(AiStreamEvent::Done);
                 self.finished = true;

@@ -1011,6 +1011,15 @@ impl AiAssistantSidebarView {
             warning: percentage > 70.0,
             danger: percentage > 85.0,
         };
+        let prompt_cache_stats = {
+            let ai = self.state.read(cx);
+            ai.conversation_state()
+                .active_conversation_id
+                .as_deref()
+                .and_then(|id| ai.chat_ui().prompt_cache_stats.get(id))
+                .filter(|stats| stats.requests > 0)
+                .cloned()
+        };
         let popover = ai_context_popover(&self.tokens)
             .child(ai_context_popover_header(
                 &self.tokens,
@@ -1097,6 +1106,66 @@ impl AiAssistantSidebarView {
                         cx,
                     )),
             )
+            .when_some(prompt_cache_stats, |popover, stats| {
+                let last_value = format!(
+                    "{:.1}% ({} / {})",
+                    stats.last_hit_rate(),
+                    ai_format_tokens(stats.last_cache_read_tokens.min(usize::MAX as u64) as usize),
+                    ai_format_tokens(stats.last_input_tokens.min(usize::MAX as u64) as usize),
+                );
+                let total_value = format!(
+                    "{:.1}% ({} / {})",
+                    stats.total_hit_rate(),
+                    ai_format_tokens(stats.total_cache_read_tokens.min(usize::MAX as u64) as usize),
+                    ai_format_tokens(stats.total_input_tokens.min(usize::MAX as u64) as usize),
+                );
+                let cache_write_value = (stats.total_cache_write_tokens > 0).then(|| {
+                    ai_format_tokens(stats.total_cache_write_tokens.min(usize::MAX as u64) as usize)
+                });
+                popover
+                    .child(
+                        div()
+                            .border_t_1()
+                            .border_color(rgba((self.tokens.ui.border << 8) | 0x1a)),
+                    )
+                    .child(
+                        div()
+                            .px(px(12.0))
+                            .py(px(8.0))
+                            .child(
+                                div()
+                                    .mb(px(6.0))
+                                    .text_size(px(10.0))
+                                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                                    .text_color(rgb(self.tokens.ui.text_muted))
+                                    .child(self.render_display_text_with_role(
+                                        SelectableTextRole::PlainDocument,
+                                        "ai-context-popover-section",
+                                        "cache",
+                                        self.i18n.t("ai.context.prompt_cache"),
+                                        self.tokens.ui.text_muted,
+                                        cx,
+                                    )),
+                            )
+                            .child(self.render_ai_context_breakdown_row(
+                                self.i18n.t("ai.context.cache_last_request"),
+                                last_value,
+                                cx,
+                            ))
+                            .child(self.render_ai_context_breakdown_row(
+                                self.i18n.t("ai.context.cache_session_total"),
+                                total_value,
+                                cx,
+                            ))
+                            .when_some(cache_write_value, |section, write_tokens| {
+                                section.child(self.render_ai_context_breakdown_row(
+                                    self.i18n.t("ai.context.cache_write"),
+                                    write_tokens,
+                                    cx,
+                                ))
+                            }),
+                    )
+            })
             .when(
                 self.state
                     .read(cx)

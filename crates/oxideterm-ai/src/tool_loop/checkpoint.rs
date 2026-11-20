@@ -57,6 +57,7 @@ async fn compact_running_ai_task(
                 AiStreamEvent::Usage {
                     input_tokens,
                     output_tokens,
+                    ..
                 } => {
                     if let Some((agent, request)) = execution.zip(request_id) {
                         let _ = agent.runtime.record_usage(

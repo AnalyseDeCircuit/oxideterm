@@ -63,10 +63,14 @@ pub(crate) fn responses_body(config: &AiChatStreamConfig, messages: &[AiChatMess
             }
             role => {
                 if !message.content.is_empty() || !crate::message_images(message).is_empty() {
-                    let role = match role {
-                        AiChatRole::User => "user",
-                        AiChatRole::Assistant => "assistant",
-                        _ => "system",
+                    let role = if crate::runtime_context::is_user_context_system_message(message) {
+                        "user"
+                    } else {
+                        match role {
+                            AiChatRole::User => "user",
+                            AiChatRole::Assistant => "assistant",
+                            _ => "system",
+                        }
                     };
                     input.push(json!({"role": role, "content": if crate::message_images(message).is_empty() { Value::String(message.content.clone()) } else { crate::images::image_message_content(message, "responses") }}));
                 }
@@ -88,6 +92,14 @@ pub(crate) fn responses_body(config: &AiChatStreamConfig, messages: &[AiChatMess
         "store": false,
         "include": ["reasoning.encrypted_content"],
     });
+    if config.provider_type == "openai"
+        && let Some(key) = config
+            .prompt_cache_key
+            .as_deref()
+            .filter(|key| !key.is_empty())
+    {
+        body["prompt_cache_key"] = json!(key);
+    }
     if let Some(tokens) = config.max_response_tokens.filter(|tokens| *tokens > 0) {
         body["max_output_tokens"] = json!(tokens);
     }

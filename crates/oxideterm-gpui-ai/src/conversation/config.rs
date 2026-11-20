@@ -161,6 +161,7 @@ impl AiWorkspaceEntity {
                 profile_id: active_profile_id,
                 memory_context,
                 memory_entry_ids,
+                prompt_cache_key: None,
                 tool_policy,
                 tools,
                 tool_choice: oxideterm_ai::AiToolChoice::Auto,
@@ -230,6 +231,7 @@ impl AiWorkspaceEntity {
             profile_id: active_profile_id,
             memory_context,
             memory_entry_ids,
+            prompt_cache_key: None,
             tool_policy,
             tools,
             tool_choice: oxideterm_ai::AiToolChoice::Auto,
@@ -308,6 +310,7 @@ impl AiWorkspaceEntity {
             profile_id: None,
             memory_context: None,
             memory_entry_ids: Vec::new(),
+            prompt_cache_key: None,
             tool_policy: AiToolUsePolicy::default(),
             tools: Vec::new(),
             tool_choice: oxideterm_ai::AiToolChoice::Auto,
@@ -318,8 +321,6 @@ impl AiWorkspaceEntity {
 pub fn build_ai_base_system_prompt(
     settings: &AiSettings,
     config: &AiChatStreamConfig,
-    rag_system_prompt: Option<&str>,
-    task_system_prompt: Option<&str>,
     skill_catalog_prompt: Option<String>,
 ) -> String {
     let providers = ai_provider_views(&settings.providers);
@@ -328,7 +329,8 @@ pub fn build_ai_base_system_prompt(
         .map(|provider| provider.name.as_str())
         .filter(|label| !label.trim().is_empty())
         .unwrap_or(config.provider_type.as_str());
-    // This is the final provider boundary for custom, RAG, and runtime context.
+    // Order sections from most static to least static so provider KV/prefix
+    // caches remain valid across turns even when memory or per-turn state shifts.
     let mut prompt = oxideterm_ai::sanitize_for_ai(settings.custom_system_prompt.trim());
     if prompt.is_empty() {
         prompt = DEFAULT_AI_SYSTEM_PROMPT.to_string();
@@ -341,34 +343,11 @@ pub fn build_ai_base_system_prompt(
     ));
     let context_window =
         ai_model_context_window(settings, config.provider_id.as_deref(), &config.model);
-    let memory_character_budget = context_window
-        .saturating_mul(4)
-        .saturating_div(8)
-        .clamp(4_000, 32_000);
-    if let Some(memory) = config.memory_context.as_deref().and_then(|memory| {
-        oxideterm_ai::ai_user_memory_prompt_with_limit(
-            memory,
-            settings.memory.enabled,
-            memory_character_budget,
-        )
-    }) {
-        prompt.push_str("\n\n");
-        prompt.push_str(&memory);
+    if context_window >= 8192 {
+        prompt.push_str(AI_SUGGESTIONS_INSTRUCTION);
     }
-    if let Some(rag_system_prompt) = rag_system_prompt
-        .map(str::trim)
-        .filter(|prompt| !prompt.is_empty())
-    {
-        prompt.push_str("\n\n");
-        prompt.push_str(&oxideterm_ai::sanitize_for_ai(rag_system_prompt));
-    }
-    if let Some(task_system_prompt) = task_system_prompt
-        .map(str::trim)
-        .filter(|prompt| !prompt.is_empty())
-    {
-        prompt.push_str("\n\n");
-        prompt.push_str(&oxideterm_ai::sanitize_for_ai(task_system_prompt));
-    }
+    prompt.push_str("\n\n");
+    prompt.push_str(&ai_orchestrator_system_prompt(config.tool_policy.enabled));
     if let Some(skill_catalog_prompt) = skill_catalog_prompt {
         if let Some(mut context) = oxideterm_audit::AuditContext::current_request()
             .or_else(oxideterm_audit::AuditContext::current)
@@ -390,10 +369,42 @@ pub fn build_ai_base_system_prompt(
         prompt.push_str("\n\n");
         prompt.push_str(&skill_catalog_prompt);
     }
-    if context_window >= 8192 {
-        prompt.push_str(AI_SUGGESTIONS_INSTRUCTION);
+    let memory_character_budget = context_window
+        .saturating_mul(4)
+        .saturating_div(8)
+        .clamp(4_000, 32_000);
+    if let Some(memory) = config.memory_context.as_deref().and_then(|memory| {
+        oxideterm_ai::ai_user_memory_prompt_with_limit(
+            memory,
+            settings.memory.enabled,
+            memory_character_budget,
+        )
+    }) {
+        prompt.push_str("\n\n");
+        prompt.push_str(&memory);
     }
-    prompt.push_str("\n\n");
-    prompt.push_str(&ai_orchestrator_system_prompt(config.tool_policy.enabled));
     prompt
+}
+
+/// Builds volatile per-turn context (RAG hits, live workspace/terminal state,
+/// intent hints, and explicit slash/skill prompts) kept outside the static
+/// system prefix so prompt caching stays intact across turns.
+pub fn build_ai_turn_context_prompt(
+    rag_system_prompt: Option<&str>,
+    task_system_prompt: Option<&str>,
+) -> Option<String> {
+    let mut parts = Vec::new();
+    if let Some(rag_system_prompt) = rag_system_prompt
+        .map(str::trim)
+        .filter(|prompt| !prompt.is_empty())
+    {
+        parts.push(oxideterm_ai::sanitize_for_ai(rag_system_prompt));
+    }
+    if let Some(task_system_prompt) = task_system_prompt
+        .map(str::trim)
+        .filter(|prompt| !prompt.is_empty())
+    {
+        parts.push(oxideterm_ai::sanitize_for_ai(task_system_prompt));
+    }
+    (!parts.is_empty()).then(|| parts.join("\n\n"))
 }

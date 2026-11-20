@@ -218,7 +218,11 @@
       "user_context": "Ngữ cảnh người dùng",
       "messages_label": "Tin nhắn",
       "tool_results": "Kết quả công cụ",
-      "compress_dialog": "Nén hội thoại"
+      "compress_dialog": "Nén hội thoại",
+      "prompt_cache": "Bộ nhớ đệm prompt",
+      "cache_last_request": "Yêu cầu gần nhất",
+      "cache_session_total": "Tổng phiên",
+      "cache_write": "Ghi vào bộ nhớ đệm"
     },
     "model_selector": {
       "ok": "OK",

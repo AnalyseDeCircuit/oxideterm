@@ -218,7 +218,11 @@
       "user_context": "사용자 컨텍스트",
       "messages_label": "메시지",
       "tool_results": "도구 결과",
-      "compress_dialog": "대화 압축"
+      "compress_dialog": "대화 압축",
+      "prompt_cache": "프롬프트 캐시",
+      "cache_last_request": "최근 요청",
+      "cache_session_total": "세션 누적",
+      "cache_write": "캐시 쓰기"
     },
     "model_selector": {
       "ok": "OK",

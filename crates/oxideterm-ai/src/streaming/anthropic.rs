@@ -56,7 +56,8 @@ pub(crate) async fn stream_anthropic_completion(
 }
 
 fn anthropic_chat_body(config: &AiChatStreamConfig, messages: &[AiChatMessage]) -> Value {
-    let (system, api_messages) = anthropic_chat_messages(messages);
+    let (system, mut api_messages) = anthropic_chat_messages(messages);
+    apply_anthropic_message_cache_breakpoints(&mut api_messages);
     let mut body = serde_json::json!({
         "model": config.model,
         "messages": api_messages,
@@ -76,13 +77,73 @@ fn anthropic_chat_body(config: &AiChatStreamConfig, messages: &[AiChatMessage]) 
     if let Some(system) = system.filter(|system| !system.is_empty())
         && let Some(object) = body.as_object_mut()
     {
-        object.insert("system".to_string(), serde_json::json!(system));
+        // Anthropic requires explicit ephemeral cache breakpoints; structured
+        // text blocks let the static system prefix hit cache across turns.
+        object.insert(
+            "system".to_string(),
+            serde_json::json!([{
+                "type": "text",
+                "text": system,
+                "cache_control": { "type": "ephemeral" },
+            }]),
+        );
     }
     if let Some(object) = body.as_object_mut() {
         let thinking_enabled = object.get("thinking").is_some();
         apply_anthropic_tool_options(object, config, thinking_enabled);
     }
     body
+}
+
+fn apply_anthropic_message_cache_breakpoints(messages: &mut [Value]) {
+    // Anthropic allows at most 4 cache_control blocks per request:
+    // 1 on tools, 1 on system, and up to 2 on messages (the previous completed
+    // turn boundary and the latest message for multi-round tool loops).
+    let len = messages.len();
+    if len >= 2 {
+        mark_anthropic_message_cacheable(&mut messages[len - 2]);
+    }
+    if len >= 1 {
+        mark_anthropic_message_cacheable(&mut messages[len - 1]);
+    }
+}
+
+fn mark_anthropic_message_cacheable(message: &mut Value) {
+    let Some(content) = message.get_mut("content") else {
+        return;
+    };
+    match content {
+        Value::String(text) if !text.is_empty() => {
+            let owned = std::mem::take(text);
+            *content = serde_json::json!([{
+                "type": "text",
+                "text": owned,
+                "cache_control": { "type": "ephemeral" },
+            }]);
+        }
+        Value::Array(blocks) => {
+            if let Some(block) = blocks.iter_mut().rev().find(|block| {
+                let Some(object) = block.as_object() else {
+                    return false;
+                };
+                if object.get("type").and_then(Value::as_str) == Some("text") {
+                    object
+                        .get("text")
+                        .and_then(Value::as_str)
+                        .is_some_and(|text| !text.is_empty())
+                } else {
+                    true
+                }
+            }) && let Some(object) = block.as_object_mut()
+            {
+                object.insert(
+                    "cache_control".to_string(),
+                    serde_json::json!({ "type": "ephemeral" }),
+                );
+            }
+        }
+        _ => {}
+    }
 }
 
 fn apply_anthropic_effort(body: &mut Value, config: &AiChatStreamConfig) {
@@ -143,7 +204,7 @@ fn apply_anthropic_tool_options(
 }
 
 fn anthropic_tool_definitions(tools: &[AiToolDefinition]) -> Vec<Value> {
-    tools
+    let mut definitions = tools
         .iter()
         .map(|tool| {
             serde_json::json!({
@@ -152,7 +213,14 @@ fn anthropic_tool_definitions(tools: &[AiToolDefinition]) -> Vec<Value> {
                 "input_schema": tool.parameters,
             })
         })
-        .collect()
+        .collect::<Vec<_>>();
+    if let Some(last) = definitions.last_mut().and_then(Value::as_object_mut) {
+        last.insert(
+            "cache_control".to_string(),
+            serde_json::json!({ "type": "ephemeral" }),
+        );
+    }
+    definitions
 }
 
 fn anthropic_thinking_budget(config: &AiChatStreamConfig) -> Option<i64> {
@@ -181,7 +249,7 @@ pub(crate) fn anthropic_chat_messages(messages: &[AiChatMessage]) -> (Option<Str
     let mut system: Option<String> = None;
     let mut converted = Vec::<(String, Value)>::new();
     for message in messages {
-        if crate::runtime_context::is_runtime_context_message(message) {
+        if crate::runtime_context::is_user_context_system_message(message) {
             converted.push(("user".to_string(), Value::String(message.content.clone())));
             continue;
         }
@@ -337,9 +405,26 @@ pub(crate) fn parse_anthropic_data_line_with_accumulator(
             .get("usage")
             .or_else(|| json.get("message").and_then(|message| message.get("usage")))
         {
+            let raw_input = usage.get("input_tokens").and_then(Value::as_u64);
+            let cache_read = usage.get("cache_read_input_tokens").and_then(Value::as_u64);
+            let cache_write = usage
+                .get("cache_creation_input_tokens")
+                .and_then(Value::as_u64);
+            // Anthropic reports non-cached, cache-read, and cache-creation input tokens
+            // separately; sum them so input_tokens matches total prompt tokens across providers.
+            let input_tokens = match (raw_input, cache_read, cache_write) {
+                (None, None, None) => None,
+                (raw, read, write) => Some(
+                    raw.unwrap_or(0)
+                        .saturating_add(read.unwrap_or(0))
+                        .saturating_add(write.unwrap_or(0)),
+                ),
+            };
             events.push(AiStreamEvent::Usage {
-                input_tokens: usage.get("input_tokens").and_then(Value::as_u64),
+                input_tokens,
                 output_tokens: usage.get("output_tokens").and_then(Value::as_u64),
+                cache_read_tokens: cache_read,
+                cache_write_tokens: cache_write,
             });
         }
         match json.get("type").and_then(Value::as_str) {
@@ -488,7 +573,7 @@ mod tests {
         assert_eq!(
             body["messages"][0],
             serde_json::json!({"role":"user", "content":[
-                {"type":"image","source":{"type":"base64","media_type":"image/png","data":"cGl4ZWw="}}
+                {"type":"image","source":{"type":"base64","media_type":"image/png","data":"cGl4ZWw="},"cache_control":{"type":"ephemeral"}}
             ]})
         );
         message.role = AiChatRole::Tool;
@@ -501,7 +586,7 @@ mod tests {
                 "type":"tool_result","tool_use_id":"screen-call","content":[
                     {"type":"text","text":"Captured"},
                     {"type":"image","source":{"type":"base64","media_type":"image/png","data":"cGl4ZWw="}}
-                ]
+                ],"cache_control":{"type":"ephemeral"}
             })
         );
     }
@@ -526,6 +611,7 @@ mod tests {
             profile_id: None,
             memory_context: None,
             memory_entry_ids: Vec::new(),
+            prompt_cache_key: None,
             tool_policy: AiToolUsePolicy::default(),
             tools: Vec::new(),
             tool_choice: AiToolChoice::Auto,
@@ -651,6 +737,55 @@ mod tests {
                 id: "call-1".to_string(),
                 name: "get_state".to_string(),
                 arguments: "{\"scope\":\"active\"}".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn anthropic_prompt_caching_places_bounded_breakpoints_and_normalizes_usage() {
+        let mut cfg = config("auto", 4096);
+        cfg.tools.push(AiToolDefinition {
+            name: "list_targets".to_string(),
+            description: "List targets".to_string(),
+            parameters: serde_json::json!({"type": "object"}),
+        });
+        let messages: Vec<AiChatMessage> = serde_json::from_value(serde_json::json!([
+            {"id":"base-system","role":"system","content":"Static rules","timestamp_ms":0},
+            {"id":"u1","role":"user","content":"First question","timestamp_ms":1},
+            {"id":"a1","role":"assistant","content":"First answer","timestamp_ms":2},
+            {"id":"u2","role":"user","content":"Second question","timestamp_ms":3},
+            {"id":"task-mode","role":"system","content":"Volatile env","timestamp_ms":4}
+        ]))
+        .unwrap();
+        let body = anthropic_chat_body(&cfg, &messages);
+        assert_eq!(
+            body["system"],
+            serde_json::json!([{"type":"text","text":"Static rules","cache_control":{"type":"ephemeral"}}])
+        );
+        assert_eq!(
+            body["tools"][0]["cache_control"],
+            serde_json::json!({"type":"ephemeral"})
+        );
+        assert_eq!(
+            body["messages"][1]["content"][0]["cache_control"],
+            serde_json::json!({"type":"ephemeral"})
+        );
+        assert_eq!(
+            body["messages"][2]["content"][0]["cache_control"],
+            serde_json::json!({"type":"ephemeral"})
+        );
+        assert!(body["messages"][0]["content"].is_string());
+
+        let parsed = parse_anthropic_data_line(
+            r#"data: {"type":"message_start","message":{"usage":{"input_tokens":200,"cache_read_input_tokens":1800,"cache_creation_input_tokens":400,"output_tokens":1}}}"#,
+        );
+        assert_eq!(
+            parsed.events,
+            vec![AiStreamEvent::Usage {
+                input_tokens: Some(2400),
+                output_tokens: Some(1),
+                cache_read_tokens: Some(1800),
+                cache_write_tokens: Some(400),
             }]
         );
     }

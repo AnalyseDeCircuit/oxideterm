@@ -13,7 +13,7 @@ use crate::{
     stream::ai_context_token_breakdown_from_prompt,
 };
 
-use super::{ai_model_context_window, build_ai_base_system_prompt};
+use super::{ai_model_context_window, build_ai_base_system_prompt, build_ai_turn_context_prompt};
 
 pub struct AiConversationPrompt<'a> {
     pub state: &'a AiWorkspaceEntity,
@@ -138,11 +138,17 @@ impl AiConversationPrompt<'_> {
         let base_system_prompt = build_ai_base_system_prompt(
             self.settings,
             config,
-            rag_system_prompt,
-            task_system_prompt,
             self.skills.prompt(self.settings.skills.enabled),
         );
-        compose_ai_provider_history(history, config, request_content, base_system_prompt)
+        let turn_context_prompt =
+            build_ai_turn_context_prompt(rag_system_prompt, task_system_prompt);
+        compose_ai_provider_history(
+            history,
+            config,
+            request_content,
+            base_system_prompt,
+            turn_context_prompt,
+        )
     }
 
     pub fn ai_send_budget_decision(
