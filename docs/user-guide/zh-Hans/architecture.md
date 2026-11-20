@@ -340,12 +340,12 @@ flowchart TB
 
 ### 第一层：GPUI 应用外壳
 
-主要由 `oxideterm-gpui-app` 承担；它既是 GPUI 页面层，也是长期应用实体的协调器。
+窗口外壳由 `oxideterm-gpui-app` 负责；各功能界面管理自己的状态，工作区协调需要窗口或长期运行时参与的操作。
 
 职责：
 
 - 创建桌面窗口。
-- 渲染活动栏、标签页、面板树、对话框和设置页面。
+- 渲染窗口外壳、标签和窗格布局，挂载由功能实体负责的弹窗、侧栏和设置页面。
 - 将用户操作路由到领域 crate。
 - 区分界面状态和持久领域状态，同时持有运行时实体句柄、订阅、任务投递和最终关闭所有权。
 - 提供应用级通知和命令面板动作。
@@ -618,7 +618,7 @@ flowchart TB
 
 知识库是一级中央标签页，并拥有自己的内部左右分栏。左侧导航负责集合与文档浏览，右侧负责 Markdown 编辑；它不是全局伴随侧边栏面板，也不是设置卡片的堆叠。
 
-源码模式和只读预览共享同一份 Markdown 草稿。`TextEditorView` 负责源码编辑与撤销历史，`oxideterm-gpui-markdown` 负责原生预览渲染，RAG 存储仍是集合、文档版本、分块和搜索索引的持久所有者。应用实体只协调选择、异步加载、自动保存、冲突检测、未保存离开保护和后台索引刷新，不把持久化职责放入 GPUI 渲染树。
+源码模式和只读预览共享一份 Markdown 草稿。`TextEditorView` 负责编辑和撤销，`oxideterm-gpui-markdown` 渲染预览。[知识库工作区](../../../crates/oxideterm-gpui-ai/src/knowledge/workspace.rs)管理文档选择、异步加载、自动保存、冲突和后台索引。离开未保存的文档时，由知识库处理保存或放弃的选择，主包执行相应的标签页或窗口操作。集合、文档版本、分块和搜索索引由 RAG 存储持久保存。
 
 知识库设置页面继续负责嵌入和检索行为配置，但不再承担主要文档浏览器或编辑器职责。
 
@@ -632,7 +632,7 @@ flowchart TB
 %%{init: {"layout": "dagre", "flowchart": {"nodeSpacing": 45, "rankSpacing": 75, "curve": "basis"}}}%%
 flowchart TB
     Select["集合与文档选择"]
-    Owner["知识库工作区状态<br/>文档身份与加载代次"]
+    Owner["gpui-ai 知识库工作区<br/>文档身份与加载代次"]
     Load["从 RAG 存储加载文档修订"]
     Draft["唯一 Markdown 草稿<br/>TextEditorView 与撤销历史"]
     Preview["只读原生 Markdown 预览"]
@@ -653,7 +653,7 @@ flowchart TB
 
 源码与预览使用同一份草稿。切换预览不创建另一份可编辑副本；索引是文档存储之后的派生工作，旧加载结果不能替换新选中的文档。
 
-实现参考：[knowledge](../../../crates/oxideterm-gpui-app/src/workspace/knowledge.rs), [operations](../../../crates/oxideterm-gpui-app/src/workspace/knowledge/operations.rs).
+实现参考：[knowledge](../../../crates/oxideterm-gpui-app/src/workspace/knowledge.rs), [operations](../../../crates/oxideterm-gpui-ai/src/knowledge/workspace/operations.rs).
 
 
 ---
@@ -920,7 +920,7 @@ flowchart TB
 
 图中区分周期性观测与用户操作结果，采样流量不能拖延操作结果。隐藏页面改变采样活动，不会把 SSH 所有权交给页面。
 
-实现参考：[entity](../../../crates/oxideterm-gpui-app/src/workspace/connection_monitor/entity.rs), [lib](../../../crates/oxideterm-connection-monitor/src/lib.rs).
+实现参考：[entity](../../../crates/oxideterm-gpui-host-tools/src/entity.rs), [lib](../../../crates/oxideterm-connection-monitor/src/lib.rs).
 
 
 ---
@@ -1242,6 +1242,8 @@ flowchart TB
 
 ## 图形与 VNC 会话
 
+远程桌面配置区分显式空密码与尚未提供凭据。查看器将会话剪贴板选项与提供程序实际支持的能力取交集，再交给工作进程。SSH 隧道端点属于当前路由，不是保存的服务器身份。
+
 ```mermaid
 %%{init: {"layout": "dagre", "flowchart": {"nodeSpacing": 45, "rankSpacing": 75, "curve": "basis"}}}%%
 flowchart TB
@@ -1355,6 +1357,8 @@ flowchart TB
 ---
 
 ## 重连与恢复
+
+多个打开请求使用同一条 SSH 路由时，连接链与节点锁会协调有冲突的操作。待处理的重连等活动连接链完成后再继续；仅仅显示某个窗格不会触发第二条传输连接。
 
 ```mermaid
 %%{init: {"layout": "dagre", "flowchart": {"nodeSpacing": 45, "rankSpacing": 75, "curve": "basis"}}}%%
@@ -1531,7 +1535,7 @@ flowchart TB
 
 这是当前的因果同步路径。本地应用与远端发布是两个步骤。应用时重新读取当前所有者，使网络请求期间的编辑参与合并。自动执行需满足配置条件且预览中没有未解决冲突；待发布或待清理不能被描述为完全成功。
 
-实现参考：[synchronize](../../../crates/oxideterm-cloud-sync/src/operation/synchronize.rs), [recovery](../../../crates/oxideterm-cloud-sync/src/sync_v3/recovery.rs), [causal](../../../crates/oxideterm-gpui-app/src/workspace/cloud_sync/causal.rs).
+实现参考：[synchronize](../../../crates/oxideterm-cloud-sync/src/operation/synchronize.rs), [recovery](../../../crates/oxideterm-cloud-sync/src/sync_v3/recovery.rs), [causal](../../../crates/oxideterm-gpui-cloud-sync/src/runtime/causal.rs).
 
 云同步、备份和 `.oxide` 包作用于持久化状态，不作用于在线终端字节。
 
@@ -1598,6 +1602,8 @@ flowchart TB
 ---
 
 ## OxideSens AI 架构
+
+[对话视图](../../../crates/oxideterm-gpui-ai/src/conversation.rs)呈现工具审批、待选项和用量；[工具循环](../../../crates/oxideterm-ai/src/tool_loop/mod.rs)协调供应商轮次与子任务。子任务需要输入时向父任务提问；轮次恢复后仍须遵守工具权限。
 
 ```mermaid
 %%{init: {"layout": "dagre", "flowchart": {"nodeSpacing": 45, "rankSpacing": 75, "curve": "basis"}}}%%
@@ -2027,28 +2033,29 @@ flowchart TB
 | `workspace.rs` 与 `workspace/root/*` | 组合顶层工作区并构造应用服务；长期节点和重连所有权位于 `workspace/runtime_entity.rs` 与领域 crate | 应用进入统一桌面工作区，同时不会让根视图成为所有传输的所有者 |
 | `workspace/tabs/*` | 创建、选择、渲染和重连绑定到标签页的视图 | 终端、SFTP、IDE 和工具页可以独立打开、关闭和恢复 |
 | `workspace/pane_tree.rs` | 持有分屏面板布局状态 | 用户可以调整工作区布局，而不改变节点或会话归属 |
-| `workspace/sidebar/*` | 渲染活动导航、保存会话、AI 侧边栏和侧边栏状态 | 活动页面变化时，导航仍保持稳定 |
-| `workspace/session_manager/*` | 管理保存连接、导入导出对话框、连接树和表格视图 | 用户可以创建、编辑、导入、导出和整理连接记录 |
-| `workspace/new_connection/*` | 持有连接表单、SSH 连接流程、主机密钥对话框和键盘交互认证对话框 | 首次连接是桌面引导流程，而不是只靠 CLI |
-| `workspace/connection_monitor/*` | 跟踪连接池状态、节点健康、拓扑、资源指标、主机工具和生命周期动作 | 用户可以看到已连接节点、资源状态、主机实体、重连状态和可操作失败 |
-| `workspace/sftp/*` | 渲染远端文件浏览、对话框、预览、冲突和传输动作 | SFTP 是节点级文件管理器，不是终端附属功能 |
-| `workspace/file_manager/*` | 渲染本地文件浏览、书签、预览对话框和外部打开动作 | 本地文件工作流与远端文件使用一致的桌面模式 |
+| `workspace/sidebar/*` | 渲染活动导航，挂载会话侧栏和 AI 侧栏 | 活动页面变化时，导航仍保持稳定 |
+| `oxideterm-gpui-connections/src/session_manager` · `workspace/session_manager/*` | 管理目录、分组、选择和导入导出弹窗；主包对实际存储和活动会话执行操作 | 用户可以创建、编辑、导入、导出和整理连接记录 |
+| `oxideterm-gpui-connections/src` · `workspace/new_connection/*` | 管理草稿、主机密钥与交互式认证弹窗、提交和预检决策；主包启动真实会话并处理窗口焦点 | 首次连接是桌面引导流程，而不是只靠 CLI |
+| `oxideterm-gpui-host-tools/src` · `workspace/connection_monitor/*` | 渲染主机工具并保存其状态；工作区提供目标和运行时访问 | 用户可以看到已连接节点、资源状态、主机实体、重连状态和可操作失败 |
+| `oxideterm-gpui-sftp/src` · `workspace/sftp/*` | 渲染远程文件浏览与传输；工作区适配代码定位活动文件会话 | SFTP 是节点级文件管理器，不是终端附属功能 |
+| `oxideterm-gpui-file-manager/src` · `workspace/file_manager/*` | 负责本地浏览和文件视图；工作区将视图挂载到窗口与标签 | 本地文件工作流与远端文件使用一致的桌面模式 |
 | `workspace/graphics.rs` 与 `workspace/graphics_vnc.rs` | 渲染图形会话、连接 VNC viewer，并路由指针/键盘输入 | 远端视觉工作流是独立应用页面，不是终端 scrollback |
 | `workspace/remote_desktop/*` | 解析远程桌面目标、打开查看器标签页，并把 provider/helper 生命周期接入工作区 | RDP/VNC 会话复用标签页外壳，同时把协议工作留在应用 crate 之外 |
 | `workspace/runtime_entity.rs` | 持有长期节点订阅、重连 worker、运行时关闭和终端消费者登记 | 关闭终端消费者不会意外关闭共享节点或传输 |
 | `workspace/ide.rs` 与 IDE crate | 打开文件夹、路由文件操作、管理编辑器状态 | 远端编辑体现为工作区，而不是裸 SFTP 操作 |
-| `workspace/forwards/*` | 渲染转发表单、规则、状态和动作 | 端口转发可见、可恢复、可从桌面应用管理 |
-| `workspace/settings/*` | 渲染终端、外观、AI、SFTP、IDE、提权凭据、便携运行时、更新和快捷键设置页 | 配置以应用为主入口，并通过共享设置模型持久化 |
-| `workspace/cloud_sync/*` | 渲染同步状态、确认流程和备份动作 | 云同步与备份操作显式展示，尽量可预演和可恢复 |
+| `oxideterm-gpui-forwards/src` · `workspace/forwards/*` | 管理规则视图与编辑；实际监听器由转发服务管理 | 端口转发可见、可恢复、可从桌面应用管理 |
+| `oxideterm-gpui-settings-view/src` · `workspace/settings/*` | 渲染设置页并管理局部交互；工作区将配置应用到活动服务 | 配置以应用为主入口，并通过共享设置模型持久化 |
+| `oxideterm-gpui-cloud-sync/src` · `workspace/cloud_sync/*` | 管理同步表单、选择、预览和进度；工作区将变更应用到共享存储 | 云同步与备份操作显式展示，尽量可预演和可恢复 |
 | `workspace/plugin_entity.rs`、`plugin_manager.rs`、`plugin_lifecycle/*`、`plugin_ui.rs` | 协调插件发现、生命周期、宿主 API 快照、设置、凭据和界面调用 | 插件可以扩展应用页面，但不拥有核心运行时状态 |
-| `workspace/sidebar/ai/*` | 渲染 AI 对话、模型选择、流式输出、上下文、Agent Skills、工具事件和对话记录状态 | OxideSens 是集成在工作区内的助手，并有明确工具边界 |
+| `oxideterm-gpui-ai/src` · `workspace/sidebar/ai/*` | 管理对话记录、模型选择和对话界面；工作区适配代码定位实际目标并处理窗口操作 | OxideSens 是集成在工作区内的助手，并有明确工具边界 |
 | `workspace/acp_workspace.rs` 与 `oxideterm-acp-*` 集成 | 协调 ACP agent 配置、session、模型选项和 ACP 主机工具桥接，并与原生供应商路径并列 | ACP session 有独立的 agent/session 生命周期，不应被当作普通供应商流 |
 | `workspace/terminal_context_actions.rs` | 构建选择、搜索、传输和命令路由等终端右键动作 | 终端动作使用统一应用菜单风格，同时仍通过明确 session API 分发 |
-| `workspace/quick_commands*` 与 `terminal_command_bar/*` | 存储快捷命令、命令行补全来源和发送器控件 | 重复终端动作可以变成可复用的桌面控件 |
+| `oxideterm-gpui-quick-commands/src`、`workspace/quick_commands.rs`、`workspace/terminal_command_bar/` | 功能视图管理快捷命令列表和编辑；工作区向指定终端发送命令并处理命令行补全 | 重复终端动作可以变成可复用的桌面控件 |
 | `workspace/terminal_command_sender.rs` 与 `terminal_command_bar/sender.rs` | `TerminalCommandSenderEntity` 管理定时、重复、多目标终端输入、目标快照、取消和进度 | 任务不依赖根视图轮询，也不会创建 SSH 连接；Entity 仍由 `WorkspaceApp` 协调，并使用已经存在的终端目标 |
-| `workspace/local_terminal_background.rs` 与 `workspace/root/background.rs` | 解析应用和终端背景图片渲染 | 背景图片属于视觉设置，不是终端缓冲区内容 |
+| `oxideterm-gpui-background`、`workspace/local_terminal_background.rs`、`workspace/root/background.rs` | 功能包显示背景图片、播放背景媒体；工作区选择并挂载背景 | 背景不改变终端缓冲区内容 |
+| `oxideterm-gpui-audit`、`workspace/audit.rs` | 审计视图管理操作记录、会话摘要和离线录制回放；主包提供回放窗格与导出文件选择器 | 回放录制不会重新连接会话 |
 | `workspace/notification_center.rs` | 收集并渲染可操作的应用通知 | 后台失败和恢复动作不会阻塞终端输入，但仍然可见 |
-| `workspace/onboarding/*` | 渲染首次启动设置和设置状态 | 用户可以从主应用完成配置，而不是从 CLI 文档开始 |
+| `oxideterm-gpui-onboarding/src`、`workspace/onboarding/` | 功能视图显示首次启动向导；工作区应用用户选择的配置 | 用户可以从主应用完成配置，而不是从 CLI 文档开始 |
 
 ### SSH 领域模块
 
@@ -2099,7 +2106,7 @@ flowchart TB
 | `chat.rs` 与 `types.rs` | 定义对话和消息类型 | 界面对话记录基于结构化记录 |
 | `context_window.rs` | 决定哪些内容可以进入模型上下文 | token 预算集中处理，而不是散落在侧边栏里 |
 | `context_sanitizer.rs` | 在模型或工具边界前脱敏敏感值 | AI 上下文属于输出边界 |
-| `key_store.rs` 与 `touch_id.rs` | 存储和解锁供应商密钥 | 供应商凭据不进入普通设置文本 |
+| `key_store.rs` | 通过系统凭据库或便携密钥库保存供应商密钥 | 供应商凭据不进入普通设置文本 |
 | `providers/*` 与 `streaming/*` | 发现模型、选择供应商、构造请求、解析流式响应 | 供应商差异隐藏在统一流式语义后面 |
 | `reasoning.rs` | 根据供应商和已知模型能力规范化推理级别 | 不输出不支持的供应商格式；ACP 使用 session 选项 |
 | `acp/*` | 持有 ACP 传输、agent 生命周期、session 配置和协议状态 | ACP 是独立于原生模型供应商的执行后端 |
@@ -2116,8 +2123,8 @@ flowchart TB
 | 区域 | Native 所有者 | 说明 |
 |---|---|---|
 | 设置 | `oxideterm-settings`, `oxideterm-settings-model`, `oxideterm-gpui-settings-view` | 设置通过共享模型加载和保存，再由 GPUI 页面渲染 |
-| 保存连接 | `oxideterm-connections`, 会话管理器模块 | 连接记录是持久对象；活跃节点是运行时对象 |
-| 转发 | `oxideterm-forwarding`, 应用转发模块 | 规则是配置；监听器是运行时状态 |
+| 保存连接 | `oxideterm-connections`、`oxideterm-gpui-connections` | 连接记录是持久对象；活跃节点是运行时对象 |
+| 转发 | `oxideterm-forwarding`、`oxideterm-gpui-forwards` | 规则是配置；监听器是运行时状态 |
 | 提权凭据 | 设置提权页面、终端提权提示、凭据感知存储 | 作用域和提示匹配器是配置；secret 值留在普通设置之外 |
 | 终端 modem 传输 | `oxideterm-modem-transfer`, `oxideterm-gpui-terminal` modem worker | 协议状态属于终端运行时；文件选择和进度属于 UI |
 | 图形会话 | `oxideterm-wsl-graphics`, `oxideterm-remote-desktop`, `oxideterm-gpui-remote-desktop`, 市场仓库的 `plugins/rdp`、`plugins/vnc`, 应用图形/远程桌面模块 | WSL 生命周期、远程协议 helper、viewer framebuffer 和终端缓冲区各自归属清晰 |
@@ -2716,7 +2723,7 @@ flowchart TB
 
 各列是独立投递路径的例子，不是必须经过的统一调度器。每个所有者管理自己的订阅与清理，具体消费者执行输出策略；并非每个事件都产生通知、对话记录或日志。
 
-实现参考：[runtime_entity](../../../crates/oxideterm-gpui-app/src/workspace/runtime_entity.rs), [entity](../../../crates/oxideterm-gpui-app/src/workspace/connection_monitor/entity.rs), [delivery](../../../crates/oxideterm-gpui-app/src/workspace/delivery.rs).
+实现参考：[runtime_entity](../../../crates/oxideterm-gpui-app/src/workspace/runtime_entity.rs), [entity](../../../crates/oxideterm-gpui-host-tools/src/entity.rs), [delivery](../../../crates/oxideterm-gpui-app/src/workspace/delivery.rs).
 
 ### 事件来源
 
@@ -2890,12 +2897,15 @@ flowchart TB
     Remote["ssh / sftp / forwarding<br/>connection-monitor / topology"]
     Editor["gpui-ide / gpui-editor / gpui-markdown<br/>ide-core / ide-fs / editor-*"]
     Graphics["gpui-remote-desktop / remote-desktop<br/>wsl-graphics / 市场辅助程序"]
-    AI["ai / ai-tasks / skills<br/>acp-host-tools / public-mcp"]
+    AI["gpui-ai / ai / ai-tasks / skills<br/>acp-host-tools / public-mcp"]
     Plugin["plugin-manifest / plugin-registry<br/>plugin-host-api / plugin-wasm-runtime"]
     Durable["connections / settings / secret-store<br/>cloud-sync / portable-runtime"]
     CLI["oxideterm-cli"]
 
     App --> SharedUI
+    FeatureViews["gpui-connections / gpui-settings-view / gpui-cloud-sync"]
+    App --> FeatureViews
+    FeatureViews --> Durable
     App --> TerminalUI
     TerminalUI --> Terminal
     App --> Remote
@@ -2916,15 +2926,15 @@ flowchart TB
 | BLE 终端传输 | `oxideterm-ble`、`oxideterm-terminal/src/session/ble.rs` |
 | 终端 modem 传输 | `oxideterm-modem-transfer`, 终端 modem worker 集成 |
 | SSH、节点路由、重连 | `oxideterm-ssh`, `oxideterm-topology`, `oxideterm-session-adapter` |
-| 主机工具和连接监控 | `oxideterm-connection-monitor`, 应用连接监控页面 |
-| SFTP 与传输 | `oxideterm-sftp` |
-| 保存连接 | `oxideterm-connections` |
-| 转发 | `oxideterm-forwarding`, 应用转发页面 |
+| 主机工具和连接监控 | `oxideterm-connection-monitor`, `oxideterm-gpui-host-tools` |
+| SFTP 与传输 | `oxideterm-sftp`、`oxideterm-gpui-sftp` |
+| 保存连接 | `oxideterm-connections`、`oxideterm-gpui-connections` |
+| 转发 | `oxideterm-forwarding`, `oxideterm-gpui-forwards` |
 | 图形和远程桌面会话 | `oxideterm-wsl-graphics`, `oxideterm-remote-desktop`, `oxideterm-gpui-remote-desktop`, 市场仓库的 `plugins/rdp`、`plugins/vnc`, 应用图形/远程桌面页面 |
 | IDE 和编辑器 | `oxideterm-gpui-ide`, `oxideterm-gpui-editor`, `oxideterm-ide-core`, `oxideterm-ide-fs`, `oxideterm-editor-*` |
-| 知识库工作区与 Markdown | `oxideterm-ai` RAG 领域、`oxideterm-gpui-markdown`、`oxideterm-gpui-editor`、`workspace/knowledge.rs` |
+| 知识库工作区与 Markdown | `oxideterm-ai`（知识库存储与检索）、`oxideterm-gpui-ai/src/knowledge`（工作区视图）、`oxideterm-gpui-markdown`、`oxideterm-gpui-editor` |
 | 设置和提权凭据 | `oxideterm-settings`, `oxideterm-settings-model`, `oxideterm-gpui-settings-view`, 应用凭据感知边界 |
-| AI、RAG、MCP、推理和工具策略 | `oxideterm-ai`, `oxideterm-ai-tasks`, `oxideterm-skills`, 应用 AI 侧边栏 |
+| AI、RAG、MCP、推理和工具策略 | `oxideterm-ai`, `oxideterm-ai-tasks`, `oxideterm-skills`, `oxideterm-gpui-ai` 侧栏 |
 | ACP 智能体会话和主机工具 | `oxideterm-acp-host-tools`、`workspace/acp_workspace.rs`、`workspace/acp_plugins.rs`；Codex 和 Claude Code 适配器在插件仓库中独立打包 |
 | 插件 | `oxideterm-plugin-manifest`, `oxideterm-plugin-registry`, `oxideterm-plugin-host-api`, `oxideterm-plugin-wasm-runtime`, 应用插件 Entity |
 | 云同步和便携运行时 | `oxideterm-cloud-sync`, `oxideterm-gpui-cloud-sync`, `oxideterm-portable-runtime` |

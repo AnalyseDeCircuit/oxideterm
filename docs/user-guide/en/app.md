@@ -14,6 +14,8 @@ Recommended first pass:
 4. Add one saved SSH connection.
 5. Connect to the host and verify terminal input, file browsing, Host Tools, and connection status.
 
+For the complete first login, including checking the host key and reopening the saved profile, see [Getting started](getting-started.md).
+
 ## App Layout
 
 The top bar selects the visible tab scope. The left activity bar opens connection management and global pages; the right activity bar opens OxideSens and individual Host Tools. See [Workspace Navigation](workspace.md) for filtering, shortcuts, background tasks, and quick-command groups.
@@ -24,7 +26,7 @@ Primary areas:
 - Connection pool: reusable connection/runtime state.
 - Connection monitor and Host Tools: health, reconnect status, processes, Docker, services, terminal multiplexers, packages, logs, ports, filesystems, and metrics.
 - Connection matrix: a broader connection overview.
-- File manager and SFTP: browse, preview, upload, download, and edit remote files.
+- File Manager: browse local files. Use SFTP to browse and preview remote files, upload or download them, or open them for editing.
 - Graphics/VNC: open a saved RDP/VNC profile, or open node-launched graphics when a connected SSH node provides it.
 - Plugins: install, enable, disable, and configure plugins.
 - Cloud sync: sync app state and inspect sync status.
@@ -82,7 +84,7 @@ Host Tools belong to the connected node. The local machine is also a Host Tools 
 
 ## SFTP and Remote Files
 
-Use SFTP or the file manager for remote file operations:
+Open SFTP for the remote host to:
 
 - Browse remote directories.
 - Preview files before downloading or editing.
@@ -149,6 +151,8 @@ Never paste secrets into AI prompts. Use the app's provider key and secret stora
 ### Agent Skills
 
 OxideSens can discover bounded `SKILL.md` workflows from the workspace, user data directories, and enabled native plugins. Open **Settings → OxideSens → Tools → Agent Skills** to review discovered skills, enable or disable them, and refresh the catalog. Loading a skill provides instructions only; it does not grant terminal, file, credential, or network permissions. Every resulting action still goes through the existing tool policy and approval mode. See the [Agent Skills reference](../../agent-skills.md) for discovery precedence and resource limits.
+
+A tool waiting for approval or a choice stays visible in the conversation. Respond there to continue the turn. Prompt-cache usage distinguishes the latest request from the session total; a cache hit does not authorize a tool.
 
 ## Knowledge
 

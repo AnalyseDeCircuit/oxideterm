@@ -713,7 +713,7 @@ flowchart TB
 }
 ```
 
-素材包不声明运行入口、权限或其他插件功能。已发布的 2.2.2 尚不支持此功能，需要后续包含背景素材包支持的主程序。
+素材包不声明运行入口、权限或其他插件功能。请用 `engines.oxideterm` 排除不支持素材包的 2.2.2 宿主。
 安装时，素材复制到当前设置文件旁的 `backgrounds` 目录，便携版跟随自己的配置目录。
 安装不改变浅色或深色外观当前选择的背景；同版本重装复用已有副本，新版本添加独立素材。
 卸载素材包会保留已导入的文件，用户可以在外观素材库中删除。
@@ -1700,6 +1700,19 @@ interface NativePluginDeclarativeUiControl {
 `componentVersion` 省略时默认为 `1`，但插件应明确声明它，以便将来协商组件变化。
 
 ## 宿主 API 参考
+
+只选完成任务需要的接口。只展示数量的面板，不必读取底层记录。
+
+| 宿主接口 | 权限 | 结果 |
+|---|---|---|
+| `app.getSettingsSummary` | 基础读取 | 仅返回允许公开的设置摘要。 |
+| `eventLog.getSummary` | 基础读取 | 返回事件数量，不含事件内容或来源。 |
+| `forward.getSummary` / `transfers.getSummary` | 基础读取 | 返回规则或传输状态的数量，不含网络端点、文件路径或错误详情。 |
+| `ui.notify` | `ui.write` | 显示通知，不向会话发送输入。 |
+| `terminal.writeLocal` | `terminal.write` | 将 `text` 显示在指定的 `terminalId` 中；省略时用当前终端。不发送到传输通道，也不写入会话日志。 |
+| `toolbar.reportActionState` | `ui.write` | 对指定的 `actionId` 和数字 `paneId` 报告解析后的 `stateId`。 |
+
+[宿主接口目录](../../../crates/oxideterm-plugin-host-api/src/catalog.rs)列出了每个直接调用的访问级别与所需权限。
 
 所有宿主 API 使用同一种调用结构：
 

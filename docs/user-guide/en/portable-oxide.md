@@ -16,6 +16,8 @@ Open the portable import surface, choose the `.oxide` file, and preview its cont
 
 Do not import a bundle until the preview matches what you expect.
 
+File validation alone does not decrypt the archive or tell you which records will change. Use the password-protected preview for that decision.
+
 ## Import Strategies
 
 Choose a conflict strategy:
@@ -37,7 +39,7 @@ Credential material is explicit:
 - External private key files are copied only when key embedding is enabled.
 - Saved key or certificate passphrases have a separate visible option.
 - OxideTerm-managed SSH keys can be included so managed-key connections restore to the managed key store.
-- Managed-key passphrases are excluded by default unless the export explicitly includes them.
+- Normal export starts with managed-key passphrases excluded. Portable migration preselects managed-key passphrases, embedded keys and portable secrets; review all three before exporting.
 - Portable secrets are for portable migration and similar self-contained profile moves.
 
 Use portable secrets only when the recipient machine needs encrypted secret material. Embed private key files or managed keys only when that is intentional and the bundle password is strong.

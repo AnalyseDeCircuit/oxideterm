@@ -10,13 +10,25 @@ oxideterm --profile <name> <command>
 OXIDETERM_CONFIG_DIR=<path> oxideterm <command>
 ```
 
-脚本使用 `--json` 或 `--format json`。CI 中如果警告也应该失败，使用 `doctor --strict` 或命令自己的 `--strict`。
+脚本需要 JSON 时，查看子命令 `--help` 列出的输出选项。CI 中要让警告也算失败，可用 `doctor --strict`。
 
 多数写命令共享同一组安全选项：
 
 - `--dry-run`：只显示计划，不写入。
 - `--yes`：确认真实写入。
-- `--json` 或 `--format json`：输出机器可读结果。
+- `--json`：输出机器可读结果。在 `connections export` 中，`--format` 选择的是连接数据格式（`sync` 或 `raw-safe`）。
+
+## 按任务选命令
+
+| 任务 | 命令 |
+|---|---|
+| 查找数据或诊断问题，不改配置 | `paths`、`diagnose`、`doctor`、`errors`。生成支持报告用 `report`；带 `--bundle` 时会写入文件。 |
+| 在桌面应用中打开目标 | `terminal` 打开本地终端，`ssh user@host` 建立临时 SSH 会话，`open` 接受受支持的连接 URI，`connections open` 使用保存的配置。 |
+| 查询或修改配置 | `settings`、`connections`、`forwards`、`quick-commands`、`plugins`、`secrets`。修改前先列出或查看对应记录。 |
+| 迁移或恢复数据 | 加密归档用 `oxide`，本地配置快照用 `backup`，便携密钥库用 `portable`，共享后端同步用 `cloud-sync`。 |
+| 接入其他工具 | `batch` 应用已审阅的计划；`mcp bridge` 将已授权的 stdio 客户端连到桌面应用；`completion` 生成或安装 Shell 补全。 |
+
+用 `oxideterm <命令> --help` 查看子命令，再用 `oxideterm <命令> <子命令> --help` 查看参数。并非所有写操作都需要 `--yes`：`oxide export` 会写入指定文件，`secrets set` 会直接修改受保护存储。演练时让 `--config-dir` 指向空目录，使用虚构记录，不操作系统凭据库。
 
 ## 诊断
 
@@ -36,9 +48,11 @@ oxideterm settings validate --strict
 oxideterm settings sections --json
 oxideterm settings get ai.providers --json
 oxideterm settings set terminal.fontSize 14 --dry-run
-oxideterm settings export --section appearance --json
+oxideterm settings export --section appearance > ./settings-snapshot.json
 oxideterm settings diff ./settings-snapshot.json --section appearance
 ```
+
+`settings export` 不加 `--json` 时直接输出快照。像上例那样写入文件，就可交给 `settings diff` 或 `settings import`；加 `--json` 时，快照位于结果的 `data.snapshot` 字段。
 
 `set` 和 `unset` 只修改已经存在的 JSON path。真实写入需要显式加 `--yes`。
 
@@ -134,7 +148,9 @@ CC Switch 等接受单个 MCP 服务对象的客户端可以使用：
 
 bridge 会从当前配置目录发现正在运行的回环端点。使用命名 profile 时，客户端命令也要带相同的 `--profile`；自定义配置目录则带 `--config-dir`。只有自动发现不可用时才设置 `OXIDETERM_MCP_ENDPOINT` 或 `--endpoint`，且它必须是 `http://localhost.../mcp`、`127.0.0.1` 或 `::1`。凭据只能放在外部客户端的秘密环境设置中，不要放进命令参数、日志或项目文件。
 
-## Batch Plans
+<a id="batch-plans"></a>
+
+## 批量操作计划
 
 batch plan 可以把多个变更合并成一次可审查操作：
 
@@ -145,7 +161,9 @@ oxideterm batch apply ./plan.json --yes --json
 
 当设置、连接快照和云同步配置需要一起审查时，使用批处理模式。
 
-## Shell Completion
+<a id="shell-completion"></a>
+
+## Shell 补全
 
 ```sh
 oxideterm completion zsh > ~/.zfunc/_oxideterm

@@ -2,6 +2,15 @@
 
 Use Cloud Sync to share selected configuration between devices. Use an encrypted `.oxide` export for a separate backup or a one-time move to another device.
 
+Choose the operation by what you want to recover:
+
+| Goal | Use | What happens next |
+|---|---|---|
+| Keep two devices up to date | Synchronize with the same backend, namespace and sync password | Preview conflicting edits, then apply locally and publish the merged result. |
+| Send selected connections to another machine once | Export an [encrypted bundle](portable-oxide.md) | The recipient previews and imports it; subsequent edits do not propagate. |
+| Undo a configuration change | Inspect a rollback backup or CLI backup | Restore locally. Synchronize separately if other devices should receive the restored state. |
+| Keep local history, recordings and databases | Quit the app and copy the [data directory](portable-oxide.md#data-directory-backups) | Preserve the protected credential store separately as appropriate to the installation. |
+
 ## Cloud Sync Status
 
 Open Cloud Sync to see whether sync is configured, when it last ran, and whether local or remote state needs attention. Before changing sync direction, inspect the status and any warnings in the app.

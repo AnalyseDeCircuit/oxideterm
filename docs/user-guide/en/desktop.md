@@ -6,6 +6,12 @@ Open OxideTerm and use the left activity bar for connection management and globa
 
 If the app starts with no sessions, create a local shell tab first. This verifies the terminal renderer, shell integration, input handling, and theme settings before you add remote hosts.
 
+1. Open a saved SSH connection and leave the shell running. From the same node, open SFTP and navigate to the directory you need.
+2. For a one-file inspection, use the file preview. For changes across several files, open the directory in the IDE and check the target path before saving. If the remote file has changed, resolve the conflict rather than overwriting it.
+3. Return to the terminal to run your command. Open Host Tools beside it and select **that node**, not the local machine. Closing one terminal removes its consumer; disconnect the node only when you also intend to interrupt its other consumers.
+
+For installation and the first login, see [Getting started](getting-started.md).
+
 ## Activity Bar
 
 Use the activity bars and connection entries to reach app surfaces:
@@ -162,7 +168,9 @@ Settings → Terminal also lets you choose the sequences sent by the physical Ba
 
 ### Edit before pasting
 
-1. With paste protection enabled, paste multiline text into the destination terminal to open the editor. To open it for any copied text, right-click the terminal and choose **Edit before pasting**.
+In terminal settings, **Right-Click Action** can open the menu, paste in the shell, or always paste. With either of the first two options, an application that tracks the mouse receives the click. **Shift+right-click** opens the OxideTerm menu in all three modes.
+
+1. With paste protection enabled, paste multiline text into the destination terminal to open the editor. For any copied text, use **Shift+right-click → Edit before pasting**.
 2. Edit the text in the dialog. **Enter** inserts a newline. You can also use **Undo** and **Redo**.
 3. If you copied a Markdown code block, choose **Remove code block markers** to remove its surrounding fence. This is an explicit action; ordinary paste keeps the text as copied.
 4. Click **Paste** to send the text, or press **Esc** to discard the draft. If you made no changes, OxideTerm passes the original text to the terminal's normal paste handling.
@@ -196,7 +204,7 @@ Use Host Tools for read-oriented host inspection. Keep destructive host actions 
 
 In the local File Manager, drag saved favorites to reorder them. System folders and drives stay in place. Drag the favorites sidebar's right edge to resize it, or double-click the edge to restore its default width. Your order and preferred width are saved; narrow windows temporarily reduce the sidebar to leave room for files.
 
-Use the file manager for remote browsing, uploads, downloads, previews, and basic file operations. Treat remote edits as real remote writes: keep backups for critical files, and verify paths before overwriting.
+For remote browsing, uploads, downloads, and previews, open SFTP for the intended host. Before overwriting a remote file, check its path and back up anything you need to keep.
 
 When a connection is unstable, pause large transfers and reconnect before retrying. Saved connection state and transfer state are separate; a failed transfer should not require deleting the connection.
 
@@ -302,3 +310,11 @@ For context-sensitive helpers such as privilege prompts or modem transfers, make
 ## Updates
 
 Use Settings → Help & About to check the active version and update channel. Stable and beta builds use separate update channels, so choose the channel that matches the build you installed.
+
+## Bells, history and AI feedback
+
+Choose a **Visual Bell Style** in terminal settings for programs that emit BEL. To draw attention to one saved connection, set its **Bell policy** to **Highlight tab**; choose **Silent** to suppress its bell instead. OLED bloom and CRT effects change how text is drawn. Turn those off first if the characters look distorted.
+
+Enable **Command Bar: Local Shell History** to include commands from the local Bash, Zsh, or Fish history in the command bar. The app uses the history file reported by that shell. If the shell has disabled history, it contributes no file. Inline suggestions while typing have a separate setting.
+
+When an AI tool card asks for approval or a selection, answer the card in the conversation. The prompt-cache display distinguishes the last request from session totals; a provider reporting cache usage has not granted permission to run a tool.

@@ -340,13 +340,13 @@ Implementation: [workspace](../../../crates/oxideterm-gpui-app/src/workspace.rs)
 
 ### Layer 1: GPUI Application Shell
 
-Owned mainly by `oxideterm-gpui-app`, which is both the GPUI surface layer and
+The window shell lives in `oxideterm-gpui-app`. Feature crates own their views; the workspace is
 the coordinator for long-lived application entities.
 
 Responsibilities:
 
 - Create the desktop window.
-- Render the activity bar, tabs, pane tree, dialogs, and settings surfaces.
+- Render window chrome and pane layout; mount feature-owned dialogs, sidebars and settings views.
 - Route user actions to domain crates.
 - Keep UI state separate from durable domain state while holding runtime entity
   handles, subscriptions, task delivery, and final shutdown ownership.
@@ -624,7 +624,7 @@ The left activity bar opens connection management and global pages. The right ba
 
 Knowledge is a first-class central tab with its own internal split layout. Its left navigator owns collection and document browsing; its right pane owns Markdown editing. It is not a global companion-sidebar panel and it is not implemented as a stack of Settings cards.
 
-The workspace keeps one canonical Markdown draft for Source and read-only Preview. `TextEditorView` owns source editing and undo history, `oxideterm-gpui-markdown` owns native preview rendering, and the RAG store remains the durable owner of collections, document revisions, chunks, and search indexes. The app entity coordinates selection, asynchronous loads, autosave, conflict detection, dirty-document leave guards, and background index refresh without moving persistence into the GPUI render tree.
+Source and read-only Preview share one Markdown draft. `TextEditorView` owns editing and undo; `oxideterm-gpui-markdown` renders the preview. The [knowledge workspace](../../../crates/oxideterm-gpui-ai/src/knowledge/workspace.rs) coordinates selection, asynchronous loads, autosave, conflicts and background indexing. When the user tries to leave an unsaved document, the feature handles the save or discard decision and the app handles the tab or window action. The RAG store persists collections, document revisions, chunks and search indexes.
 
 Knowledge settings remain a configuration surface for embedding and retrieval behavior. They do not own the primary document browser or editor.
 
@@ -638,7 +638,7 @@ Notifications turn asynchronous domain events into user-visible messages. They s
 %%{init: {"layout": "dagre", "flowchart": {"nodeSpacing": 45, "rankSpacing": 75, "curve": "basis"}}}%%
 flowchart TB
     Select["Collection / document selection"]
-    Owner["Knowledge workspace state<br/>document identity and load generation"]
+    Owner["gpui-ai knowledge workspace<br/>document identity and load generation"]
     Load["Load document revision from RAG store"]
     Draft["Canonical Markdown draft<br/>TextEditorView and undo history"]
     Preview["Read-only native Markdown preview"]
@@ -659,7 +659,7 @@ flowchart TB
 
 Source and Preview use the same draft. A preview switch does not create another editable copy; indexing is derived work after document storage, and an old load must not replace a newly selected document.
 
-Implementation: [knowledge](../../../crates/oxideterm-gpui-app/src/workspace/knowledge.rs), [operations](../../../crates/oxideterm-gpui-app/src/workspace/knowledge/operations.rs).
+Implementation: [knowledge](../../../crates/oxideterm-gpui-app/src/workspace/knowledge.rs), [operations](../../../crates/oxideterm-gpui-ai/src/knowledge/workspace/operations.rs).
 
 
 ---
@@ -926,7 +926,7 @@ flowchart TB
 
 The paths distinguish periodic observations from user-requested results. Sampling traffic must not delay an operation result. Hiding a page changes sampling activity; it does not transfer SSH ownership to the page.
 
-Implementation: [entity](../../../crates/oxideterm-gpui-app/src/workspace/connection_monitor/entity.rs), [lib](../../../crates/oxideterm-connection-monitor/src/lib.rs).
+Implementation: [entity](../../../crates/oxideterm-gpui-host-tools/src/entity.rs), [lib](../../../crates/oxideterm-connection-monitor/src/lib.rs).
 
 
 ---
@@ -1248,6 +1248,8 @@ Use auto-start only for forwards that should start whenever the owning connectio
 
 ## Graphics And VNC Sessions
 
+A saved desktop profile distinguishes an explicitly empty password from an absent credential. The viewer intersects the session's clipboard preferences with the provider's capabilities before passing options to the worker. The actual SSH tunnel endpoint belongs to the active route, not the saved server identity.
+
 ```mermaid
 %%{init: {"layout": "dagre", "flowchart": {"nodeSpacing": 45, "rankSpacing": 75, "curve": "basis"}}}%%
 flowchart TB
@@ -1361,6 +1363,8 @@ Implementation: [remote_desktop](../../../crates/oxideterm-gpui-app/src/workspac
 ---
 
 ## Reconnect And Recovery
+
+When several opens need the same SSH route, connection-chain and node locks serialize conflicting work. Pending reconnects wait for the active chain; a pane becoming visible is not a reason to start another transport.
 
 ```mermaid
 %%{init: {"layout": "dagre", "flowchart": {"nodeSpacing": 45, "rankSpacing": 75, "curve": "basis"}}}%%
@@ -1541,7 +1545,7 @@ flowchart TB
 
 This is the current causal sync path. Applying local values and publishing remote data are separate steps. The apply step rereads live owners so edits made during network work participate in the merge. Automatic execution requires the configured conditions and no unresolved preview conflicts; pending publication or cleanup is not reported as complete success.
 
-Implementation: [synchronize](../../../crates/oxideterm-cloud-sync/src/operation/synchronize.rs), [recovery](../../../crates/oxideterm-cloud-sync/src/sync_v3/recovery.rs), [causal](../../../crates/oxideterm-gpui-app/src/workspace/cloud_sync/causal.rs).
+Implementation: [synchronize](../../../crates/oxideterm-cloud-sync/src/operation/synchronize.rs), [recovery](../../../crates/oxideterm-cloud-sync/src/sync_v3/recovery.rs), [causal](../../../crates/oxideterm-gpui-cloud-sync/src/runtime/causal.rs).
 
 Cloud sync, backups, and `.oxide` bundles operate on persisted state, not on live terminal bytes.
 
@@ -1611,6 +1615,8 @@ Implementation: [local_file](../../../crates/oxideterm-cloud-sync/src/operation/
 ---
 
 ## OxideSens AI Architecture
+
+The [conversation view](../../../crates/oxideterm-gpui-ai/src/conversation.rs) presents tool approvals, choices and usage. The [tool loop](../../../crates/oxideterm-ai/src/tool_loop/mod.rs) coordinates provider turns and child tasks. A child asks its parent for input; tool permissions still apply when a turn resumes.
 
 ```mermaid
 %%{init: {"layout": "dagre", "flowchart": {"nodeSpacing": 45, "rankSpacing": 75, "curve": "basis"}}}%%
@@ -2042,28 +2048,29 @@ Implementation: [workspace](../../../crates/oxideterm-gpui-app/src/workspace.rs)
 | `workspace.rs` and `workspace/root/*` | Compose the top-level workspace and construct app services; long-lived node/reconnect ownership lives in `workspace/runtime_entity.rs` and domain crates | The app opens into one coherent desktop workspace without making the root view the owner of every transport |
 | `workspace/tabs/*` | Create, select, render, and reconnect tab-bound views | Terminal, SFTP, IDE, and utility pages can be opened, closed, and restored independently |
 | `workspace/pane_tree.rs` | Hold split-pane layout state | Users can arrange work without changing the underlying node or session ownership |
-| `workspace/sidebar/*` | Render activity navigation, saved sessions, AI sidebar, and sidebar state | Navigation stays stable while the active work surface changes |
-| `workspace/session_manager/*` | Manage saved connections, import/export dialogs, and connection tree/table views | Users can create, edit, import, export, and organize connection records |
-| `workspace/new_connection/*` | Own the connection form, SSH connection flow, host-key dialog, and keyboard-interactive dialog | First connection setup is a guided desktop workflow, not a CLI-only path |
-| `workspace/connection_monitor/*` | Track pool state, node health, topology, resource metrics, host tools, and lifecycle actions | Users can see connected nodes, resource status, host entities, reconnect state, and actionable failures |
-| `workspace/sftp/*` | Render remote file browsing, dialogs, previews, conflicts, and transfer actions | SFTP is a node-level file manager, not a terminal add-on |
-| `workspace/file_manager/*` | Render local file browsing, bookmarks, preview dialogs, and external open actions | Local file workflows use the same desktop patterns as remote files |
+| `workspace/sidebar/*` | Render activity navigation and mount the session and AI sidebars | Navigation stays stable while the active work surface changes |
+| `oxideterm-gpui-connections/src/session_manager` · `workspace/session_manager/*` | Catalog state, group and selection actions, import/export dialogs; the app applies changes to its stores and live sessions | Users can create, edit, import, export, and organize connection records |
+| `oxideterm-gpui-connections/src` · `workspace/new_connection/*` | Owns drafts, host-key and interactive prompts, form submission and preflight decisions; the app starts real sessions and handles window focus | First connection setup is a guided desktop workflow, not a CLI-only path |
+| `oxideterm-gpui-host-tools/src` · `workspace/connection_monitor/*` | Renders host tools and retains their state; the workspace provides the target and runtime access | Users can see connected nodes, resource status, host entities, reconnect state, and actionable failures |
+| `oxideterm-gpui-sftp/src` · `workspace/sftp/*` | Renders remote file browsing and transfers; workspace adapters resolve the live file session | SFTP is a node-level file manager, not a terminal add-on |
+| `oxideterm-gpui-file-manager/src` · `workspace/file_manager/*` | Owns local browsing and file views; the workspace connects them to windows and tabs | Local file workflows use the same desktop patterns as remote files |
 | `workspace/graphics.rs` and `workspace/graphics_vnc.rs` | Render graphics sessions, connect the VNC viewer, and route pointer/keyboard input | Visual remote workflows are separate app surfaces, not terminal scrollback |
 | `workspace/remote_desktop/*` | Resolve remote desktop targets, open viewer tabs, and bridge provider/helper lifecycle into the workspace | RDP/VNC sessions use the same tab shell while keeping protocol work outside the app crate |
 | `workspace/runtime_entity.rs` | Own long-lived node subscriptions, reconnect workers, runtime shutdown, and terminal-consumer bookkeeping | Closing a terminal consumer does not accidentally close a shared node or transport |
 | `workspace/ide.rs` and IDE crates | Open folders, route file operations, and manage editor state | Remote editing is presented as a workspace, not as raw SFTP operations |
-| `workspace/forwards/*` | Render forwarding forms, rules, state, and actions | Port forwarding is visible and recoverable from the desktop app |
-| `workspace/settings/*` | Render settings pages for terminal, appearance, AI, SFTP, IDE, privilege credentials, portable runtime, updates, and keybindings | Configuration is app-first and persists through the shared settings model |
-| `workspace/cloud_sync/*` | Render sync status, confirmations, and backup actions | Cloud sync and backup operations are explicit and reversible where possible |
+| `oxideterm-gpui-forwards/src` · `workspace/forwards/*` | Owns rule views and editing; the forwarding service manages listeners | Port forwarding is visible and recoverable from the desktop app |
+| `oxideterm-gpui-settings-view/src` · `workspace/settings/*` | Renders settings pages and holds page-local interaction state; the workspace applies settings to active services | Configuration is app-first and persists through the shared settings model |
+| `oxideterm-gpui-cloud-sync/src` · `workspace/cloud_sync/*` | Owns sync forms, selection, preview and progress; the workspace applies changes to shared stores | Cloud sync and backup operations are explicit and reversible where possible |
 | `workspace/plugin_entity.rs`, `plugin_manager.rs`, `plugin_lifecycle/*`, `plugin_ui.rs` | Coordinate plugin discovery, lifecycle, host API snapshots, settings, secrets, and UI host calls | Plugins can extend app surfaces without owning core runtime state |
-| `workspace/sidebar/ai/*` | Render AI conversations, model selection, streaming, context, Agent Skills, tool events, and transcript state | OxideSens appears as an integrated workspace assistant with explicit tool boundaries |
+| `oxideterm-gpui-ai/src` · `workspace/sidebar/ai/*` | Owns the transcript, model selection and conversation UI; workspace adapters resolve live targets and window actions | OxideSens appears as an integrated workspace assistant with explicit tool boundaries |
 | `workspace/acp_workspace.rs` and `oxideterm-acp-*` integration | Coordinate ACP agent configuration, sessions, model options, and ACP host-tool bridging beside the native provider path | ACP sessions have an independent agent/session lifecycle and are not ordinary provider streams |
 | `workspace/terminal_context_actions.rs` | Build terminal context-menu actions for selection, search, transfers, and command routing | Terminal actions share app menu style while still dispatching through explicit session APIs |
-| `workspace/quick_commands*` and `terminal_command_bar/*` | Store quick commands, command-line completion providers, and sender controls | Repeated terminal actions become reusable desktop controls |
+| `oxideterm-gpui-quick-commands/src`, `workspace/quick_commands.rs`, and `workspace/terminal_command_bar/` | The feature view manages saved commands and editing; the workspace sends commands to the target terminal and handles command-line completion | Repeated terminal actions become reusable desktop controls |
 | `workspace/terminal_command_sender.rs` and `terminal_command_bar/sender.rs` | `TerminalCommandSenderEntity` owns scheduled, repeatable, multi-target terminal input, target snapshots, cancellation, and progress | Jobs do not depend on root-view polling or create SSH connections; the Entity remains coordinated by `WorkspaceApp` and uses existing terminal targets |
-| `workspace/local_terminal_background.rs` and `workspace/root/background.rs` | Resolve app and terminal background image rendering | Background images are visual settings, not terminal buffer content |
+| `oxideterm-gpui-background`, `workspace/local_terminal_background.rs` and `workspace/root/background.rs` | The feature crate renders images and plays background media; the workspace selects and mounts the layer | Backgrounds do not change terminal buffer content |
+| `oxideterm-gpui-audit` and `workspace/audit.rs` | The audit view manages activity, session summaries and offline recording playback; the app provides the playback pane and export file picker | Replaying a recording does not reopen a live session |
 | `workspace/notification_center.rs` | Collect and render actionable app notifications | Background failures and recovery actions are visible without blocking terminal input |
-| `workspace/onboarding/*` | Render first-run setup and setup state | Users can configure the main app without starting from CLI documentation |
+| `oxideterm-gpui-onboarding/src` and `workspace/onboarding/` | The feature view presents first-run setup; the workspace applies the choices | Users can configure the main app without starting from CLI documentation |
 
 ### SSH Domain Modules
 
@@ -2114,7 +2121,7 @@ Implementation: [workspace](../../../crates/oxideterm-gpui-app/src/workspace.rs)
 | `chat.rs` and `types.rs` | Define conversation and message types | UI transcript state is based on structured records |
 | `context_window.rs` | Decide what fits into the model context | Token budgeting is centralized instead of scattered through the sidebar |
 | `context_sanitizer.rs` | Redact sensitive values before model or tool boundaries | AI context is an output boundary |
-| `key_store.rs` and `touch_id.rs` | Store and unlock provider keys | Provider credentials stay out of normal settings text |
+| `key_store.rs` | Store provider keys through the native secret store or the portable keystore | Provider credentials stay out of normal settings text |
 | `providers/*` and `streaming/*` | Discover models, select providers, build requests, and parse streaming responses | Provider differences are hidden behind shared streaming semantics |
 | `reasoning.rs` | Normalize reasoning levels against provider and known-model capabilities | Unsupported provider formats are not emitted; ACP uses session options instead |
 | `acp/*` | Own ACP transport, agent lifecycle, session configuration, and protocol state | ACP is a separate execution backend from native model providers |
@@ -2131,8 +2138,8 @@ Implementation: [workspace](../../../crates/oxideterm-gpui-app/src/workspace.rs)
 | Area | Native Owner | Notes |
 |---|---|---|
 | Settings | `oxideterm-settings`, `oxideterm-settings-model`, `oxideterm-gpui-settings-view` | Settings are loaded and saved through shared models, then rendered by GPUI pages |
-| Saved connections | `oxideterm-connections`, session manager modules | Connection records are durable; active nodes are runtime objects |
-| Forwarding | `oxideterm-forwarding`, app forwarding modules | Rules are configuration; listeners are runtime state |
+| Saved connections | `oxideterm-connections`, `oxideterm-gpui-connections` | Connection records are durable; active nodes are runtime objects |
+| Forwarding | `oxideterm-forwarding`, `oxideterm-gpui-forwards` | Rules are configuration; listeners are runtime state |
 | Privilege credentials | Settings privilege page, terminal privilege prompt, secret-aware storage | Scope and prompt matchers are configuration; secret values stay outside ordinary settings |
 | Terminal modem transfers | `oxideterm-modem-transfer`, `oxideterm-gpui-terminal` modem worker | Protocol state is terminal-runtime work; file selection and progress are UI concerns |
 | Graphics sessions | `oxideterm-wsl-graphics`, `oxideterm-remote-desktop`, `oxideterm-gpui-remote-desktop`, marketplace `plugins/rdp` and `plugins/vnc`, app graphics/remote-desktop modules | WSL lifecycle, remote protocol helpers, viewer framebuffer, and terminal buffers have separate owners |
@@ -2731,7 +2738,7 @@ flowchart TB
 
 The lanes are examples of independent delivery paths, not mandatory hops through a common dispatcher. Each owner keeps its own subscriptions and cleanup. Output policy is applied at concrete consumers; not every event becomes a toast, transcript entry or log.
 
-Implementation: [runtime_entity](../../../crates/oxideterm-gpui-app/src/workspace/runtime_entity.rs), [entity](../../../crates/oxideterm-gpui-app/src/workspace/connection_monitor/entity.rs), [delivery](../../../crates/oxideterm-gpui-app/src/workspace/delivery.rs).
+Implementation: [runtime_entity](../../../crates/oxideterm-gpui-app/src/workspace/runtime_entity.rs), [entity](../../../crates/oxideterm-gpui-host-tools/src/entity.rs), [delivery](../../../crates/oxideterm-gpui-app/src/workspace/delivery.rs).
 
 ### Event Sources
 
@@ -2907,12 +2914,15 @@ flowchart TB
     Remote["ssh / sftp / forwarding<br/>connection-monitor / topology"]
     Editor["gpui-ide / gpui-editor / gpui-markdown<br/>ide-core / ide-fs / editor-*"]
     Graphics["gpui-remote-desktop / remote-desktop<br/>wsl-graphics / marketplace helpers"]
-    AI["ai / ai-tasks / skills<br/>acp-host-tools / public-mcp"]
+    AI["gpui-ai / ai / ai-tasks / skills<br/>acp-host-tools / public-mcp"]
     Plugin["plugin-manifest / plugin-registry<br/>plugin-host-api / plugin-wasm-runtime"]
     Durable["connections / settings / secret-store<br/>cloud-sync / portable-runtime"]
     CLI["oxideterm-cli"]
 
     App --> SharedUI
+    FeatureViews["gpui-connections / gpui-settings-view / gpui-cloud-sync"]
+    App --> FeatureViews
+    FeatureViews --> Durable
     App --> TerminalUI
     TerminalUI --> Terminal
     App --> Remote
@@ -2933,15 +2943,15 @@ flowchart TB
 | BLE terminal transport | `oxideterm-ble`, `oxideterm-terminal/src/session/ble.rs` |
 | Terminal modem transfers | `oxideterm-modem-transfer`, terminal modem worker integration |
 | SSH, node routing, reconnect | `oxideterm-ssh`, `oxideterm-topology`, `oxideterm-session-adapter` |
-| Host Tools and connection monitoring | `oxideterm-connection-monitor`, app connection monitor surface |
-| SFTP and transfers | `oxideterm-sftp` |
-| Saved connections | `oxideterm-connections` |
-| Forwarding | `oxideterm-forwarding`, app forwarding surface |
+| Host Tools and connection monitoring | `oxideterm-connection-monitor`, `oxideterm-gpui-host-tools` |
+| SFTP and transfers | `oxideterm-sftp`, `oxideterm-gpui-sftp` |
+| Saved connections | `oxideterm-connections`, `oxideterm-gpui-connections` |
+| Forwarding | `oxideterm-forwarding`, `oxideterm-gpui-forwards` |
 | Graphics and remote desktop sessions | `oxideterm-wsl-graphics`, `oxideterm-remote-desktop`, `oxideterm-gpui-remote-desktop`, marketplace `plugins/rdp` and `plugins/vnc`, app graphics/remote-desktop surfaces |
 | IDE and editor | `oxideterm-gpui-ide`, `oxideterm-gpui-editor`, `oxideterm-ide-core`, `oxideterm-ide-fs`, `oxideterm-editor-*` |
-| Knowledge workspace and Markdown | `oxideterm-ai` RAG domain, `oxideterm-gpui-markdown`, `oxideterm-gpui-editor`, `workspace/knowledge.rs` |
+| Knowledge workspace and Markdown | `oxideterm-ai` (RAG storage and search), `oxideterm-gpui-ai/src/knowledge` (workspace view), `oxideterm-gpui-markdown`, `oxideterm-gpui-editor` |
 | Settings and privilege credentials | `oxideterm-settings`, `oxideterm-settings-model`, `oxideterm-gpui-settings-view`, secret-aware app boundary |
-| AI, RAG, MCP, reasoning, and tool policy | `oxideterm-ai`, `oxideterm-ai-tasks`, `oxideterm-skills`, app AI sidebar |
+| AI, RAG, MCP, reasoning, and tool policy | `oxideterm-ai`, `oxideterm-ai-tasks`, `oxideterm-skills`, `oxideterm-gpui-ai` sidebar |
 | ACP agent sessions and host tools | `oxideterm-acp-host-tools`, `workspace/acp_workspace.rs`, `workspace/acp_plugins.rs`; Codex and Claude Code adapters are independent packages in the plugin repository |
 | Plugins | `oxideterm-plugin-manifest`, `oxideterm-plugin-registry`, `oxideterm-plugin-host-api`, `oxideterm-plugin-wasm-runtime`, app plugin entities |
 | Cloud sync and portable runtime | `oxideterm-cloud-sync`, `oxideterm-gpui-cloud-sync`, `oxideterm-portable-runtime` |

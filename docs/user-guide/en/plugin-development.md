@@ -714,9 +714,9 @@ Background packs use the same installer and declare only
 }
 ```
 
-Omit `runtime`, `main`, capabilities, and other contributions. Background packs
-require a subsequent host release containing this feature; 2.2.2 does not support
-them. Installation copies media into `backgrounds` beside the active settings
+Omit `runtime`, `main`, capabilities, and other contributions. Set the host range
+in `engines.oxideterm` to exclude 2.2.2, which cannot install this pack
+type. Installation copies media into `backgrounds` beside the active settings
 file, including portable profiles, without changing either appearance's selection.
 Reinstalling a version reuses its copies. New versions add separate media; uninstalling
 keeps imported files for the user to manage in the appearance library.
@@ -1760,6 +1760,19 @@ both false. `componentVersion` defaults to `1` for compatibility, but plugins
 should declare it explicitly so future component changes can be negotiated.
 
 ## Host API Reference
+
+Choose the narrowest operation needed. A dashboard showing counts does not need the underlying records.
+
+| Host call | Grant | Effect |
+|---|---|---|
+| `app.getSettingsSummary` | Baseline read | Returns only allowlisted settings. |
+| `eventLog.getSummary` | Baseline read | Returns counts without event contents or sources. |
+| `forward.getSummary` / `transfers.getSummary` | Baseline read | Rule or transfer-state counts; no endpoints, file paths or error details. |
+| `ui.notify` | `ui.write` | Displays a notice without sending input to a session. |
+| `terminal.writeLocal` | `terminal.write` | Displays `text` in the specified `terminalId`, or the active terminal if omitted. Nothing is sent to the transport or session log. |
+| `toolbar.reportActionState` | `ui.write` | Reports the resolved `stateId` for an `actionId` and numeric `paneId`. |
+
+The [host API catalog](../../../crates/oxideterm-plugin-host-api/src/catalog.rs) lists the access tier and capability for each direct call.
 
 All host APIs use:
 

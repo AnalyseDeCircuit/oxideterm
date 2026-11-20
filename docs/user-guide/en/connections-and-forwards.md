@@ -1,10 +1,18 @@
 # Connections and Forwards
 
-Use the Sessions, Connection Pool, Connection Monitor, Host Tools, graphics/VNC, and forwarding surfaces for normal SSH work. The CLI companion is only for headless validation, export, and repeatable setup.
+Use Sessions to open a saved host, or run `oxideterm connections open <name>` to open it in the desktop app. Use Connection Monitor to inspect its live SSH node.
+
+Start with the address you want to reach, then describe the route separately. A saved profile can be edited while no session is running. An active SSH node, by contrast, may already serve several terminal, SFTP, IDE and forwarding consumers.
+
+New Connection groups the target, route and protocol settings in one editor. For standalone SFTP, check both endpoints on a server-to-server transfer. For SSH, open **SSH Algorithms** only if the server needs a different negotiation order: choose a category, reorder enabled algorithms, and leave at least one enabled. Other categories can continue to follow the preset. The connection progress display helps distinguish a route or authentication failure from a terminal that has already opened.
+
+Each jump host has its own authentication settings. Expand the hop's verification-code picker to bind its TOTP credential; editing the destination alone does not configure that hop.
 
 ## Saved Connections
 
-Saved connections hold reusable SSH profile data: name, host, user, port, group, tags, color, authentication mode, and optional post-connect command.
+Saved SSH profiles hold the host, account, port, authentication method, and your choice of name, group, tags, and color.
+
+To prepare the local machine first, for example by starting a VPN, use **Run before connect (this device only)**. OxideTerm waits for the local command to finish before starting the connection. A nonzero exit or a 60-second timeout stops the attempt. Cloud Sync and encrypted `.oxide` exports omit this command; configure it separately on each device. Use the **Run after connect** for a command that should run in the remote terminal after login instead.
 
 Create and edit saved connections from the connection manager or Sessions view. For a new host, fill in the profile, choose an authentication mode, save it, then open the connection from Sessions. If the connection fails, edit the same saved profile instead of creating duplicate entries with similar labels.
 
@@ -126,6 +134,8 @@ For RDP or VNC, open **Plugin Manager → Marketplace**, install and enable the 
 Graphics/VNC sessions are visual app surfaces backed either by a saved RDP/VNC profile or by a connected node's graphics runtime. They are useful when a remote workflow needs a desktop or graphical application rather than terminal output.
 
 The viewer state is separate from terminal scrollback. If a profile-backed viewer disconnects, reconnect its provider/helper; if a node-launched viewer disconnects, reconnect or restart it from the node context. Do not duplicate a saved SSH profile just to repair a viewer.
+
+For an RDP or VNC server that deliberately accepts an empty password, choose **Use empty password**. An empty input field while editing can mean “keep the saved password”; it is not the same choice. RDP clipboard file support also depends on the provider and session options.
 
 ## Telnet Line Endings
 

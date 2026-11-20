@@ -2,6 +2,16 @@
 
 Start troubleshooting from the desktop app. The visible app state usually tells you whether the problem is a saved profile, a live SSH node, a terminal session, Host Tools, graphics/VNC, SFTP, forwarding, sync, settings, or a plugin.
 
+Start with the symptom on the affected device. Keep the saved profile until you have distinguished a problem with the view, the route and the credentials.
+
+| Symptom | First check |
+|---|---|
+| The local terminal works but SSH waits during connection | Check which stage and which hop is waiting. Verify reachability, host key, account or second factor for that hop; do not approve an unexpected changed host key just to advance. |
+| The connection opens but a desktop feature is missing | Check the RDP/VNC provider and its capabilities as well as the saved session option. For a server intentionally using no password, select **Use empty password**. |
+| An AI task appears stuck | Look for a tool awaiting approval or a choice in the conversation. A running child task and a tool waiting for your input need different actions. |
+| A transfer reappears after restart | Check source, destination and the paused queue entry, then resume. Do not start a duplicate upload before checking the first one. |
+| OxideTerm does not open at login on macOS | Use the startup setting to open system Login Items and check the entry there. This is separate from verifying the signature of the downloaded app. |
+
 ## First Checks In The App
 
 Check the relevant surface before editing files or running repair commands:
@@ -11,7 +21,7 @@ Check the relevant surface before editing files or running repair commands:
 - Host Tools: check whether resource snapshots are fresh and whether an action failed with a visible error.
 - Terminal tab: confirm the shell accepts input, whether a command is still running, and whether a terminal helper prompt is active.
 - Graphics/VNC: confirm the saved profile/provider or owning node is live and the viewer is connected.
-- SFTP or File Manager: confirm the target node is live before retrying directory reads or transfers.
+- Missing files: check which browser is open. File Manager shows the local machine. In SFTP, check the remote endpoint and directory; for an SSH-backed session, also check that its node is connected.
 - Settings: check recent changes to terminal background images, privilege credentials, SSH, AI, cloud sync, plugin, or update settings.
 - Notifications: review recent warnings and errors.
 

@@ -18,6 +18,8 @@ Typical flow:
 
 If a plugin appears to be installed but inactive, check the plugin manager first. Do not edit plugin state files directly while the desktop app is running.
 
+**Try a provider:** install and enable the VNC provider, choose VNC in New Connection and open a test desktop. Importing a saved VNC profile on a second machine does not install that provider there. A manifest-only package executes no code; a process provider runs with the OS access of a local program.
+
 ## Updates and Host Compatibility
 
 The marketplace offers the highest plugin release compatible with both your app version and platform. A newer incompatible release shows its requirements rather than replacing the installed version. Incompatible installed plugins keep their files and settings but cannot activate. Refresh the marketplace and check the required app version when an update is missing; older clients using the frozen v1 catalog must upgrade OxideTerm to discover newer releases.
@@ -55,7 +57,7 @@ oxideterm plugins disable demo.plugin --dry-run
 oxideterm plugins settings export --json
 ```
 
-For CLI secret writes, prefer stdin or environment variables:
+Only the status command below is read-only. Set and clear change protected storage immediately. Supply values through stdin or an environment variable:
 
 ```sh
 oxideterm secrets status --scope ai --json

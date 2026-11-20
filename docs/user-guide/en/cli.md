@@ -10,13 +10,25 @@ oxideterm --profile <name> <command>
 OXIDETERM_CONFIG_DIR=<path> oxideterm <command>
 ```
 
-Use `--json` or `--format json` for scripts. Use `doctor --strict` or command-specific `--strict` flags when warnings should fail CI.
+For scripts, use the JSON output flag shown by the subcommand’s `--help`. Use `doctor --strict` when warnings should fail CI.
 
 Most write commands share the same safety flags:
 
 - `--dry-run`: show the plan without writing.
 - `--yes`: confirm a real write.
-- `--json` or `--format json`: produce machine-readable output.
+- `--json`: produce machine-readable output. For `connections export`, `--format` selects the connection data format (`sync` or `raw-safe`).
+
+## Choose a command
+
+| Task | Commands |
+|---|---|
+| Locate data and diagnose problems without changing settings | `paths`, `diagnose`, `doctor`, `errors`. Use `report` for a support report; `report --bundle` writes a file. |
+| Open something in the desktop app | `terminal` opens a local tab; `ssh user@host` opens a temporary SSH session; `open` takes a supported connection URI; `connections open` uses a saved profile. |
+| Inspect or change configuration | `settings`, `connections`, `forwards`, `quick-commands`, `plugins`, `secrets`. List or inspect before changing a record. |
+| Move or recover data | `oxide` for encrypted archives, `backup` for local configuration snapshots, `portable` for the portable keystore, `cloud-sync` for a shared backend. |
+| Integrate with another tool | `batch` applies a reviewed plan; `mcp bridge` connects an authorized stdio client to the desktop app; `completion` generates or installs shell completions. |
+
+Use `oxideterm <command> --help` for subcommands and `oxideterm <command> <subcommand> --help` for its flags. Not every write takes `--yes`: `oxide export` writes the specified output file, and `secrets set` changes protected storage directly. For a rehearsal, point `--config-dir` at an empty directory, use fictitious records and leave the system credential store alone.
 
 ## Diagnostics
 
@@ -36,9 +48,11 @@ oxideterm settings validate --strict
 oxideterm settings sections --json
 oxideterm settings get ai.providers --json
 oxideterm settings set terminal.fontSize 14 --dry-run
-oxideterm settings export --section appearance --json
+oxideterm settings export --section appearance > ./settings-snapshot.json
 oxideterm settings diff ./settings-snapshot.json --section appearance
 ```
+
+Without `--json`, `settings export` prints the snapshot itself. Redirect it to a file for `settings diff` or `settings import`. With `--json`, the snapshot is inside `data.snapshot`.
 
 `set` and `unset` update existing JSON paths only. Use `--yes` to confirm writes.
 

@@ -2,6 +2,10 @@
 
 Use the top bar to choose which tabs to see, the left sidebar to manage connections, and the right sidebar for tools alongside your work.
 
+A tab scope filters what you see. It does not choose the server that receives your keystrokes. In a mixed tab, click the intended terminal pane before typing; for Host Tools, check the target in the tool itself.
+
+The session sidebar supports multi-selection and bulk node removal. Read the confirmation against the selected nodes. Cleaning up inactive nodes preserves live subtrees; removing a saved profile in Session Manager is a different operation.
+
 ## Choose a Tab Scope
 
 The searchable selector in the center of the top bar offers:
@@ -34,7 +38,7 @@ Tab navigation, numeric shortcuts, and bulk-close actions use the visible tabs. 
 - **Right sidebar:** OxideSens and individual Host Tools open beside the current workspace. Tool groups separate frequently changing status from on-demand inspection. **More** appears only when the available height cannot fit every tool.
 - **App lock:** when configured and enabled in Settings, its shortcut sits at the bottom of the right sidebar. Locking protects the workspace while connections continue running.
 
-The top bar remains available in full screen and hides in Zen mode. On Windows and Linux, workspace actions leave room for the window controls at the right edge. Shortcut hints follow your configured bindings.
+The top bar remains available in full screen and hides in Zen mode. The placement of title-bar actions depends on the platform and window-button layout. Shortcut hints follow your configured bindings.
 
 Host Tools operate on the connection selected in their panel, and terminal actions use the active pane. In a mixed split, check the actual target rather than treating the tab scope as a command destination.
 

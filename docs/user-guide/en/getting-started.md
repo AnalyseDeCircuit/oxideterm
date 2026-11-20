@@ -10,19 +10,19 @@ connections. The desktop app is the main entry point.
 
 On macOS, packaged artifacts include a `.dmg`, an `.app.zip`, and a portable archive. Linux and Windows portable packages use platform-appropriate archive formats.
 
+To change launch at login on macOS, manage OxideTerm under Login Items in System Settings.
+
 ## First Launch
 
-Open the OxideTerm desktop app first. The left side manages connections and global pages, the top bar selects a tab scope, and the right side opens OxideSens and Host Tools. See [Workspace Navigation](workspace.md).
+Use the left activity bar for connections and global pages, the top bar to filter tabs, and the right side for OxideSens and Host Tools. See [Workspace Navigation](workspace.md).
 
-Start with a local terminal tab:
+1. Download the package for your OS and processor from the [official releases](https://github.com/AnalyseDeCircuit/oxideterm/releases). On macOS, open the DMG and drag OxideTerm to Applications; on Windows, run the installer. Linux packages include AppImage and distribution-specific packages. For an installation that carries its own data, see [portable folders](portable-oxide.md).
+2. Start OxideTerm and choose **Local Terminal** on the welcome screen. Run `echo ok` to check shell startup and keyboard input. In **Settings**, check the terminal font, theme, shell and keyboard shortcuts before opening a remote session.
+3. Choose **New Connection** and select **SSH**. Give the profile a recognizable name. Enter the server address, port and remote account supplied by your administrator. Choose the authentication method that server accepts; for a private key, select the private key file rather than its public counterpart.
+4. Choose **Save & Connect**. On the first connection, compare the host-key fingerprint with a trusted copy from the administrator before accepting it. A key passphrase unlocks your private key; a server password signs in to the remote account. Saving a connection does not by itself authorize storing either secret.
+5. At the remote prompt, run `hostname` and check the result. Close the terminal tab, open **Session Manager**, and reopen the saved profile. A new terminal can use a node that is already connected.
 
-1. Create a local terminal.
-2. Run a simple command such as `pwd` or `echo ok`.
-3. Open Settings and confirm terminal font, theme, shell, and keyboard behavior.
-4. Add one saved SSH connection.
-5. Connect to the host and confirm the terminal opens.
-
-After that, try the app surfaces you expect to use most: SFTP/file manager, connection monitor, Host Tools, port forwarding, graphics/VNC, IDE workspace, AI sidebar, and plugin manager.
+To browse files on that server, open SFTP from its session rather than creating another saved host. To stop the connection used by all its tools, disconnect the node. [Connections and forwards](connections-and-forwards.md) explains the difference.
 
 ## Check The App
 
@@ -30,7 +30,7 @@ After the first local terminal and first SSH connection work, check the app surf
 
 - Sessions: saved connections and active SSH nodes.
 - Connection monitor and Host Tools: connection health, stale nodes, reconnect state, host resources, and action results.
-- File manager or SFTP: remote directory browsing and transfers.
+- File Manager: browse local folders. Open SFTP on a connected node to browse remote files and transfer them.
 - Terminal helpers: context menu actions, command bar actions, background image settings, and X/Y/ZMODEM transfer prompts.
 - Remote desktop: install and enable the RDP or VNC plugin, then open a profile from New Connection or Session Manager. Windows WSL Graphics is a separate built-in feature.
 - IDE workspace: remote project folders and editor tabs.
@@ -40,7 +40,7 @@ After the first local terminal and first SSH connection work, check the app surf
 
 ## CLI Companion Diagnostics
 
-Use the CLI companion only when you want a read-only diagnostic view of paths and health:
+To check paths and application health without changing settings, run:
 
 ```sh
 oxideterm paths
