@@ -744,6 +744,30 @@ pub fn cursor_style_label(style: SettingsCursorStyle, i18n: &I18n) -> String {
     }
 }
 
+pub fn terminal_bell_style_options() -> &'static [oxideterm_settings::TerminalBellStyle] {
+    &[
+        oxideterm_settings::TerminalBellStyle::Off,
+        oxideterm_settings::TerminalBellStyle::SoftFlash,
+        oxideterm_settings::TerminalBellStyle::EdgeGlow,
+        oxideterm_settings::TerminalBellStyle::CursorPulse,
+        oxideterm_settings::TerminalBellStyle::HeaderStrip,
+    ]
+}
+
+pub fn terminal_bell_style_label(
+    style: oxideterm_settings::TerminalBellStyle,
+    i18n: &I18n,
+) -> String {
+    use oxideterm_settings::TerminalBellStyle;
+    match style {
+        TerminalBellStyle::Off => i18n.t("settings_view.terminal.bell_style_off"),
+        TerminalBellStyle::SoftFlash => i18n.t("settings_view.terminal.bell_style_soft_flash"),
+        TerminalBellStyle::EdgeGlow => i18n.t("settings_view.terminal.bell_style_edge_glow"),
+        TerminalBellStyle::CursorPulse => i18n.t("settings_view.terminal.bell_style_cursor_pulse"),
+        TerminalBellStyle::HeaderStrip => i18n.t("settings_view.terminal.bell_style_header_strip"),
+    }
+}
+
 pub fn background_fit_label(fit: BackgroundFit, i18n: &I18n) -> String {
     match fit {
         BackgroundFit::Cover => i18n.t("settings_view.terminal.bg_fit_cover"),

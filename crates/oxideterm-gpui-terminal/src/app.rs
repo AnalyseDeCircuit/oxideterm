@@ -175,6 +175,8 @@ pub enum TerminalPaneEvent {
     },
     // Output contents stay pane-owned; consumers only learn that the visible buffer changed.
     OutputActivity,
+    // Connection-level Bell notifications highlight background tabs when opted in.
+    BellActivity,
     // CWD payloads stay pane-owned; Workspace only recomputes the active metadata key.
     CurrentDirectoryChanged,
     // Recording contents stay pane-owned; consumers only reschedule visible elapsed chrome.
@@ -631,7 +633,8 @@ pub struct TerminalPane {
     recorder: Option<TerminalRecorder>,
     session_log: Option<TerminalSessionLog>,
     last_session_log_path: Option<std::path::PathBuf>,
-    bell_flash: bool,
+    bell_flash_started_at: Option<Instant>,
+    bell_flash_generation: u64,
     terminal_exited: bool,
     crt_power_off_started_at: Option<Instant>,
     ssh_reconnect_state: SshReconnectState,
@@ -1447,7 +1450,8 @@ impl TerminalPane {
             recorder: None,
             session_log,
             last_session_log_path: None,
-            bell_flash: false,
+            bell_flash_started_at: None,
+            bell_flash_generation: 0,
             terminal_exited: false,
             crt_power_off_started_at: None,
             ssh_reconnect_state: SshReconnectState::Idle,
@@ -2293,6 +2297,11 @@ impl TerminalPane {
         }
         if !preferences.crt_effect {
             self.crt_power_off_started_at = None;
+        }
+        if preferences.bell_style == TerminalBellStyle::Off
+            || preferences.bell_policy == TerminalBellPolicy::Silent
+        {
+            self.bell_flash_started_at = None;
         }
         self.settings = next_settings;
         self.apply_theme_transition(preferences.theme.clone(), cx);
@@ -4196,14 +4205,42 @@ impl TerminalPane {
                 TerminalEventEffect::notify()
             }
             TerminalEvent::Bell => {
-                self.bell_flash = true;
+                if self.preferences.bell_policy == TerminalBellPolicy::Silent {
+                    return TerminalEventEffect::default();
+                }
+                if self.preferences.bell_policy == TerminalBellPolicy::TabHighlight {
+                    cx.emit(TerminalPaneEvent::BellActivity);
+                }
+                let style = self.preferences.bell_style;
+                if style == TerminalBellStyle::Off {
+                    return TerminalEventEffect::default();
+                }
+                // Throttle rapid consecutive BEL spam so held keys or CLI loops do not strobe.
+                if self
+                    .bell_flash_started_at
+                    .is_some_and(|started| started.elapsed() < Duration::from_millis(160))
+                {
+                    return TerminalEventEffect::default();
+                }
+                let duration_ms = match style {
+                    TerminalBellStyle::Off => 0,
+                    TerminalBellStyle::SoftFlash => 220,
+                    TerminalBellStyle::EdgeGlow => 260,
+                    TerminalBellStyle::CursorPulse => 320,
+                    TerminalBellStyle::HeaderStrip => 280,
+                };
+                self.bell_flash_started_at = Some(Instant::now());
+                self.bell_flash_generation = self.bell_flash_generation.wrapping_add(1);
+                let generation = self.bell_flash_generation;
                 cx.spawn(async move |weak, cx| {
                     cx.background_executor()
-                        .timer(Duration::from_millis(180))
+                        .timer(Duration::from_millis(duration_ms + 24))
                         .await;
                     let _ = weak.update(cx, |this, cx| {
-                        this.bell_flash = false;
-                        cx.notify();
+                        if this.bell_flash_generation == generation {
+                            this.bell_flash_started_at = None;
+                            cx.notify();
+                        }
                     });
                 })
                 .detach();

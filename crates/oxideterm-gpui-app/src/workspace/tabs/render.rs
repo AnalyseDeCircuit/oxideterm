@@ -199,6 +199,7 @@ impl WorkspaceApp {
 
         let tabs_with_unread_terminal_output =
             self.tab_host.read(cx).unread_terminal_output_tab_ids();
+        let tabs_with_bell_highlight = self.tab_host.read(cx).bell_highlighted_tab_ids();
         let active_tab_id = self.active_tab_id(cx);
         let layout = self.tab_strip_layout(window, cx);
         self.scroll_reordering_tab(&layout, window, cx);
@@ -246,6 +247,7 @@ impl WorkspaceApp {
             visible_tab_index += 1;
             let active = Some(tab_id) == active_tab_id;
             let has_unread_terminal_output = tabs_with_unread_terminal_output.contains(&tab_id);
+            let has_bell_highlight = tabs_with_bell_highlight.contains(&tab_id);
             let drag_state = self.main_window_tabs.drag.as_ref();
             let drag_active = drag_state.is_some_and(|drag| drag.active);
             let is_being_dragged = drag_state.is_some_and(|drag| drag.tab_id == tab_id);
@@ -260,6 +262,8 @@ impl WorkspaceApp {
             let close_button_tooltip_id = tab_tooltip_id.clone();
             let tab_text_color = if active {
                 rgb(theme.text)
+            } else if has_bell_highlight {
+                rgb(theme.warning)
             } else if has_unread_terminal_output {
                 rgb(theme.success)
             } else {
@@ -371,6 +375,15 @@ impl WorkspaceApp {
                         .text_size(px(self.tokens.metrics.tab_font_size))
                         .child(tab_text),
                 )
+                .when(has_bell_highlight && !active, |tab| {
+                    tab.child(
+                        div()
+                            .size(px(6.0))
+                            .rounded_full()
+                            .bg(rgb(theme.warning))
+                            .flex_shrink_0(),
+                    )
+                })
                 .when_some(
                     reconnect_job.zip(reconnect_node_id),
                     |tab, (job, node_id)| {

@@ -1,9 +1,10 @@
 use std::{path::PathBuf, sync::Arc, time::Instant};
 
 use gpui::{
-    Anchor, AnchoredPositionMode, AnyElement, App, ClipboardItem, Context, ExternalPaths,
-    FocusHandle, Focusable, FontWeight, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    Render, SharedString, Window, anchored, deferred, div, point, prelude::*, px, rgb, rgba,
+    Anchor, AnchoredPositionMode, AnyElement, App, BoxShadow, ClipboardItem, Context,
+    ExternalPaths, FocusHandle, Focusable, FontWeight, MouseButton, MouseDownEvent, MouseMoveEvent,
+    MouseUpEvent, Render, SharedString, Window, anchored, deferred, div, point, prelude::*, px,
+    relative, rgb, rgba,
 };
 use oxideterm_gpui_ui::button::{
     ButtonRadius, ContextChipOptions, IconButtonOptions, context_chip, icon_button,
@@ -181,7 +182,7 @@ fn external_paths_for_local_terminal(paths: &[PathBuf]) -> Option<String> {
     Some(input)
 }
 
-const TERMINAL_VISUAL_BELL_OVERLAY_ALPHA: u8 = 0x66;
+const TERMINAL_VISUAL_BELL_MAX_SOFT_ALPHA: f32 = 112.0;
 
 fn terminal_pane_base_is_transparent(has_window_background: bool) -> bool {
     // Content-scoped images paint inside the pane above its fallback color.
@@ -190,8 +191,22 @@ fn terminal_pane_base_is_transparent(has_window_background: bool) -> bool {
     has_window_background
 }
 
-fn terminal_visual_bell_overlay_color(bell_background: u32) -> u32 {
-    serial_color_alpha(bell_background, TERMINAL_VISUAL_BELL_OVERLAY_ALPHA)
+fn terminal_visual_bell_duration_ms(style: TerminalBellStyle) -> u64 {
+    match style {
+        TerminalBellStyle::Off => 0,
+        TerminalBellStyle::SoftFlash => 220,
+        TerminalBellStyle::EdgeGlow => 260,
+        TerminalBellStyle::CursorPulse => 320,
+        TerminalBellStyle::HeaderStrip => 280,
+    }
+}
+
+fn terminal_visual_bell_soft_flash_color(bell_background: u32, progress: f32) -> u32 {
+    let alpha = ((progress * std::f32::consts::PI).sin().max(0.0)
+        * TERMINAL_VISUAL_BELL_MAX_SOFT_ALPHA)
+        .round()
+        .clamp(0.0, 255.0) as u8;
+    serial_color_alpha(bell_background, alpha)
 }
 
 fn terminal_cursor_shape_for_render(
@@ -319,11 +334,22 @@ impl Render for TerminalPane {
             let next = settled.saturating_add(super::THEME_DILATION_SETTLE_ROWS_PER_FRAME);
             self.theme_dilation_settle_row = (next < viewport_rows).then_some(next);
         }
+        let bell_duration_ms = terminal_visual_bell_duration_ms(self.preferences.bell_style);
+        let bell_progress = if bell_duration_ms == 0 {
+            None
+        } else {
+            self.bell_flash_started_at.and_then(|started| {
+                let elapsed_secs = now.saturating_duration_since(started).as_secs_f32();
+                let progress = elapsed_secs / (bell_duration_ms as f32 / 1000.0);
+                (progress < 1.0).then_some(progress.clamp(0.0, 1.0))
+            })
+        };
         if self.snapshot_dirty
             || self.smooth_scroll_animation.is_some()
             || fold_animating
             || theme_transition_colors.is_some()
             || self.theme_dilation_settle_row.is_some()
+            || bell_progress.is_some()
         {
             window.request_animation_frame();
         }
@@ -417,18 +443,128 @@ impl Render for TerminalPane {
         self.ensure_background_image_completion_poll(cx);
         let transparent_pane_base =
             terminal_pane_base_is_transparent(self.preferences.transparent_background);
-        let bell_flash_layer = self.bell_flash.then(|| {
-            // Keep the flash above image backgrounds but below terminal text.
-            // This preserves visual feedback without replacing the background.
-            div()
-                .absolute()
-                .top_0()
-                .right_0()
-                .bottom_0()
-                .left_0()
-                .bg(rgba(terminal_visual_bell_overlay_color(
-                    self.theme.bell_background,
-                )))
+        let bell_style = self.preferences.bell_style;
+        let bell_accent = self.theme.tokens.ui.accent;
+        let bell_flash_layer = bell_progress.and_then(|progress| {
+            (bell_style == TerminalBellStyle::SoftFlash).then(|| {
+                // Keep the soft flash above image backgrounds but below terminal text.
+                div()
+                    .absolute()
+                    .top_0()
+                    .right_0()
+                    .bottom_0()
+                    .left_0()
+                    .bg(rgba(terminal_visual_bell_soft_flash_color(
+                        self.theme.bell_background,
+                        progress,
+                    )))
+            })
+        });
+        let bell_overlay_layer = bell_progress.and_then(|progress| match bell_style {
+            TerminalBellStyle::EdgeGlow => {
+                let decay = (1.0 - progress).powi(2);
+                let border_alpha = (decay * 210.0).round().clamp(0.0, 255.0) as u8;
+                let glow_alpha = (decay * 130.0).round().clamp(0.0, 255.0) as u8;
+                Some(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .right_0()
+                        .bottom_0()
+                        .left_0()
+                        .border_2()
+                        .border_color(rgba(serial_color_alpha(bell_accent, border_alpha)))
+                        .shadow(vec![BoxShadow {
+                            color: rgba(serial_color_alpha(bell_accent, glow_alpha)).into(),
+                            offset: point(px(0.0), px(0.0)),
+                            blur_radius: px(22.0),
+                            spread_radius: px(4.0),
+                            inset: true,
+                        }]),
+                )
+            }
+            TerminalBellStyle::HeaderStrip => {
+                let ease_out = 1.0 - (1.0 - progress).powi(3);
+                let span = (0.16 + 0.84 * ease_out).min(1.0);
+                let fade = (1.0 - progress).powf(1.4);
+                let bar_alpha = (fade * 240.0).round().clamp(0.0, 255.0) as u8;
+                let glow_alpha = (fade * 150.0).round().clamp(0.0, 255.0) as u8;
+                Some(
+                    div()
+                        .absolute()
+                        .top(px(terminal_top))
+                        .left_0()
+                        .right_0()
+                        .h(px(3.0))
+                        .child(
+                            div()
+                                .absolute()
+                                .top_0()
+                                .left(relative((0.5 - span * 0.5).max(0.0)))
+                                .w(relative(span))
+                                .h(px(2.5))
+                                .rounded_full()
+                                .bg(rgba(serial_color_alpha(bell_accent, bar_alpha)))
+                                .shadow(vec![BoxShadow {
+                                    color: rgba(serial_color_alpha(bell_accent, glow_alpha)).into(),
+                                    offset: point(px(0.0), px(2.0)),
+                                    blur_radius: px(12.0),
+                                    spread_radius: px(1.0),
+                                    inset: false,
+                                }]),
+                        ),
+                )
+            }
+            _ => None,
+        });
+        let cursor_bell_layer = bell_progress.and_then(|progress| {
+            (bell_style == TerminalBellStyle::CursorPulse).then(|| {
+                let ease_out = 1.0 - (1.0 - progress).powi(3);
+                let diameter = 18.0 + 102.0 * ease_out;
+                let radius = diameter * 0.5;
+                let fade = (1.0 - progress).powi(2);
+                let ring_alpha = (fade * 230.0).round().clamp(0.0, 255.0) as u8;
+                let fill_alpha = (fade * 48.0).round().clamp(0.0, 255.0) as u8;
+                let glow_alpha = (fade * 140.0).round().clamp(0.0, 255.0) as u8;
+                let (center_x, center_y) = if snapshot.display_offset == 0
+                    && snapshot.cursor_row < viewport_rows
+                    && snapshot.cursor_shape != TerminalCursorShape::Hidden
+                {
+                    let cell_w = f32::from(self.metrics.cell_width);
+                    let line_h = self.metrics.line_height_f32();
+                    let text_left =
+                        self.timestamp_gutter_width() + self.command_mark_gutter_width();
+                    (
+                        text_left + (snapshot.cursor_col as f32 + 0.5) * cell_w
+                            - f32::from(self.horizontal_scroll_offset_px),
+                        (snapshot.cursor_row as f32 + 0.5) * line_h
+                            + f32::from(smooth_scroll_y_offset),
+                    )
+                } else if let Some(bounds) = self.bounds {
+                    (
+                        f32::from(bounds.size.width) * 0.5,
+                        f32::from(bounds.size.height) * 0.5,
+                    )
+                } else {
+                    (120.0, 80.0)
+                };
+                div()
+                    .absolute()
+                    .left(px(center_x - radius))
+                    .top(px(center_y - radius))
+                    .size(px(diameter))
+                    .rounded_full()
+                    .border_2()
+                    .border_color(rgba(serial_color_alpha(bell_accent, ring_alpha)))
+                    .bg(rgba(serial_color_alpha(bell_accent, fill_alpha)))
+                    .shadow(vec![BoxShadow {
+                        color: rgba(serial_color_alpha(bell_accent, glow_alpha)).into(),
+                        offset: point(px(0.0), px(0.0)),
+                        blur_radius: px(16.0),
+                        spread_radius: px(2.0),
+                        inset: false,
+                    }])
+            })
         });
         let command_mark_ui_visible =
             command_mark_ui_available(self.settings.command_marks_enabled, terminal_mode)
@@ -712,9 +848,11 @@ impl Render for TerminalPane {
                     .bottom(px(self.preferences.padding_vertical))
                     .overflow_hidden()
                     .child(terminal_element)
+                    .when_some(cursor_bell_layer, |inner, pulse| inner.child(pulse))
                     .children(self.render_command_gutter_controls(cx))
                     .children(self.render_fold_summaries(cx)),
             )
+            .when_some(bell_overlay_layer, |pane, overlay| pane.child(overlay))
             .when(self.is_serial_transport(), |pane| {
                 pane.child(self.render_serial_control_bar(cx))
             })

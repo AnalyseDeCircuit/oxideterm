@@ -215,6 +215,15 @@ impl SettingsControls<'_> {
                     ),
                     self.card_separator(),
                     self.select_setting_row(
+                        "settings_view.terminal.bell_style",
+                        "settings_view.terminal.bell_style_hint",
+                        SettingsSelect::TerminalBellStyle,
+                        terminal_bell_style_label(settings.terminal.bell_style, &self.i18n),
+                        self.tokens.metrics.settings_select_width,
+                        cx,
+                    ),
+                    self.card_separator(),
+                    self.select_setting_row(
                         "settings_view.terminal.encoding",
                         "settings_view.terminal.encoding_hint",
                         SettingsSelect::TerminalEncoding,

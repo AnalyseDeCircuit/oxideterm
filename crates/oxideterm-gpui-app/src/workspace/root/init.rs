@@ -1463,6 +1463,14 @@ impl WorkspaceApp {
             smooth_scroll: terminal.smooth_scroll,
             optical_bloom: terminal.optical_bloom,
             crt_effect: terminal.crt_effect,
+            bell_style: match terminal.bell_style {
+                SettingsTerminalBellStyle::Off => TerminalBellStyle::Off,
+                SettingsTerminalBellStyle::SoftFlash => TerminalBellStyle::SoftFlash,
+                SettingsTerminalBellStyle::EdgeGlow => TerminalBellStyle::EdgeGlow,
+                SettingsTerminalBellStyle::CursorPulse => TerminalBellStyle::CursorPulse,
+                SettingsTerminalBellStyle::HeaderStrip => TerminalBellStyle::HeaderStrip,
+            },
+            bell_policy: TerminalBellPolicy::Inherit,
             paste_protection: terminal.paste_protection,
             smart_copy: terminal.smart_copy,
             osc52_clipboard: terminal.osc52_clipboard,
@@ -1929,6 +1937,11 @@ pub(in crate::workspace) fn terminal_preference_overrides(
             ConnectionTerminalSessionLogPolicy::Inherit => None,
         },
         session_log_context: None,
+        bell_policy: Some(match options.bell_policy {
+            ConnectionTerminalBellPolicy::Inherit => TerminalBellPolicy::Inherit,
+            ConnectionTerminalBellPolicy::Silent => TerminalBellPolicy::Silent,
+            ConnectionTerminalBellPolicy::TabHighlight => TerminalBellPolicy::TabHighlight,
+        }),
     }
 }
 

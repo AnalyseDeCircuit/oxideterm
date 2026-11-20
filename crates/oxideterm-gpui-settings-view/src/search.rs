@@ -175,6 +175,8 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
                 "settings_view.terminal.optical_bloom_hint",
                 "settings_view.terminal.crt_effect",
                 "settings_view.terminal.crt_effect_hint",
+                "settings_view.terminal.bell_style",
+                "settings_view.terminal.bell_style_hint",
                 "settings_view.terminal.encoding",
             ],
         ),

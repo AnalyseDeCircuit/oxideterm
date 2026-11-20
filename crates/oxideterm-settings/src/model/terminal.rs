@@ -336,6 +336,17 @@ fn default_confirm_before_closing_ssh() -> bool {
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub enum TerminalBellStyle {
+    Off,
+    #[default]
+    SoftFlash,
+    EdgeGlow,
+    CursorPulse,
+    HeaderStrip,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub enum TerminalSemanticScheme {
     #[default]
     Balanced,
@@ -455,6 +466,9 @@ pub struct TerminalSettings {
     /// Retro CRT tube post-processing (curvature, scanlines, edge convergence, power-off collapse).
     #[serde(default)]
     pub crt_effect: bool,
+    /// Visual feedback style shown when a terminal rings the bell (`\x07`).
+    #[serde(default)]
+    pub bell_style: TerminalBellStyle,
     pub renderer: RendererType,
     pub terminal_encoding: TerminalEncoding,
     // Legacy terminal applications disagree on the bytes produced by these physical keys.
@@ -686,6 +700,7 @@ impl Default for TerminalSettings {
             smooth_scroll: true,
             optical_bloom: false,
             crt_effect: false,
+            bell_style: TerminalBellStyle::default(),
             renderer: RendererType::default(),
             terminal_encoding: TerminalEncoding::Utf8,
             backspace_sequence: TerminalBackspaceSequence::default(),

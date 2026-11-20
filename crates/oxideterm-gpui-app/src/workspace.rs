@@ -119,8 +119,8 @@ use gpui::{
 };
 use oxideterm_connection_monitor::{ConnectionPoolEntryState, ConnectionPoolEntrySummary};
 use oxideterm_connections::{
-    ConnectionStore, ConnectionTerminalOptions, ConnectionTerminalSessionLogPolicy,
-    MoshIpFamily as SavedMoshIpFamily, MoshPredictionMode,
+    ConnectionStore, ConnectionTerminalBellPolicy, ConnectionTerminalOptions,
+    ConnectionTerminalSessionLogPolicy, MoshIpFamily as SavedMoshIpFamily, MoshPredictionMode,
     MoshUdpPortSelection as SavedMoshUdpPortSelection, PrivilegePromptType, PrivilegeResponseMode,
     SaveConnectionRequest, SavedPrivilegeCredential, SshConfigSyncService,
 };
@@ -135,8 +135,9 @@ use oxideterm_gpui_platform::{
 use oxideterm_gpui_terminal::{
     BackgroundImageRenderCache, PrivilegePromptMatch, SemanticShellDialect,
     SharedTerminalCommandHistory, SharedTerminalSession, TerminalAutosuggestLabels,
-    TerminalBackgroundPreferences, TerminalBroadcastInputKind, TerminalCommandSelectionLabels,
-    TerminalContextAction, TerminalHighlightMatchScope, TerminalHighlightRenderMode,
+    TerminalBackgroundPreferences, TerminalBellPolicy, TerminalBellStyle,
+    TerminalBroadcastInputKind, TerminalCommandSelectionLabels, TerminalContextAction,
+    TerminalHighlightMatchScope, TerminalHighlightRenderMode,
     TerminalHighlightRule as UiHighlightRule, TerminalHighlightRuleSetOverride,
     TerminalHistoryStore, TerminalInputBroadcaster, TerminalInputInterceptor,
     TerminalInputInterceptorResult, TerminalKittyFileTransmissionLabels, TerminalModemLabels,
@@ -187,8 +188,8 @@ use oxideterm_settings::{
     AI_SIDEBAR_ABSOLUTE_MAX_WIDTH, AI_SIDEBAR_ABSOLUTE_MIN_WIDTH, BackgroundScope,
     CursorStyle as SettingsCursorStyle, FrostedGlassMode, GLOBAL_HIGHLIGHT_RULE_SET_ID,
     HighlightRule, HighlightRuleMatchScope, HighlightRuleRenderMode, Language, PersistedSettings,
-    SettingsStore, background_images_directory, default_settings_path,
-    ensure_bundled_background_image, list_background_images,
+    SettingsStore, TerminalBellStyle as SettingsTerminalBellStyle, background_images_directory,
+    default_settings_path, ensure_bundled_background_image, list_background_images,
 };
 use oxideterm_sftp::{
     BackgroundTransferState, LazyProgressStore, ProgressStore, SftpTransferManager,

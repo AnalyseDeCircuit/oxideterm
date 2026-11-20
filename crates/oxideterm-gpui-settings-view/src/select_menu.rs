@@ -1069,6 +1069,32 @@ impl SettingsSelectMenu<'_> {
                 }
                 Some(popup)
             }
+            (SettingsTab::Terminal, SettingsSelect::TerminalBellStyle) => {
+                let mut popup = select_overlay_popup(&self.tokens, width);
+                for &style in terminal_bell_style_options() {
+                    popup = popup.child(select_option_action(
+                        select_option(
+                            &self.tokens,
+                            terminal_bell_style_label(style, &self.i18n),
+                            style == settings.terminal.bell_style,
+                        ),
+                        false,
+                        false,
+                        self.action(move |this, _event, _window, cx| {
+                            this.send(SelectMenuRequest::Close, _window, cx);
+                            this.send(
+                                SelectMenuRequest::Edit(Box::new(move |settings| {
+                                    settings.terminal.bell_style = style
+                                })),
+                                _window,
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        }),
+                    ));
+                }
+                Some(popup)
+            }
             (SettingsTab::Terminal, SettingsSelect::XmodemBlockSize) => {
                 let mut popup = select_overlay_popup(&self.tokens, width);
                 for size in [

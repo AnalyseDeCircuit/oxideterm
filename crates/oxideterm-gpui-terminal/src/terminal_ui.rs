@@ -78,6 +78,24 @@ pub(crate) const TERMINAL_BIDI_ENABLED: bool = true;
 pub(crate) const TERMINAL_COMMAND_MARKS_ENABLED: bool = true;
 pub(crate) const TERMINAL_COMMAND_MARKS_SHOW_HOVER_ACTIONS: bool = true;
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum TerminalBellStyle {
+    Off,
+    #[default]
+    SoftFlash,
+    EdgeGlow,
+    CursorPulse,
+    HeaderStrip,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum TerminalBellPolicy {
+    #[default]
+    Inherit,
+    Silent,
+    TabHighlight,
+}
+
 #[derive(Clone)]
 pub struct TerminalUiPreferences {
     pub font_family: String,
@@ -95,6 +113,8 @@ pub struct TerminalUiPreferences {
     pub smooth_scroll: bool,
     pub optical_bloom: bool,
     pub crt_effect: bool,
+    pub bell_style: TerminalBellStyle,
+    pub bell_policy: TerminalBellPolicy,
     pub paste_protection: bool,
     pub smart_copy: bool,
     pub osc52_clipboard: bool,
@@ -168,6 +188,7 @@ pub struct TerminalUiPreferenceOverrides {
     pub session_log_available: Option<bool>,
     pub session_log_automatic: Option<bool>,
     pub session_log_context: Option<TerminalSessionLogContext>,
+    pub bell_policy: Option<TerminalBellPolicy>,
 }
 
 impl TerminalUiPreferenceOverrides {
@@ -204,6 +225,9 @@ impl TerminalUiPreferenceOverrides {
         {
             options.context = context.clone();
         }
+        if let Some(bell_policy) = self.bell_policy {
+            preferences.bell_policy = bell_policy;
+        }
     }
 }
 
@@ -225,6 +249,8 @@ impl Default for TerminalUiPreferences {
             smooth_scroll: true,
             optical_bloom: false,
             crt_effect: false,
+            bell_style: TerminalBellStyle::default(),
+            bell_policy: TerminalBellPolicy::default(),
             paste_protection: TERMINAL_PASTE_PROTECTION,
             smart_copy: TERMINAL_SMART_COPY,
             osc52_clipboard: TERMINAL_OSC52_CLIPBOARD,

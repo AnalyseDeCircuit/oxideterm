@@ -763,6 +763,7 @@ fn terminal_options(options: &PublicTerminalOptions) -> ConnectionTerminalOption
                 ConnectionTerminalSessionLogPolicy::Disabled
             }
         },
+        bell_policy: Default::default(),
     }
 }
 

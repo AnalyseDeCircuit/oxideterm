@@ -238,6 +238,7 @@ fn edit_properties_preserves_transport_policy_and_terminal_overrides() {
         semantic_scheme: Some("conservative".to_string()),
         highlight_rule_set: Some("network-devices".to_string()),
         session_log_policy: oxideterm_connections::ConnectionTerminalSessionLogPolicy::Manual,
+        bell_policy: oxideterm_connections::ConnectionTerminalBellPolicy::TabHighlight,
     };
 
     let mut form = form_from_saved_connection(&saved_connection, None);

@@ -209,6 +209,21 @@ impl ConnectionTerminalSessionLogPolicy {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ConnectionTerminalBellPolicy {
+    #[default]
+    Inherit,
+    Silent,
+    TabHighlight,
+}
+
+impl ConnectionTerminalBellPolicy {
+    fn is_inherit(&self) -> bool {
+        *self == Self::Inherit
+    }
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionTerminalOptions {
@@ -227,6 +242,11 @@ pub struct ConnectionTerminalOptions {
         skip_serializing_if = "ConnectionTerminalSessionLogPolicy::is_inherit"
     )]
     pub session_log_policy: ConnectionTerminalSessionLogPolicy,
+    #[serde(
+        default,
+        skip_serializing_if = "ConnectionTerminalBellPolicy::is_inherit"
+    )]
+    pub bell_policy: ConnectionTerminalBellPolicy,
 }
 
 impl ConnectionTerminalOptions {
@@ -237,6 +257,7 @@ impl ConnectionTerminalOptions {
             && self.semantic_scheme.is_none()
             && self.highlight_rule_set.is_none()
             && self.session_log_policy == ConnectionTerminalSessionLogPolicy::Inherit
+            && self.bell_policy == ConnectionTerminalBellPolicy::Inherit
     }
 }
 

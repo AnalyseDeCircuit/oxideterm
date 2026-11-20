@@ -1,6 +1,8 @@
 use super::*;
 use gpui::{App, CursorStyle, InteractiveElement};
-use oxideterm_connections::{ConnectionTerminalSessionLogPolicy, SshChannelStrategy};
+use oxideterm_connections::{
+    ConnectionTerminalBellPolicy, ConnectionTerminalSessionLogPolicy, SshChannelStrategy,
+};
 use oxideterm_remote_desktop::RemoteDesktopRdpNetworkProfile;
 use oxideterm_settings_model::parse_rgb24_hex;
 
@@ -1147,7 +1149,8 @@ impl ConnectionFormView {
                     | NewConnectionSelect::BleDisplayMode
                     | NewConnectionSelect::TerminalSemanticScheme
                     | NewConnectionSelect::TerminalHighlightRuleSet
-                    | NewConnectionSelect::TerminalSessionLogPolicy => return,
+                    | NewConnectionSelect::TerminalSessionLogPolicy
+                    | NewConnectionSelect::TerminalBellPolicy => return,
                 }
                 form.field_focused = false;
                 form.selected_field = None;
@@ -3838,6 +3841,30 @@ impl ConnectionFormView {
                 self.i18n.t("ssh.form.terminal_session_log_disabled")
             }
         };
+        let inherited_bell_style_label = match application_defaults.bell_style {
+            oxideterm_settings::TerminalBellStyle::Off => {
+                self.i18n.t("settings_view.terminal.bell_style_off")
+            }
+            oxideterm_settings::TerminalBellStyle::SoftFlash => {
+                self.i18n.t("settings_view.terminal.bell_style_soft_flash")
+            }
+            oxideterm_settings::TerminalBellStyle::EdgeGlow => {
+                self.i18n.t("settings_view.terminal.bell_style_edge_glow")
+            }
+            oxideterm_settings::TerminalBellStyle::CursorPulse => self
+                .i18n
+                .t("settings_view.terminal.bell_style_cursor_pulse"),
+            oxideterm_settings::TerminalBellStyle::HeaderStrip => self
+                .i18n
+                .t("settings_view.terminal.bell_style_header_strip"),
+        };
+        let bell_policy_label = match terminal.bell_policy {
+            ConnectionTerminalBellPolicy::Inherit => inherited_label(&inherited_bell_style_label),
+            ConnectionTerminalBellPolicy::Silent => self.i18n.t("ssh.form.terminal_bell_silent"),
+            ConnectionTerminalBellPolicy::TabHighlight => {
+                self.i18n.t("ssh.form.terminal_bell_tab_highlight")
+            }
+        };
 
         div()
             .flex()
@@ -3974,6 +4001,22 @@ impl ConnectionFormView {
                                 self.render_new_connection_select_control(
                                     NewConnectionSelect::TerminalSessionLogPolicy,
                                     session_log_policy_label,
+                                    false,
+                                    false,
+                                    cx,
+                                ),
+                            )),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(CONNECTION_TERMINAL_CONTROL_MIN_WIDTH))
+                            .child(form_field(
+                                &self.tokens,
+                                self.i18n.t("ssh.form.terminal_bell_policy"),
+                                self.render_new_connection_select_control(
+                                    NewConnectionSelect::TerminalBellPolicy,
+                                    bell_policy_label,
                                     false,
                                     false,
                                     cx,
@@ -4558,6 +4601,23 @@ impl ConnectionFormView {
         self.update_connection_form_state(cx, |state| {
             if let Some(form) = state.form.as_mut() {
                 form.terminal.session_log_policy = policy;
+                form.field_focused = false;
+                clear_connection_selection(form);
+                form.error = None;
+            }
+        });
+        self.request(ConnectionsWindowRequest::ClearComposition, None, cx);
+        cx.notify();
+    }
+
+    pub(super) fn set_new_connection_terminal_bell_policy(
+        &mut self,
+        policy: ConnectionTerminalBellPolicy,
+        cx: &mut Context<Self>,
+    ) {
+        self.update_connection_form_state(cx, |state| {
+            if let Some(form) = state.form.as_mut() {
+                form.terminal.bell_policy = policy;
                 form.field_focused = false;
                 clear_connection_selection(form);
                 form.error = None;

@@ -110,6 +110,7 @@ impl WorkspaceApp {
                 }
             }
             WorkspaceTabHostEvent::TerminalOutputUnread => cx.notify(),
+            WorkspaceTabHostEvent::TerminalBellTriggered => cx.notify(),
             WorkspaceTabHostEvent::TerminalPaneDelivery {
                 pane_id,
                 session_id,

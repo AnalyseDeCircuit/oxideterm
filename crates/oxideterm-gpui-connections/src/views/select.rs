@@ -82,6 +82,7 @@ pub fn select_anchor_id(select_id: NewConnectionSelect) -> SelectAnchorId {
         NewConnectionSelect::TerminalSessionLogPolicy => {
             SelectAnchorId::NewConnectionTerminalSessionLogPolicy
         }
+        NewConnectionSelect::TerminalBellPolicy => SelectAnchorId::NewConnectionTerminalBellPolicy,
     }
 }
 

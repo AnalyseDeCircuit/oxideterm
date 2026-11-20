@@ -292,6 +292,8 @@ impl WorkspaceApp {
                     self.schedule_privilege_prompt_sync(cx);
                 }
             }
+            // TabHost consumes BellActivity for background tab highlighting.
+            TerminalPaneEvent::BellActivity => {}
             TerminalPaneEvent::HoverTooltipChanged => {
                 let id = format!("terminal-timestamp-{}", pane_id.0);
                 let tooltip = self

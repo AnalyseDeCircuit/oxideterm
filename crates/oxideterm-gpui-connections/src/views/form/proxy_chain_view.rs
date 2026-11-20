@@ -1,5 +1,5 @@
 use super::*;
-use oxideterm_connections::ConnectionTerminalSessionLogPolicy;
+use oxideterm_connections::{ConnectionTerminalBellPolicy, ConnectionTerminalSessionLogPolicy};
 
 struct JumpServerRenderSnapshot {
     saved_connection_id: String,
@@ -804,6 +804,58 @@ impl ConnectionFormView {
                         cx.listener(move |this, _event, _window, cx| {
                             this.close_new_connection_select(cx);
                             this.set_new_connection_terminal_session_log_policy(policy, cx);
+                            cx.stop_propagation();
+                        }),
+                    ));
+                }
+            }
+            NewConnectionSelect::TerminalBellPolicy => {
+                let selected = self
+                    .connection_form_state(cx)
+                    .form
+                    .as_ref()
+                    .map(|form| form.terminal.bell_policy)
+                    .unwrap_or_default();
+                let inherited_style = match self.environment.terminal.bell_style {
+                    oxideterm_settings::TerminalBellStyle::Off => {
+                        self.i18n.t("settings_view.terminal.bell_style_off")
+                    }
+                    oxideterm_settings::TerminalBellStyle::SoftFlash => {
+                        self.i18n.t("settings_view.terminal.bell_style_soft_flash")
+                    }
+                    oxideterm_settings::TerminalBellStyle::EdgeGlow => {
+                        self.i18n.t("settings_view.terminal.bell_style_edge_glow")
+                    }
+                    oxideterm_settings::TerminalBellStyle::CursorPulse => self
+                        .i18n
+                        .t("settings_view.terminal.bell_style_cursor_pulse"),
+                    oxideterm_settings::TerminalBellStyle::HeaderStrip => self
+                        .i18n
+                        .t("settings_view.terminal.bell_style_header_strip"),
+                };
+                for (policy, label) in [
+                    (
+                        ConnectionTerminalBellPolicy::Inherit,
+                        self.i18n
+                            .t("ssh.form.terminal_use_application_default")
+                            .replace("{{value}}", &inherited_style),
+                    ),
+                    (
+                        ConnectionTerminalBellPolicy::Silent,
+                        self.i18n.t("ssh.form.terminal_bell_silent"),
+                    ),
+                    (
+                        ConnectionTerminalBellPolicy::TabHighlight,
+                        self.i18n.t("ssh.form.terminal_bell_tab_highlight"),
+                    ),
+                ] {
+                    popup = popup.child(select_option_action(
+                        select_option(&self.tokens, label, selected == policy),
+                        false,
+                        false,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.close_new_connection_select(cx);
+                            this.set_new_connection_terminal_bell_policy(policy, cx);
                             cx.stop_propagation();
                         }),
                     ));

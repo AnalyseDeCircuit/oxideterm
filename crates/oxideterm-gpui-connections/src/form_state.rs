@@ -188,6 +188,7 @@ pub enum NewConnectionSelect {
     TerminalSemanticScheme,
     TerminalHighlightRuleSet,
     TerminalSessionLogPolicy,
+    TerminalBellPolicy,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

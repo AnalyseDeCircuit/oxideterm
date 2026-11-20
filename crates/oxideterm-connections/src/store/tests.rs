@@ -740,6 +740,7 @@ mod tests {
                 semantic_scheme: Some("conservative".to_string()),
                 highlight_rule_set: Some("network-devices".to_string()),
                 session_log_policy: ConnectionTerminalSessionLogPolicy::Automatic,
+                ..ConnectionTerminalOptions::default()
             },
             ..ConnectionOptions::default()
         };
@@ -3553,6 +3554,7 @@ mod tests {
                 semantic_scheme: None,
                 highlight_rule_set: None,
                 session_log_policy: ConnectionTerminalSessionLogPolicy::Disabled,
+                ..ConnectionTerminalOptions::default()
             },
             pre_connect_command: None,
             connect_on_open: true,

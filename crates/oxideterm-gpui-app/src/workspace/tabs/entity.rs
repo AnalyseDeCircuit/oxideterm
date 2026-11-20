@@ -31,6 +31,7 @@ pub(in crate::workspace) struct WorkspaceTabHostEntity {
         HashMap<TerminalSessionId, super::super::local_sessions::LocalTerminalInstance>,
     terminal_output_highlight_enabled: bool,
     tabs_with_unread_terminal_output: HashSet<TabId>,
+    tabs_with_bell_highlight: HashSet<TabId>,
     navigation_history: Vec<TabId>,
     navigation_index: Option<usize>,
     navigation_replaying: bool,
@@ -119,6 +120,7 @@ pub(in crate::workspace) enum WorkspaceTabHostEvent {
         pane_id: PaneId,
     },
     TerminalOutputUnread,
+    TerminalBellTriggered,
     TerminalPaneDelivery {
         pane_id: PaneId,
         session_id: TerminalSessionId,
@@ -177,6 +179,7 @@ impl WorkspaceTabHostEntity {
             local_sessions: HashMap::new(),
             terminal_output_highlight_enabled: true,
             tabs_with_unread_terminal_output: HashSet::new(),
+            tabs_with_bell_highlight: HashSet::new(),
             navigation_history: Vec::new(),
             navigation_index: None,
             navigation_replaying: false,
@@ -388,6 +391,7 @@ impl WorkspaceTabHostEntity {
         let removed_was_active = Some(tab.id) == previous_active_tab_id;
         let tab = self.tabs.remove(index);
         self.tabs_with_unread_terminal_output.remove(&tab.id);
+        self.tabs_with_bell_highlight.remove(&tab.id);
         let mount_cleanup = self.close_tab_mount(tab.id);
         let next_active_tab_id = if !removed_was_active
             && previous_active_tab_id.is_some_and(|tab_id| {
@@ -706,6 +710,7 @@ impl WorkspaceTabHostEntity {
         for old in &removed {
             self.zoomed_panes.remove(old);
             self.tabs_with_unread_terminal_output.remove(old);
+            self.tabs_with_bell_highlight.remove(old);
         }
         let mut sessions = Vec::new();
         root.collect_session_ids(&mut sessions);
@@ -825,6 +830,7 @@ impl WorkspaceTabHostEntity {
         self.tabs.retain(|tab| !removed.contains(&tab.id));
         for old in &removed {
             self.tabs_with_unread_terminal_output.remove(old);
+            self.tabs_with_bell_highlight.remove(old);
             self.affinities.remove(old);
         }
         for location in self.terminal_locations.values_mut() {
@@ -1023,6 +1029,7 @@ impl WorkspaceTabHostEntity {
         self.active_tab_id = active_tab_id;
         if let Some(tab_id) = active_tab_id {
             self.tabs_with_unread_terminal_output.remove(&tab_id);
+            self.tabs_with_bell_highlight.remove(&tab_id);
         }
         self.active_tab_index_cache.set(None);
         self.observe_active_tab(active_tab_id);
@@ -1134,6 +1141,10 @@ impl WorkspaceTabHostEntity {
                 && tab_host.mark_terminal_output_unread(session_id).is_some()
             {
                 cx.emit(WorkspaceTabHostEvent::TerminalOutputUnread);
+            } else if *event == TerminalPaneEvent::BellActivity
+                && tab_host.mark_terminal_bell(session_id).is_some()
+            {
+                cx.emit(WorkspaceTabHostEvent::TerminalBellTriggered);
             }
             let Some(window_handle) = tab_host
                 .pane_window_affinities
@@ -1223,6 +1234,20 @@ impl WorkspaceTabHostEntity {
         self.terminal_locations.get(&session_id).copied()
     }
 
+    pub(in crate::workspace) fn bell_highlighted_tab_ids(&self) -> HashSet<TabId> {
+        self.tabs_with_bell_highlight.clone()
+    }
+
+    fn mark_terminal_bell(&mut self, session_id: TerminalSessionId) -> Option<TabId> {
+        let tab_id = self.terminal_locations.get(&session_id)?.tab_id;
+        if Some(tab_id) == self.active_tab_id || self.is_outside_main_window(tab_id) {
+            return None;
+        }
+        self.tabs_with_bell_highlight
+            .insert(tab_id)
+            .then_some(tab_id)
+    }
+
     pub(in crate::workspace) fn unread_terminal_output_tab_ids(&self) -> HashSet<TabId> {
         // Rendering needs stable identities after releasing the Entity borrow.
         self.tabs_with_unread_terminal_output.clone()
@@ -1274,6 +1299,7 @@ impl WorkspaceTabHostEntity {
         let previous = self.active_tab_id;
         let mount_id = self.begin_detach(tab_id)?;
         self.tabs_with_unread_terminal_output.remove(&tab_id);
+        self.tabs_with_bell_highlight.remove(&tab_id);
         let current = if previous == Some(tab_id) {
             self.nearest_main_tab(tab_index)
         } else {
