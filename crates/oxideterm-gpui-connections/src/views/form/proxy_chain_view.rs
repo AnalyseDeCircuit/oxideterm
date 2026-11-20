@@ -1268,8 +1268,11 @@ impl ConnectionFormView {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let Some((jump_form, gssapi_credentials_available, is_editing, footer_error)) =
-            self.connection_form_state(cx).form.as_ref().and_then(|form| {
+        let Some((jump_form, gssapi_credentials_available, is_editing, footer_error)) = self
+            .connection_form_state(cx)
+            .form
+            .as_ref()
+            .and_then(|form| {
                 form.jump_server_form.as_ref().map(|hop| {
                     (
                         JumpServerRenderSnapshot::from_hop(hop),

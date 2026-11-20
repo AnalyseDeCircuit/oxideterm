@@ -811,7 +811,10 @@ mod tests {
         let mut summary_cfg = cfg;
         summary_cfg.tool_choice = AiToolChoice::None;
         let summary_body = anthropic_chat_body(&summary_cfg, &messages);
-        assert_eq!(summary_body["tool_choice"], serde_json::json!({"type": "none"}));
+        assert_eq!(
+            summary_body["tool_choice"],
+            serde_json::json!({"type": "none"})
+        );
         assert_eq!(summary_body["tools"], body["tools"]);
 
         let parsed = parse_anthropic_data_line(

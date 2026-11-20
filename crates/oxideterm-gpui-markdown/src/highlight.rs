@@ -74,7 +74,10 @@ fn cache_key(
     }
 }
 
-fn highlight_cache_get(key: &HighlightCacheKey, code: &str) -> Option<(SharedString, Vec<TextRun>)> {
+fn highlight_cache_get(
+    key: &HighlightCacheKey,
+    code: &str,
+) -> Option<(SharedString, Vec<TextRun>)> {
     highlight_cache()
         .lock()
         .ok()?
@@ -354,8 +357,8 @@ mod tests {
         let sample = "if [ -f /etc/hosts ]; then echo \"ok\"; fi\n";
         let (dark_text, dark_runs) =
             highlight_code_for_theme("zsh", sample, &dark, &opts).expect("zsh alias highlighted");
-        let (light_text, light_runs) =
-            highlight_code_for_theme("zsh", sample, &light, &opts).expect("light theme highlighted");
+        let (light_text, light_runs) = highlight_code_for_theme("zsh", sample, &light, &opts)
+            .expect("light theme highlighted");
         let (cached_text, cached_runs) =
             highlight_code_for_theme("zsh", sample, &light, &opts).expect("cached light highlight");
 

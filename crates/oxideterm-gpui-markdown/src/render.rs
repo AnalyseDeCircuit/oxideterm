@@ -2309,7 +2309,8 @@ fn unordered_bullet_for_depth(depth: usize) -> &'static str {
 fn ordered_marker_width(start: u64, count: usize, opts: &MarkdownOptions) -> f32 {
     let max_number = start.saturating_add(count.saturating_sub(1) as u64);
     let digits = max_number.to_string().len() + 1; // digits + '.'
-    opts.list_indent.max(digits as f32 * opts.base_font_size * 0.62)
+    opts.list_indent
+        .max(digits as f32 * opts.base_font_size * 0.62)
 }
 
 fn render_list_marker(
@@ -3865,7 +3866,11 @@ mod tests {
         );
         let blocks = &doc.blocks;
         let gap = |i: usize| {
-            crate::style::block_spacing_before(i.checked_sub(1).map(|p| &blocks[p]), &blocks[i], &opts)
+            crate::style::block_spacing_before(
+                i.checked_sub(1).map(|p| &blocks[p]),
+                &blocks[i],
+                &opts,
+            )
         };
 
         assert_eq!(gap(0), 0.0);

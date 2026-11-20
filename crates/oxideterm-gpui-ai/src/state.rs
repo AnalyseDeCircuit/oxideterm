@@ -929,7 +929,10 @@ impl AiWorkspaceEntity {
                 (*entry_scope == scope).then_some((
                     assistant_id.as_str(),
                     replay.messages.len(),
-                    replay.user_override.as_ref().map(|(_, content)| content.len()),
+                    replay
+                        .user_override
+                        .as_ref()
+                        .map(|(_, content)| content.len()),
                 ))
             })
             .collect::<Vec<_>>();

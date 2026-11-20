@@ -242,8 +242,8 @@ impl MarkdownMeasurements {
                 let same_content_estimate = |old_idx: usize, new_idx: usize| {
                     let old_content = f32::from(previous.layout.item_sizes[old_idx].height)
                         - previous.layout.top_spacings[old_idx];
-                    let new_content = f32::from(layout.item_sizes[new_idx].height)
-                        - layout.top_spacings[new_idx];
+                    let new_content =
+                        f32::from(layout.item_sizes[new_idx].height) - layout.top_spacings[new_idx];
                     (old_content - new_content).abs() < 0.01
                 };
                 let adjusted_height = |old_idx: usize, new_idx: usize, measured: f32| {
