@@ -247,6 +247,7 @@ pub struct AiToolDefinition {
 pub enum AiToolChoice {
     #[default]
     Auto,
+    None,
     Required,
     Named(String),
 }

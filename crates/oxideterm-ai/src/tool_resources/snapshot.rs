@@ -363,7 +363,8 @@ pub fn ai_runtime_context_prompt<N: Clone + Eq + Hash>(
         stable_resources,
         live_handles: authority.current_handle_projections(session),
     };
-    serde_json::to_string_pretty(&serde_json::json!({ "runtimeContext": projection }))
+    // Compact JSON avoids spending hundreds of whitespace tokens per runtime snapshot.
+    serde_json::to_string(&serde_json::json!({ "runtimeContext": projection }))
         .map(|text| ai_model_safe_runtime_text(&text))
         .unwrap_or_else(|_| "{\"runtimeContext\":{\"protocolVersion\":2}}".to_owned())
 }

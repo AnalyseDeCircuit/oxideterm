@@ -379,7 +379,7 @@ pub mod context;
 mod config;
 pub use config::{
     AiMemoryScope, ai_model_context_window, ai_tool_use_policy_from_settings,
-    build_ai_base_system_prompt, build_ai_turn_context_prompt,
+    build_ai_base_system_prompt, build_ai_memory_context_prompt, build_ai_turn_context_prompt,
 };
 
 impl AiWorkspaceEntity {

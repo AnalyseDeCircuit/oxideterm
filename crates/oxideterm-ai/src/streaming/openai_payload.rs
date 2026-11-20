@@ -61,6 +61,12 @@ fn apply_tool_options(body: &mut serde_json::Map<String, Value>, config: &AiChat
     );
     match &config.tool_choice {
         AiToolChoice::Auto => {}
+        AiToolChoice::None => {
+            // Keep `tools` intact for prefix caching and disable invocation via tool_choice.
+            if config.provider_type != "glm" {
+                body.insert("tool_choice".to_string(), serde_json::json!("none"));
+            }
+        }
         AiToolChoice::Required => {
             // GLM documents only automatic tool selection, while Kimi K2.6
             // and K2.7 reject `required`.
@@ -694,18 +700,30 @@ mod tests {
 
     #[test]
     fn cross_turn_live_replay_preserves_full_prefix_across_providers() {
-        let deepseek_cfg = config("deepseek", "auto");
-        let openai_cfg = config("openai", "auto");
-        let gemini_cfg = config("gemini", "auto");
+        let test_tool = vec![AiToolDefinition {
+            name: "terminal_exec".to_string(),
+            description: "Run a shell command".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": { "command": { "type": "string" } },
+                "required": ["command"]
+            }),
+        }];
+        let mut deepseek_cfg = config("deepseek", "auto");
+        deepseek_cfg.tools = test_tool.clone();
+        let mut openai_cfg = config("openai", "auto");
+        openai_cfg.tools = test_tool.clone();
+        let mut gemini_cfg = config("gemini", "auto");
+        gemini_cfg.tools = test_tool;
 
-        // Simulate Turn 1 Round 1 after a tool call completed.
+        // Simulate Turn 1 Round 1 after a slash-command override + tool call completed.
         let mut turn1_history = crate::stream_state::compose_ai_provider_history(
             serde_json::from_value(serde_json::json!([
-                {"id":"u1","role":"user","content":"Inspect memory","timestamp_ms":1}
+                {"id":"u1","role":"user","content":"/explain Inspect memory","timestamp_ms":1}
             ]))
             .unwrap(),
             &deepseek_cfg,
-            None,
+            Some("Inspect memory".to_string()),
             "Static system instructions".to_string(),
             Some("Memory + RAG 1".to_string()),
         );
@@ -739,7 +757,7 @@ mod tests {
         let turn1_round1_snapshot =
             crate::sanitize_api_messages_for_provider(turn1_history.clone());
 
-        // Turn 1 finishes with a final assistant response; capture the replay slice after u1.
+        // Turn 1 finishes with a final assistant response; capture the replay slice including wire user text.
         let mut turn1_completed = turn1_history;
         turn1_completed.push(
             serde_json::from_value(serde_json::json!({
@@ -751,15 +769,23 @@ mod tests {
             }))
             .unwrap(),
         );
-        let start = turn1_completed.iter().rposition(|m| m.id == "u1").unwrap() + 1;
-        let replay = crate::sanitize_api_messages_for_provider(turn1_completed[start..].to_vec());
+        let user_index = turn1_completed.iter().rposition(|m| m.id == "u1").unwrap();
+        let mut sanitized =
+            crate::sanitize_api_messages_for_provider(turn1_completed[user_index..].to_vec());
+        let wire_user = sanitized.remove(0);
         let mut replays = std::collections::HashMap::new();
-        replays.insert("a1".to_string(), replay);
+        replays.insert(
+            "a1".to_string(),
+            crate::stream_state::AiLiveTurnReplay {
+                user_override: Some(("u1".to_string(), wire_user.content)),
+                messages: sanitized,
+            },
+        );
 
-        // Turn 2 starts from persisted messages [u1, a1, u2] and expands live replays.
+        // Turn 2 starts from persisted messages [u1(with /explain), a1, u2] and expands live replays.
         let mut turn2_history = crate::stream_state::compose_ai_provider_history(
             serde_json::from_value(serde_json::json!([
-                {"id":"u1","role":"user","content":"Inspect memory","timestamp_ms":1},
+                {"id":"u1","role":"user","content":"/explain Inspect memory","timestamp_ms":1},
                 {"id":"a1","role":"assistant","content":"Memory usage is 50%.","timestamp_ms":4},
                 {"id":"u2","role":"user","content":"Now check disk","timestamp_ms":5}
             ]))
@@ -769,10 +795,30 @@ mod tests {
             "Static system instructions".to_string(),
             Some("Memory + RAG 2".to_string()),
         );
+        // Simulate level >= 3 transcript lookup + budget-exhausted summary notice arriving mid-conversation.
+        turn2_history.push(
+            serde_json::from_value(serde_json::json!({
+                "id": "transcript-lookup-reference",
+                "role": "system",
+                "content": "Transcript ref: /tmp/t.jsonl",
+                "timestamp_ms": 0
+            }))
+            .unwrap(),
+        );
+        turn2_history.push(
+            serde_json::from_value(serde_json::json!({
+                "id": "agent-budget-exhausted",
+                "role": "system",
+                "content": "Budget exhausted. Summarize.",
+                "timestamp_ms": 0
+            }))
+            .unwrap(),
+        );
         crate::stream_state::expand_ai_live_turn_replays(&mut turn2_history, &replays);
         let turn2_wire_input = crate::sanitize_api_messages_for_provider(turn2_history.clone());
 
-        // DeepSeek & OpenAI Chat: Turn 1 Round 1's entire wire message list must be an exact prefix of Turn 2.
+        // DeepSeek & OpenAI Chat: Turn 1 Round 1's entire wire message list must be an exact prefix of Turn 2,
+        // and AiToolChoice::None must keep `tools` intact on summary rounds.
         for cfg in [&deepseek_cfg, &openai_cfg] {
             let t1_msgs = openai_chat_messages(cfg, &turn1_round1_snapshot);
             let t2_msgs = openai_chat_messages(cfg, &turn2_wire_input);
@@ -783,7 +829,28 @@ mod tests {
                 "provider {} lost exact cross-turn wire prefix",
                 cfg.provider_type
             );
+            let mut summary_cfg = cfg.clone();
+            summary_cfg.tool_choice = AiToolChoice::None;
+            let summary_body = openai_chat_body(&summary_cfg, &turn2_wire_input);
+            assert_eq!(summary_body["tool_choice"], "none");
+            assert!(!summary_body["tools"].as_array().unwrap().is_empty());
         }
+
+        // Responses & Gemini summary-only tool_choice keeps tools intact too.
+        let mut resp_summary = openai_cfg.clone();
+        resp_summary.tool_choice = AiToolChoice::None;
+        let resp_body =
+            super::super::responses_payload::responses_body(&resp_summary, &turn2_wire_input);
+        assert_eq!(resp_body["tool_choice"], "none");
+        assert!(!resp_body["tools"].as_array().unwrap().is_empty());
+        let mut gem_summary = gemini_cfg.clone();
+        gem_summary.tool_choice = AiToolChoice::None;
+        let gem_body = super::super::gemini::gemini_chat_body(&gem_summary, &turn2_wire_input);
+        assert_eq!(
+            gem_body["toolConfig"]["functionCallingConfig"]["mode"],
+            "NONE"
+        );
+        assert!(!gem_body["tools"].as_array().unwrap().is_empty());
 
         // Anthropic: user + per-turn context + runtime context remain distinct content blocks,
         // and Turn 1's entire message array is preserved verbatim as Turn 2's prefix.

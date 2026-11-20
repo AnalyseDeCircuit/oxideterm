@@ -522,6 +522,7 @@ pub fn truncate_ai_tool_result_for_model(value: &str, max_chars: usize) -> (Stri
 pub fn ai_tool_choice_label(choice: &crate::AiToolChoice) -> serde_json::Value {
     match choice {
         crate::AiToolChoice::Auto => serde_json::json!("auto"),
+        crate::AiToolChoice::None => serde_json::json!("none"),
         crate::AiToolChoice::Required => serde_json::json!("required"),
         crate::AiToolChoice::Named(name) => serde_json::json!(name),
     }

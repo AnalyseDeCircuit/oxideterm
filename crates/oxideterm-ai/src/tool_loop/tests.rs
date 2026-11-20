@@ -823,6 +823,147 @@ mod agent_loop_tests {
         host.join().unwrap();
         assert_eq!(server.await.unwrap().len(), 1);
     }
+
+    #[test]
+    fn shared_agent_prefix_enforces_role_tools_and_keeps_mailbox_out_of_system() {
+        let runtime = crate::agent::AgentRuntime::new(2);
+        let parent_scope = crate::agent::AgentScope {
+            targets: std::collections::HashSet::new(),
+            tools: ["run_command", "read_resource"]
+                .into_iter()
+                .map(str::to_owned)
+                .collect::<std::collections::BTreeSet<_>>(),
+        };
+        let parent_run = runtime.create_group(
+            "conv-cache".into(),
+            AgentModel {
+                provider_id: "provider".into(),
+                model: "gpt-6".into(),
+            },
+            parent_scope,
+            8,
+        );
+        let child_scope = crate::agent::AgentScope {
+            targets: std::collections::HashSet::new(),
+            tools: ["read_resource"]
+                .into_iter()
+                .map(str::to_owned)
+                .collect::<std::collections::BTreeSet<_>>(),
+        };
+        let child_run = runtime
+            .delegate(
+                &parent_run,
+                crate::agent::AgentText::new("Inspect config"),
+                crate::agent::AgentText::new("Read /etc/hosts"),
+                child_scope,
+                None,
+            )
+            .unwrap();
+        let resources = crate::agent::AgentResourceCoordinator::default();
+        let mut parent_exec =
+            AgentExecution::new(runtime.clone(), parent_run.clone(), resources.clone()).unwrap();
+        let child_exec =
+            AgentExecution::new(runtime.clone(), child_run.clone(), resources).unwrap();
+
+        let mut shared_tools = crate::orchestrator_tool_definitions()
+            .into_iter()
+            .filter(|tool| matches!(tool.name.as_str(), "run_command" | "read_resource"))
+            .collect::<Vec<_>>();
+        shared_tools.extend(crate::agent::agent_tool_definitions(false));
+        shared_tools.extend(crate::agent::agent_tool_definitions(true));
+
+        let parent_allowed = allowed_tool_names_for_run(&shared_tools, Some(&parent_exec));
+        assert!(parent_allowed.contains("run_command"));
+        assert!(parent_allowed.contains("delegate_task"));
+        assert!(!parent_allowed.contains("report_progress"));
+        assert!(!parent_allowed.contains("ask_parent"));
+
+        let child_allowed = allowed_tool_names_for_run(&shared_tools, Some(&child_exec));
+        assert!(child_allowed.contains("read_resource"));
+        assert!(child_allowed.contains("report_progress"));
+        assert!(child_allowed.contains("ask_parent"));
+        assert!(!child_allowed.contains("run_command"));
+        assert!(!child_allowed.contains("delegate_task"));
+        assert!(!child_allowed.contains("ask_user"));
+
+        let mut base = agent_chat_message(AiChatRole::System, "Static base rules".into());
+        base.id = "base-system".into();
+        base.timestamp_ms = 0;
+        let mut history = vec![
+            base,
+            agent_chat_message(AiChatRole::User, "Check nodes".into()),
+        ];
+        let mut config = loop_test_chat_config();
+        config.model = "gemini-4".into();
+        config.tools = shared_tools;
+
+        let initial_gemini_system =
+            crate::streaming::gemini_chat_body(&config, &history)["system_instruction"].clone();
+        let initial_openai_system =
+            crate::streaming::openai_chat_messages(&config, &history)[0].clone();
+
+        let _res1 = runtime
+            .register_resource(
+                &parent_run,
+                crate::agent::OwnedResourceKind::TerminalCommand,
+                crate::agent::AgentText::new("job-1"),
+            )
+            .unwrap();
+        runtime
+            .send(
+                &child_run,
+                &parent_run,
+                AgentMessageKind::Question,
+                crate::agent::AgentText::new("Need path?"),
+            )
+            .unwrap();
+        runtime
+            .complete(
+                &child_run,
+                crate::agent::AgentResult {
+                    summary: crate::agent::AgentText::new("Done"),
+                    evidence: Vec::new(),
+                    actions: Vec::new(),
+                    unfinished: Vec::new(),
+                    error_code: None,
+                },
+            )
+            .unwrap();
+        append_agent_mailbox(&mut history, &mut parent_exec);
+        let first_len = history.len();
+        // Repeated poll with unchanged resources must not append duplicate observations.
+        append_agent_mailbox(&mut history, &mut parent_exec);
+        assert_eq!(history.len(), first_len);
+
+        // New resource appends rather than deleting prior observations.
+        let _res2 = runtime
+            .register_resource(
+                &parent_run,
+                crate::agent::OwnedResourceKind::TerminalCommand,
+                crate::agent::AgentText::new("job-2"),
+            )
+            .unwrap();
+        append_agent_mailbox(&mut history, &mut parent_exec);
+        assert_eq!(
+            history
+                .iter()
+                .filter(|message| message.id == "agent-owned-resources")
+                .count(),
+            2
+        );
+        assert!(history.iter().any(|m| m.id == "agent-communication"));
+        assert!(history.iter().any(|m| m.id == "agent-child-result"));
+
+        let updated_gemini = crate::streaming::gemini_chat_body(&config, &history);
+        let updated_openai = crate::streaming::openai_chat_messages(&config, &history);
+        assert_eq!(updated_gemini["system_instruction"], initial_gemini_system);
+        assert_eq!(updated_openai[0], initial_openai_system);
+        assert!(
+            updated_openai[1..]
+                .iter()
+                .all(|msg| msg["role"] != "system")
+        );
+    }
 }
 
 #[cfg(test)]

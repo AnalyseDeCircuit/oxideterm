@@ -290,10 +290,15 @@ impl<Node: Clone + Eq + Hash + 'static, Terminal: Clone + 'static>
             self.begin_ai_chat_stream_with_authority(&conversation_id, &assistant_id, cx);
 
         let runtime = self.state.read(cx).task_runtime().clone();
+        let parent_base_system_prompt = history
+            .iter()
+            .find(|message| message.role == AiChatRole::System && message.id == "base-system")
+            .map(|message| message.content.clone());
         let execution = self.start_ai_agent_group(
             generation,
             &conversation_id,
             &assistant_id,
+            parent_base_system_prompt,
             &mut config,
             &services,
             &tool_session_id,
@@ -325,6 +330,7 @@ impl<Node: Clone + Eq + Hash + 'static, Terminal: Clone + 'static>
         generation: u64,
         conversation_id: &str,
         assistant_id: &str,
+        parent_base_system_prompt: Option<String>,
         config: &mut AiChatStreamConfig,
         services: &AiModelBackendServices,
         session: &ToolSessionId,
@@ -369,6 +375,7 @@ impl<Node: Clone + Eq + Hash + 'static, Terminal: Clone + 'static>
                 crate::state::agents::AiAgentGroup {
                     parent: run.clone(),
                     parent_message_id: assistant_id.to_owned(),
+                    parent_base_system_prompt,
                     config: config.clone(),
                     services: services.clone(),
                     context_window,

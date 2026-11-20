@@ -14,7 +14,17 @@ pub(crate) fn is_user_context_system_message(message: &crate::AiChatMessage) -> 
     message.role == crate::AiChatRole::System
         && matches!(
             message.id.as_str(),
-            RUNTIME_CONTEXT_MESSAGE_ID | "current-terminal-context" | "task-mode"
+            RUNTIME_CONTEXT_MESSAGE_ID
+                | "current-terminal-context"
+                | "task-mode"
+                | "memory-context"
+                | "transcript-lookup-reference"
+                | "agent-budget-exhausted"
+                | "agent-no-progress"
+                | "agent-child-role"
+                | "agent-owned-resources"
+                | "agent-communication"
+                | "agent-child-result"
         )
 }
 

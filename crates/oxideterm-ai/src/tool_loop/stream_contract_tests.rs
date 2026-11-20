@@ -196,11 +196,6 @@ mod ai_turn_order_tests {
         );
         // Round 0 must remain an exact byte-for-byte prefix of Round 1 for KV cache reuse.
         assert_eq!(&history[..round0_prefix.len()], round0_prefix.as_slice());
-        assert!(
-            history[0]
-                .content
-                .contains("A stale handle must be rediscovered")
-        );
         let runtime_message = history.last().unwrap();
         assert_eq!(runtime_message.role, AiChatRole::System);
         assert_eq!(runtime_message.content, latest);

@@ -183,13 +183,20 @@ impl AiChatDeliveryBatch {
                         });
                     }
                 }
-                AiStreamDeliveryEvent::TurnWireReplay { scope, messages } => {
+                AiStreamDeliveryEvent::TurnWireReplay {
+                    scope,
+                    user_override,
+                    messages,
+                } => {
                     if !ai.is_child_stream(generation) {
                         ai.record_live_turn_replay(
                             &conversation_id,
                             &assistant_id,
                             scope,
-                            messages,
+                            oxideterm_ai::stream_state::AiLiveTurnReplay {
+                                user_override,
+                                messages,
+                            },
                         );
                     }
                 }

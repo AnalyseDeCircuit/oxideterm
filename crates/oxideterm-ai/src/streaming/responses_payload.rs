@@ -152,6 +152,7 @@ pub(crate) fn responses_body(config: &AiChatStreamConfig, messages: &[AiChatMess
         );
         body["tool_choice"] = match &config.tool_choice {
             AiToolChoice::Auto => json!("auto"),
+            AiToolChoice::None => json!("none"),
             AiToolChoice::Required => json!("required"),
             AiToolChoice::Named(name) => json!({"type":"function", "name":name}),
         };

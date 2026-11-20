@@ -890,30 +890,30 @@ impl AiWorkspaceEntity {
         conversation_id: &str,
         assistant_id: &str,
         scope: u64,
-        messages: Vec<oxideterm_ai::AiChatMessage>,
+        replay: oxideterm_ai::stream_state::AiLiveTurnReplay,
     ) {
-        if messages.is_empty() {
+        if replay.messages.is_empty() {
             return;
         }
         self.chat_ui
             .live_turn_replays
             .entry(conversation_id.to_owned())
             .or_default()
-            .insert(assistant_id.to_owned(), (scope, messages));
+            .insert(assistant_id.to_owned(), (scope, replay));
     }
 
     pub fn live_turn_replays_for(
         &self,
         conversation_id: &str,
         scope: u64,
-    ) -> HashMap<String, Vec<oxideterm_ai::AiChatMessage>> {
+    ) -> HashMap<String, oxideterm_ai::stream_state::AiLiveTurnReplay> {
         let Some(entries) = self.chat_ui.live_turn_replays.get(conversation_id) else {
             return HashMap::new();
         };
         entries
             .iter()
-            .filter_map(|(assistant_id, (entry_scope, messages))| {
-                (*entry_scope == scope).then(|| (assistant_id.clone(), messages.clone()))
+            .filter_map(|(assistant_id, (entry_scope, replay))| {
+                (*entry_scope == scope).then(|| (assistant_id.clone(), replay.clone()))
             })
             .collect()
     }
@@ -925,8 +925,12 @@ impl AiWorkspaceEntity {
         };
         let mut keys = entries
             .iter()
-            .filter_map(|(assistant_id, (entry_scope, messages))| {
-                (*entry_scope == scope).then_some((assistant_id.as_str(), messages.len()))
+            .filter_map(|(assistant_id, (entry_scope, replay))| {
+                (*entry_scope == scope).then_some((
+                    assistant_id.as_str(),
+                    replay.messages.len(),
+                    replay.user_override.as_ref().map(|(_, content)| content.len()),
+                ))
             })
             .collect::<Vec<_>>();
         keys.sort_unstable();
@@ -4265,7 +4269,7 @@ pub struct AiChatWorkspaceState {
     input_usage: RefCell<HashMap<String, oxideterm_ai::AiInputUsage>>,
     pub prompt_cache_stats: HashMap<String, AiPromptCacheStats>,
     pub live_turn_replays:
-        HashMap<String, HashMap<String, (u64, Vec<oxideterm_ai::AiChatMessage>)>>,
+        HashMap<String, HashMap<String, (u64, oxideterm_ai::stream_state::AiLiveTurnReplay)>>,
     pub conversation_list_open: bool,
     pub show_archived_conversations: bool,
     pub menu_open: bool,

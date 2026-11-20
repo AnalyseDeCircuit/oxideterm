@@ -194,14 +194,11 @@ async fn execute_ai_chat_tool_loop(
     }
     crate::scope_responses_history(history, &config);
     if config.prompt_cache_key.is_none() && !conversation_id.is_empty() {
-        let child_scope = execution
-            .as_ref()
-            .filter(|agent| agent.is_child())
-            .map(|agent| agent.run.agent_id.to_string())
-            .unwrap_or_default();
+        // Share the conversation+model cache key between parent and same-model
+        // children so delegated runs route to the parent's already-warm shard
+        // and hit the shared tools + static system prefix on round 0.
         config.prompt_cache_key = Some(prompt_cache_key_for_session(
             &conversation_id,
-            &child_scope,
             &config.model,
         ));
     }
@@ -226,11 +223,7 @@ async fn execute_ai_chat_tool_loop(
         .unwrap_or_else(|| ai_response_reserve(model_runtime.context_window));
     let transcript_lookup_prompt = ai_find_prompt_transcript_lookup_reference(&history)
         .map(ai_build_transcript_lookup_prompt_reference);
-    let available_tool_names = config
-        .tools
-        .iter()
-        .map(|tool| tool.name.clone())
-        .collect::<std::collections::HashSet<_>>();
+    let available_tool_names = allowed_tool_names_for_run(&config.tools, execution.as_ref());
     let mut transcript_lookup_prompt_injected = history
         .iter()
         .any(|message| message.id == "transcript-lookup-reference");
@@ -312,7 +305,9 @@ async fn execute_ai_chat_tool_loop(
                             }
                         }
                     }
-                    history.push(agent_chat_message(AiChatRole::System, "The shared tool-round budget is exhausted. Summarize completed work and remaining limitations from the available evidence. Do not call tools or claim that cancelled remote operations were terminated.".into()));
+                    let mut notice = agent_chat_message(AiChatRole::System, "The shared tool-round budget is exhausted. Summarize completed work and remaining limitations from the available evidence. Do not call tools or claim that cancelled remote operations were terminated.".into());
+                    notice.id = "agent-budget-exhausted".into();
+                    history.push(notice);
                     summary_only = true;
                 }
                 Err(_) => {
@@ -357,9 +352,10 @@ async fn execute_ai_chat_tool_loop(
         };
         replace_ai_runtime_context_message(&mut history, runtime_context);
         let mut provider_config = config.clone();
-        if summary_only {
-            provider_config.tools.clear();
-            provider_config.tool_choice = crate::AiToolChoice::Auto;
+        if summary_only && !provider_config.tools.is_empty() {
+            // Preserve `tools` verbatim so the summary round reuses the heated
+            // prefix cache instead of invalidating every preceding turn.
+            provider_config.tool_choice = crate::AiToolChoice::None;
         }
         if ai_input_needs_compaction(
             ai_request_token_breakdown(history, &provider_config, response_reserve).prompt_tokens(),
@@ -769,6 +765,11 @@ async fn execute_ai_chat_tool_loop(
             false,
         );
 
+        if summary_only {
+            // Never dispatch tool calls on a summary-only round even if a gateway
+            // ignores `tool_choice: "none"`.
+            completed_calls.clear();
+        }
         if completed_calls.is_empty() {
             if !config.tool_policy.enabled
                 && hard_deny_retry_count < AI_MAX_HARD_DENY_RETRIES
@@ -907,24 +908,33 @@ async fn execute_ai_chat_tool_loop(
             }
             history.push(final_message);
             if execution.as_ref().is_none_or(|agent| !agent.is_child())
-                && let Some(start) = history
+                && let Some(user_index) = history
                     .iter()
                     .rposition(|message| message.id == task_user_id)
-                    .map(|index| index + 1)
-                && start < history.len()
+                && user_index + 1 < history.len()
             {
-                let replay = crate::sanitize_api_messages_for_provider(history[start..].to_vec());
-                let _ = send_ai_loop_delivery(
-                    execution.is_some(),
-                    &ui_tx,
-                    generation,
-                    &conversation_id,
-                    &assistant_id,
-                    AiStreamDeliveryEvent::TurnWireReplay {
-                        scope: config.input_scope(),
-                        messages: replay,
-                    },
-                );
+                let mut sanitized =
+                    crate::sanitize_api_messages_for_provider(history[user_index..].to_vec());
+                let user_override = if !sanitized.is_empty() {
+                    let wire_user = sanitized.remove(0);
+                    (!wire_user.content.is_empty()).then_some((task_user_id.clone(), wire_user.content))
+                } else {
+                    None
+                };
+                if !sanitized.is_empty() {
+                    let _ = send_ai_loop_delivery(
+                        execution.is_some(),
+                        &ui_tx,
+                        generation,
+                        &conversation_id,
+                        &assistant_id,
+                        AiStreamDeliveryEvent::TurnWireReplay {
+                            scope: config.input_scope(),
+                            user_override,
+                            messages: sanitized,
+                        },
+                    );
+                }
             }
             if let Some(agent) = execution.as_mut() {
                 if !summary_only {
@@ -1463,10 +1473,39 @@ async fn request_ai_runtime_context(
     receiver.await.ok().flatten()
 }
 
-fn prompt_cache_key_for_session(conversation_id: &str, child_scope: &str, model: &str) -> String {
+fn allowed_tool_names_for_run(
+    tools: &[crate::AiToolDefinition],
+    execution: Option<&AgentExecution>,
+) -> std::collections::HashSet<String> {
+    // Parent and child runs intentionally share the exact same wire tool schema
+    // so delegated children hit the parent's provider KV cache on round 0;
+    // enforce role and delegation boundaries here before argument parsing.
+    if let Some(agent) = execution.filter(|agent| agent.is_child()) {
+        let scope_tools = agent
+            .runtime
+            .snapshot(&agent.run)
+            .map(|snapshot| snapshot.scope.tools)
+            .unwrap_or_default();
+        return tools
+            .iter()
+            .filter(|tool| {
+                scope_tools.contains(&tool.name)
+                    || crate::agent::CHILD_AGENT_TOOLS.contains(&tool.name.as_str())
+            })
+            .map(|tool| tool.name.clone())
+            .collect();
+    }
+    tools
+        .iter()
+        .filter(|tool| !crate::agent::CHILD_AGENT_TOOLS.contains(&tool.name.as_str()))
+        .map(|tool| tool.name.clone())
+        .collect()
+}
+
+fn prompt_cache_key_for_session(conversation_id: &str, model: &str) -> String {
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
-    for part in [conversation_id, child_scope, model] {
+    for part in [conversation_id, model] {
         hasher.update(part.as_bytes());
         hasher.update([0]);
     }
@@ -1500,10 +1539,19 @@ fn runtime_context_semantically_equal(left: &str, right: &str) -> bool {
         return left_json == right_json;
     };
     // Ignore per-round snapshotId and observedAtMs so unchanged handles do not
-    // append redundant observations or bust the tool-loop KV cache.
-    ["protocolVersion", "registryEpoch", "stableResources", "liveHandles"]
+    // append redundant observations or bust the tool-loop KV cache. Also ignore
+    // registryEpoch when neither snapshot holds live handles.
+    let same_core = ["protocolVersion", "stableResources", "liveHandles"]
         .into_iter()
-        .all(|field| left_ctx.get(field) == right_ctx.get(field))
+        .all(|field| left_ctx.get(field) == right_ctx.get(field));
+    if !same_core {
+        return false;
+    }
+    let has_live_handles = right_ctx
+        .get("liveHandles")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|handles| !handles.is_empty());
+    !has_live_handles || left_ctx.get("registryEpoch") == right_ctx.get("registryEpoch")
 }
 
 fn replace_ai_runtime_context_message(history: &mut Vec<AiChatMessage>, content: String) {

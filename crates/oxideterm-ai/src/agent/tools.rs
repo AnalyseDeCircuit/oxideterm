@@ -20,13 +20,13 @@ pub fn agent_tool_definitions(child: bool) -> Vec<AiToolDefinition> {
         vec![
             (
                 "report_progress",
-                "Post one brief progress line (does not wake parent).",
+                "Child agent only: post one brief progress line (does not wake parent).",
                 json!({"text": {"type":"string","maxLength":512}}),
                 vec!["text"],
             ),
             (
                 "ask_parent",
-                "Ask parent a question and wait for reply (never contact user or other agents).",
+                "Child agent only: ask parent a question and wait for reply (never contact user or other agents).",
                 json!({"question":{"type":"string","maxLength":8192}}),
                 vec!["question"],
             ),

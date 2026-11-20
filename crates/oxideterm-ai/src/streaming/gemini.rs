@@ -283,6 +283,9 @@ fn gemini_tool_definitions(tools: &[AiToolDefinition]) -> Vec<Value> {
 fn gemini_tool_config(tool_choice: &AiToolChoice) -> Option<Value> {
     match tool_choice {
         AiToolChoice::Auto => None,
+        AiToolChoice::None => Some(serde_json::json!({
+            "functionCallingConfig": { "mode": "NONE" },
+        })),
         AiToolChoice::Required => Some(serde_json::json!({
             "functionCallingConfig": { "mode": "ANY" },
         })),

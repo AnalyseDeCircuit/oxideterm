@@ -214,6 +214,12 @@ impl AiWorkspaceEntity {
                             && !tool_policy.disabled_tools.contains(&tool.name)
                     }),
             );
+            if agents_enabled {
+                // Include child coordination schemas in the shared tool array so
+                // parent and delegated children emit byte-identical tool prefixes
+                // for provider KV caching; parent calls are rejected by the loop.
+                tools.extend(oxideterm_ai::agent::agent_tool_definitions(true));
+            }
         }
         let image_input =
             Self::ai_image_model_setting(settings, &provider.id, &provider.base_url, &model);
@@ -391,32 +397,36 @@ pub fn build_ai_base_system_prompt(
     prompt
 }
 
-/// Builds volatile per-turn context (scope-filtered user memories, RAG hits,
-/// live workspace/terminal state, intent hints, and explicit slash/skill prompts)
-/// kept outside the static system prefix so prompt caching stays intact across
-/// turns, tab switches, and working-directory changes.
-pub fn build_ai_turn_context_prompt(
+/// Builds scope-filtered user memory context kept in its own trailing context
+/// message so unchanged memories are deduplicated across turns without
+/// invalidating the static system prefix.
+pub fn build_ai_memory_context_prompt(
     settings: &AiSettings,
     config: &AiChatStreamConfig,
-    rag_system_prompt: Option<&str>,
-    task_system_prompt: Option<&str>,
 ) -> Option<String> {
-    let mut parts = Vec::new();
     let context_window =
         ai_model_context_window(settings, config.provider_id.as_deref(), &config.model);
     let memory_character_budget = context_window
         .saturating_mul(4)
         .saturating_div(8)
         .clamp(4_000, 32_000);
-    if let Some(memory) = config.memory_context.as_deref().and_then(|memory| {
+    config.memory_context.as_deref().and_then(|memory| {
         oxideterm_ai::ai_user_memory_prompt_with_limit(
             memory,
             settings.memory.enabled,
             memory_character_budget,
         )
-    }) {
-        parts.push(memory);
-    }
+    })
+}
+
+/// Builds volatile per-turn context (RAG hits, live workspace/terminal state,
+/// intent hints, and explicit slash/skill prompts) kept outside the static
+/// system prefix so prompt caching stays intact across turns.
+pub fn build_ai_turn_context_prompt(
+    rag_system_prompt: Option<&str>,
+    task_system_prompt: Option<&str>,
+) -> Option<String> {
+    let mut parts = Vec::new();
     if let Some(rag_system_prompt) = rag_system_prompt
         .map(str::trim)
         .filter(|prompt| !prompt.is_empty())

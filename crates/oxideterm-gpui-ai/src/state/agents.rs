@@ -25,6 +25,7 @@ impl gpui::Global for AiAgentServices {}
 pub struct AiAgentGroup {
     pub parent: AgentRunRef,
     pub parent_message_id: String,
+    pub parent_base_system_prompt: Option<String>,
     pub config: AiChatStreamConfig,
     pub services: AiModelBackendServices,
     pub context_window: usize,

@@ -13,7 +13,10 @@ use crate::{
     stream::ai_context_token_breakdown_from_prompt,
 };
 
-use super::{ai_model_context_window, build_ai_base_system_prompt, build_ai_turn_context_prompt};
+use super::{
+    ai_model_context_window, build_ai_base_system_prompt, build_ai_memory_context_prompt,
+    build_ai_turn_context_prompt,
+};
 
 pub struct AiConversationPrompt<'a> {
     pub state: &'a AiWorkspaceEntity,
@@ -22,28 +25,39 @@ pub struct AiConversationPrompt<'a> {
     pub skills: &'a AiSkillCatalog,
 }
 
+fn append_deduped_context_message(history: &mut Vec<AiChatMessage>, id: &str, content: String) {
+    if history
+        .iter()
+        .rev()
+        .find(|message| message.id == id)
+        .is_some_and(|previous| previous.content == content)
+    {
+        return;
+    }
+    history.push(AiChatMessage {
+        id: id.to_owned(),
+        role: AiChatRole::System,
+        content,
+        timestamp_ms: 0,
+        model: None,
+        context: None,
+        thinking_content: None,
+        is_streaming: false,
+        metadata: None,
+        tool_call_id: None,
+        tool_calls: Vec::new(),
+        turn: None,
+        transcript_ref: None,
+        summary_ref: None,
+        branches: None,
+        suggestions: Vec::new(),
+    });
+}
+
 fn insert_transcript_lookup(history: &mut Vec<AiChatMessage>, content: String) {
-    history.insert(
-        1,
-        AiChatMessage {
-            id: "transcript-lookup-reference".to_owned(),
-            role: AiChatRole::System,
-            content,
-            timestamp_ms: 0,
-            model: None,
-            context: None,
-            thinking_content: None,
-            is_streaming: false,
-            metadata: None,
-            tool_call_id: None,
-            tool_calls: Vec::new(),
-            turn: None,
-            transcript_ref: None,
-            summary_ref: None,
-            branches: None,
-            suggestions: Vec::new(),
-        },
-    );
+    // Append as a trailing user-context message instead of inserting at index 1
+    // so crossing budget level 3 never mutates the cached static system prefix.
+    append_deduped_context_message(history, "transcript-lookup-reference", content);
 }
 
 impl AiConversationPrompt<'_> {
@@ -212,12 +226,9 @@ impl AiConversationPrompt<'_> {
             config,
             self.skills.prompt(self.settings.skills.enabled),
         );
-        let turn_context_prompt = build_ai_turn_context_prompt(
-            self.settings,
-            config,
-            rag_system_prompt,
-            task_system_prompt,
-        );
+        let turn_context_prompt =
+            build_ai_turn_context_prompt(rag_system_prompt, task_system_prompt);
+        let memory_context_prompt = build_ai_memory_context_prompt(self.settings, config);
         let mut history = compose_ai_provider_history(
             history,
             config,
@@ -230,6 +241,11 @@ impl AiConversationPrompt<'_> {
                 .state
                 .live_turn_replays_for(conversation_id, config.input_scope());
             expand_ai_live_turn_replays(&mut history, &replays);
+        }
+        if let Some(memory) = memory_context_prompt {
+            // Skip re-injecting identical memory context when an earlier replayed
+            // turn already carries the exact same snapshot.
+            append_deduped_context_message(&mut history, "memory-context", memory);
         }
         history
     }

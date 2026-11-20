@@ -126,6 +126,7 @@ pub enum AiStreamDeliveryEvent {
     /// never persisted) so subsequent turns reuse the provider prefix cache across tool rounds.
     TurnWireReplay {
         scope: u64,
+        user_override: Option<(String, String)>,
         messages: Vec<crate::AiChatMessage>,
     },
     ToolExecutionRequested {

@@ -1033,6 +1033,10 @@ impl AiAssistantSidebarView {
                 .into_any_element();
         }
         let status = ai_tool_group_status(&calls);
+        let waiting_for_input = matches!(
+            status,
+            AiToolStatus::PendingApproval | AiToolStatus::PendingSelection
+        );
         let needs_attention = calls.iter().any(|call| {
             matches!(
                 ai_tool_status_from_value(call.get("status")),
@@ -1044,8 +1048,8 @@ impl AiAssistantSidebarView {
         });
         // The transcript height cache tracks disclosures under this owner prefix.
         let key = format!("{}-thinking-activity-{start}", message.id);
-        let default_expanded = active || self.frame().thinking_default_expanded;
-        let expanded = needs_attention
+        let default_expanded = needs_attention || active || self.frame().thinking_default_expanded;
+        let expanded = waiting_for_input
             || self
                 .state
                 .read(cx)
@@ -1103,7 +1107,7 @@ impl AiAssistantSidebarView {
         .on_mouse_down(
             MouseButton::Left,
             cx.listener(move |this, _, _, cx| {
-                if !needs_attention {
+                if !waiting_for_input {
                     this.toggle_ai_thinking_with_motion(toggle_key.clone(), default_expanded, cx);
                 }
                 cx.stop_propagation();

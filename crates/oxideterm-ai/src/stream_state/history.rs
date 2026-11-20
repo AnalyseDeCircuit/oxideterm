@@ -296,7 +296,16 @@ pub fn is_ai_compaction_anchor(message: &AiChatMessage) -> bool {
 pub fn is_runtime_ai_history_system(message: &AiChatMessage) -> bool {
     matches!(
         message.id.as_str(),
-        "task-mode" | "current-terminal-context"
+        "task-mode"
+            | "current-terminal-context"
+            | "memory-context"
+            | "transcript-lookup-reference"
+            | "agent-budget-exhausted"
+            | "agent-no-progress"
+            | "agent-child-role"
+            | "agent-owned-resources"
+            | "agent-communication"
+            | "agent-child-result"
     )
 }
 
@@ -810,26 +819,46 @@ When helpful (skip for trivial replies), append 2-4 concise (<60 chars) next ste
 <suggestions><s icon="IconName">Text</s></suggestions>
 Icons: Zap, Search, Bug, FileCode, Terminal, Settings, RefreshCw, Shield, BarChart, GitBranch, Download, Upload, Eye, Wrench, Play"#;
 
+/// Sanitized wire replay of one completed assistant turn kept strictly in process memory.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AiLiveTurnReplay {
+    /// Wire-sent `(user_message_id, sanitized_content)` when `request_content` differed
+    /// from the persisted user message (e.g. stripped slash command or `@participant`).
+    pub user_override: Option<(String, String)>,
+    pub messages: Vec<AiChatMessage>,
+}
+
 /// Replaces completed assistant placeholders with their exact in-memory wire turn
-/// segments (per-turn context, tool calls, tool results, final assistant text) so
-/// subsequent user turns keep an identical prefix for provider KV/prompt caching.
+/// segments (per-turn context, tool calls, tool results, final assistant text) and
+/// restores any wire-overridden user text so subsequent turns keep an identical prefix
+/// for provider KV/prompt caching.
 pub fn expand_ai_live_turn_replays(
     history: &mut Vec<AiChatMessage>,
-    replays: &std::collections::HashMap<String, Vec<AiChatMessage>>,
+    replays: &std::collections::HashMap<String, AiLiveTurnReplay>,
 ) {
     if replays.is_empty() {
         return;
     }
+    let user_overrides: std::collections::HashMap<&str, &str> = replays
+        .values()
+        .filter_map(|replay| replay.user_override.as_ref())
+        .map(|(id, content)| (id.as_str(), content.as_str()))
+        .collect();
     let mut expanded_ids = std::collections::HashSet::new();
     let mut expanded = Vec::with_capacity(history.len());
-    for message in history.drain(..) {
+    for mut message in history.drain(..) {
+        if message.role == AiChatRole::User
+            && let Some(wire_content) = user_overrides.get(message.id.as_str())
+        {
+            message.content = (*wire_content).to_owned();
+        }
         if message.role == AiChatRole::Assistant
             && !message.is_streaming
-            && let Some(segment) = replays.get(&message.id)
-            && !segment.is_empty()
+            && let Some(replay) = replays.get(&message.id)
+            && !replay.messages.is_empty()
         {
             expanded_ids.insert(message.id);
-            expanded.extend(segment.iter().cloned());
+            expanded.extend(replay.messages.iter().cloned());
         } else if message.role == AiChatRole::User
             && let Some(assistant_id) = message.id.strip_prefix("tool-images-")
         {
@@ -838,11 +867,11 @@ pub fn expand_ai_live_turn_replays(
                 // already contains the original tool messages for that turn.
                 continue;
             }
-            if let Some(segment) = replays.get(assistant_id)
-                && !segment.is_empty()
+            if let Some(replay) = replays.get(assistant_id)
+                && !replay.messages.is_empty()
             {
                 expanded_ids.insert(assistant_id.to_owned());
-                expanded.extend(segment.iter().cloned());
+                expanded.extend(replay.messages.iter().cloned());
                 continue;
             }
             expanded.push(message);

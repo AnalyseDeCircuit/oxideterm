@@ -182,11 +182,20 @@ fn apply_anthropic_tool_options(
         "tools".to_string(),
         serde_json::json!(anthropic_tool_definitions(&config.tools)),
     );
+    if matches!(config.tool_choice, AiToolChoice::None) {
+        // Anthropic permits `tool_choice: {"type": "none"}` even when extended
+        // thinking is enabled, preserving the cached `tools` prefix on summary rounds.
+        body.insert(
+            "tool_choice".to_string(),
+            serde_json::json!({ "type": "none" }),
+        );
+        return;
+    }
     if thinking_enabled {
         return;
     }
     match &config.tool_choice {
-        AiToolChoice::Auto => {}
+        AiToolChoice::Auto | AiToolChoice::None => {}
         AiToolChoice::Required => {
             body.insert(
                 "tool_choice".to_string(),
@@ -798,6 +807,12 @@ mod tests {
             serde_json::json!({"type":"ephemeral"})
         );
         assert!(body["messages"][0]["content"].is_string());
+
+        let mut summary_cfg = cfg;
+        summary_cfg.tool_choice = AiToolChoice::None;
+        let summary_body = anthropic_chat_body(&summary_cfg, &messages);
+        assert_eq!(summary_body["tool_choice"], serde_json::json!({"type": "none"}));
+        assert_eq!(summary_body["tools"], body["tools"]);
 
         let parsed = parse_anthropic_data_line(
             r#"data: {"type":"message_start","message":{"usage":{"input_tokens":200,"cache_read_input_tokens":1800,"cache_creation_input_tokens":400,"output_tokens":1}}}"#,
