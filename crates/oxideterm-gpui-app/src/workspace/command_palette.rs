@@ -3652,6 +3652,7 @@ mod panel_layout_tests {
         let settings_path = default_settings_path();
         assert!(settings_path.starts_with(PathBuf::from(fixture_dir)));
         let mut settings = SettingsStore::load_from_path(&settings_path).unwrap();
+        settings.settings_mut().onboarding_completed = true;
         settings.settings_mut().ssh_config.auto_load_hosts = false;
         settings.save().unwrap();
         cx.executor().allow_parking();
