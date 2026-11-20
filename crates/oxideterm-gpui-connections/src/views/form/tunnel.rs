@@ -241,16 +241,15 @@ impl ConnectionFormView {
                     .child(error),
             );
         }
-        let width = composer::CONNECTION_STUDIO_WIDTH;
-        let height = f32::from(window.viewport_size().height)
+        let modal_max_height = f32::from(window.viewport_size().height)
             * self.tokens.metrics.modal_max_viewport_height_ratio;
+        let (modal_width, studio_height) =
+            composer::studio_modal_size(window, true, modal_max_height);
         let dialog = modal_container(&self.tokens)
             .bg(rgb(self.tokens.ui.bg_elevated))
             .overflow_hidden()
-            .w(px(width.min(
-                (f32::from(window.viewport_size().width) - 64.0).max(0.0),
-            )))
-            .h(px(height))
+            .w(px(modal_width))
+            .h(px(studio_height))
             .flex()
             .flex_col()
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())

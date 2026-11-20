@@ -2,8 +2,6 @@ use super::*;
 use crate::form_state::ConnectionFormDrawer;
 use oxideterm_gpui_ui::scroll::{Scrollbar, ScrollbarAxis};
 
-const STANDALONE_SFTP_VIEWPORT_MARGIN: f32 = 32.0;
-
 struct StandaloneSftpModalSnapshot {
     profile_id: Option<String>,
     transfer_mode: StandaloneSftpTransferMode,
@@ -170,16 +168,10 @@ impl ConnectionFormView {
         }
         let theme = self.tokens.ui;
         let remote_to_remote = form.transfer_mode == StandaloneSftpTransferMode::RemoteRemote;
-        let desired_width = if shows_transport_selector {
-            composer::CONNECTION_STUDIO_WIDTH
-        } else {
-            composer::CONNECTION_STUDIO_EDIT_WIDTH
-        };
-        let modal_width = desired_width
-            .min(f32::from(window.viewport_size().width) - STANDALONE_SFTP_VIEWPORT_MARGIN);
         let modal_max_height = f32::from(window.viewport_size().height)
             * self.tokens.metrics.modal_max_viewport_height_ratio;
-        let studio_min_height = composer::CONNECTION_STUDIO_MIN_HEIGHT.min(modal_max_height);
+        let (modal_width, studio_height) =
+            composer::studio_modal_size(window, shows_transport_selector, modal_max_height);
         let form_visible = self.connection_form_state(cx).presence.phase()
             == oxideterm_gpui_ui::motion::ExitPhase::Visible;
         let primary_complete = !form.host.trim().is_empty()
@@ -312,7 +304,7 @@ impl ConnectionFormView {
                 .bg(rgb(theme.bg_elevated))
                 .overflow_hidden()
                 .w(px(modal_width))
-                .min_h(px(studio_min_height))
+                .h(px(studio_height))
                 .max_h(px(modal_max_height))
                 .flex()
                 .flex_col()

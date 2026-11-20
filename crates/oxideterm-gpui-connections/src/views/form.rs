@@ -86,7 +86,6 @@ pub use tunnel::{TunnelFormEnvironment, TunnelKind};
 
 use field_controls::{AuthSelectorContext, serial_port_display_label};
 
-const TAURI_EDIT_MODAL_WIDTH: f32 = 500.0; // Tauri sm:max-w-[500px]
 const TAURI_EDIT_COLOR_FALLBACK: u32 = 0x22d3ee;
 const TAURI_EDIT_COLOR_FALLBACK_TEXT: &str = "#22d3ee";
 const TAURI_PROMPT_FEEDBACK_ALPHA: u32 = 0x1a;
@@ -104,7 +103,6 @@ const TAURI_PROXY_CHAIN_CONNECTOR_THICKNESS: f32 = 2.0; // Tauri w-0.5 h-0.5
 const TAURI_PROXY_CHAIN_CARD_PADDING: f32 = 12.0; // Tauri p-3
 const TAURI_SERIAL_GRID_GAP: f32 = 16.0; // Tauri serial grid gap-4
 pub const NEW_CONNECTION_TYPE_SIDEBAR_WIDTH: f32 = 160.0;
-const NEW_CONNECTION_MODAL_VIEWPORT_MARGIN: f32 = 32.0;
 const CONNECTION_TERMINAL_CONTROL_MIN_WIDTH: f32 = 220.0;
 const CONNECTION_ICON_COLOR_CONTROL_MIN_WIDTH: f32 = 220.0;
 

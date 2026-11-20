@@ -421,22 +421,21 @@ impl ConnectionFormView {
             form.pending || !(has_required_fields || (ble_mode && form.ble_profile_id.is_some()));
         let form_visible = self.connection_form_state(cx).presence.phase()
             == oxideterm_gpui_ui::motion::ExitPhase::Visible;
-        let base_modal_width = if drill_down_mode || prompt_mode {
-            520.0
-        } else if shows_transport_selector {
-            composer::CONNECTION_STUDIO_WIDTH
+        let (modal_width, studio_fixed_height) = if drill_down_mode || prompt_mode {
+            let max_w = (f32::from(window.viewport_size().width)
+                - composer::CONNECTION_STUDIO_VIEWPORT_MARGIN * 2.0)
+                .max(0.0);
+            (520.0_f32.min(max_w), None)
         } else {
-            composer::CONNECTION_STUDIO_EDIT_WIDTH
+            let (width, height) =
+                composer::studio_modal_size(window, shows_transport_selector, modal_max_height);
+            (width, Some(height))
         };
-        let studio_min_height = if drill_down_mode || prompt_mode {
-            None
-        } else {
-            Some(composer::CONNECTION_STUDIO_MIN_HEIGHT.min(modal_max_height))
-        };
-        let available_modal_width = (f32::from(window.viewport_size().width)
-            - NEW_CONNECTION_MODAL_VIEWPORT_MARGIN * 2.0)
-            .max(TAURI_EDIT_MODAL_WIDTH);
-        let modal_width = base_modal_width.min(available_modal_width);
+        let modal_max_height = modal_max_height.min(
+            (f32::from(window.viewport_size().height)
+                - composer::CONNECTION_STUDIO_VIEWPORT_MARGIN * 2.0)
+                .max(0.0),
+        );
         let light = theme.is_light();
         let modal_shadows = vec![
             gpui::BoxShadow {
@@ -764,7 +763,7 @@ impl ConnectionFormView {
                 .shadow(modal_shadows)
                 .overflow_hidden()
                 .w(px(modal_width))
-                .when_some(studio_min_height, |container, min_h| container.min_h(px(min_h)))
+                .when_some(studio_fixed_height, |container, h| container.h(px(h)))
                 .max_h(px(modal_max_height))
                 .flex()
                 .flex_col()

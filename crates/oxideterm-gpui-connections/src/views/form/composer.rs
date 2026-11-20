@@ -10,7 +10,36 @@ use oxideterm_settings_model::parse_rgb24_hex;
 pub(super) const CONNECTION_STUDIO_WIDTH: f32 = 880.0;
 pub(super) const CONNECTION_STUDIO_EDIT_WIDTH: f32 = 760.0;
 pub(super) const CONNECTION_STUDIO_MIN_HEIGHT: f32 = 560.0;
+pub(super) const CONNECTION_STUDIO_MAX_HEIGHT: f32 = 680.0;
+pub(super) const CONNECTION_STUDIO_VIEWPORT_MARGIN: f32 = 16.0;
 pub(super) const CONNECTION_STUDIO_SIDEBAR_WIDTH: f32 = 188.0;
+
+/// Computes a viewport-locked outer frame for every multi-page Connection Studio
+/// shell (create, edit, standalone SFTP, SSH tunnel) so switching protocols,
+/// sidebar pages, auth tabs, or algorithm categories never shifts modal bounds
+/// and never overflows small windows.
+pub(super) fn studio_modal_size(
+    window: &Window,
+    shows_transport_selector: bool,
+    modal_max_height: f32,
+) -> (f32, f32) {
+    let viewport = window.viewport_size();
+    let viewport_w = f32::from(viewport.width);
+    let viewport_h = f32::from(viewport.height);
+    let desired_w = if shows_transport_selector {
+        CONNECTION_STUDIO_WIDTH
+    } else {
+        CONNECTION_STUDIO_EDIT_WIDTH
+    };
+    let max_w = (viewport_w - CONNECTION_STUDIO_VIEWPORT_MARGIN * 2.0).max(0.0);
+    let width = desired_w.min(max_w);
+    let max_h =
+        modal_max_height.min((viewport_h - CONNECTION_STUDIO_VIEWPORT_MARGIN * 2.0).max(0.0));
+    let height = (viewport_h * 0.82)
+        .clamp(CONNECTION_STUDIO_MIN_HEIGHT, CONNECTION_STUDIO_MAX_HEIGHT)
+        .min(max_h);
+    (width, height)
+}
 
 const STUDIO_PROTOCOL_SELECTOR_ID: &str = "studio-protocol-selector";
 const STUDIO_CATEGORY_SELECTOR_ID: &str = "studio-category-selector";
@@ -117,6 +146,17 @@ impl ConnectionFormView {
             .into_any_element()
     }
 
+    pub(super) fn reset_studio_form_scroll(&self) {
+        let origin = point(px(0.0), px(0.0));
+        for id in [
+            "new-connection-modal-form-scroll",
+            "standalone-sftp-form-scroll",
+            "ssh-tunnel-form-scroll",
+        ] {
+            self.selectable_text_scroll_handle(id).set_offset(origin);
+        }
+    }
+
     /// Selects a transport from the top protocol bar and runs all transport-switch cleanup.
     fn select_composer_transport(
         &mut self,
@@ -128,6 +168,7 @@ impl ConnectionFormView {
         if self.environment.tunnel.is_some() {
             self.request(ConnectionsWindowRequest::LeaveTunnel, Some(window), cx);
         }
+        self.reset_studio_form_scroll();
         let mut should_refresh_ports = false;
         let mut should_refresh_ble_adapters = false;
         self.update_connection_form_state(cx, |state| {
@@ -826,6 +867,7 @@ impl ConnectionFormView {
                     cx.listener(move |this, _event, _window, cx| {
                         this.close_new_connection_select(cx);
                         if item_index != active_index {
+                            this.reset_studio_form_scroll();
                             let offset_y = (active_index as f32 - item_index as f32) * row_stride;
                             this.begin_user_segmented_control_transition_with_history(
                                 STUDIO_CATEGORY_SELECTOR_ID,
@@ -913,6 +955,7 @@ impl ConnectionFormView {
                                         if let Some(target_idx) = appearance_index
                                             && target_idx != active_index
                                         {
+                                            this.reset_studio_form_scroll();
                                             let offset_y =
                                                 (active_index as f32 - target_idx as f32)
                                                     * row_stride;
