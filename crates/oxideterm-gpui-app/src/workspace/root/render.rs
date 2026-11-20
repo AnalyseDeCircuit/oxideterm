@@ -348,7 +348,9 @@ impl WorkspaceApp {
                 )
             })
         };
-        let zen_mode = self.settings_store.settings().sidebar_ui.zen_mode;
+        let settings = self.settings_store.settings();
+        let zen_mode = settings.sidebar_ui.zen_mode;
+        let tabbar_visible = !zen_mode || settings.appearance.zen_mode_keep_tabbar;
         let titlebar_visible = self.window_titlebar_visible(window);
         let effective_titlebar_height = self.window_titlebar_height(window);
         let sidebar_resize_cursor_active =
@@ -356,7 +358,7 @@ impl WorkspaceApp {
         let embedded_sftp_resize_cursor_active = self.embedded_sftp_sidebar_resizing;
         let disclaimer_locked = self.onboarding_disclaimer_locked();
         let read_only_selection_workspace = cx.entity();
-        self.update_main_window_tabbar_drop_bounds(window, titlebar_visible, zen_mode, cx);
+        self.update_main_window_tabbar_drop_bounds(window, titlebar_visible, tabbar_visible, cx);
 
         let mut key_context = gpui::KeyContext::new_with_defaults(cx.platform_info().os);
         key_context.add("Workspace");
@@ -1164,7 +1166,7 @@ impl WorkspaceApp {
                             .flex_col()
                             .min_w(px(self.tokens.metrics.min_main_width))
                             .overflow_hidden()
-                            .when(!zen_mode, |main| {
+                            .when(tabbar_visible, |main| {
                                 main.child(self.render_tab_bar(window, cx))
                             })
                             .child(
@@ -1524,9 +1526,7 @@ impl WorkspaceApp {
 }
 
 impl WorkspaceApp {
-    /// Zen mode keeps the bottom bar but hides every other affordance. A thin
-    /// top strip reveals the only pointer path back out; the pill carries the
-    /// current shortcut so the affordance teaches the keyboard route.
+    /// The top strip provides a pointer exit when zen mode hides the title bar.
     fn render_zen_exit_hot_zone(&self, top: Pixels, cx: &mut Context<Self>) -> AnyElement {
         // Once revealed, keep hovering across the visual gap without capturing clicks there.
         let height = HOT_ZONE_HEIGHT

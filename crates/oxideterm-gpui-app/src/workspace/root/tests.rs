@@ -142,18 +142,32 @@ mod tests {
         let button = cx.debug_bounds("zen-exit-affordance-pill").unwrap();
         cx.simulate_mouse_move(button.center(), None, gpui::Modifiers::default());
 
-        for zen_mode in [false, true] {
+        for (zen_mode, keep_tabbar, expect_tabbar) in [
+            (false, false, true),
+            (true, false, false),
+            (true, true, true),
+            (true, false, false),
+        ] {
             workspace.update(cx, |workspace, cx| {
                 let path = workspace.settings_store.path().to_path_buf();
                 let mut store = SettingsStore::load_from_path(path).unwrap();
                 store.settings_mut().sidebar_ui.zen_mode = zen_mode;
+                store.settings_mut().appearance.zen_mode_keep_tabbar = keep_tabbar;
                 store.save().unwrap();
                 workspace.reload_after_external_sync(cx).unwrap();
             });
             cx.update(|window, cx| window.draw(cx).clear(cx));
+            assert_eq!(
+                cx.debug_bounds("workspace-tab-scroll-viewport").is_some(),
+                expect_tabbar,
+            );
+            assert_eq!(
+                cx.debug_bounds("workspace-titlebar-drag-left").is_some(),
+                !zen_mode
+            );
+            assert_eq!(cx.debug_bounds("zen-exit-hot-zone").is_some(), zen_mode);
+            assert!(cx.debug_bounds("zen-exit-affordance-pill").is_none());
         }
-        assert!(cx.debug_bounds("zen-exit-hot-zone").is_some());
-        assert!(cx.debug_bounds("zen-exit-affordance-pill").is_none());
     }
 
     fn connection_trace_event(

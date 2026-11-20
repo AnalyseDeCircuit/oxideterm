@@ -92,6 +92,7 @@ const APPEARANCE_KEYS: &[&str] = &[
     "borderRadius",
     "uiFontFamily",
     "showWindowTitlebar",
+    "zenModeKeepTabbar",
     "windowOpacity",
     "animationSpeed",
     "frostedGlass",

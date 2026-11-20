@@ -448,6 +448,7 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
                 "settings_view.appearance.corner_continuous",
                 "settings_view.appearance.ui_font",
                 "settings_view.appearance.ui_font_size",
+                "settings_view.appearance.zen_mode_keep_tabbar",
             ],
         ),
         settings_search_entry(

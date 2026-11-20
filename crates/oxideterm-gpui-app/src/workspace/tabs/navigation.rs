@@ -1411,13 +1411,8 @@ impl WorkspaceApp {
 
     fn tabbar_outer_width(&self, window: &Window, cx: &App) -> f32 {
         let window_width = f32::from(window.inner_window_bounds().get_bounds().size.width);
-        let sidebar_width = if self.sidebar_collapsed {
-            self.tokens.metrics.activity_bar_width
-        } else {
-            self.sidebar_width
-        };
         let context_sidebar_width = self.context_sidebar_occupied_width(cx);
-        (window_width - sidebar_width - context_sidebar_width).max(0.0)
+        (window_width - self.tabbar_left_x(window) - context_sidebar_width).max(0.0)
     }
 
     pub(in crate::workspace) fn tabbar_scroll_viewport_width(
@@ -1432,8 +1427,15 @@ impl WorkspaceApp {
         self.tabbar_outer_width(window, cx)
     }
 
-    pub(in crate::workspace) fn tabbar_left_x(&self) -> f32 {
-        if self.sidebar_collapsed {
+    pub(in crate::workspace) fn tabbar_left_x(&self, window: &Window) -> f32 {
+        if self.settings_store.settings().sidebar_ui.zen_mode {
+            // AppKit keeps its native window buttons above the first row in windowed mode.
+            if cfg!(target_os = "macos") && !window.is_fullscreen() {
+                self.tokens.metrics.titlebar_label_x()
+            } else {
+                0.0
+            }
+        } else if self.sidebar_collapsed {
             self.tokens.metrics.activity_bar_width
         } else {
             self.sidebar_width

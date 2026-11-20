@@ -85,6 +85,8 @@ pub struct AppearanceSettings {
     pub ui_font_family: String,
     #[serde(default = "default_show_window_titlebar")]
     pub show_window_titlebar: bool,
+    #[serde(default)]
+    pub zen_mode_keep_tabbar: bool,
     #[serde(default = "default_window_opacity")]
     pub window_opacity: f64,
     pub animation_speed: AnimationSpeed,
@@ -109,6 +111,7 @@ impl Default for AppearanceSettings {
             ui_font_size: default_ui_font_size(),
             ui_font_family: String::new(),
             show_window_titlebar: true,
+            zen_mode_keep_tabbar: false,
             window_opacity: DEFAULT_WINDOW_OPACITY,
             animation_speed: AnimationSpeed::Normal,
             frosted_glass: FrostedGlassMode::Off,

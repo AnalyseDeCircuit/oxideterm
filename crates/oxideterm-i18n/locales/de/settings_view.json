@@ -952,6 +952,7 @@
       "ui_font_placeholder": "Systemstandard",
       "ui_font_size": "UI-Schriftgröße",
       "ui_font_size_hint": "Textgröße in der gesamten Anwendungsoberfläche anpassen",
+      "zen_mode_keep_tabbar": "Tableiste im Zen-Modus beibehalten",
       "show_window_titlebar": "Fenstertitelleiste anzeigen",
       "show_window_titlebar_hint": "Nur Linux. Für Kachel-Kompositoren deaktivieren; zum Verschieben, Ändern der Größe oder Schließen die Kompositor-Kürzel verwenden.",
       "window_opacity": "Fensterdeckkraft",

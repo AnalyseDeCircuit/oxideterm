@@ -952,6 +952,7 @@
       "ui_font_placeholder": "시스템 기본값",
       "ui_font_size": "UI 글꼴 크기",
       "ui_font_size_hint": "애플리케이션 인터페이스 전체의 글자 크기를 조정합니다",
+      "zen_mode_keep_tabbar": "Zen 모드에서 탭 표시줄 유지",
       "show_window_titlebar": "창 제목 표시줄 표시",
       "show_window_titlebar_hint": "Linux 전용입니다. 타일링 컴포지터에서는 끄고 이동, 크기 조절, 닫기에 컴포지터 단축키를 사용하세요.",
       "window_opacity": "창 불투명도",

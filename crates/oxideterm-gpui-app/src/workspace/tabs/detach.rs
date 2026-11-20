@@ -121,10 +121,10 @@ impl WorkspaceApp {
         &mut self,
         window: &Window,
         titlebar_visible: bool,
-        zen_mode: bool,
+        tabbar_visible: bool,
         cx: &App,
     ) {
-        if zen_mode {
+        if !tabbar_visible {
             self.main_window_tabbar_drop_bounds = None;
             return;
         }
@@ -135,11 +135,7 @@ impl WorkspaceApp {
         } else {
             0.0
         };
-        let left_offset = if self.sidebar_collapsed {
-            self.tokens.metrics.activity_bar_width
-        } else {
-            self.sidebar_width
-        };
+        let left_offset = self.tabbar_left_x(window);
         let right_offset = self.context_sidebar_occupied_width(cx);
         let width = (f32::from(window_bounds.size.width) - left_offset - right_offset).max(0.0);
         self.main_window_tabbar_drop_bounds = Some(Bounds::new(
@@ -1081,7 +1077,7 @@ impl WorkspaceApp {
             height: handoff.origin.height,
         };
         let target = TabWindowHandoffRect {
-            left: self.tabbar_left_x() - self.tabbar_effective_scroll_x(window, cx)
+            left: self.tabbar_left_x(window) - self.tabbar_effective_scroll_x(window, cx)
                 + tab_bounds.start,
             top: self
                 .main_window_tabbar_drop_bounds

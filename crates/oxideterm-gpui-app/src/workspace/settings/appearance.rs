@@ -86,6 +86,12 @@ impl WorkspaceApp {
                 // need an explicit repaint after their chrome changes.
                 cx.refresh_windows();
             }
+            AppearanceAction::ZenModeKeepTabbar(enabled) => {
+                self.edit_settings(
+                    |settings| settings.appearance.zen_mode_keep_tabbar = enabled,
+                    cx,
+                );
+            }
         }
     }
 

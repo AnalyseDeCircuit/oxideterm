@@ -952,6 +952,7 @@
       "ui_font_placeholder": "Mặc định hệ thống",
       "ui_font_size": "Cỡ chữ giao diện",
       "ui_font_size_hint": "Điều chỉnh cỡ chữ trên toàn bộ giao diện ứng dụng",
+      "zen_mode_keep_tabbar": "Giữ thanh tab trong chế độ Zen",
       "show_window_titlebar": "Hiện thanh tiêu đề cửa sổ",
       "show_window_titlebar_hint": "Chỉ dành cho Linux. Tắt khi dùng trình tổng hợp xếp ô; dùng phím tắt của trình tổng hợp để di chuyển, đổi kích thước hoặc đóng cửa sổ.",
       "window_opacity": "Độ mờ cửa sổ",

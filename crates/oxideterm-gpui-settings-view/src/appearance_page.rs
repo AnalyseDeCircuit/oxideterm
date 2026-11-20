@@ -46,6 +46,7 @@ pub enum AppearanceAction {
     Corner(CornerStyle),
     Icon(AppIconVariant),
     Titlebar(bool),
+    ZenModeKeepTabbar(bool),
 }
 
 pub struct AppearancePageData {
@@ -415,6 +416,7 @@ impl AppearancePage<'_> {
     }
 
     pub fn appearance_layout_card(&self, settings: &PersistedSettings, cx: &App) -> AnyElement {
+        let keep_tabbar = settings.appearance.zen_mode_keep_tabbar;
         let rows = vec![
             self.appearance_row(
                 "settings_view.appearance.density",
@@ -459,6 +461,16 @@ impl AppearancePage<'_> {
                     "px",
                     cx,
                 ),
+            ),
+            self.appearance_row(
+                "settings_view.appearance.zen_mode_keep_tabbar",
+                "",
+                switch(self.tokens, "zen-mode-keep-tabbar", "", keep_tabbar)
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        self.press(AppearanceAction::ZenModeKeepTabbar(!keep_tabbar)),
+                    )
+                    .into_any_element(),
             ),
         ]
         .into_iter()

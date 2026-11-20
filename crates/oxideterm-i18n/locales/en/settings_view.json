@@ -952,6 +952,7 @@
       "ui_font_placeholder": "System Default",
       "ui_font_size": "UI Font Size",
       "ui_font_size_hint": "Adjust text size throughout the application interface",
+      "zen_mode_keep_tabbar": "Keep the tab bar in Zen Mode",
       "show_window_titlebar": "Show window titlebar",
       "show_window_titlebar_hint": "Linux only. Disable for tiling compositors; use compositor shortcuts to move, resize, or close the window.",
       "window_opacity": "Window Opacity",

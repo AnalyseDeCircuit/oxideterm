@@ -952,6 +952,7 @@
       "ui_font_placeholder": "Padrão do sistema",
       "ui_font_size": "Tamanho da fonte da interface",
       "ui_font_size_hint": "Ajuste o tamanho do texto em toda a interface do aplicativo",
+      "zen_mode_keep_tabbar": "Manter a barra de abas no modo Zen",
       "show_window_titlebar": "Mostrar barra de título da janela",
       "show_window_titlebar_hint": "Somente Linux. Desative em compositores lado a lado e use os atalhos do compositor para mover, redimensionar ou fechar a janela.",
       "window_opacity": "Opacidade da janela",

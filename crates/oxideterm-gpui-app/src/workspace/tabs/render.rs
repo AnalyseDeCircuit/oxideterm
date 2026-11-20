@@ -157,6 +157,9 @@ impl WorkspaceApp {
         let has_window_background = self.window_background_preferences().is_some();
         let strip_bg = theme.shell_bg();
         let bar = div()
+            .when(self.settings_store.settings().sidebar_ui.zen_mode, |bar| {
+                bar.ml(px(self.tabbar_left_x(window)))
+            })
             .h(px(self.tokens.metrics.tabbar_height))
             .flex()
             .flex_row()
@@ -575,7 +578,7 @@ impl WorkspaceApp {
         let viewport_left = if measured_width > 1.0 {
             f32::from(viewport_bounds.origin.x)
         } else {
-            self.tabbar_left_x()
+            self.tabbar_left_x(window)
         };
         calculate_tabbar_scrollbar_geometry(
             viewport_left,
