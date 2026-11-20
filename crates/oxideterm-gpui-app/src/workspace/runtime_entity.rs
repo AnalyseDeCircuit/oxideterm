@@ -33,6 +33,10 @@ pub(in crate::workspace) enum WorkspaceRuntimeEffect {
         node_id: NodeId,
     },
     ContinueReconnectCascade,
+    ResumeReconnectAfterChain {
+        node_id: NodeId,
+        job_id: String,
+    },
     StartReconnectPipeline {
         node_id: NodeId,
     },
@@ -248,6 +252,8 @@ struct ConnectionChainRun {
     next_index: usize,
     trace_plan: Arc<ConnectionTracePlan>,
     progress: Option<tokio::sync::watch::Sender<oxideterm_ssh::ConnectionChainProgress>>,
+    // The reconnect pipeline has one owner; wake it when this chain releases its locks.
+    waiting_reconnect: Option<(NodeId, String)>,
 }
 
 /// Owns runtime worker endpoints and reliable delivery independently from tabs.
@@ -1767,7 +1773,7 @@ impl WorkspaceRuntimeEntity {
             }
             self.remote_shell_integration.cancel_node(node_id);
             self.cancel_connection_trace(node_id, cx);
-            self.abort_connection_chain_for_node(node_id);
+            self.abort_connection_chain_for_node(node_id, cx);
             self.unlock_connecting_node(node_id);
             self.reconnect_orchestrator.cancel(&node_id.0);
         }
@@ -1806,6 +1812,20 @@ impl WorkspaceRuntimeEntity {
 
     pub(in crate::workspace) fn has_active_connection_chain(&self) -> bool {
         self.active_connection_chain.is_some()
+    }
+
+    pub(in crate::workspace) fn defer_reconnect_until_chain_release(
+        &mut self,
+        node_id: &NodeId,
+    ) -> bool {
+        let Some(chain) = self.active_connection_chain.as_mut() else {
+            return false;
+        };
+        let Some(job_id) = self.reconnect_orchestrator.active_job_id(&node_id.0) else {
+            return false;
+        };
+        chain.waiting_reconnect = Some((node_id.clone(), job_id));
+        true
     }
 
     pub(in crate::workspace) fn connection_chain_contains(&self, node_id: &NodeId) -> bool {
@@ -1863,6 +1883,7 @@ impl WorkspaceRuntimeEntity {
             next_index: 0,
             trace_plan: Arc::new(trace_plan),
             progress,
+            waiting_reconnect: None,
         });
         true
     }
@@ -1879,6 +1900,7 @@ impl WorkspaceRuntimeEntity {
     pub(in crate::workspace) fn advance_connection_chain(
         &mut self,
         node_id: &NodeId,
+        cx: &mut Context<Self>,
     ) -> ConnectionChainAdvance {
         let Some(run) = self.active_connection_chain.as_mut() else {
             return ConnectionChainAdvance::Ignored;
@@ -1899,7 +1921,7 @@ impl WorkspaceRuntimeEntity {
                 p.status = ConnectionTraceStatus::Ready;
             });
         }
-        self.release_connection_chain();
+        self.release_connection_chain(cx);
         ConnectionChainAdvance::Complete
     }
 
@@ -1917,18 +1939,25 @@ impl WorkspaceRuntimeEntity {
     pub(in crate::workspace) fn abort_connection_chain_for_node(
         &mut self,
         node_id: &NodeId,
+        cx: &mut Context<Self>,
     ) -> bool {
         if !self.connection_chain_contains(node_id) {
             return false;
         }
-        self.release_connection_chain();
+        self.release_connection_chain(cx);
         true
     }
 
-    fn release_connection_chain(&mut self) {
+    fn release_connection_chain(&mut self, cx: &mut Context<Self>) {
         if let Some(run) = self.active_connection_chain.take() {
             for node_id in &run.trace_plan.node_ids {
                 self.connecting_node_locks.remove(node_id);
+            }
+            if let Some((node_id, job_id)) = run.waiting_reconnect {
+                self.push_runtime_effect(
+                    WorkspaceRuntimeEffect::ResumeReconnectAfterChain { node_id, job_id },
+                    cx,
+                );
             }
         }
     }
@@ -2436,6 +2465,14 @@ impl WorkspaceRuntimeEntity {
     }
 
     fn cancel_reconnect_scheduler_nodes(&mut self, node_ids: &[NodeId]) {
+        if let Some(chain) = &mut self.active_connection_chain
+            && chain
+                .waiting_reconnect
+                .as_ref()
+                .is_some_and(|(id, _)| node_ids.contains(id))
+        {
+            chain.waiting_reconnect = None;
+        }
         self.reconnect_requeue_states
             .retain(|node_id, _| !node_ids.contains(node_id));
         self.reconnect_requeue_tasks
@@ -3183,6 +3220,7 @@ fn runtime_effect_is_reconnect_schedule_for_nodes(
 ) -> bool {
     match effect {
         WorkspaceRuntimeEffect::StartReconnectRoot { node_id }
+        | WorkspaceRuntimeEffect::ResumeReconnectAfterChain { node_id, .. }
         | WorkspaceRuntimeEffect::ContinueConnectionChain { node_id }
         | WorkspaceRuntimeEffect::StartReconnectPipeline { node_id }
         | WorkspaceRuntimeEffect::RetryNodeConnect { node_id, .. }
@@ -3605,7 +3643,7 @@ mod tests {
         let parent_node_id = NodeId::new("node-parent");
         let child_node_id = NodeId::new("node-child");
 
-        entity.update(cx, |entity, _cx| {
+        entity.update(cx, |entity, cx| {
             assert!(entity.try_lock_connecting_node(&parent_node_id));
             assert!(!entity.try_lock_connecting_node(&parent_node_id));
             entity.unlock_connecting_node(&parent_node_id);
@@ -3618,6 +3656,9 @@ mod tests {
             let (tx, rx) =
                 tokio::sync::watch::channel(oxideterm_ssh::ConnectionChainProgress::queued(1));
             assert!(entity.try_begin_connection_chain(trace_plan, Some(tx)));
+            let waiting = NodeId::new("offline-node");
+            let job = entity.start_reconnect_job(&waiting, "Offline".into(), ReconnectSnapshot::default());
+            assert!(entity.defer_reconnect_until_chain_release(&waiting));
             assert!(entity.has_active_connection_chain());
             assert!(entity.connection_chain_contains(&parent_node_id));
             assert_eq!(
@@ -3635,25 +3676,28 @@ mod tests {
             assert_eq!(first_step.node_id, parent_node_id);
             assert_eq!(first_step.trace_plan.attempt_id, "attempt-a");
             assert_eq!(
-                entity.advance_connection_chain(&child_node_id),
+                entity.advance_connection_chain(&child_node_id, cx),
                 ConnectionChainAdvance::Ignored
             );
             assert_eq!(
-                entity.advance_connection_chain(&parent_node_id),
+                entity.advance_connection_chain(&parent_node_id, cx),
                 ConnectionChainAdvance::Continue
             );
             assert!(entity.connection_chain_waits_after_node(&parent_node_id));
             assert_eq!(rx.borrow().hop, 2);
             assert_eq!(rx.borrow().status, ConnectionTraceStatus::Running);
+            assert!(entity.take_runtime_effects(cx).is_empty());
             assert_eq!(
                 entity.connection_chain_next_step().unwrap().node_id,
                 child_node_id
             );
             assert_eq!(
-                entity.advance_connection_chain(&child_node_id),
+                entity.advance_connection_chain(&child_node_id, cx),
                 ConnectionChainAdvance::Complete
             );
             assert_eq!(rx.borrow().status, ConnectionTraceStatus::Ready);
+            assert!(matches!(entity.take_runtime_effects(cx).as_slice(),
+                [WorkspaceRuntimeEffect::ResumeReconnectAfterChain { node_id, job_id }] if node_id == &waiting && job_id == &job.job_id));
             assert!(!entity.has_active_connection_chain());
 
             // Completing the chain releases every lock for future user or reconnect actions.
@@ -3670,7 +3714,7 @@ mod tests {
         let chain_node_id = NodeId::new("node-chain");
         let unrelated_node_id = NodeId::new("node-unrelated");
 
-        entity.update(cx, |entity, _cx| {
+        entity.update(cx, |entity, cx| {
             assert!(entity.try_lock_connecting_node(&unrelated_node_id));
             assert!(entity.try_begin_connection_chain(
                 ConnectionTracePlan {
@@ -3680,10 +3724,16 @@ mod tests {
                 },
                 None
             ));
-            assert!(!entity.abort_connection_chain_for_node(&unrelated_node_id));
+            assert!(!entity.abort_connection_chain_for_node(&unrelated_node_id, cx));
             assert!(entity.connection_chain_contains(&chain_node_id));
-            assert!(entity.abort_connection_chain_for_node(&chain_node_id));
+            let waiting = NodeId::new("cancelled-reconnect");
+            entity.start_reconnect_job(&waiting, "Offline".into(), ReconnectSnapshot::default());
+            assert!(entity.defer_reconnect_until_chain_release(&waiting));
+            entity.disconnect_node_runtime_subtree(&waiting, cx);
+            assert!(entity.abort_connection_chain_for_node(&chain_node_id, cx));
             assert!(!entity.has_active_connection_chain());
+            assert!(!entity.take_runtime_effects(cx).iter().any(|effect| matches!(effect,
+                WorkspaceRuntimeEffect::ResumeReconnectAfterChain { node_id, .. } if node_id == &waiting)));
             assert!(entity.try_lock_connecting_node(&chain_node_id));
             assert!(!entity.try_lock_connecting_node(&unrelated_node_id));
         });

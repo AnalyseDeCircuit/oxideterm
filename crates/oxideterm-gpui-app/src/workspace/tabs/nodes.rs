@@ -70,6 +70,21 @@ impl WorkspaceApp {
             runtime_entity::WorkspaceRuntimeEffect::ContinueReconnectCascade => {
                 self.start_next_reconnect_cascade_node(cx)
             }
+            runtime_entity::WorkspaceRuntimeEffect::ResumeReconnectAfterChain {
+                node_id,
+                job_id,
+            } => {
+                let runtime = self.workspace_runtime.read(cx);
+                if !runtime.reconnect_job_is_current(&node_id, &job_id)
+                    || !runtime
+                        .reconnect_active_progress(&node_id)
+                        .is_some_and(|job| job.status == ReconnectPhase::SshConnect)
+                {
+                    return false;
+                }
+                self.start_reconnect_cascade_after_grace_expired(&node_id, cx);
+                true
+            }
             runtime_entity::WorkspaceRuntimeEffect::RetryNodeConnect {
                 node_id,
                 attempt,
@@ -458,9 +473,6 @@ impl WorkspaceApp {
                     changed = true;
                 }
                 runtime_entity::ReconnectRuntimeEffect::GraceExpired { node_id, detail } => {
-                    if let Some(node) = self.ssh_nodes.get_mut(&node_id) {
-                        node.readiness = NodeReadiness::Connecting;
-                    }
                     self.log_reconnect_phase(&node_id, ReconnectPhase::SshConnect, Some(detail));
                     // Tauri falls back from grace-period probing to a full
                     // reconnectCascade(root): root reconnect first, and
@@ -1257,6 +1269,11 @@ impl WorkspaceApp {
         root_node_id: &NodeId,
         cx: &mut Context<Self>,
     ) {
+        if self.workspace_runtime.update(cx, |runtime, _| {
+            runtime.defer_reconnect_until_chain_release(root_node_id)
+        }) {
+            return;
+        }
         let mut affected_nodes = self.node_router.subtree_postorder(root_node_id);
         affected_nodes.reverse();
         if affected_nodes.is_empty() {
@@ -1275,18 +1292,22 @@ impl WorkspaceApp {
             })
             .cloned()
             .collect::<Vec<_>>();
-        self.workspace_runtime.update(cx, |runtime, _cx| {
-            runtime.replace_reconnect_cascade(cascade_node_ids);
-        });
-
-        if let Some(node) = self.ssh_nodes.get_mut(root_node_id) {
-            node.readiness = NodeReadiness::Connecting;
+        if self.connection_trace_node_is_ready(root_node_id) {
+            // The preceding chain may already have restored this node.
+            self.workspace_runtime.update(cx, |runtime, _| {
+                runtime.replace_reconnect_cascade(cascade_node_ids)
+            });
+            self.finish_reconnect_job(root_node_id, Ok(0), cx);
+            self.schedule_next_reconnect_cascade_node(cx);
+            return;
         }
         if !self.ensure_node_connection_started(root_node_id, cx) {
-            self.workspace_runtime.update(cx, |runtime, _cx| {
-                runtime.clear_reconnect_cascade();
-            });
+            self.finish_unstarted_reconnect(root_node_id, root_node_id, cx);
+            return;
         }
+        self.workspace_runtime.update(cx, |runtime, _| {
+            runtime.replace_reconnect_cascade(cascade_node_ids)
+        });
     }
 
     fn schedule_next_reconnect_cascade_node(&self, cx: &mut Context<Self>) {
@@ -1644,8 +1665,8 @@ impl WorkspaceApp {
 
     fn abort_failed_connection_chain(&mut self, failed: &NodeId, cx: &mut Context<Self>) {
         let step = self.workspace_runtime.read(cx).connection_chain_next_step();
-        if self.workspace_runtime.update(cx, |runtime, _| {
-            runtime.abort_connection_chain_for_node(failed)
+        if self.workspace_runtime.update(cx, |runtime, cx| {
+            runtime.abort_connection_chain_for_node(failed, cx)
         }) && let Some(step) = step
             && let Some(index) = step
                 .trace_plan
@@ -1657,7 +1678,33 @@ impl WorkspaceApp {
             for node in &step.trace_plan.node_ids[index..] {
                 self.fail_queued_tunnels(node, cx);
             }
+            if step.trace_plan.mode == ConnectionTraceMode::Reconnect
+                && let Some(target) = step.trace_plan.node_ids.last()
+                && target != failed
+            {
+                // Only the failed hop receives a worker result. Its unreached target still owns the reconnect slot.
+                self.finish_unstarted_reconnect(target, failed, cx);
+            }
         }
+    }
+
+    fn finish_unstarted_reconnect(
+        &mut self,
+        target: &NodeId,
+        failed: &NodeId,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.has_active_reconnect_job(target, cx) {
+            return;
+        }
+        let detail = self
+            .node_router
+            .node_state(failed)
+            .ok()
+            .and_then(|snapshot| snapshot.state.error)
+            .map(|detail| oxideterm_ai::sanitize_for_ai(&detail))
+            .unwrap_or_else(|| self.i18n.t("ssh.errors.chain_failed_title"));
+        self.finish_reconnect_job(target, Err(detail), cx);
     }
 
     fn advance_connection_chain_after_node_connected(
@@ -1665,10 +1712,9 @@ impl WorkspaceApp {
         node_id: &NodeId,
         cx: &mut Context<Self>,
     ) {
-        match self
-            .workspace_runtime
-            .update(cx, |runtime, _cx| runtime.advance_connection_chain(node_id))
-        {
+        match self.workspace_runtime.update(cx, |runtime, cx| {
+            runtime.advance_connection_chain(node_id, cx)
+        }) {
             runtime_entity::ConnectionChainAdvance::Ignored => {}
             runtime_entity::ConnectionChainAdvance::Continue => {
                 let completed_node_id = node_id.clone();

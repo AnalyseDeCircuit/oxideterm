@@ -159,6 +159,14 @@ impl WorkspaceApp {
             self.report_saved_next_hop_error("sessions.saved_next_hop.parent_not_ready", cx);
             return;
         }
+        if self
+            .workspace_runtime
+            .read(cx)
+            .has_active_connection_chain()
+        {
+            self.report_saved_next_hop_error("ssh.errors.chain_busy_desc", cx);
+            return;
+        }
 
         let Some(connection) = self.connection_store.get(&saved_connection_id).cloned() else {
             self.report_saved_next_hop_error("sessions.saved_next_hop.not_found", cx);
@@ -198,10 +206,11 @@ impl WorkspaceApp {
         };
 
         let target_node_id = expansion.target_node_id;
-        if let Some(node) = self.ssh_nodes.get_mut(&target_node_id) {
-            node.readiness = NodeReadiness::Connecting;
-        }
         self.active_ssh_node_id = Some(target_node_id.clone());
+        if !self.ensure_node_connection_started(&target_node_id, cx) {
+            self.report_saved_next_hop_error("ssh.errors.chain_failed_title", cx);
+            return;
+        }
         self.connections.flow.update(cx, |connection_flow, cx| {
             connection_flow.clear_host_key_challenge(cx);
         });
@@ -212,7 +221,6 @@ impl WorkspaceApp {
             .update(cx, |session_manager, cx| {
                 session_manager.set_status(Some(message), cx);
             });
-        self.ensure_node_connection_started(&target_node_id, cx);
         let _ = self.connection_store.mark_used(&saved_connection_id);
         self.persist_session_tree_snapshot();
         cx.notify();
