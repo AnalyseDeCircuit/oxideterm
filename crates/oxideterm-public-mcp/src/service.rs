@@ -9,9 +9,8 @@ use rmcp::{
     ErrorData as McpError, RoleServer, ServerHandler,
     model::{
         CacheScope, CallToolRequestParams, CallToolResponse, CallToolResult, CustomRequest,
-        CustomResult, ErrorCode, Implementation, JsonObject, ListToolsResult,
-        PaginatedRequestParams, ProtocolVersion, ServerCapabilities, ServerInfo, Tool,
-        ToolAnnotations,
+        CustomResult, ErrorCode, Implementation, InitializeResult, JsonObject, ListToolsResult,
+        PaginatedRequestParams, ProtocolVersion, ServerCapabilities, Tool, ToolAnnotations,
     },
     service::RequestContext,
 };
@@ -667,8 +666,8 @@ impl PublicMcpService {
 }
 
 impl ServerHandler for PublicMcpService {
-    fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+    fn get_info(&self) -> InitializeResult {
+        InitializeResult::new(ServerCapabilities::builder().enable_tools().build())
             .with_protocol_version(ProtocolVersion::V_2026_07_28)
             .with_server_info(
                 Implementation::new("oxideterm-public-mcp", env!("CARGO_PKG_VERSION"))
