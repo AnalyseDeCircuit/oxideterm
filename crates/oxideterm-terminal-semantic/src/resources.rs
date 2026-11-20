@@ -12,6 +12,9 @@ use crate::{
 const RESOURCE_FIELD_PRIORITY: u8 = 94;
 const DISK_WARNING_PERCENT: u8 = 80;
 const DISK_ERROR_PERCENT: u8 = 90;
+/// Once used space passes this share of the total, Used and Avail both turn
+/// yellow: with less than 20% left the two numbers say the same thing.
+const DISK_CAPACITY_WARNING_RATIO: f64 = 0.8;
 
 pub(crate) fn line_candidates(
     text: &str,
@@ -30,6 +33,22 @@ pub(crate) fn line_candidates(
                 push_memory_row(text, &allows_class, &mut candidates);
             }
         }
+        // Without a command marker (SSH remotes usually lack shell integration, so
+        // there is no OSC 133) the role degrades to Unknown/Output and column-aware
+        // parsing never runs; df/free fall back to per-token regex guesses, which
+        // tint half a column and leave the rest at the default color. Match on the
+        // output shape instead: `push_disk_row` / `push_memory_row` validate column
+        // counts, size suffixes, percentages and absolute mount points, so nothing
+        // is emitted for `ls -l` or `ps` style output.
+        _ if role.is_output() || role == SemanticLineRole::Unknown => {
+            if !push_header(text, &allows_class, &mut candidates) {
+                let before = candidates.len();
+                push_disk_row(text, &allows_class, &mut candidates);
+                if candidates.len() == before {
+                    push_memory_row(text, &allows_class, &mut candidates);
+                }
+            }
+        }
         _ => {}
     }
     candidates
@@ -37,8 +56,8 @@ pub(crate) fn line_candidates(
 
 fn push_header(
     text: &str,
-    allows_class: &impl Fn(SemanticClass) -> bool,
-    candidates: &mut Vec<Candidate>,
+    _allows_class: &impl Fn(SemanticClass) -> bool,
+    _candidates: &mut Vec<Candidate>,
 ) -> bool {
     let Some(first) = ranges(text).next() else {
         return false;
@@ -46,42 +65,10 @@ fn push_header(
     let Some(first_text) = text_at(text, &first) else {
         return false;
     };
-    if !matches!(first_text, "Filesystem" | "total") {
-        return false;
-    }
-    if !allows_class(SemanticClass::Keyword) {
-        return true;
-    }
-
-    for range in ranges(text) {
-        let Some(token) = text_at(text, &range) else {
-            continue;
-        };
-        if matches!(
-            token,
-            "Filesystem"
-                | "Type"
-                | "Size"
-                | "Used"
-                | "Avail"
-                | "Use%"
-                | "Mounted"
-                | "on"
-                | "total"
-                | "used"
-                | "free"
-                | "shared"
-                | "buff/cache"
-                | "available"
-        ) {
-            candidates.push(Candidate::new(
-                range,
-                SemanticClass::Keyword,
-                RESOURCE_FIELD_PRIORITY,
-            ));
-        }
-    }
-    true
+    // Headers stay uncolored: they are just column names, and tinting them with
+    // the data draws the eye. This only detects that a line is a header so the
+    // caller can skip data-row parsing.
+    matches!(first_text, "Filesystem" | "total")
 }
 
 fn push_memory_row(
@@ -210,10 +197,12 @@ fn push_disk_row(
     // Mount points may contain spaces; preserve their complete display value.
     mount.end = text.trim_end().len();
 
+    // Only real device paths are colored; names like tmpfs / devtmpfs / efivars
+    // stay at the default color.
     let filesystem_class = if text_at(text, &filesystem).is_some_and(|value| value.contains('/')) {
         SemanticClass::Path
     } else {
-        SemanticClass::Variable
+        SemanticClass::Plain
     };
     if allows_class(filesystem_class) {
         candidates.push(Candidate::new(
@@ -229,11 +218,36 @@ fn push_disk_row(
             RESOURCE_FIELD_PRIORITY,
         ));
     }
-    if allows_class(SemanticClass::Number) {
-        for range in [size, used, available] {
+    // The capacity columns key off used/total: at 80% both Used and Avail turn
+    // yellow, because with less than 20% left the two numbers say the same thing.
+    let capacity_class = match (
+        text_at(text, &size).and_then(parse_quantity),
+        text_at(text, &used).and_then(parse_quantity),
+    ) {
+        (Some(size_bytes), Some(used_bytes)) if size_bytes > 0.0 => {
+            if used_bytes / size_bytes >= DISK_CAPACITY_WARNING_RATIO {
+                SemanticClass::Warning
+            } else {
+                SemanticClass::Success
+            }
+        }
+        _ => SemanticClass::Success,
+    };
+    // Pin the Size column back to the default color: it is only a reference value,
+    // and the generic "number + unit" rule would tint 248G magenta. A higher
+    // priority keeps that rule from winning here.
+    if allows_class(SemanticClass::Plain) {
+        candidates.push(Candidate::new(
+            size,
+            SemanticClass::Plain,
+            RESOURCE_FIELD_PRIORITY,
+        ));
+    }
+    if allows_class(capacity_class) {
+        for range in [used, available] {
             candidates.push(Candidate::new(
                 range,
-                SemanticClass::Number,
+                capacity_class,
                 RESOURCE_FIELD_PRIORITY,
             ));
         }
@@ -243,8 +257,7 @@ fn push_disk_row(
     } else if percent >= DISK_WARNING_PERCENT {
         SemanticClass::Warning
     } else {
-        // Healthy capacity is informational; green is reserved for explicit success states.
-        SemanticClass::Number
+        SemanticClass::Success
     };
     if allows_class(usage_class) {
         candidates.push(Candidate::new(usage, usage_class, RESOURCE_FIELD_PRIORITY));
@@ -253,6 +266,28 @@ fn push_disk_row(
 
 fn parse_percent(value: &str) -> Option<u8> {
     value.strip_suffix('%')?.parse().ok()
+}
+
+/// Parse `7.6G` / `256K` / `1.1M` into bytes so the ratio can be computed.
+/// `df -h` uses base 1024, but this only feeds a ratio, so the unit base does
+/// not change the result.
+fn parse_quantity(value: &str) -> Option<f64> {
+    let number_end = value
+        .bytes()
+        .position(|byte| !byte.is_ascii_digit() && !matches!(byte, b'.' | b','))
+        .unwrap_or(value.len());
+    let number: f64 = value[..number_end].replace(',', "").parse().ok()?;
+    let multiplier = match &value[number_end..] {
+        "" | "B" => 1.0,
+        "k" | "K" | "KB" | "KiB" | "Ki" => 1024.0,
+        "M" | "MB" | "MiB" | "Mi" => 1024.0_f64.powi(2),
+        "G" | "GB" | "GiB" | "Gi" => 1024.0_f64.powi(3),
+        "T" | "TB" | "TiB" | "Ti" => 1024.0_f64.powi(4),
+        "P" | "PB" | "PiB" | "Pi" => 1024.0_f64.powi(5),
+        "E" | "EB" | "EiB" | "Ei" => 1024.0_f64.powi(6),
+        _ => return None,
+    };
+    Some(number * multiplier)
 }
 
 fn is_quantity(value: &str) -> bool {

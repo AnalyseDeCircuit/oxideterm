@@ -602,6 +602,7 @@
         "semantic_class_permission_execute": "执行权限",
         "semantic_class_permission_special": "特殊权限",
         "semantic_class_number": "数字",
+        "semantic_class_plain": "普通文本",
         "semantic_class_error": "错误",
         "semantic_class_warning": "警告",
         "semantic_class_success": "成功",

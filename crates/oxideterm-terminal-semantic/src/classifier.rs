@@ -316,7 +316,14 @@ pub fn classify_line_with_compiled_scheme_and_shell(
         class == SemanticClass::Keyword || semantic_scheme.contains_rule_class(class)
     }));
     candidates.extend(resources::line_candidates(text, role, |class| {
-        class == SemanticClass::Keyword || semantic_scheme.contains_rule_class(class)
+        // `Plain` is the marker class `resources` uses to pin text back to the
+        // default color. No scheme rule ever produces it, so `contains_rule_class`
+        // reports false and the candidate would be dropped. Allow it explicitly,
+        // otherwise the generic "number + unit" rule keeps tinting df's Size
+        // column.
+        class == SemanticClass::Keyword
+            || class == SemanticClass::Plain
+            || semantic_scheme.contains_rule_class(class)
     }));
     candidates.extend(network::line_candidates(text, role, |class| {
         class == SemanticClass::Keyword || semantic_scheme.contains_rule_class(class)

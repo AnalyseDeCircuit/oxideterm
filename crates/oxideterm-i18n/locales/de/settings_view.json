@@ -600,6 +600,7 @@
         "semantic_class_permission_execute": "Ausführungsberechtigung",
         "semantic_class_permission_special": "Sonderberechtigung",
         "semantic_class_number": "Zahl",
+        "semantic_class_plain": "Normaler Text",
         "semantic_class_error": "Fehler",
         "semantic_class_warning": "Warnung",
         "semantic_class_success": "Erfolg",

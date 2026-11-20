@@ -182,6 +182,18 @@ static BUILT_IN_RULES: LazyLock<Vec<Rule>> = LazyLock::new(|| {
             89,
             SemanticRuleContext::Any,
         ),
+        // Capacity values with a unit (190G / 7.9G / 4.0M / 256K). Without this
+        // rule the generic one only matches bare numbers, so "number + unit" output
+        // from df -h or ls -lh ends up half tinted and half default. Longer
+        // suffixes come first so KiB is not matched by K.
+        Rule::new(
+            "quantity",
+            r"\b\d+(?:[.,]\d+)?(?:KiB|MiB|GiB|TiB|PiB|EiB|KB|MB|GB|TB|PB|EB|Ki|Mi|Gi|Ti|Pi|Ei|[kKMGTPE]|B)\b",
+            0,
+            SemanticClass::Number,
+            86,
+            SemanticRuleContext::Any,
+        ),
         Rule::new(
             "ipv6-address",
             IPV6_ADDRESS_PATTERN,

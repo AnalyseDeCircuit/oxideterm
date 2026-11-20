@@ -1222,6 +1222,17 @@ impl TerminalPane {
             this.handle_focus_change(false, cx);
         });
 
+        // End the drag selection when the window loses activation. Releasing the
+        // left button outside the window never delivers `mouse_up`, so the drag
+        // autoscroll keeps running and only stops once the user comes back.
+        let window_activation = cx.observe_window_activation(window, |this, window, cx| {
+            if !window.is_window_active() && this.selecting {
+                this.selecting = false;
+                this.selection_autoscroll_position = None;
+                cx.notify();
+            }
+        });
+
         // GPUI unit tests use a deterministic single-thread scheduler, so real PTY threads must
         // not wake its local executor directly. Production builds keep the activity-driven path.
         let backend_activity_enabled = !cfg!(test);
@@ -1533,7 +1544,7 @@ impl TerminalPane {
             modem_progress: None,
             modem_transfer: None,
             modem_worker: None,
-            _subscriptions: vec![focus_in, focus_out],
+            _subscriptions: vec![focus_in, focus_out, window_activation],
         };
         pane.sync_terminal_output_events_enabled();
         Ok(pane)

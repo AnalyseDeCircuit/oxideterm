@@ -1012,6 +1012,9 @@ pub(crate) fn terminal_semantic_color_from_palette(
         SemanticClass::PermissionExecute => terminal.bright_green,
         SemanticClass::PermissionSpecial => terminal.bright_magenta,
         SemanticClass::Number => terminal.magenta,
+        // Explicitly uncolored: fall back to the terminal's default foreground so
+        // columns that should stay plain are not tinted.
+        SemanticClass::Plain => terminal.foreground,
         SemanticClass::Comment => terminal.bright_black,
         SemanticClass::Error => terminal.bright_red,
         SemanticClass::Warning => terminal.bright_yellow,
@@ -1649,7 +1652,12 @@ pub(crate) fn terminal_font_with_family_and_cjk(
         "Noto Sans Mono",
         "Liberation Mono",
         "Courier New",
+        // Terminal output often contains emoji such as ℹ️ / 🆄. Without the
+        // platform emoji font they fall back to arbitrary symbol fonts, whose box
+        // size and baseline do not line up with the surrounding text.
+        "Segoe UI Emoji",
         "Apple Color Emoji",
+        "Noto Color Emoji",
     ] {
         push_font_fallback(&mut fallback_families, fallback);
     }

@@ -600,6 +600,7 @@
         "semantic_class_permission_execute": "実行権限",
         "semantic_class_permission_special": "特殊権限",
         "semantic_class_number": "数値",
+        "semantic_class_plain": "通常テキスト",
         "semantic_class_error": "エラー",
         "semantic_class_warning": "警告",
         "semantic_class_success": "成功",
