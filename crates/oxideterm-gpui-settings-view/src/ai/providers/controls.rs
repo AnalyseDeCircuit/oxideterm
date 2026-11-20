@@ -186,6 +186,7 @@ impl AiProviderSettingsView {
         options.button.disabled = refreshing;
         options.icon_gap = Some(4.0);
         options.loading = refreshing;
+        let refresh_id = provider_id.clone();
         // Tauri refresh is a compact ghost button with a leading RefreshCw
         // icon. Shared action guard keeps the loading state non-submitting.
         self.workspace_toolbar_action_button(
@@ -201,6 +202,7 @@ impl AiProviderSettingsView {
                 cx.stop_propagation();
             }),
         )
+        .debug_selector(move || format!("refresh-models-{refresh_id}"))
         .into_any_element()
     }
 
