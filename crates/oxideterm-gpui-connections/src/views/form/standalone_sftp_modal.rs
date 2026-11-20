@@ -1,13 +1,13 @@
 use super::*;
+use crate::form_state::ConnectionFormDrawer;
 use oxideterm_gpui_ui::scroll::{Scrollbar, ScrollbarAxis};
 
-const STANDALONE_SFTP_COMMON_COLUMN_WIDTH: f32 = 320.0;
-const STANDALONE_SFTP_ENDPOINT_COLUMN_WIDTH: f32 = 390.0;
 const STANDALONE_SFTP_VIEWPORT_MARGIN: f32 = 32.0;
 
 struct StandaloneSftpModalSnapshot {
     profile_id: Option<String>,
     transfer_mode: StandaloneSftpTransferMode,
+    active_drawer: Option<ConnectionFormDrawer>,
     name: String,
     group: String,
     notes: String,
@@ -31,6 +31,7 @@ struct StandaloneSftpModalSnapshot {
     proxy_command_enabled: bool,
     proxy_command: zeroize::Zeroizing<String>,
     proxy_command_configured: bool,
+    route_customized: bool,
     secondary_host: String,
     secondary_port: String,
     secondary_username: String,
@@ -59,9 +60,21 @@ struct StandaloneSftpModalSnapshot {
 
 impl StandaloneSftpModalSnapshot {
     fn from_form(form: &NewConnectionForm) -> Self {
+        let remote_to_remote =
+            form.standalone_sftp_transfer_mode == StandaloneSftpTransferMode::RemoteRemote;
+        let primary_route_customized = form.proxy_command_enabled
+            || !form.proxy_hops.is_empty()
+            || form.upstream_proxy_policy != NewConnectionUpstreamProxyPolicy::Direct;
+        let secondary_route_customized = remote_to_remote
+            && (form.standalone_sftp_secondary.proxy_command_enabled
+                || !form.standalone_sftp_secondary.proxy_hops.is_empty()
+                || form.standalone_sftp_secondary.upstream_proxy_policy
+                    != NewConnectionUpstreamProxyPolicy::Direct);
+
         Self {
             profile_id: form.standalone_sftp_profile_id.clone(),
             transfer_mode: form.standalone_sftp_transfer_mode,
+            active_drawer: form.active_drawer,
             name: form.name.clone(),
             group: form.group.clone(),
             notes: form.notes.clone(),
@@ -86,6 +99,7 @@ impl StandaloneSftpModalSnapshot {
             // Rendering owns one bounded zeroizing copy of the protected command draft.
             proxy_command: zeroize::Zeroizing::new(form.proxy_command.clone()),
             proxy_command_configured: form.proxy_command_keychain_id.is_some(),
+            route_customized: primary_route_customized || secondary_route_customized,
             secondary_host: form.standalone_sftp_secondary.host.clone(),
             secondary_port: form.standalone_sftp_secondary.port.clone(),
             secondary_username: form.standalone_sftp_secondary.username.clone(),
@@ -154,17 +168,18 @@ impl ConnectionFormView {
         {
             self.ensure_kerberos_credentials_availability(cx);
         }
+        let theme = self.tokens.ui;
         let remote_to_remote = form.transfer_mode == StandaloneSftpTransferMode::RemoteRemote;
-        let gap = self.tokens.metrics.modal_section_gap;
-        let endpoint_count = if remote_to_remote { 2.0 } else { 1.0 };
-        let fields_width = STANDALONE_SFTP_COMMON_COLUMN_WIDTH
-            + endpoint_count * (STANDALONE_SFTP_ENDPOINT_COLUMN_WIDTH + gap);
-        let desired_width = (fields_width + 2.0 * self.tokens.metrics.modal_body_padding)
-            .max(composer::CONNECTION_STUDIO_WIDTH);
+        let desired_width = if shows_transport_selector {
+            composer::CONNECTION_STUDIO_WIDTH
+        } else {
+            composer::CONNECTION_STUDIO_EDIT_WIDTH
+        };
         let modal_width = desired_width
             .min(f32::from(window.viewport_size().width) - STANDALONE_SFTP_VIEWPORT_MARGIN);
         let modal_max_height = f32::from(window.viewport_size().height)
             * self.tokens.metrics.modal_max_viewport_height_ratio;
+        let studio_min_height = composer::CONNECTION_STUDIO_MIN_HEIGHT.min(modal_max_height);
         let form_visible = self.connection_form_state(cx).presence.phase()
             == oxideterm_gpui_ui::motion::ExitPhase::Visible;
         let primary_complete = !form.host.trim().is_empty()
@@ -194,39 +209,84 @@ impl ConnectionFormView {
         } else {
             self.i18n.t("sftp.standalone.form_title")
         };
-        let fields_scroll = self.selectable_text_scroll_handle("standalone-sftp-form-scroll");
-        let fields = div()
-            .min_w(px(fields_width))
-            .flex()
-            .gap(px(gap))
-            .child(self.render_standalone_sftp_common_column(&form, cx))
-            .child(self.render_standalone_sftp_endpoint_column(&form, false, remote_to_remote, cx))
-            .when(remote_to_remote, |fields| {
-                fields.child(self.render_standalone_sftp_endpoint_column(&form, true, true, cx))
+
+        let mut sidebar_items = vec![
+            composer::CategoryNavItem {
+                drawer: None,
+                icon: LucideIcon::FolderSync,
+                label: self.i18n.t("ssh.form.basic_information"),
+                summary: None,
+            },
+            composer::CategoryNavItem {
+                drawer: Some(ConnectionFormDrawer::StandaloneSftpPrimary),
+                icon: LucideIcon::Server,
+                label: self.i18n.t(if remote_to_remote {
+                    "sftp.standalone.remote_host_1"
+                } else {
+                    "sftp.standalone.remote_host"
+                }),
+                summary: (!form.host.trim().is_empty()).then(|| "•".to_string()),
+            },
+        ];
+        if remote_to_remote {
+            sidebar_items.push(composer::CategoryNavItem {
+                drawer: Some(ConnectionFormDrawer::StandaloneSftpSecondary),
+                icon: LucideIcon::Server,
+                label: self.i18n.t("sftp.standalone.remote_host_2"),
+                summary: (!form.secondary_host.trim().is_empty()).then(|| "•".to_string()),
             });
-        // Only fields move horizontally; the transport list stays reachable
-        // while editing either endpoint.
-        let scrollable_fields = div()
-            .flex_1()
-            .min_w_0()
-            .min_h_0()
-            .relative()
-            .child(
-                div()
-                    .id("standalone-sftp-form-scroll")
-                    .size_full()
-                    .overflow_scroll()
-                    .track_scroll(&fields_scroll)
-                    .on_scroll(cx.listener(|this, _, _, cx| {
-                        if this.connection_form_state(cx).open_select.is_some() {
-                            this.close_new_connection_select(cx);
-                            this.clear_new_connection_select_anchor(cx);
-                            cx.notify();
-                        }
-                    }))
-                    .child(fields),
-            )
-            .child(Scrollbar::new(&fields_scroll).axis(ScrollbarAxis::Both));
+        }
+        sidebar_items.push(composer::CategoryNavItem {
+            drawer: Some(ConnectionFormDrawer::Route),
+            icon: LucideIcon::Network,
+            label: self.i18n.t("ssh.form.connection_route"),
+            summary: form.route_customized.then(|| "•".to_string()),
+        });
+        sidebar_items.push(composer::CategoryNavItem {
+            drawer: Some(ConnectionFormDrawer::Notes),
+            icon: LucideIcon::Sparkles,
+            label: self.i18n.t("ssh.form.appearance"),
+            summary: (!form.notes.trim().is_empty()).then(|| "•".to_string()),
+        });
+
+        let active_drawer = if !remote_to_remote
+            && form.active_drawer == Some(ConnectionFormDrawer::StandaloneSftpSecondary)
+        {
+            None
+        } else {
+            form.active_drawer
+        };
+
+        let category_sidebar = self.render_studio_category_sidebar(
+            sidebar_items,
+            active_drawer,
+            true,
+            Some(ConnectionFormDrawer::Notes),
+            cx,
+        );
+
+        let page_content = match active_drawer {
+            Some(ConnectionFormDrawer::StandaloneSftpPrimary) => {
+                self.render_standalone_sftp_endpoint_page(&form, false, remote_to_remote, cx)
+            }
+            Some(ConnectionFormDrawer::StandaloneSftpSecondary) if remote_to_remote => {
+                self.render_standalone_sftp_endpoint_page(&form, true, true, cx)
+            }
+            Some(ConnectionFormDrawer::Route) => {
+                self.render_standalone_sftp_route_page(&form, remote_to_remote, cx)
+            }
+            Some(ConnectionFormDrawer::Notes) => div()
+                .flex()
+                .flex_col()
+                .gap(px(self.tokens.metrics.modal_section_gap))
+                .child(self.render_connection_appearance_options(cx))
+                .child(div().h(px(1.0)).bg(rgb(theme.border)))
+                .child(self.render_connection_notes_fields(&form.notes, cx))
+                .into_any_element(),
+            _ => self.render_standalone_sftp_basic_page(&form, cx),
+        };
+
+        let fields_scroll = self.selectable_text_scroll_handle("standalone-sftp-form-scroll");
 
         oxideterm_gpui_ui::modal::staged_overlay_root()
             .on_mouse_down(
@@ -245,138 +305,237 @@ impl ConnectionFormView {
             .child(oxideterm_gpui_ui::motion::form_transition(
                 &self.tokens,
                 "new-connection-form-enter",
-                modal_container(&self.tokens)
-                    .bg(rgb(self.tokens.ui.bg_elevated))
-                    .w(px(modal_width))
-                    .h(px(modal_max_height))
-                    .flex()
-                    .flex_col()
-                    .overflow_hidden()
-                    .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
-                        cx.stop_propagation();
-                    })
-                    .child(self.render_studio_top_chrome(
-                        title,
-                        Some(self.i18n.t("sftp.standalone.form_description")),
-                        shows_transport_selector,
-                        true,
-                        cx,
-                    ))
-                    .child(
-                        modal_body(&self.tokens)
-                            .flex_1()
-                            .min_w_0()
-                            .min_h(px(0.0))
-                            .child(scrollable_fields),
-                    )
-                    .child(
-                        modal_footer(&self.tokens)
-                            .flex_none()
-                            .bg(rgb(self.tokens.ui.bg_panel))
-                            .child(self.render_connection_button(
-                                self.i18n.t("ssh.form.cancel"),
-                                false,
-                                ConnectionButtonAction::Cancel,
-                                false,
-                                cx,
-                            ))
-                            .when(form.profile_id.is_none(), |footer| {
-                                footer
-                                    .when(!remote_to_remote, |footer| {
-                                        footer.child(self.render_connection_button(
-                                            self.i18n.t("ssh.form.test"),
-                                            false,
-                                            ConnectionButtonAction::Test,
-                                            primary_disabled,
-                                            cx,
-                                        ))
-                                    })
-                                    .child(self.render_connection_button(
-                                        self.i18n.t("ssh.form.save"),
+                oxideterm_gpui_ui::theme_overlay_surface_shadow(
+                    modal_container(&self.tokens),
+                    &self.tokens,
+                )
+                .bg(rgb(theme.bg_elevated))
+                .overflow_hidden()
+                .w(px(modal_width))
+                .min_h(px(studio_min_height))
+                .max_h(px(modal_max_height))
+                .flex()
+                .flex_col()
+                .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                    cx.stop_propagation();
+                })
+                .child(self.render_studio_top_chrome(
+                    title,
+                    Some(self.i18n.t("sftp.standalone.form_description")),
+                    shows_transport_selector,
+                    false,
+                    cx,
+                ))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_h(px(0.0))
+                        .flex()
+                        .child(category_sidebar)
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .min_h(px(0.0))
+                                .relative()
+                                .child(
+                                    div()
+                                        .id("standalone-sftp-form-scroll")
+                                        .size_full()
+                                        .px(px(22.0))
+                                        .py(px(18.0))
+                                        .overflow_y_scroll()
+                                        .track_scroll(&fields_scroll)
+                                        .on_scroll(cx.listener(|this, _, _, cx| {
+                                            if this.connection_form_state(cx).open_select.is_some()
+                                            {
+                                                this.close_new_connection_select(cx);
+                                                this.clear_new_connection_select_anchor(cx);
+                                                cx.notify();
+                                            }
+                                        }))
+                                        .child(page_content),
+                                )
+                                .child(
+                                    Scrollbar::new(&fields_scroll).axis(ScrollbarAxis::Vertical),
+                                ),
+                        ),
+                )
+                .child(
+                    modal_footer(&self.tokens)
+                        .flex_none()
+                        .bg(rgb(theme.bg_panel))
+                        .child(self.render_connection_button(
+                            self.i18n.t("ssh.form.cancel"),
+                            false,
+                            ConnectionButtonAction::Cancel,
+                            false,
+                            cx,
+                        ))
+                        .when(form.profile_id.is_none(), |footer| {
+                            footer
+                                .when(!remote_to_remote, |footer| {
+                                    footer.child(self.render_connection_button(
+                                        self.i18n.t("ssh.form.test"),
                                         false,
-                                        ConnectionButtonAction::Save,
+                                        ConnectionButtonAction::Test,
                                         primary_disabled,
                                         cx,
                                     ))
-                                    .when(!remote_to_remote, |footer| {
-                                        footer.child(self.render_connection_button(
-                                            self.i18n.t("sftp.standalone.open"),
-                                            false,
-                                            ConnectionButtonAction::Connect,
-                                            primary_disabled,
-                                            cx,
-                                        ))
-                                    })
-                                    .child(self.render_connection_button(
-                                        self.i18n.t("sftp.standalone.save_and_open"),
-                                        true,
-                                        ConnectionButtonAction::SaveAndConnect,
-                                        primary_disabled,
-                                        cx,
-                                    ))
-                            })
-                            .when(form.profile_id.is_some(), |footer| {
-                                footer.child(self.render_connection_button(
-                                    self.i18n.t("sessionManager.edit_properties.save"),
-                                    true,
+                                })
+                                .child(self.render_connection_button(
+                                    self.i18n.t("ssh.form.save"),
+                                    false,
                                     ConnectionButtonAction::Save,
                                     primary_disabled,
                                     cx,
                                 ))
-                            }),
-                    ),
+                                .when(!remote_to_remote, |footer| {
+                                    footer.child(self.render_connection_button(
+                                        self.i18n.t("sftp.standalone.open"),
+                                        false,
+                                        ConnectionButtonAction::Connect,
+                                        primary_disabled,
+                                        cx,
+                                    ))
+                                })
+                                .child(self.render_connection_button(
+                                    self.i18n.t("sftp.standalone.save_and_open"),
+                                    true,
+                                    ConnectionButtonAction::SaveAndConnect,
+                                    primary_disabled,
+                                    cx,
+                                ))
+                        })
+                        .when(form.profile_id.is_some(), |footer| {
+                            footer.child(self.render_connection_button(
+                                self.i18n.t("sessionManager.edit_properties.save"),
+                                true,
+                                ConnectionButtonAction::Save,
+                                primary_disabled,
+                                cx,
+                            ))
+                        }),
+                ),
                 form_visible,
             ))
             .into_any_element()
     }
 
-    fn render_standalone_sftp_common_column(
+    fn render_standalone_sftp_basic_page(
         &self,
         form: &StandaloneSftpModalSnapshot,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         div()
-            .id("standalone-sftp-common-column")
-            .w(px(STANDALONE_SFTP_COMMON_COLUMN_WIDTH))
-            .flex_none()
-            .border_r_1()
-            .border_color(rgba((self.tokens.ui.border << 8) | 0x80))
+            .flex()
+            .flex_col()
+            .gap(px(14.0))
             .child(
                 div()
                     .flex()
-                    .flex_col()
-                    .gap(px(self.tokens.metrics.modal_section_gap))
-                    .pr(px(self.tokens.metrics.modal_section_gap))
-                    .child(
-                        div()
-                            .p_3()
-                            .rounded(px(self.tokens.radii.md))
-                            .border_1()
-                            .border_color(rgb(self.tokens.ui.warning))
-                            .text_size(px(self.tokens.metrics.ui_text_sm))
-                            .text_color(rgb(self.tokens.ui.text))
-                            .child(self.i18n.t("sftp.standalone.usage_notice")),
-                    )
-                    .child(self.render_standalone_sftp_transfer_mode(form.transfer_mode, cx))
-                    .child(self.render_connection_field(
+                    .flex_row()
+                    .gap(px(12.0))
+                    .child(div().flex_1().min_w_0().child(self.render_connection_field(
                         self.i18n.t("ssh.form.name"),
                         &form.name,
                         self.i18n.t("ssh.form.name_placeholder"),
                         NewConnectionField::Name,
                         false,
                         cx,
-                    ))
-                    .child(self.render_connection_group_select(
-                        self.i18n.t("ssh.form.group"),
-                        &form.group,
-                        cx,
-                    ))
-                    .child(self.render_connection_notes_fields(&form.notes, cx))
-                    .when_some(form.error.clone(), |content, error| {
-                        content.child(self.render_prompt_feedback_box(error, form.feedback_success))
-                    }),
+                    )))
+                    .child(div().w(px(196.0)).flex_none().child(
+                        self.render_connection_group_select(
+                            self.i18n.t("ssh.form.group"),
+                            &form.group,
+                            cx,
+                        ),
+                    )),
             )
+            .child(self.render_standalone_sftp_transfer_mode(form.transfer_mode, cx))
+            .child(self.render_connection_hint(self.i18n.t("sftp.standalone.usage_notice")))
+            .when_some(form.error.clone(), |content, error| {
+                content.child(self.render_prompt_feedback_box(error, form.feedback_success))
+            })
             .into_any_element()
+    }
+
+    fn render_standalone_sftp_endpoint_page(
+        &self,
+        form: &StandaloneSftpModalSnapshot,
+        secondary: bool,
+        numbered: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(14.0))
+            .child(self.render_standalone_sftp_endpoint_fields(form, secondary, numbered, cx))
+            .when_some(form.error.clone(), |content, error| {
+                content.child(self.render_prompt_feedback_box(error, form.feedback_success))
+            })
+            .into_any_element()
+    }
+
+    fn render_standalone_sftp_route_page(
+        &self,
+        form: &StandaloneSftpModalSnapshot,
+        remote_to_remote: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let mut page = div()
+            .flex()
+            .flex_col()
+            .gap(px(self.tokens.metrics.modal_section_gap));
+        if remote_to_remote {
+            page = page.child(
+                div()
+                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .text_color(rgb(theme.text_heading))
+                    .child(self.i18n.t("sftp.standalone.remote_host_1")),
+            );
+        }
+        page = page
+            .child(self.render_proxy_command_section(
+                form.proxy_command_enabled,
+                form.proxy_command.as_str(),
+                form.proxy_command_configured,
+                false,
+                cx,
+            ))
+            .when(!form.proxy_command_enabled, |route| {
+                route
+                    .child(self.render_upstream_proxy_policy_section(false, cx))
+                    .child(self.render_proxy_chain_section(false, cx))
+            });
+
+        if remote_to_remote {
+            page = page
+                .child(div().h(px(1.0)).bg(rgb(theme.border)))
+                .child(
+                    div()
+                        .text_size(px(self.tokens.metrics.ui_text_sm))
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .text_color(rgb(theme.text_heading))
+                        .child(self.i18n.t("sftp.standalone.remote_host_2")),
+                )
+                .child(self.render_proxy_command_section(
+                    form.secondary_proxy_command_enabled,
+                    form.secondary_proxy_command.as_str(),
+                    form.secondary_proxy_command_configured,
+                    true,
+                    cx,
+                ))
+                .when(!form.secondary_proxy_command_enabled, |route| {
+                    route
+                        .child(self.render_upstream_proxy_policy_section(true, cx))
+                        .child(self.render_proxy_chain_section(true, cx))
+                });
+        }
+        page.into_any_element()
     }
 
     fn render_standalone_sftp_transfer_mode(
@@ -432,13 +591,14 @@ impl ConnectionFormView {
             .into_any_element()
     }
 
-    fn render_standalone_sftp_endpoint_column(
+    fn render_standalone_sftp_endpoint_fields(
         &self,
         form: &StandaloneSftpModalSnapshot,
         secondary: bool,
         numbered: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let theme = self.tokens.ui;
         let (
             host,
             port,
@@ -507,11 +667,6 @@ impl ConnectionFormView {
         } else {
             NewConnectionField::Username
         };
-        let column_id = if secondary {
-            "standalone-sftp-secondary-column"
-        } else {
-            "standalone-sftp-primary-column"
-        };
         let title_key = if numbered {
             if secondary {
                 "sftp.standalone.remote_host_2"
@@ -536,127 +691,85 @@ impl ConnectionFormView {
         };
 
         div()
-            .id(column_id)
-            .w(px(STANDALONE_SFTP_ENDPOINT_COLUMN_WIDTH))
-            .flex_none()
-            .when(numbered && !secondary, |column| {
-                column
-                    .border_r_1()
-                    .border_color(rgba((self.tokens.ui.border << 8) | 0x80))
+            .flex()
+            .flex_col()
+            .gap(px(14.0))
+            .when(numbered, |section| {
+                section.child(
+                    div()
+                        .text_size(px(self.tokens.metrics.ui_text_sm))
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .text_color(rgb(theme.text_heading))
+                        .child(self.i18n.t(title_key)),
+                )
             })
             .child(
                 div()
                     .flex()
-                    .flex_col()
-                    .gap(px(self.tokens.metrics.modal_section_gap))
-                    .pr(px(self.tokens.metrics.modal_section_gap))
-                    .child(
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_base))
-                            .font_weight(gpui::FontWeight::SEMIBOLD)
-                            .text_color(rgb(self.tokens.ui.text))
-                            .child(self.i18n.t(title_key)),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .gap(px(self.tokens.metrics.form_host_port_gap))
-                            .child(div().flex_1().child(self.render_connection_field(
-                                self.i18n.t("sftp.standalone.host"),
-                                host,
-                                self.i18n.t("sftp.standalone.host_placeholder"),
-                                host_field,
-                                false,
-                                cx,
-                            )))
-                            .child(div().w(px(self.tokens.metrics.form_port_width)).child(
-                                self.render_connection_field(
-                                    self.i18n.t("sftp.standalone.port"),
-                                    port,
-                                    SSH_DEFAULT_PORT_TEXT.to_string(),
-                                    port_field,
-                                    false,
-                                    cx,
-                                ),
-                            )),
-                    )
-                    .child(self.render_connection_field(
-                        self.i18n.t("ssh.form.username"),
-                        username,
-                        "root".to_string(),
-                        username_field,
+                    .flex_row()
+                    .gap(px(12.0))
+                    .child(div().flex_1().min_w_0().child(self.render_connection_field(
+                        self.i18n.t("sftp.standalone.host"),
+                        host,
+                        self.i18n.t("sftp.standalone.host_placeholder"),
+                        host_field,
                         false,
                         cx,
-                    ))
-                    .child(self.render_standalone_sftp_endpoint_auth(
-                        auth_tab,
-                        secondary,
-                        key_path,
-                        managed_key_id,
-                        cert_path,
-                        identity_agent,
-                        if secondary {
-                            form.secondary_gssapi_enabled
-                        } else {
-                            form.gssapi_enabled
-                        },
-                        gssapi_server_identity,
-                        gssapi_delegate_credentials,
-                        form.gssapi_credentials_available,
-                        agent_available,
-                        saved_credential_present,
-                        save_password,
-                        if secondary {
-                            form.secondary_empty_password
-                        } else {
-                            form.empty_password
-                        },
-                        cx,
-                    ))
-                    .child(options)
-                    .child({
-                        let (proxy_command_enabled, proxy_command, proxy_command_configured) =
-                            if secondary {
-                                (
-                                    form.secondary_proxy_command_enabled,
-                                    form.secondary_proxy_command.as_str(),
-                                    form.secondary_proxy_command_configured,
-                                )
-                            } else {
-                                (
-                                    form.proxy_command_enabled,
-                                    form.proxy_command.as_str(),
-                                    form.proxy_command_configured,
-                                )
-                            };
-                        let route = div()
-                            .flex()
-                            .flex_col()
-                            .gap(px(self.tokens.metrics.modal_section_gap))
-                            .child(self.render_proxy_command_section(
-                                proxy_command_enabled,
-                                proxy_command,
-                                proxy_command_configured,
-                                secondary,
+                    )))
+                    .child(
+                        div()
+                            .w(px(96.0))
+                            .flex_none()
+                            .child(self.render_connection_field(
+                                self.i18n.t("sftp.standalone.port"),
+                                port,
+                                SSH_DEFAULT_PORT_TEXT.to_string(),
+                                port_field,
+                                false,
                                 cx,
-                            ))
-                            .when(!proxy_command_enabled, |route| {
-                                route
-                                    .child(self.render_upstream_proxy_policy_section(secondary, cx))
-                                    .child(self.render_proxy_chain_section(secondary, cx))
-                            })
-                            .into_any_element();
-                        self.render_connection_form_section(
-                            if secondary {
-                                ConnectionFormSection::StandaloneSftpSecondaryRoute
-                            } else {
-                                ConnectionFormSection::Route
-                            },
-                            route,
-                            cx,
-                        )
-                    }),
+                            )),
+                    )
+                    .child(
+                        div()
+                            .w(px(168.0))
+                            .flex_none()
+                            .child(self.render_connection_field(
+                                self.i18n.t("ssh.form.username"),
+                                username,
+                                "root".to_string(),
+                                username_field,
+                                false,
+                                cx,
+                            )),
+                    ),
             )
+            .child(self.render_standalone_sftp_endpoint_auth(
+                auth_tab,
+                secondary,
+                key_path,
+                managed_key_id,
+                cert_path,
+                identity_agent,
+                if secondary {
+                    form.secondary_gssapi_enabled
+                } else {
+                    form.gssapi_enabled
+                },
+                gssapi_server_identity,
+                gssapi_delegate_credentials,
+                form.gssapi_credentials_available,
+                agent_available,
+                saved_credential_present,
+                save_password,
+                if secondary {
+                    form.secondary_empty_password
+                } else {
+                    form.empty_password
+                },
+                cx,
+            ))
+            .child(div().h(px(1.0)).bg(rgb(theme.border)))
+            .child(options)
             .into_any_element()
     }
 }

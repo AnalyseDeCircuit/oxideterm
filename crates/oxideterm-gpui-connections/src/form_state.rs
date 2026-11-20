@@ -790,6 +790,8 @@ pub enum ConnectionFormDrawer {
     SerialParameters,
     BleTransportOptions,
     FtpOptions,
+    StandaloneSftpPrimary,
+    StandaloneSftpSecondary,
 }
 
 pub struct NewConnectionForm {
@@ -1397,6 +1399,9 @@ impl NewConnectionForm {
         {
             // Hidden second-endpoint credentials must not outlive the selected topology.
             self.standalone_sftp_secondary.zeroize_secret_drafts();
+            if self.active_drawer == Some(ConnectionFormDrawer::StandaloneSftpSecondary) {
+                self.active_drawer = None;
+            }
         }
         self.standalone_sftp_transfer_mode = mode;
     }

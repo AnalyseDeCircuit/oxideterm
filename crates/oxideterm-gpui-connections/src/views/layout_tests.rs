@@ -22,9 +22,13 @@ fn mount_form(
     cx: &mut Context<FormPreview>,
     setup: impl FnOnce(&mut NewConnectionForm),
 ) -> FormPreview {
-    let theme = || ConnectionsEnvironment {
-        tokens: oxideterm_theme::default_tokens(),
-        i18n: I18n::new(Locale::En),
+    let theme = || {
+        let mut tokens = oxideterm_theme::default_tokens();
+        tokens.apply_motion(oxideterm_theme::UiMotionProfile::Off);
+        ConnectionsEnvironment {
+            tokens,
+            i18n: I18n::new(Locale::En),
+        }
     };
     let runtime = tokio::runtime::Builder::new_current_thread()
         .build()
@@ -82,7 +86,7 @@ fn mount_form(
 }
 
 #[gpui::test]
-fn standalone_sftp_keeps_transport_switcher_and_scrolls_both_axes(cx: &mut gpui::TestAppContext) {
+fn standalone_sftp_keeps_transport_switcher_and_scrolls_vertically(cx: &mut gpui::TestAppContext) {
     let (view, cx) = cx.add_window_view(|_, cx| {
         mount_form(cx, |form| {
             form.set_standalone_sftp_transfer_mode(
@@ -116,35 +120,64 @@ fn standalone_sftp_keeps_transport_switcher_and_scrolls_both_axes(cx: &mut gpui:
     });
     cx.simulate_resize(gpui::size(px(960.0), px(460.0)));
     draw(cx);
+    let primary_nav = cx
+        .debug_bounds("studio-category-Some(StandaloneSftpPrimary)")
+        .expect("standalone SFTP keeps Remote Host 1 in its own category");
+    cx.simulate_click(primary_nav.center(), gpui::Modifiers::default());
+    draw(cx);
+    view.read_with(cx, |view, cx| {
+        assert_eq!(
+            view.views
+                .flow
+                .read(cx)
+                .form
+                .form
+                .as_ref()
+                .unwrap()
+                .active_drawer,
+            Some(crate::form_state::ConnectionFormDrawer::StandaloneSftpPrimary),
+        );
+    });
     let rail_item = cx
         .debug_bounds("new-connection-transport-Ssh")
         .expect("protocol rail remains pinned outside scrolling fields");
     let viewport = fields.bounds();
     assert!(viewport.size.height > px(0.0) && viewport.size.height < px(460.0));
     assert!(fields.max_offset().y > px(0.0));
-    assert!(fields.max_offset().x > px(0.0));
+    assert_eq!(fields.max_offset().x, px(0.0));
 
-    for (delta, expected) in [
-        (
-            gpui::point(px(0.0), px(-4000.0)),
-            gpui::point(px(0.0), -fields.max_offset().y),
-        ),
-        (
-            gpui::point(px(-4000.0), px(0.0)),
-            gpui::point(-fields.max_offset().x, -fields.max_offset().y),
-        ),
-    ] {
-        cx.simulate_event(gpui::ScrollEvent {
-            position: viewport.center(),
-            delta: gpui::ScrollDelta::Pixels(delta),
-            ..Default::default()
-        });
-        draw(cx);
-        assert_eq!(fields.offset(), expected);
+    cx.simulate_event(gpui::ScrollEvent {
+        position: viewport.center(),
+        delta: gpui::ScrollDelta::Pixels(gpui::point(px(0.0), px(-4000.0))),
+        ..Default::default()
+    });
+    draw(cx);
+    assert_eq!(
+        fields.offset(),
+        gpui::point(px(0.0), -fields.max_offset().y)
+    );
+    assert_eq!(
+        cx.debug_bounds("new-connection-transport-Ssh").unwrap(),
+        rail_item,
+        "the protocol rail stays pinned outside the scrolling fields",
+    );
+
+    let secondary_nav = cx
+        .debug_bounds("studio-category-Some(StandaloneSftpSecondary)")
+        .expect("remote-to-remote mode shows Remote Host 2 in category sidebar");
+    cx.simulate_click(secondary_nav.center(), gpui::Modifiers::default());
+    draw(cx);
+    view.read_with(cx, |view, cx| {
         assert_eq!(
-            cx.debug_bounds("new-connection-transport-Ssh").unwrap(),
-            rail_item,
-            "the protocol rail stays pinned outside the scrolling fields",
+            view.views
+                .flow
+                .read(cx)
+                .form
+                .form
+                .as_ref()
+                .unwrap()
+                .active_drawer,
+            Some(crate::form_state::ConnectionFormDrawer::StandaloneSftpSecondary),
         );
-    }
+    });
 }

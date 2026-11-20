@@ -755,6 +755,7 @@ impl ConnectionFormView {
             });
             let row = div()
                 .id(SharedString::from(format!("studio-category-{target:?}")))
+                .debug_selector(move || format!("studio-category-{target:?}"))
                 .relative()
                 .w_full()
                 .h(px(STUDIO_CATEGORY_ROW_HEIGHT))

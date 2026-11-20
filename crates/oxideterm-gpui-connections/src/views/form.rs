@@ -84,7 +84,7 @@ mod standalone_sftp_modal;
 mod tunnel;
 pub use tunnel::{TunnelFormEnvironment, TunnelKind};
 
-use field_controls::{AuthSelectorContext, ConnectionFormSection, serial_port_display_label};
+use field_controls::{AuthSelectorContext, serial_port_display_label};
 
 const TAURI_EDIT_MODAL_WIDTH: f32 = 500.0; // Tauri sm:max-w-[500px]
 const TAURI_EDIT_COLOR_FALLBACK: u32 = 0x22d3ee;
