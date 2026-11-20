@@ -1008,7 +1008,10 @@ impl AcpStdioLauncher {
         agent_client_protocol::Error,
     > {
         let command_path = resolve_acp_command(self.config.command.trim());
-        let mut command = async_process::Command::new(command_path);
+        #[cfg(windows)]
+        let command_path = oxideterm_local_command::windows_batch_launch_path(&command_path)
+            .map_err(agent_client_protocol::Error::into_internal_error)?;
+        let mut command = async_process::Command::new(command_path.as_os_str());
         configure_acp_async_process(&mut command);
         command.args(&self.config.args);
         command.envs(&self.config.env);
@@ -2101,6 +2104,28 @@ mod tests {
         assert!(config.args.is_empty());
         assert!(config.env.is_empty());
         assert!(config.cwd.is_none());
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn windows_acp_batch_entry_round_trips_stdio() {
+        use futures::AsyncReadExt;
+
+        let directory = tempfile::tempdir().unwrap();
+        let entry = directory.path().join("adapter fixture.cmd");
+        std::fs::write(&entry, "@echo off\r\nset /p line=\r\necho %~1:%line%\r\n").unwrap();
+        let mut config = launch_config();
+        config.command = entry.canonicalize().unwrap().to_str().unwrap().into();
+        config.args = vec!["two words".into()];
+        config.env.clear();
+        let launcher = build_acp_stdio_launcher(config).unwrap();
+        let (mut stdin, mut stdout, _, mut child) = launcher.spawn_process().unwrap();
+        stdin.write_all(b"handshake\r\n").await.unwrap();
+        drop(stdin);
+        let mut output = String::new();
+        stdout.read_to_string(&mut output).await.unwrap();
+        assert!(child.status().await.unwrap().success());
+        assert_eq!(output.trim_end(), "two words:handshake");
     }
 
     #[test]

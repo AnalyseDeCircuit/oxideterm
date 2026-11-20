@@ -55,4 +55,5 @@ zstd = "0.13"
 tempfile = "3.23"
 
 [target.'cfg(windows)'.dependencies]
+oxideterm-local-command = { path = "../oxideterm-local-command" }
 windows = { workspace = true, features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_System_Diagnostics_ToolHelp", "Win32_Security"] }

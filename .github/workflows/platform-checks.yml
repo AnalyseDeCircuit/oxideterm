@@ -68,6 +68,10 @@ jobs:
         if: steps.scope.outputs.rust == 'true'
         run: cargo test -p gpui-pre-windows --lib windows_text_
 
+      - name: Test Windows ACP batch entry and stdio
+        if: steps.scope.outputs.rust == 'true'
+        run: cargo test -p oxideterm-ai --lib windows_acp_batch_entry_round_trips_stdio
+
       - name: Test Windows terminal pipe readiness and EOF
         if: steps.scope.outputs.rust == 'true'
         run: cargo test -p alacritty_terminal --lib tty::windows::blocking::tests

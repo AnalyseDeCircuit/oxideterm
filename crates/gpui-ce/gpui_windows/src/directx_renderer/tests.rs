@@ -4,6 +4,52 @@ use gpui::{Bounds, ContentMask, Corners, Quad, ScaledPixels, point, rgb, size};
 
 #[test]
 #[ignore = "requires a hardware DirectX device and a desktop session"]
+fn window_renderer_resumes_after_failed_swap_chain_recovery() -> Result<()> {
+    use gpui::{DevicePixels, Scene, WindowBackgroundAppearance};
+    use windows::{
+        Win32::{Foundation::HWND, UI::WindowsAndMessaging::*},
+        core::w,
+    };
+
+    unsafe {
+        let hwnd = CreateWindowExW(
+            WINDOW_EX_STYLE::default(),
+            w!("STATIC"),
+            w!(""),
+            WS_POPUP,
+            0,
+            0,
+            64,
+            64,
+            None,
+            None,
+            None,
+            None,
+        )?;
+        let result = (|| -> Result<()> {
+            let devices = DirectXDevices::new()?;
+            let mut renderer = super::DirectXRenderer::new(hwnd, &devices, true)?;
+            let replacement = DirectXDevices::new()?;
+            // The real swap-chain constructor rejects a missing window.
+            renderer.hwnd = HWND::default();
+            assert!(renderer.handle_device_lost(&replacement).is_err());
+            renderer.resize(size(DevicePixels(48), DevicePixels(32)))?;
+            let scene = Scene::default();
+            renderer.draw(&scene, WindowBackgroundAppearance::Opaque)?;
+            renderer.hwnd = hwnd;
+            renderer.handle_device_lost(&replacement)?;
+            renderer.mark_drawable();
+            let image = renderer.render_to_image(&scene, WindowBackgroundAppearance::Opaque)?;
+            assert_eq!(image.dimensions(), (48, 32));
+            Ok(())
+        })();
+        DestroyWindow(hwnd)?;
+        result
+    }
+}
+
+#[test]
+#[ignore = "requires a hardware DirectX device and a desktop session"]
 fn drawing_releases_completed_media_without_texture_uploads() -> Result<()> {
     use gpui::{DevicePixels, PlatformAtlas, Scene, WindowBackgroundAppearance};
     use std::{

@@ -1466,23 +1466,15 @@ impl WindowsWindowInner {
         if lparam.0 == 0 {
             return None;
         }
-        {
-            let devices = lparam.0 as *const DirectXDevices;
-            let devices = unsafe { &*devices };
-            if let Err(err) = self
-                .state
-                .renderer
-                .borrow_mut()
-                .handle_device_lost(&devices)
-            {
-                panic!("Device lost: {err}");
-            }
-        }
-
-        // Make sure the first `draw_window` after recovery (whether it comes
-        // from the forced WM_GPUI_FORCE_UPDATE_WINDOW or a stray WM_PAINT in
-        // between) is treated as a forced render so it both clears
-        // `skip_draws` and bypasses the view cache.
+        // SendMessageW only lends the devices for this callback. Rebuild during a
+        // coordinated draw so a nested window message cannot reborrow the renderer.
+        let devices = unsafe { &*(lparam.0 as *const DirectXDevices) };
+        self.state.pending_renderer_recovery.replace(Some(
+            crate::window::PendingRendererRecovery {
+                devices: devices.clone(),
+                retry_at: None,
+            },
+        ));
         self.state.force_render_pending.set(true);
         Some(0)
     }
@@ -1511,6 +1503,39 @@ impl WindowsWindowInner {
             self.request_frame();
             return Some(0);
         };
+        let pending = self.state.pending_renderer_recovery.take();
+        if let Some(mut pending) = pending {
+            let now = std::time::Instant::now();
+            if pending.retry_at.is_none_or(|at| now >= at) {
+                match self
+                    .state
+                    .renderer
+                    .borrow_mut()
+                    .handle_device_lost(&pending.devices)
+                {
+                    Ok(()) => {
+                        pending.retry_at = None;
+                        self.state.force_render_pending.set(true);
+                    }
+                    Err(err) => {
+                        if pending.retry_at.is_none() {
+                            log::error!("Window renderer recovery failed; retrying: {err:#}");
+                        }
+                        pending.retry_at =
+                            Some(std::time::Instant::now() + std::time::Duration::from_secs(1));
+                    }
+                }
+            }
+            if pending.retry_at.is_some() {
+                self.state
+                    .pending_renderer_recovery
+                    .borrow_mut()
+                    .get_or_insert(pending);
+                // VSync invalidates visible windows again. Leave other windows and input live.
+                unsafe { ValidateRect(Some(handle), None).ok().log_err() };
+                return Some(0);
+            }
+        }
         let mut request_frame = self.state.callbacks.request_frame.take()?;
         self.state.direct_manipulation.update();
 

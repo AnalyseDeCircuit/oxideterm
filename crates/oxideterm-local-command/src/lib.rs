@@ -17,6 +17,11 @@ mod process;
 #[cfg(test)]
 mod tests;
 
+#[cfg(windows)]
+mod batch_path;
+#[cfg(windows)]
+pub use batch_path::windows_batch_launch_path;
+
 pub const PRE_CONNECT_COMMAND_MAX_BYTES: usize = 8192;
 pub const PRE_CONNECT_COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
 const POLL_INTERVAL: Duration = Duration::from_millis(20);

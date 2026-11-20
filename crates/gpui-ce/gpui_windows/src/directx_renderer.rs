@@ -82,6 +82,7 @@ pub(crate) struct DirectXRenderer {
     globals: DirectXGlobalElements,
     pipelines: DirectXRenderPipelines,
     direct_composition: Option<DirectComposition>,
+    disable_direct_composition: bool,
     font_info: &'static FontInfo,
     gpu_specs: OnceLock<GpuSpecs>,
 
@@ -320,6 +321,7 @@ impl DirectXRenderer {
             globals,
             pipelines,
             direct_composition,
+            disable_direct_composition,
             font_info: Self::get_font_info(),
             gpu_specs: OnceLock::new(),
             width: 1,
@@ -386,14 +388,9 @@ impl DirectXRenderer {
     }
 
     pub(crate) fn handle_device_lost(&mut self, directx_devices: &DirectXDevices) -> Result<()> {
-        try_to_recover_from_device_lost(|| {
-            self.handle_device_lost_impl(directx_devices)
-                .context("DirectXRenderer handling device lost")
-        })
-    }
-
-    fn handle_device_lost_impl(&mut self, directx_devices: &DirectXDevices) -> Result<()> {
-        let disable_direct_composition = self.direct_composition.is_none();
+        let disable_direct_composition = self.disable_direct_composition;
+        self.skip_draws = true;
+        self.active_render_target.take();
 
         unsafe {
             #[cfg(debug_assertions)]
@@ -456,7 +453,6 @@ impl DirectXRenderer {
         self.globals = globals;
         self.pipelines = pipelines;
         self.direct_composition = direct_composition;
-        self.skip_draws = true;
         Ok(())
     }
 
@@ -755,6 +751,11 @@ impl DirectXRenderer {
         }
         self.width = width;
         self.height = height;
+
+        // Device recovery recreates the swap chain at the most recent client size.
+        if self.resources.is_none() {
+            return Ok(());
+        }
 
         // Clear the render target before resizing
         let devices = self.devices.as_ref().context("devices missing")?;

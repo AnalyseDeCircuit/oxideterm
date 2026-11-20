@@ -41,3 +41,6 @@ zeroize.workspace = true
 
 [dev-dependencies]
 wat = "1.250.0"
+
+[target.'cfg(windows)'.dependencies]
+oxideterm-local-command = { path = "../oxideterm-local-command" }

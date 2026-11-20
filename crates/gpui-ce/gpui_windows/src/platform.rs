@@ -444,14 +444,15 @@ impl WindowsPlatform {
             .name("VSyncProvider".to_owned())
             .spawn(move || {
                 let vsync_provider = VSyncProvider::new();
+                let mut recovery_pending = false;
                 loop {
                     let signal_source = vsync_provider.wait_for_vsync();
                     let signal_at = PlatformFrameSignal::capture(scheduler::Instant::now);
                     if stop.load(Ordering::Acquire) {
                         break;
                     }
-                    if check_device_lost(&directx_device.device)
-                        || invalidate_devices.fetch_and(false, Ordering::Acquire)
+                    let invalidated = invalidate_devices.swap(false, Ordering::AcqRel);
+                    if recovery_pending || invalidated || check_device_lost(&directx_device.device)
                     {
                         if let Err(err) = handle_gpu_device_lost(
                             &mut directx_device,
@@ -459,8 +460,13 @@ impl WindowsPlatform {
                             validation_number,
                             &all_windows,
                         ) {
-                            panic!("Device lost: {err}");
+                            if !recovery_pending {
+                                log::error!("DirectX device recovery failed; retrying: {err:#}");
+                            }
+                            recovery_pending = true;
+                            continue;
                         }
+                        recovery_pending = false;
                     }
                     let Some(all_windows) = all_windows.upgrade() else {
                         break;
@@ -1820,12 +1826,13 @@ fn handle_gpu_device_lost(
         std::thread::sleep(std::time::Duration::from_millis(200));
         for window in all_windows.read().iter() {
             unsafe {
-                SendMessageW(
-                    window.as_raw(),
+                PostMessageW(
+                    Some(window.as_raw()),
                     WM_GPUI_FORCE_UPDATE_WINDOW,
-                    Some(WPARAM(validation_number)),
-                    None,
-                );
+                    WPARAM(validation_number),
+                    LPARAM(0),
+                )
+                .log_err();
             }
         }
     }

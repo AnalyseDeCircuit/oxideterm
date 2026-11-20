@@ -42,6 +42,11 @@ impl std::ops::Deref for WindowsWindow {
     }
 }
 
+pub(crate) struct PendingRendererRecovery {
+    pub devices: DirectXDevices,
+    pub retry_at: Option<Instant>,
+}
+
 pub struct WindowsWindowState {
     pub origin: Cell<Point<Pixels>>,
     pub logical_size: Cell<Size<Pixels>>,
@@ -73,6 +78,7 @@ pub struct WindowsWindowState {
     /// and when a forced render was requested while another draw was in
     /// progress and had to be deferred.
     pub force_render_pending: Cell<bool>,
+    pub(crate) pending_renderer_recovery: RefCell<Option<PendingRendererRecovery>>,
     /// Coalesces demand-driven frame messages so keyboard input cannot flood
     /// the Win32 queue or leave presentation dependent on low-priority WM_PAINT.
     pub frame_request_pending: Cell<bool>,
@@ -187,6 +193,7 @@ impl WindowsWindowState {
             last_visibility: Cell::new(None),
             renderer: RefCell::new(renderer),
             force_render_pending: Cell::new(false),
+            pending_renderer_recovery: RefCell::new(None),
             frame_request_pending: Cell::new(false),
             click_state,
             current_cursor: Cell::new(current_cursor),
