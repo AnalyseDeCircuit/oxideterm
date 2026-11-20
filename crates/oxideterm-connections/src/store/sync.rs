@@ -815,6 +815,7 @@ impl ConnectionStore {
                 .any(|t| t.id == profile.id && t.deleted_at >= profile.updated_at)
         });
         changed |= self.data.remote_desktop_profiles.len() != record_count;
+        let mut replaced_credentials = Vec::new();
         for mut profile in snapshot.records {
             profile.pre_connect_command = None;
             if self
@@ -836,7 +837,11 @@ impl ConnectionStore {
             {
                 if profile.updated_at >= existing.updated_at {
                     // Updating portable metadata must not disconnect a valid local credential.
-                    profile.credential_ref = existing.credential_ref.clone();
+                    if profile.empty_password {
+                        replaced_credentials.extend(existing.credential_ref.take());
+                    } else {
+                        profile.credential_ref = existing.credential_ref.clone();
+                    }
                     preserve_standalone_sftp_upstream_proxy_secret(
                         &mut profile.upstream_proxy,
                         &existing.upstream_proxy,
@@ -854,6 +859,14 @@ impl ConnectionStore {
         if changed {
             self.normalize();
             self.save()?;
+        }
+        if !replaced_credentials.is_empty() {
+            let retained = self.credential_reference_ids();
+            for reference in replaced_credentials {
+                if !retained.contains(&reference) {
+                    self.delete_or_queue_connection_keychain_entry(reference)?;
+                }
+            }
         }
         Ok(applied)
     }

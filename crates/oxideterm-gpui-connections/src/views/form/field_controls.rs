@@ -565,7 +565,12 @@ impl ConnectionFormView {
         let form = self.connection_form_state(cx).form.as_ref()?;
         let use_empty = match field {
             NewConnectionField::Password => {
-                form.empty_password && form.auth_tab == SshAuthTab::Password
+                form.empty_password
+                    && (form.auth_tab == SshAuthTab::Password
+                        || matches!(
+                            form.transport,
+                            NewConnectionTransport::Rdp | NewConnectionTransport::Vnc
+                        ))
             }
             NewConnectionField::StandaloneSftpSecondaryPassword => {
                 form.standalone_sftp_secondary.empty_password
@@ -2633,6 +2638,7 @@ impl ConnectionFormView {
             username,
             keeps_saved_password,
             save_password,
+            empty_password,
             group,
             notes,
             ssh_gateway_connection_id,
@@ -2645,6 +2651,7 @@ impl ConnectionFormView {
                 form.remote_desktop_profile_id.is_some()
                     && form.saved_password_keychain_id.is_some(),
                 form.save_password,
+                form.empty_password,
                 form.group.clone(),
                 form.notes.clone(),
                 form.remote_desktop_ssh_gateway_connection_id.clone(),
@@ -2728,7 +2735,9 @@ impl ConnectionFormView {
             ))
             .child(self.render_connection_secret_field(
                 self.i18n.t("ssh.form.password"),
-                if keeps_saved_password {
+                if empty_password {
+                    String::new()
+                } else if keeps_saved_password {
                     self.i18n
                         .t("modals.new_connection.remote_desktop_password_keep_placeholder")
                 } else if protocol == oxideterm_remote_desktop::RemoteDesktopProtocol::Rdp {
@@ -2741,12 +2750,27 @@ impl ConnectionFormView {
                 cx,
             ))
             .child(self.render_connection_checkbox(
-                "telnet-save-password",
-                self.i18n.t("ssh.form.save_password"),
-                save_password,
-                |form| form.save_password = !form.save_password,
+                "remote-desktop-empty-password",
+                self.i18n.t("ssh.form.use_empty_password"),
+                empty_password,
+                |form| {
+                    form.empty_password = !form.empty_password;
+                    if form.empty_password {
+                        form.field_focused = false;
+                        form.password.zeroize();
+                    }
+                },
                 cx,
             ))
+            .when(!empty_password, |section| {
+                section.child(self.render_connection_checkbox(
+                    "remote-desktop-save-password",
+                    self.i18n.t("ssh.form.save_password"),
+                    save_password,
+                    |form| form.save_password = !form.save_password,
+                    cx,
+                ))
+            })
             .into_any_element();
 
         div()

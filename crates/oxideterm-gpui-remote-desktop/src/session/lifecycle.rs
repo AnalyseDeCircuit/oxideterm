@@ -427,10 +427,7 @@ impl RemoteDesktopSessionEntity {
                                 );
                             }
                             if category == Some(RemoteDesktopErrorCategory::Authentication)
-                                && self
-                                    .password
-                                    .as_ref()
-                                    .is_none_or(|password| password.is_empty())
+                                && self.password.is_none()
                                 && self.credential_prompt_generation != Some(generation)
                             {
                                 self.credential_prompt_generation = Some(generation);
@@ -700,10 +697,7 @@ impl RemoteDesktopSessionEntity {
         self.start_connection_audit("desktop_connect", None);
         let profile = self.profile.clone();
         let provider = self.provider.clone();
-        let password_available = self
-            .password
-            .as_ref()
-            .is_some_and(|password| !password.is_empty());
+        let password_available = self.password.is_some();
         let frame_slot = self.frame_slot.clone();
         let delivery_tx = self.delivery_tx.clone();
         let generation = next_remote_desktop_worker_generation(self.worker_generation);
@@ -759,10 +753,7 @@ impl RemoteDesktopSessionEntity {
             initial_remote_desktop_sizes_for_session(self);
         let profile = self.profile.clone();
         let provider = self.provider.clone();
-        let password_available = self
-            .password
-            .as_ref()
-            .is_some_and(|password| !password.is_empty());
+        let password_available = self.password.is_some();
         let generation = next_remote_desktop_worker_generation(self.worker_generation);
         let scale_factor = self.last_viewport_scale_factor;
         self.shutdown_worker();

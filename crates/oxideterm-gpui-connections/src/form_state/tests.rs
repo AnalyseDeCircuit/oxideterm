@@ -149,6 +149,7 @@ fn remote_desktop_edit_form_restores_options_without_loading_secret() {
         username: Some("operator".to_string()),
         domain: Some("EXAMPLE".to_string()),
         credential_ref: Some("remote-desktop:remote-1".to_string()),
+        empty_password: false,
         ssh_gateway_connection_id: Some("gateway-1".to_string()),
         upstream_proxy: SavedUpstreamProxyPolicy::Custom {
             proxy: oxideterm_connections::SavedUpstreamProxyConfig {

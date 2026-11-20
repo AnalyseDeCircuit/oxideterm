@@ -322,7 +322,9 @@ impl ConnectionStore {
                 .iter()
                 .find(|old| old.id == profile.id)
             {
-                profile.credential_ref = old.credential_ref.clone();
+                if !profile.empty_password {
+                    profile.credential_ref = old.credential_ref.clone();
+                }
                 preserve_standalone_sftp_upstream_proxy_secret(
                     &mut profile.upstream_proxy,
                     &old.upstream_proxy,

@@ -97,15 +97,17 @@ pub fn next_connection_field(
         transport,
         NewConnectionTransport::Rdp | NewConnectionTransport::Vnc
     ) {
-        let fields = [
+        let mut fields = vec![
             NewConnectionField::Name,
             NewConnectionField::Group,
             NewConnectionField::Host,
             NewConnectionField::Port,
             NewConnectionField::Notes,
             NewConnectionField::Username,
-            NewConnectionField::Password,
         ];
+        if !empty_password {
+            fields.push(NewConnectionField::Password);
+        }
         let index = fields
             .iter()
             .position(|candidate| *candidate == field)

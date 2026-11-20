@@ -950,8 +950,8 @@ fn credential_status(store: &oxideterm_connections::ConnectionStore, key: &str) 
             "slot": { "kind": "primary" },
             "credential_kind": "password",
             "writable": true,
-            "configured": profile.credential_ref.is_some(),
-            "source": profile.credential_ref.as_ref().map(|_| "protected_store"),
+            "configured": profile.has_configured_password(),
+            "source": if profile.empty_password { Some("empty_password") } else { profile.credential_ref.as_ref().map(|_| "protected_store") },
         })];
     }
     Vec::new()

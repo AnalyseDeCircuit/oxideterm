@@ -395,6 +395,7 @@ impl ConnectionFormView {
             !form.host.trim().is_empty()
                 && !form.username.trim().is_empty()
                 && (remote_desktop_edit_mode
+                    || form.empty_password
                     || form.password_present
                     || form.saved_password_keychain_id.is_some())
                 && form.port.trim().parse::<u16>().is_ok_and(|port| port > 0)

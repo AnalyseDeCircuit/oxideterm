@@ -627,7 +627,7 @@ fn describe_connection(
                 "port": profile.port,
                 "username": profile.username,
                 "domain": profile.domain,
-                "credential_configured": profile.credential_ref.is_some(),
+                "credential_configured": profile.has_configured_password(),
                 "read_only": profile.read_only,
                 "options": connections::remote_desktop_options_projection(&profile.session_options),
                 "color": profile.color,

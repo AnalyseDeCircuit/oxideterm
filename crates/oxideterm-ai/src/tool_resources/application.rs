@@ -325,7 +325,7 @@ pub fn ai_list_transport_profiles(
                 "port": profile.port,
                 "username": profile.username,
                 "readOnly": profile.read_only,
-                "hasCredential": profile.credential_ref.is_some(),
+                "hasCredential": profile.has_configured_password(),
             })
         })
         .collect::<Vec<_>>();
@@ -379,7 +379,7 @@ pub fn ai_list_credential_metadata(
         .collect::<Vec<_>>();
     let remote_desktop = remote_desktop
         .iter()
-        .filter(|profile| profile.credential_ref.is_some())
+        .filter(|profile| profile.has_configured_password())
         .map(|profile| {
             serde_json::json!({
                 "profileId": profile.id,

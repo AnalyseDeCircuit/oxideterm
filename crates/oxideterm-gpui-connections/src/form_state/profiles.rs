@@ -20,6 +20,7 @@ pub fn form_from_remote_desktop_profile(
     form.remote_desktop_ssh_gateway_connection_id = profile.ssh_gateway_connection_id.clone();
     apply_saved_upstream_proxy_to_form(&mut form, &profile.upstream_proxy);
     form.saved_password_keychain_id = profile.credential_ref.clone();
+    form.empty_password = profile.empty_password;
     form.save_password = profile.credential_ref.is_some();
     form.group = profile.group.clone().unwrap_or(ungrouped_label);
     form.notes = profile.notes.clone().unwrap_or_default();

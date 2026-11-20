@@ -2397,12 +2397,17 @@ impl ConnectionStore {
                 bail!("Cannot replace and clear a remote desktop credential in one update");
             }
             let requested_credential_ref = normalize_optional_text(request.credential_ref);
-            let mut credential_ref = if request.clear_credential {
+            let empty_password = match &request.credential {
+                Some(value) => value.is_empty(),
+                None => !request.clear_credential && requested_credential_ref.is_none()
+                    && existing.as_ref().is_some_and(|profile| profile.empty_password),
+            };
+            let mut credential_ref = if empty_password || request.clear_credential {
                 None
             } else {
                 requested_credential_ref.or_else(|| old_credential_ref.clone())
             };
-            if request.credential.is_some() && credential_ref.is_none() {
+            if !empty_password && request.credential.is_some() && credential_ref.is_none() {
                 credential_ref = Some(remote_desktop_credential_ref(&id));
             }
 
@@ -2430,6 +2435,7 @@ impl ConnectionStore {
             profile.ssh_gateway_connection_id =
                 normalize_optional_text(request.ssh_gateway_connection_id);
             profile.credential_ref = credential_ref.clone();
+            profile.empty_password = empty_password;
             profile.upstream_proxy = policy;
             profile.read_only = request.read_only;
             profile.session_options = request.session_options;
@@ -2472,6 +2478,7 @@ impl ConnectionStore {
 
             if old_credential_ref != credential_ref
                 && let Some(stale_reference) = old_credential_ref
+                && !self.credential_reference_ids().contains(&stale_reference)
             {
                 self.delete_or_queue_connection_keychain_entry(stale_reference)?;
             }
@@ -2595,6 +2602,7 @@ impl ConnectionStore {
             .find(|profile| profile.id == profile_id)
             .expect("remote desktop profile checked above");
         profile.credential_ref = Some(reference.clone());
+        profile.empty_password = false;
         profile.updated_at = Utc::now();
         self.save()?;
         Ok(reference)
@@ -2604,10 +2612,13 @@ impl ConnectionStore {
     }
 
     pub fn get_remote_desktop_credential(&self, profile_id: &str) -> Result<Option<SecretString>> {
-        let Some(reference) = self
-            .get_remote_desktop_profile(profile_id)
-            .and_then(|profile| profile.credential_ref.as_deref())
-        else {
+        let Some(profile) = self.get_remote_desktop_profile(profile_id) else {
+            return Ok(None);
+        };
+        if profile.empty_password {
+            return Ok(Some(SecretString::default()));
+        }
+        let Some(reference) = profile.credential_ref.as_deref() else {
             return Ok(None);
         };
         self.keychain.get_optional(reference)
@@ -2630,13 +2641,16 @@ impl ConnectionStore {
         else {
             return Ok(false);
         };
-        let Some(reference) = profile.credential_ref.take() else {
+        let reference = profile.credential_ref.take();
+        if !std::mem::take(&mut profile.empty_password) && reference.is_none() {
             return Ok(false);
-        };
+        }
         profile.updated_at = Utc::now();
         self.record_cleared_credentials(previous_credentials);
         self.save()?;
-        self.delete_or_queue_connection_keychain_entry(reference)?;
+        if let Some(reference) = reference {
+            self.delete_or_queue_connection_keychain_entry(reference)?;
+        }
         Ok(true)
         })();
         audit.changed(&audit_result);

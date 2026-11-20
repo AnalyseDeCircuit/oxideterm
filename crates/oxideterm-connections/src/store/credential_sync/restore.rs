@@ -315,6 +315,17 @@ impl ConnectionStore {
                 prepared.summary.skipped += 1;
                 continue;
             }
+            // Configuration takes precedence over an older password in a separate secret bundle.
+            if secret.kind != CLEARED_PROFILE_CREDENTIAL_KIND
+                && target.slot == CredentialSlot::Primary
+                && let CredentialOwner::RemoteDesktop(id) = &target.owner
+                && self
+                    .get_remote_desktop_profile(id)
+                    .is_some_and(|profile| profile.empty_password)
+            {
+                prepared.summary.skipped += 1;
+                continue;
+            }
             if secret.kind == CLEARED_PROFILE_CREDENTIAL_KIND && !secret.secret.is_empty() {
                 bail!("Credential deletion must not contain a value");
             }

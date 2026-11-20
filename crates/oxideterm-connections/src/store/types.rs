@@ -1822,6 +1822,9 @@ pub struct RemoteDesktopProfile {
     /// Stable protected-store reference; the credential value is never serialized here.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub credential_ref: Option<String>,
+    /// An explicit empty password travels with the profile even when credential sync is disabled.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub empty_password: bool,
     #[serde(default, skip_serializing_if = "is_false")]
     pub read_only: bool,
     #[serde(default)]
@@ -2171,6 +2174,10 @@ fn default_remote_desktop_proxy() -> SavedUpstreamProxyPolicy {
 }
 
 impl RemoteDesktopProfile {
+    pub fn has_configured_password(&self) -> bool {
+        self.empty_password || self.credential_ref.is_some()
+    }
+
     pub fn new(
         name: impl Into<String>,
         protocol: RemoteDesktopProtocol,
@@ -2194,6 +2201,7 @@ impl RemoteDesktopProfile {
             ssh_gateway_connection_id: None,
             upstream_proxy: SavedUpstreamProxyPolicy::Direct,
             credential_ref: None,
+            empty_password: false,
             read_only: false,
             session_options: RemoteDesktopSessionOptions::default(),
             pre_connect_command: None,

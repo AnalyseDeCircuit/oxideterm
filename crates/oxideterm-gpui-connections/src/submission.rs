@@ -1620,6 +1620,7 @@ pub fn prepare_remote_desktop_form(
     if protocol == RemoteDesktopProtocol::Rdp
         && action != NewConnectionSubmitAction::Save
         && form.password.is_empty()
+        && !form.empty_password
         && !has_saved_credential
     {
         form.error = Some(i18n.t("modals.new_connection.remote_desktop_password_required"));
@@ -1658,22 +1659,26 @@ pub fn prepare_remote_desktop_form(
         };
     let label = remote_desktop_profile_label(&form.name, protocol, &host, port);
     let username = Some(form.username.trim().to_string()).filter(|username| !username.is_empty());
-    let password = if !form.password.is_empty() {
+    let password = if form.empty_password {
+        Some(SecretString::default())
+    } else if !form.password.is_empty() {
         // Move the UI draft into a zeroizing type before saving or starting a worker.
         Some(SecretString::from(std::mem::take(&mut form.password)))
     } else {
         None
     };
-    let save_credential = form.save_password;
+    let save_credential = form.save_password || form.empty_password;
     let ssh_gateway_connection_id = form.remote_desktop_ssh_gateway_connection_id.clone();
     let should_save = editing_profile_id.is_some() || action != NewConnectionSubmitAction::Connect;
-    let clear_credential = editing_profile_id.is_some() && has_saved_credential && !save_credential;
     let (credential_to_save, runtime_password) = if should_save && save_credential {
         // Saving and connecting reloads the protected value below instead of cloning it.
         (password, None)
     } else {
         (None, password)
     };
+    let clear_credential = credential_to_save.is_none()
+        && ((has_saved_credential && !save_credential)
+            || existing_profile.as_ref().is_some_and(|p| p.empty_password));
 
     let source_profile = existing_profile.as_ref().or(reconnect_profile);
     let domain = source_profile.and_then(|profile| profile.domain.clone());
