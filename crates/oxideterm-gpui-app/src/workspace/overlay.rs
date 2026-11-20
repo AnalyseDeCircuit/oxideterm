@@ -215,8 +215,8 @@ const TOOLTIP_REENTRY_WINDOW: Duration = Duration::from_millis(250);
 const TOOLTIP_ENTER_OFFSET_Y: f32 = 3.0;
 const TOOLTIP_SWITCH_ROW_TOLERANCE: f32 = 12.0;
 const TOOLTIP_SWITCH_MAX_DISTANCE: f32 = 96.0;
-const CONNECTION_TRACE_UPDATE_COALESCE: Duration = Duration::from_millis(300);
-const CONNECTION_TRACE_SUCCESS_TTL: Duration = Duration::from_millis(900);
+const CONNECTION_TRACE_UPDATE_COALESCE: Duration = Duration::from_millis(45);
+const CONNECTION_TRACE_SUCCESS_TTL: Duration = Duration::from_millis(720);
 const CONNECTION_TRACE_HISTORY_LIMIT: usize = 12;
 const DISMISSED_CONNECTION_TRACE_LIMIT: usize = 64;
 const CONNECTION_CARD_LAYER_PRIORITY: usize = 40;
@@ -1029,21 +1029,6 @@ impl WorkspaceOverlayEntity {
                 }
                 continue;
             }
-            let final_step_ready = event.status == ConnectionTraceStatus::Ready
-                && event
-                    .step_index
-                    .zip(event.total_steps)
-                    .is_none_or(|(step, total)| step >= total);
-            let ble_trace = connection_trace_transport(event.stage) == TraceTransport::Ble;
-            if final_step_ready && !ble_trace {
-                // A ready terminal is already the success confirmation. Remove
-                // its overlay in the same delivery instead of covering the pane.
-                // BLE is the exception: its scan→match→verify sequence can
-                // finish in milliseconds, so the card keeps the success state
-                // for CONNECTION_TRACE_SUCCESS_TTL to stay readable.
-                changed |= self.connection_trace_cards.remove(&attempt_id).is_some();
-                continue;
-            }
             if !self.connection_trace_cards.contains_key(&attempt_id) {
                 // A node owns one visible connection trace. A retry replaces the
                 // failed physical attempt instead of accumulating another card.
@@ -1113,9 +1098,8 @@ impl WorkspaceOverlayEntity {
                 ConnectionTraceStatus::Ready => {
                     trace.flush_deadline = None;
                     let mut success = event;
-                    success.elapsed_ms = trace
-                        .started_at
-                        .elapsed()
+                    success.elapsed_ms = now
+                        .saturating_duration_since(trace.started_at)
                         .as_millis()
                         .min(u128::from(u64::MAX)) as u64;
                     trace.visible = true;
@@ -3405,7 +3389,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn fast_connection_removes_its_completed_card_immediately(cx: &mut TestAppContext) {
+    fn fast_connection_shows_completed_card_for_success_ttl(cx: &mut TestAppContext) {
         let overlay = cx.new(|cx| WorkspaceOverlayEntity::new(Duration::ZERO, cx));
         let event = |stage, status, progress| ConnectionTraceEvent {
             attempt_id: "fast-attempt".to_string(),
@@ -3424,6 +3408,7 @@ mod tests {
 
         overlay.update(cx, |overlay, _cx| {
             let now = Instant::now();
+            let ready_at = now + Duration::from_millis(80);
             overlay.apply_connection_trace_events(
                 vec![
                     event(
@@ -3437,9 +3422,23 @@ mod tests {
                         100.0,
                     ),
                 ],
-                now,
+                ready_at,
             );
 
+            let card = overlay
+                .connection_trace_cards
+                .get("fast-attempt")
+                .expect("completed SSH card stays visible long enough to play ready sweep");
+            assert_eq!(
+                card.displayed.as_ref().unwrap().stage,
+                ConnectionTraceStage::Ready
+            );
+            assert_eq!(
+                card.expires_at,
+                Some(ready_at + CONNECTION_TRACE_SUCCESS_TTL)
+            );
+
+            assert!(overlay.process_due_deadlines(ready_at + CONNECTION_TRACE_SUCCESS_TTL));
             assert!(!overlay.connection_trace_cards.contains_key("fast-attempt"));
         });
     }
