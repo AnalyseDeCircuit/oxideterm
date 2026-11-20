@@ -1232,7 +1232,7 @@ impl WorkspaceApp {
                     .absolute(),
                 )
             })
-            .when(zen_mode, |root| {
+            .when(zen_mode && !tabbar_visible, |root| {
                 let top = window_shell::client_window_top_resize_inset(window);
                 root.child(self.render_zen_exit_hot_zone(top, cx))
                     .when(self.zen_exit.visible(), |root| {

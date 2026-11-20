@@ -136,7 +136,7 @@ impl WorkspaceApp {
             0.0
         };
         let left_offset = self.tabbar_left_x(window);
-        let right_offset = self.context_sidebar_occupied_width(cx);
+        let right_offset = self.context_sidebar_occupied_width(cx) + self.zen_exit_tabbar_width();
         let width = (f32::from(window_bounds.size.width) - left_offset - right_offset).max(0.0);
         self.main_window_tabbar_drop_bounds = Some(Bounds::new(
             gpui::point(

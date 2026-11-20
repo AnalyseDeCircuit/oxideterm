@@ -1409,10 +1409,23 @@ impl WorkspaceApp {
         }
     }
 
+    pub(super) fn zen_exit_tabbar_width(&self) -> f32 {
+        let settings = self.settings_store.settings();
+        if settings.sidebar_ui.zen_mode && settings.appearance.zen_mode_keep_tabbar {
+            self.tokens.metrics.tabbar_height
+        } else {
+            0.0
+        }
+    }
+
     fn tabbar_outer_width(&self, window: &Window, cx: &App) -> f32 {
         let window_width = f32::from(window.inner_window_bounds().get_bounds().size.width);
         let context_sidebar_width = self.context_sidebar_occupied_width(cx);
-        (window_width - self.tabbar_left_x(window) - context_sidebar_width).max(0.0)
+        (window_width
+            - self.tabbar_left_x(window)
+            - context_sidebar_width
+            - self.zen_exit_tabbar_width())
+        .max(0.0)
     }
 
     pub(in crate::workspace) fn tabbar_scroll_viewport_width(

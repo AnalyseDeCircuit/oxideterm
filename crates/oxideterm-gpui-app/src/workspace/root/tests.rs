@@ -165,8 +165,25 @@ mod tests {
                 cx.debug_bounds("workspace-titlebar-drag-left").is_some(),
                 !zen_mode
             );
-            assert_eq!(cx.debug_bounds("zen-exit-hot-zone").is_some(), zen_mode);
+            assert_eq!(
+                cx.debug_bounds("zen-exit-hot-zone").is_some(),
+                zen_mode && !keep_tabbar
+            );
             assert!(cx.debug_bounds("zen-exit-affordance-pill").is_none());
+            let exit = cx.debug_bounds("zen-exit-tabbar-button");
+            assert_eq!(exit.is_some(), zen_mode && keep_tabbar);
+            if let Some(exit) = exit {
+                let tabs = cx.debug_bounds("workspace-tab-scroll-viewport").unwrap();
+                assert!(tabs.right() <= exit.left());
+                cx.simulate_click(exit.center(), gpui::Modifiers::default());
+                assert!(
+                    !workspace.read_with(cx, |w, _| w
+                        .settings_store
+                        .settings()
+                        .sidebar_ui
+                        .zen_mode)
+                );
+            }
         }
     }
 
