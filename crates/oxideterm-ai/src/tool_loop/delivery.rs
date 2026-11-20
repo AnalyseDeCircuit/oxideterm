@@ -122,6 +122,12 @@ pub enum AiStreamDeliveryEvent {
         tool_session_id: ToolSessionId,
         sender: tokio::sync::oneshot::Sender<Option<String>>,
     },
+    /// Completed sanitized wire messages for one assistant turn (process memory only,
+    /// never persisted) so subsequent turns reuse the provider prefix cache across tool rounds.
+    TurnWireReplay {
+        scope: u64,
+        messages: Vec<crate::AiChatMessage>,
+    },
     ToolExecutionRequested {
         audit_context: Option<oxideterm_audit::AuditContext>,
         dispatch: Option<crate::agent::AgentDispatch>,

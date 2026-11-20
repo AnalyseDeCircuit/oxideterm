@@ -12,6 +12,9 @@ use super::turn::{set_ai_turn_status, update_ai_tool_call_status};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct AiPromptTokenBreakdown {
+    pub next_input: Option<usize>,
+    pub request_scope: u64,
+    pub last_actual_input: Option<usize>,
     pub system_instructions: usize,
     pub tool_definitions: usize,
     pub reserved_output: usize,
@@ -21,15 +24,15 @@ pub struct AiPromptTokenBreakdown {
 
 impl AiPromptTokenBreakdown {
     pub fn total(&self) -> usize {
-        self.system_instructions
-            .saturating_add(self.tool_definitions)
-            .saturating_add(self.reserved_output)
-            .saturating_add(self.messages)
-            .saturating_add(self.tool_results)
+        self.prompt_tokens().saturating_add(self.reserved_output)
     }
 
     pub fn prompt_tokens(&self) -> usize {
-        self.total().saturating_sub(self.reserved_output)
+        self.next_input.unwrap_or_else(|| {
+            self.system_instructions
+                .saturating_add(self.tool_definitions)
+                .saturating_add(self.history_tokens())
+        })
     }
 
     pub fn history_tokens(&self) -> usize {
@@ -437,6 +440,10 @@ pub fn ai_response_reserve(context_window: usize) -> usize {
 
 pub const AI_HISTORY_BUDGET_RATIO: f32 = 0.7;
 pub const AI_COMPACTION_TRIGGER_THRESHOLD: f32 = 0.80;
+pub fn ai_input_needs_compaction(input_tokens: usize, context_window: usize) -> bool {
+    input_tokens >= context_window.saturating_mul(4).div_ceil(5)
+}
+
 pub const AI_TRANSCRIPT_LOOKUP_THRESHOLD: f32 = 0.92;
 pub const AI_TOOL_LOOP_STOP_THRESHOLD: f32 = 0.98;
 pub const AI_MIN_PROMPT_SAFETY_MARGIN: usize = 128;
@@ -611,17 +618,20 @@ fn trim_ai_stream_history_with_estimator(
     }
     let system_tokens = history
         .iter()
-        .filter(|message| message.role == AiChatRole::System)
+        .filter(|message| {
+            message.role == AiChatRole::System
+                && !crate::runtime_context::is_user_context_system_message(message)
+        })
         .map(&estimate_message)
         .sum::<usize>();
     let regular_indices = history
         .iter()
         .enumerate()
         .filter_map(|(index, message)| {
-            matches!(
+            (matches!(
                 message.role,
                 AiChatRole::User | AiChatRole::Assistant | AiChatRole::Tool
-            )
+            ) || crate::runtime_context::is_user_context_system_message(message))
             .then_some(index)
         })
         .collect::<Vec<_>>();
@@ -636,7 +646,9 @@ fn trim_ai_stream_history_with_estimator(
         .saturating_sub(fixed_prompt_overhead);
     let mut groups: Vec<Vec<usize>> = Vec::new();
     for index in regular_indices {
-        if history[index].role == AiChatRole::Tool && !groups.is_empty() {
+        let attach_to_previous = history[index].role == AiChatRole::Tool
+            || crate::runtime_context::is_user_context_system_message(&history[index]);
+        if attach_to_previous && !groups.is_empty() {
             groups.last_mut().unwrap().push(index);
         } else {
             groups.push(vec![index]);
@@ -664,7 +676,9 @@ fn trim_ai_stream_history_with_estimator(
         .drain(..)
         .enumerate()
         .filter_map(|(index, message)| {
-            (message.role == AiChatRole::System || kept_indices.contains(&index)).then_some(message)
+            let is_pinned_system = message.role == AiChatRole::System
+                && !crate::runtime_context::is_user_context_system_message(&message);
+            (is_pinned_system || kept_indices.contains(&index)).then_some(message)
         })
         .collect();
     total_regular.saturating_sub(kept_regular)
@@ -831,6 +845,49 @@ Rules:
 - Use Lucide icon names: Zap, Search, Bug, FileCode, Terminal, Settings, RefreshCw, Shield, BarChart, GitBranch, Download, Upload, Eye, Wrench, Play
 - Suggestions must be contextually relevant to the conversation"#;
 
+/// Replaces completed assistant placeholders with their exact in-memory wire turn
+/// segments (per-turn context, tool calls, tool results, final assistant text) so
+/// subsequent user turns keep an identical prefix for provider KV/prompt caching.
+pub fn expand_ai_live_turn_replays(
+    history: &mut Vec<AiChatMessage>,
+    replays: &std::collections::HashMap<String, Vec<AiChatMessage>>,
+) {
+    if replays.is_empty() {
+        return;
+    }
+    let mut expanded_ids = std::collections::HashSet::new();
+    let mut expanded = Vec::with_capacity(history.len());
+    for message in history.drain(..) {
+        if message.role == AiChatRole::Assistant
+            && !message.is_streaming
+            && let Some(segment) = replays.get(&message.id)
+            && !segment.is_empty()
+        {
+            expanded_ids.insert(message.id);
+            expanded.extend(segment.iter().cloned());
+        } else if message.role == AiChatRole::User
+            && let Some(assistant_id) = message.id.strip_prefix("tool-images-")
+        {
+            if expanded_ids.contains(assistant_id) {
+                // Skip synthetic tool-image observations when the live wire replay
+                // already contains the original tool messages for that turn.
+                continue;
+            }
+            if let Some(segment) = replays.get(assistant_id)
+                && !segment.is_empty()
+            {
+                expanded_ids.insert(assistant_id.to_owned());
+                expanded.extend(segment.iter().cloned());
+                continue;
+            }
+            expanded.push(message);
+        } else {
+            expanded.push(message);
+        }
+    }
+    *history = expanded;
+}
+
 pub fn compose_ai_provider_history(
     mut history: Vec<AiChatMessage>,
     config: &AiChatStreamConfig,
@@ -873,12 +930,11 @@ pub fn ai_send_budget_decision(
     context_window: usize,
 ) -> AiPromptBudgetDecision {
     let response_reserve = ai_chat_response_reserve(config, context_window);
-    let breakdown = ai_prompt_token_breakdown(
-        history,
-        &config.tools,
-        &config.provider_type,
-        response_reserve,
-    );
+    let breakdown = super::ai_request_token_breakdown(history, config, response_reserve);
+    let system = breakdown
+        .system_instructions
+        .saturating_add(breakdown.tool_definitions)
+        .min(breakdown.prompt_tokens());
     let regular_messages = history
         .iter()
         .filter(|message| message.role != AiChatRole::System)
@@ -887,17 +943,20 @@ pub fn ai_send_budget_decision(
     determine_ai_compression_level(AiPromptBudgetInput {
         context_window,
         response_reserve,
-        system_budget: breakdown
-            .system_instructions
-            .saturating_add(breakdown.tool_definitions),
-        history_tokens: breakdown.history_tokens(),
+        system_budget: system,
+        history_tokens: breakdown.prompt_tokens().saturating_sub(system),
         trimmable_history_tokens: Some(breakdown.history_tokens()),
         summary_eligible_tokens: Some(summary_eligible_tokens),
         can_summarize: summary_eligible_tokens > 0,
         can_lookup_transcript: ai_find_prompt_transcript_lookup_reference(&conversation.messages)
             .is_some(),
         in_tool_loop: false,
-        auto_compact_threshold: None,
+        auto_compact_threshold: Some(crate::ai_to_usable_budget_threshold(
+            AI_COMPACTION_TRIGGER_THRESHOLD,
+            context_window,
+            system,
+            response_reserve,
+        )),
         transcript_lookup_threshold: None,
         tool_loop_stop_threshold: None,
         safety_margin: None,
@@ -913,12 +972,11 @@ pub fn ai_budget_diagnostic_payload(
     trimmed_count: usize,
 ) -> serde_json::Value {
     let response_reserve = ai_chat_response_reserve(config, context_window);
-    let breakdown = ai_prompt_token_breakdown(
-        history,
-        &config.tools,
-        &config.provider_type,
-        response_reserve,
-    );
+    let breakdown = super::ai_request_token_breakdown(history, config, response_reserve);
+    let system = breakdown
+        .system_instructions
+        .saturating_add(breakdown.tool_definitions)
+        .min(breakdown.prompt_tokens());
     let transcript_lookup_tokens = decision
         .filter(|decision| decision.level >= 3)
         .and_then(|_| ai_find_prompt_transcript_lookup_reference(&conversation.messages))
@@ -937,10 +995,8 @@ pub fn ai_budget_diagnostic_payload(
         "nextLevel": decision.map(|decision| decision.level).unwrap_or(0),
         "contextWindow": context_window,
         "responseReserve": response_reserve,
-        "systemBudget": breakdown.system_instructions
-            .saturating_add(breakdown.tool_definitions)
-            .saturating_add(transcript_lookup_tokens),
-        "historyTokens": breakdown.history_tokens(),
+        "systemBudget": system.saturating_add(transcript_lookup_tokens),
+        "historyTokens": breakdown.prompt_tokens().saturating_sub(system),
         "trimmedCount": trimmed_count,
     })
 }

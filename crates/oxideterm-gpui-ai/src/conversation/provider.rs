@@ -7,9 +7,9 @@ use crate::{
 use gpui::{App, Context};
 use oxideterm_ai::{
     AiChatMessage, AiChatRole, AiChatStreamConfig, ToolSessionId,
-    agent::{AgentExecution, AgentModel, AgentOptions},
+    agent::{AgentExecution, AgentModel},
     stream_state::{
-        ai_diagnostic_event, ai_prompt_token_breakdown, ai_response_reserve, ai_transcript_entry,
+        ai_diagnostic_event, ai_request_token_breakdown, ai_response_reserve, ai_transcript_entry,
     },
     tool_loop::{AiModelBackendServices, AiModelRuntimeState, run_ai_chat_tool_loop},
 };
@@ -35,9 +35,10 @@ pub enum AiProviderSendPlan {
 impl super::AiConversationPrompt<'_> {
     pub fn plan_provider_turn(
         &self,
-        pending: crate::state::AiPendingChatStream,
+        mut pending: crate::state::AiPendingChatStream,
         allow_pre_send_compaction: bool,
     ) -> Option<AiProviderSendPlan> {
+        pending.config.input_usage = self.state.input_usage_for(&pending.conversation_id);
         if allow_pre_send_compaction
             && self.should_force_ai_pre_send_compaction(
                 &pending.conversation_id,
@@ -152,7 +153,6 @@ impl<Node: Clone + Eq + Hash + 'static, Terminal: Clone + 'static>
         &self,
         turn: AiProviderTurn,
         services: AiModelBackendServices,
-        agent_options: AgentOptions,
         agent_concurrency: usize,
         diagnostic: impl Fn(serde_json::Value) -> serde_json::Value,
         cx: &mut App,
@@ -298,7 +298,6 @@ impl<Node: Clone + Eq + Hash + 'static, Terminal: Clone + 'static>
             &services,
             &tool_session_id,
             context_window,
-            &agent_options,
             agent_concurrency,
             cx,
         );
@@ -330,7 +329,6 @@ impl<Node: Clone + Eq + Hash + 'static, Terminal: Clone + 'static>
         services: &AiModelBackendServices,
         session: &ToolSessionId,
         context_window: usize,
-        options: &AgentOptions,
         concurrency: usize,
         cx: &mut App,
     ) -> AgentExecution {
@@ -341,20 +339,13 @@ impl<Node: Clone + Eq + Hash + 'static, Terminal: Clone + 'static>
             config
                 .tools
                 .iter()
-                .filter(|tool| !config.tool_policy.disabled_tools.contains(&tool.name))
+                .filter(|tool| {
+                    !oxideterm_ai::agent::is_agent_tool(&tool.name)
+                        && !config.tool_policy.disabled_tools.contains(&tool.name)
+                })
                 .map(|tool| tool.name.clone())
                 .collect(),
         );
-        if config.tool_policy.enabled {
-            config.tools.extend(
-                oxideterm_ai::agent::agent_tool_definitions(false)
-                    .into_iter()
-                    .filter(|tool| {
-                        (options.enabled || tool.name == "ask_user")
-                            && !config.tool_policy.disabled_tools.contains(&tool.name)
-                    }),
-            );
-        }
         let run = runtime.create_group(
             conversation_id.to_owned(),
             AgentModel {
@@ -418,7 +409,7 @@ fn record_prompt_usage(
         .filter(|v| *v > 0)
         .unwrap_or_else(|| ai_response_reserve(max_tokens));
     let breakdown = ai_context_token_breakdown_from_prompt(
-        ai_prompt_token_breakdown(history, &config.tools, &config.provider_type, reserved),
+        ai_request_token_breakdown(history, config, reserved),
         max_tokens,
     );
     ai.set_prepared_prompt_usage(AiPreparedPromptUsage {

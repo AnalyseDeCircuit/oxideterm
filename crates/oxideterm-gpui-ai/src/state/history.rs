@@ -1120,6 +1120,7 @@ impl AiWorkspaceEntity {
             conversation != id || self.agents.message_runs.contains_key(message)
         });
         self.history.branches.insert(id.into(), branch_id);
+        self.chat_ui.live_turn_replays.remove(id);
         if let Some(page) = self.history.pages.get_mut(id) {
             page.before = None;
             page.after = None;
@@ -1171,6 +1172,7 @@ impl AiWorkspaceEntity {
             conversation != id || self.agents.message_runs.contains_key(message)
         });
         self.history.branches.insert(id.into(), branch_id);
+        self.chat_ui.live_turn_replays.remove(id);
         if let Some(page) = self.history.pages.get_mut(id) {
             page.before = None;
             page.after = None;

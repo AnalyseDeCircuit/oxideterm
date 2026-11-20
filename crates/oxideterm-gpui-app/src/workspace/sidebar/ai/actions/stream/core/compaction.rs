@@ -57,7 +57,12 @@ impl WorkspaceApp {
         let profile = self.read_ai_compaction_profile(!request.summarize, cx);
         let owner = cx.weak_entity();
         let effects = owner.clone();
+        let meter = owner.clone();
         let bindings = AiCompactionBindings {
+            should_compact: Rc::new(move |conversation, cx| meter.upgrade().is_some_and(|entity| {
+                let app = entity.read(cx);
+                app.resolve_ai_stream_config(cx).is_ok_and(|config| app.ai_conversation_prompt(cx).should_auto_compact_history(conversation, config))
+            })),
             i18n: self.i18n.clone(),
             current_profile: Rc::new(move |compact, cx| {
                 Some(

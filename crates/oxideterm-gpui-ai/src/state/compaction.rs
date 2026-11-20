@@ -31,6 +31,7 @@ pub enum AiCompactionEffect {
 #[derive(Clone)]
 pub struct AiCompactionBindings {
     pub i18n: I18n,
+    pub should_compact: Rc<dyn Fn(&oxideterm_ai::AiConversation, &App) -> bool>,
     pub current_profile: Rc<dyn Fn(bool, &App) -> Option<Result<AiCompactionProfile, String>>>,
     pub dispatch: Rc<dyn Fn(AiCompactionEffect, &mut App)>,
 }
@@ -121,6 +122,14 @@ impl AiWorkspaceEntity {
                 .await;
             // Read preferences before entering the AI entity. The history read
             // and summary start are separate stages, as in the provider path.
+            if request.silent
+                && !request.force
+                && let Ok(Ok(source)) = &result
+                && !cx.update(|cx| (bindings.should_compact)(source, cx))
+            {
+                let _ = weak.update(cx, |ai, _| ai.history.compaction_loads.remove(&target));
+                return;
+            }
             let profile = cx.update(|cx| (bindings.current_profile)(!request.summarize, cx));
             let _ = weak.update(cx, |ai, cx| {
                 ai.history.compaction_loads.remove(&target);
@@ -197,13 +206,6 @@ impl AiWorkspaceEntity {
         } else {
             scope_responses_history(&mut messages, &config);
             let context_window = profile.context_window;
-            if request.silent
-                && !request.force
-                && !should_compact(&messages, &config, context_window)
-            {
-                self.finish_compaction(id);
-                return Err(request.resume_after);
-            }
             let Some(plan) = ai_compaction_plan_for_provider(
                 &messages,
                 context_window,
@@ -383,6 +385,7 @@ impl AiWorkspaceEntity {
                     &message_id,
                     now,
                 ) {
+                    self.input_usage_for(id).clear();
                     self.persist_summary_created(
                         id,
                         &message_id,
@@ -442,42 +445,6 @@ impl AiWorkspaceEntity {
         cx.notify();
         effects
     }
-}
-
-fn should_compact(
-    messages: &[oxideterm_ai::AiChatMessage],
-    config: &AiChatStreamConfig,
-    context_window: usize,
-) -> bool {
-    let total_tokens = messages
-        .iter()
-        .map(|message| ai_message_payload_estimated_tokens(message, &config.provider_type))
-        .sum::<usize>();
-    let reserve = ai_response_reserve(context_window);
-    let prompt_budget = oxideterm_ai::compute_ai_prompt_budget(context_window, reserve, 0, None);
-    let threshold = if prompt_budget.usable_prompt_budget > 0 {
-        (context_window as f32 * AI_COMPACTION_TRIGGER_THRESHOLD)
-            / prompt_budget.usable_prompt_budget as f32
-    } else {
-        AI_COMPACTION_TRIGGER_THRESHOLD
-    };
-    determine_ai_compression_level(AiPromptBudgetInput {
-        context_window,
-        response_reserve: reserve,
-        system_budget: 0,
-        history_tokens: total_tokens,
-        trimmable_history_tokens: None,
-        summary_eligible_tokens: Some(total_tokens),
-        can_summarize: true,
-        can_lookup_transcript: false,
-        in_tool_loop: false,
-        auto_compact_threshold: Some(threshold),
-        transcript_lookup_threshold: None,
-        tool_loop_stop_threshold: None,
-        safety_margin: None,
-    })
-    .level
-        >= 2
 }
 
 impl AiCompactionRequest {

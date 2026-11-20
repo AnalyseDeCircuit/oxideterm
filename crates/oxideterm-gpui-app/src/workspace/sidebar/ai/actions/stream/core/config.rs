@@ -27,7 +27,7 @@ impl WorkspaceApp {
             .map(|connection| connection.connection_id);
         let user = uses_scoped_memory.then(whoami::username);
         self.ai.state.read(cx).resolve_ai_stream_config(
-            settings, &self.i18n, self.ai_web_provider_id().is_ok(), host.clone(),
+            self.global_agent_options().enabled, settings, &self.i18n, self.ai_web_provider_id().is_ok(), host.clone(),
             oxideterm_gpui_ai::conversation::AiMemoryScope {
                 user: user.as_deref(), project: project.as_deref(), host: host.as_deref(),
             },

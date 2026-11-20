@@ -220,6 +220,8 @@
       "tool_results": "Werkzeugergebnisse",
       "compress_dialog": "Dialog komprimieren",
       "prompt_cache": "Prompt-Cache",
+      "next_input": "Geschätzte nächste Eingabe",
+      "last_actual_input": "Tatsächliche letzte Eingabe",
       "cache_last_request": "Letzte Anfrage",
       "cache_session_total": "Sitzung gesamt",
       "cache_write": "Cache-Schreibvorgänge"

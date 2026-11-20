@@ -220,6 +220,8 @@
       "tool_results": "工具結果",
       "compress_dialog": "壓縮對話",
       "prompt_cache": "提示詞快取",
+      "next_input": "下次預估輸入",
+      "last_actual_input": "上次實際輸入",
       "cache_last_request": "最近請求",
       "cache_session_total": "本工作階段累計",
       "cache_write": "快取寫入"

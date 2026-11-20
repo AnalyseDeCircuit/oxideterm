@@ -165,14 +165,14 @@ fn send_ai_loop_delivery(
 
 const AI_TOOL_CALLS_PER_ROUND_SAFETY_LIMIT: usize = 16;
 const AI_RUNTIME_CONTEXT_MESSAGE_ID: &str = crate::RUNTIME_CONTEXT_MESSAGE_ID;
-const AI_RUNTIME_CONTEXT_POLICY_MESSAGE_ID: &str = "runtime-context-policy";
+
 const AI_RUNTIME_CONTEXT_INSTRUCTIONS: &str = concat!(
     "The final application runtime context is the current observation supplied by the application, not a user request. ",
     "Its snapshotId identifies the observation and observedAtMs is its capture time.\n",
     "Use stable resource_ref only for durable actions such as connecting a saved connection, reading settings or knowledge, and opening an application surface.\n",
     "Use handle_id only for the current live terminal, local shell, SFTP session, or IDE workspace.\n",
     "A stale handle must be rediscovered; never substitute a tab, session, node, or target id.",
-);
+); its resource_ref and handle_id values are current for this turn only.";
 
 async fn execute_ai_chat_tool_loop(
     mut config: AiChatStreamConfig,
@@ -188,6 +188,7 @@ async fn execute_ai_chat_tool_loop(
     execution: &mut Option<AgentExecution>,
 ) -> AiAgentLoopOutcome {
     if let Some(agent) = execution.as_mut().filter(|agent| agent.is_child()) {
+        config.input_usage = Default::default();
         if let Err(error) =
             configure_ai_child_model(agent, &mut config, &mut model_runtime, &services).await
         {
@@ -361,15 +362,15 @@ async fn execute_ai_chat_tool_loop(
             };
         };
         replace_ai_runtime_context_message(&mut history, runtime_context);
-        if ai_prompt_token_breakdown(
-            history,
-            &config.tools,
-            &config.provider_type,
-            response_reserve,
-        )
-        .total()
-            > model_runtime.context_window.saturating_mul(75) / 100
-        {
+        let mut provider_config = config.clone();
+        if summary_only {
+            provider_config.tools.clear();
+            provider_config.tool_choice = crate::AiToolChoice::Auto;
+        }
+        if ai_input_needs_compaction(
+            ai_request_token_breakdown(history, &provider_config, response_reserve).prompt_tokens(),
+            model_runtime.context_window,
+        ) {
             if let Err(error) = compact_running_ai_task(
                 history,
                 &config,
@@ -431,11 +432,6 @@ async fn execute_ai_chat_tool_loop(
         } else {
             None
         };
-        let mut provider_config = config.clone();
-        if summary_only {
-            provider_config.tools.clear();
-            provider_config.tool_choice = crate::AiToolChoice::Auto;
-        }
         let _ = send_ai_diagnostic(
             &ui_tx,
             generation,
@@ -454,6 +450,10 @@ async fn execute_ai_chat_tool_loop(
             }),
         );
         let provider_history = crate::sanitize_api_messages_for_provider(history.clone());
+        let breakdown =
+            ai_request_token_breakdown(&provider_history, &provider_config, response_reserve);
+        let request_prefix =
+            AiRequestPrefix::capture(&provider_config, &provider_history, breakdown.clone());
         let _ = send_ai_prompt_usage(
             &ui_tx,
             generation,
@@ -469,12 +469,7 @@ async fn execute_ai_chat_tool_loop(
                 .clone()
                 .unwrap_or_else(|| provider_config.provider_type.clone()),
             provider_config.model.clone(),
-            ai_prompt_token_breakdown(
-                &provider_history,
-                &provider_config.tools,
-                &provider_config.provider_type,
-                response_reserve,
-            ),
+            breakdown,
             model_runtime.context_window,
         );
         let usage_request = execution
@@ -715,6 +710,9 @@ async fn execute_ai_chat_tool_loop(
         // request and its credentials before entering any tool interaction.
         drop(model_request);
 
+        if let Some(input) = round_input_tokens.and_then(|n| usize::try_from(n).ok()) {
+            config.input_usage.record(request_prefix, input);
+        }
         if execution.as_ref().is_none_or(|agent| !agent.is_child())
             && (round_input_tokens.is_some()
                 || round_cache_read_tokens.is_some()
@@ -891,6 +889,8 @@ async fn execute_ai_chat_tool_loop(
             }
             let mut final_message =
                 agent_chat_message(AiChatRole::Assistant, round_content.clone());
+            final_message.thinking_content =
+                (!round_thinking.is_empty()).then(|| round_thinking.clone());
             if let Some(round) = response_round {
                 set_ai_provider_parts(
                     &mut final_message,
@@ -908,8 +908,30 @@ async fn execute_ai_chat_tool_loop(
                         part: round,
                     }),
                 );
+            } else if config.provider_type == "gemini" && !round_provider_parts.is_empty() {
+                set_ai_provider_parts(&mut final_message, "gemini", round_provider_parts.clone());
             }
             history.push(final_message);
+            if execution.as_ref().is_none_or(|agent| !agent.is_child())
+                && let Some(start) = history
+                    .iter()
+                    .rposition(|message| message.id == task_user_id)
+                    .map(|index| index + 1)
+                && start < history.len()
+            {
+                let replay = crate::sanitize_api_messages_for_provider(history[start..].to_vec());
+                let _ = send_ai_loop_delivery(
+                    execution.is_some(),
+                    &ui_tx,
+                    generation,
+                    &conversation_id,
+                    &assistant_id,
+                    AiStreamDeliveryEvent::TurnWireReplay {
+                        scope: config.input_scope(),
+                        messages: replay,
+                    },
+                );
+            }
             if let Some(agent) = execution.as_mut() {
                 if !summary_only {
                     let _ = agent.runtime.refund_empty_round(&agent.run);
@@ -1328,15 +1350,10 @@ async fn execute_ai_chat_tool_loop(
             };
         }
         let budget_history = crate::sanitize_api_messages_for_provider(history.clone());
-        let prompt_breakdown = ai_prompt_token_breakdown(
-            &budget_history,
-            &config.tools,
-            &config.provider_type,
-            response_reserve,
-        );
+        let prompt_breakdown = ai_request_token_breakdown(&budget_history, &config, response_reserve);
         let system_budget = prompt_breakdown
             .system_instructions
-            .saturating_add(prompt_breakdown.tool_definitions);
+            .saturating_add(prompt_breakdown.tool_definitions).min(prompt_breakdown.prompt_tokens());
         let regular_messages = history
             .iter()
             .filter(|message| message.role != AiChatRole::System)
@@ -1346,13 +1363,15 @@ async fn execute_ai_chat_tool_loop(
             context_window: model_runtime.context_window,
             response_reserve,
             system_budget,
-            history_tokens: prompt_breakdown.history_tokens(),
+            history_tokens: prompt_breakdown.prompt_tokens().saturating_sub(system_budget),
             trimmable_history_tokens: None,
             summary_eligible_tokens: Some(summary_eligible_tokens),
             can_summarize: summary_eligible_tokens > 0,
             can_lookup_transcript: transcript_lookup_prompt.is_some(),
             in_tool_loop: true,
-            auto_compact_threshold: None,
+            auto_compact_threshold: Some(ai_to_usable_budget_threshold(
+                AI_COMPACTION_TRIGGER_THRESHOLD, model_runtime.context_window, system_budget, response_reserve,
+            )),
             transcript_lookup_threshold: None,
             tool_loop_stop_threshold: Some(ai_to_usable_budget_threshold(
                 0.9,
@@ -1496,13 +1515,13 @@ fn runtime_context_semantically_equal(left: &str, right: &str) -> bool {
 fn replace_ai_runtime_context_message(history: &mut Vec<AiChatMessage>, content: String) {
     if !history
         .iter()
-        .any(|message| message.id == AI_RUNTIME_CONTEXT_POLICY_MESSAGE_ID)
+        .any(|message| message.id == RUNTIME_CONTEXT_POLICY_MESSAGE_ID)
     {
         let mut policy = agent_chat_message(
             AiChatRole::System,
             AI_RUNTIME_CONTEXT_INSTRUCTIONS.to_string(),
         );
-        policy.id = AI_RUNTIME_CONTEXT_POLICY_MESSAGE_ID.to_string();
+        policy.id = RUNTIME_CONTEXT_POLICY_MESSAGE_ID.to_string();
         history.insert(0, policy);
     }
     // Keep prior runtime-context observations in place (append-only) and skip

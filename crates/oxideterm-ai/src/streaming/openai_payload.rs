@@ -45,12 +45,10 @@ pub(crate) fn openai_chat_body(config: &AiChatStreamConfig, messages: &[AiChatMe
 }
 
 fn supports_openai_stream_usage_option(config: &AiChatStreamConfig) -> bool {
-    matches!(config.provider_type.as_str(), "openai" | "deepseek" | "xai")
-        || (config.provider_type == "openai_compatible"
-            && config
-                .base_url
-                .to_ascii_lowercase()
-                .contains("openrouter.ai"))
+    matches!(
+        config.provider_type.as_str(),
+        "openai" | "openai_compatible" | "deepseek" | "xai" | "kimi" | "glm" | "mimo"
+    )
 }
 
 fn apply_tool_options(body: &mut serde_json::Map<String, Value>, config: &AiChatStreamConfig) {
@@ -368,6 +366,7 @@ mod tests {
             memory_context: None,
             memory_entry_ids: Vec::new(),
             prompt_cache_key: None,
+            input_usage: Default::default(),
             tool_policy: AiToolUsePolicy::default(),
             tools: Vec::new(),
             tool_choice: AiToolChoice::Auto,
@@ -652,13 +651,19 @@ mod tests {
         assert_eq!(wire1["messages"][0], wire2["messages"][0]);
         assert_eq!(wire1["messages"][1], wire2["messages"][1]);
         assert_eq!(wire2["prompt_cache_key"], "oxideterm-conv-1");
-        assert_eq!(wire2["stream_options"], serde_json::json!({"include_usage": true}));
+        assert_eq!(
+            wire2["stream_options"],
+            serde_json::json!({"include_usage": true})
+        );
 
         let resp2 = super::super::responses_payload::responses_body(&cfg, &turn2);
         assert_eq!(resp2["prompt_cache_key"], "oxideterm-conv-1");
         assert_eq!(resp2["input"][0]["role"], "system");
         assert_eq!(resp2["input"][0]["content"], "Static system rules");
-        assert_eq!(resp2["input"].as_array().unwrap().last().unwrap()["role"], "user");
+        assert_eq!(
+            resp2["input"].as_array().unwrap().last().unwrap()["role"],
+            "user"
+        );
 
         // Verify cached token extraction for OpenAI and DeepSeek formats.
         let openai_usage = super::super::openai_parse::parse_openai_data_line(
@@ -685,5 +690,141 @@ mod tests {
                 cache_write_tokens: None,
             }]
         );
+    }
+
+    #[test]
+    fn cross_turn_live_replay_preserves_full_prefix_across_providers() {
+        let deepseek_cfg = config("deepseek", "auto");
+        let openai_cfg = config("openai", "auto");
+        let gemini_cfg = config("gemini", "auto");
+
+        // Simulate Turn 1 Round 1 after a tool call completed.
+        let mut turn1_history = crate::stream_state::compose_ai_provider_history(
+            serde_json::from_value(serde_json::json!([
+                {"id":"u1","role":"user","content":"Inspect memory","timestamp_ms":1}
+            ]))
+            .unwrap(),
+            &deepseek_cfg,
+            None,
+            "Static system instructions".to_string(),
+            Some("Memory + RAG 1".to_string()),
+        );
+        turn1_history.push(
+            serde_json::from_value(serde_json::json!({
+                "id": crate::runtime_context::RUNTIME_CONTEXT_MESSAGE_ID,
+                "role": "system",
+                "content": "Active terminal: prod-1",
+                "timestamp_ms": 0
+            }))
+            .unwrap(),
+        );
+        turn1_history.push(serde_json::from_value(serde_json::json!({
+            "id": "r0-assistant",
+            "role": "assistant",
+            "content": "",
+            "thinking_content": "Let me check free -m",
+            "tool_calls": [{"id":"call-1","name":"terminal_exec","arguments":"{\"command\":\"free -m\"}"}],
+            "timestamp_ms": 2
+        })).unwrap());
+        turn1_history.push(
+            serde_json::from_value(serde_json::json!({
+                "id": "r0-tool",
+                "role": "tool",
+                "tool_call_id": "call-1",
+                "content": "Mem: 16G total, 8G used",
+                "timestamp_ms": 3
+            }))
+            .unwrap(),
+        );
+        let turn1_round1_snapshot =
+            crate::sanitize_api_messages_for_provider(turn1_history.clone());
+
+        // Turn 1 finishes with a final assistant response; capture the replay slice after u1.
+        let mut turn1_completed = turn1_history;
+        turn1_completed.push(
+            serde_json::from_value(serde_json::json!({
+                "id": "a1-final",
+                "role": "assistant",
+                "content": "Memory usage is 50%.",
+                "thinking_content": "Summarize result",
+                "timestamp_ms": 4
+            }))
+            .unwrap(),
+        );
+        let start = turn1_completed.iter().rposition(|m| m.id == "u1").unwrap() + 1;
+        let replay = crate::sanitize_api_messages_for_provider(turn1_completed[start..].to_vec());
+        let mut replays = std::collections::HashMap::new();
+        replays.insert("a1".to_string(), replay);
+
+        // Turn 2 starts from persisted messages [u1, a1, u2] and expands live replays.
+        let mut turn2_history = crate::stream_state::compose_ai_provider_history(
+            serde_json::from_value(serde_json::json!([
+                {"id":"u1","role":"user","content":"Inspect memory","timestamp_ms":1},
+                {"id":"a1","role":"assistant","content":"Memory usage is 50%.","timestamp_ms":4},
+                {"id":"u2","role":"user","content":"Now check disk","timestamp_ms":5}
+            ]))
+            .unwrap(),
+            &deepseek_cfg,
+            None,
+            "Static system instructions".to_string(),
+            Some("Memory + RAG 2".to_string()),
+        );
+        crate::stream_state::expand_ai_live_turn_replays(&mut turn2_history, &replays);
+        let turn2_wire_input = crate::sanitize_api_messages_for_provider(turn2_history.clone());
+
+        // DeepSeek & OpenAI Chat: Turn 1 Round 1's entire wire message list must be an exact prefix of Turn 2.
+        for cfg in [&deepseek_cfg, &openai_cfg] {
+            let t1_msgs = openai_chat_messages(cfg, &turn1_round1_snapshot);
+            let t2_msgs = openai_chat_messages(cfg, &turn2_wire_input);
+            assert!(t2_msgs.len() > t1_msgs.len());
+            assert_eq!(
+                &t2_msgs[..t1_msgs.len()],
+                t1_msgs.as_slice(),
+                "provider {} lost exact cross-turn wire prefix",
+                cfg.provider_type
+            );
+        }
+
+        // Anthropic: user + per-turn context + runtime context remain distinct content blocks,
+        // and Turn 1's entire message array is preserved verbatim as Turn 2's prefix.
+        let (t1_sys, t1_anth) =
+            super::super::anthropic::anthropic_chat_messages(&turn1_round1_snapshot);
+        let (t2_sys, t2_anth) = super::super::anthropic::anthropic_chat_messages(&turn2_wire_input);
+        assert_eq!(t1_sys, t2_sys);
+        assert_eq!(&t2_anth[..t1_anth.len()], t1_anth.as_slice());
+        assert_eq!(
+            t2_anth[0]["content"],
+            serde_json::json!([
+                {"type": "text", "text": "Inspect memory"},
+                {"type": "text", "text": "Memory + RAG 1"},
+                {"type": "text", "text": "Active terminal: prod-1"}
+            ])
+        );
+
+        // Gemini: Turn 1's entire `contents` array is preserved verbatim as Turn 2's prefix.
+        let t1_gem = super::super::gemini::gemini_chat_body(&gemini_cfg, &turn1_round1_snapshot);
+        let t2_gem = super::super::gemini::gemini_chat_body(&gemini_cfg, &turn2_wire_input);
+        let t1_contents = t1_gem["contents"].as_array().unwrap();
+        let t2_contents = t2_gem["contents"].as_array().unwrap();
+        assert_eq!(t1_gem["systemInstruction"], t2_gem["systemInstruction"]);
+        assert_eq!(&t2_contents[..t1_contents.len()], t1_contents.as_slice());
+
+        // Budget trimming must drop Turn 1's context/runtime messages atomically with Turn 1's user turn.
+        let mut trimmed = turn2_history;
+        let removed = crate::stream_state::trim_ai_stream_history_to_request_budget(
+            &mut trimmed,
+            &[],
+            "openai",
+            120,
+            60,
+        );
+        assert!(removed > 0);
+        assert!(
+            !trimmed
+                .iter()
+                .any(|m| m.content == "Memory + RAG 1" || m.content == "Active terminal: prod-1"),
+            "orphaned turn-1 context messages survived trimming: {trimmed:#?}"
+        );
+        assert!(trimmed.iter().any(|m| m.id == "u2"));
     }
 }

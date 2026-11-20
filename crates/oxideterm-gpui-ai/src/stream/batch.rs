@@ -183,6 +183,16 @@ impl AiChatDeliveryBatch {
                         });
                     }
                 }
+                AiStreamDeliveryEvent::TurnWireReplay { scope, messages } => {
+                    if !ai.is_child_stream(generation) {
+                        ai.record_live_turn_replay(
+                            &conversation_id,
+                            &assistant_id,
+                            scope,
+                            messages,
+                        );
+                    }
+                }
                 event => {
                     return Some(AiStreamDelivery {
                         generation,
@@ -626,13 +636,14 @@ pub fn ai_context_token_breakdown_from_prompt(
     max_tokens: usize,
 ) -> AiContextTokenBreakdown {
     AiContextTokenBreakdown {
+        request_scope: breakdown.request_scope,
+        last_actual_input: breakdown.last_actual_input,
         system_instructions: breakdown.system_instructions,
         tool_definitions: breakdown.tool_definitions,
         reserved_output: breakdown.reserved_output,
         messages: breakdown.messages,
         tool_results: breakdown.tool_results,
-        // The ring reports context already sent to the model. Output reserve
-        // remains visible in the popover but is not presented as used input.
+        // Output reserve is capacity held back, not part of the next input.
         total: breakdown.prompt_tokens(),
         max_tokens,
     }

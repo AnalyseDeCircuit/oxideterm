@@ -61,7 +61,7 @@ impl WorkspaceApp {
                 }
             }
             Some(AiProviderSendPlan::Launch(turn)) => self.ai.conversations.launch_provider_turn(
-                *turn, self.ai_model_backend_services(cx), self.global_agent_options(),
+                *turn, self.ai_model_backend_services(cx),
                 self.agent_concurrency(), |data| self.ai_diagnostic_base(data), cx,
             ),
             None => {}

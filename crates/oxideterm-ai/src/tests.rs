@@ -31,6 +31,7 @@ fn test_stream_config(provider_type: &str) -> AiChatStreamConfig {
         memory_context: None,
         memory_entry_ids: Vec::new(),
         prompt_cache_key: None,
+        input_usage: Default::default(),
         tool_policy: AiToolUsePolicy::default(),
         tools: Vec::new(),
         tool_choice: AiToolChoice::Auto,
@@ -56,6 +57,60 @@ fn chat_message(id: &str, role: AiChatRole, content: &str) -> AiChatMessage {
         branches: None,
         suggestions: Vec::new(),
     }
+}
+
+#[test]
+fn measured_input_counts_only_replayed_additions_in_the_same_request_scope() {
+    let config = test_stream_config("openai");
+    let mut history = vec![
+        chat_message("user", AiChatRole::User, "abc"),
+        chat_message("task-mode", AiChatRole::System, "abc"),
+    ];
+    let first = ai_request_token_breakdown(&history, &config, 100);
+    assert_eq!(first.prompt_tokens(), 2);
+    let prefix = AiRequestPrefix::capture(&config, &history, first);
+    config.input_usage.record(prefix, 799);
+    history.pop();
+    let mut assistant = chat_message("reply", AiChatRole::Assistant, "abc");
+    assistant.thinking_content = Some("private reasoning".repeat(40));
+    history.push(assistant);
+    let next = ai_request_token_breakdown(&history, &config, 100);
+    assert_eq!(next.prompt_tokens(), 799);
+    assert!(!ai_input_needs_compaction(next.prompt_tokens(), 1000));
+    history.push(chat_message("next", AiChatRole::User, "abc"));
+    let next = ai_request_token_breakdown(&history, &config, 100);
+    assert_eq!(next.prompt_tokens(), 800);
+    assert!(ai_input_needs_compaction(next.prompt_tokens(), 1000));
+    let prefix = AiRequestPrefix::capture(&config, &history, next);
+    config.input_usage.record(prefix, 602);
+    assert_eq!(
+        ai_request_token_breakdown(&history, &config, 0).prompt_tokens(),
+        602
+    );
+    for changed in ["model", "endpoint", "tools", "history"] {
+        let mut config = config.clone();
+        let mut history = history.clone();
+        match changed {
+            "model" => config.model.push('2'),
+            "endpoint" => config.base_url.push_str("/v2"),
+            "tools" => config.tools.push(AiToolDefinition {
+                name: "read".into(),
+                description: String::new(),
+                parameters: serde_json::json!({}),
+            }),
+            _ => history[0].content = "xyz".into(),
+        }
+        assert_eq!(
+            ai_request_token_breakdown(&history, &config, 0).next_input,
+            None,
+            "{changed}"
+        );
+    }
+    config.input_usage.clear();
+    assert_eq!(
+        ai_request_token_breakdown(&history, &config, 0).prompt_tokens(),
+        3
+    );
 }
 
 #[test]

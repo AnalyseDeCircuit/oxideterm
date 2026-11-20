@@ -847,6 +847,7 @@ fn loop_test_chat_config() -> crate::AiChatStreamConfig {
         memory_context: None,
         memory_entry_ids: Vec::new(),
         prompt_cache_key: None,
+        input_usage: Default::default(),
         tool_policy: Default::default(),
         tools: Vec::new(),
         tool_choice: crate::AiToolChoice::Auto,

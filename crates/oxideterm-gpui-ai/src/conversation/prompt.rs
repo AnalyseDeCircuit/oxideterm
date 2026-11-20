@@ -5,7 +5,7 @@ use oxideterm_ai::{
 use oxideterm_settings::{AiActiveBackend, AiSettings};
 
 use crate::{
-    sidebar::transcript::{ai_chat_hash_json_value, ai_chat_message_base_signature},
+    sidebar::transcript::ai_chat_message_base_signature,
     state::{
         AiChatMessageSignatureCache, AiContextTokenBreakdown, AiContextTokenBreakdownKey,
         AiWorkspaceEntity, skills::AiSkillCatalog,
@@ -61,24 +61,67 @@ impl AiConversationPrompt<'_> {
     ) -> bool {
         let Some(conversation) = self
             .state
-            .conversation_state()
-            .conversations
-            .iter()
-            .find(|conversation| conversation.id == conversation_id)
+            .history
+            .model_contexts
+            .get(conversation_id)
+            .or_else(|| {
+                self.state
+                    .conversation_state()
+                    .conversations
+                    .iter()
+                    .find(|c| c.id == conversation_id)
+            })
         else {
             return false;
         };
-        let Some(decision) = self.ai_send_budget_decision(
-            conversation,
+        let history = self.compose_ai_stream_history_for_conversation(
+            Some(conversation_id),
+            conversation.messages.clone(),
             config,
-            request_content,
+            request_content.map(str::to_owned),
             task_system_prompt,
             rag_system_prompt,
-        ) else {
-            return false;
-        };
-        decision.level >= 2
+        );
+        history
+            .iter()
+            .filter(|m| m.role != AiChatRole::System)
+            .take(4)
+            .count()
+            == 4
+            && ai_input_needs_compaction(
+                ai_request_token_breakdown(&history, config, 0).prompt_tokens(),
+                self.context_window(config),
+            )
             && ai_find_prompt_transcript_lookup_reference(&conversation.messages).is_none()
+    }
+
+    pub fn should_auto_compact_history(
+        &self,
+        conversation: &AiConversation,
+        mut config: AiChatStreamConfig,
+    ) -> bool {
+        config.input_usage = self.state.input_usage_for(&conversation.id);
+        let history = self.compose_ai_stream_history_for_conversation(
+            Some(&conversation.id),
+            conversation.messages.clone(),
+            &config,
+            None,
+            None,
+            None,
+        );
+        let next = ai_request_token_breakdown(&history, &config, 0).prompt_tokens();
+        let draft = if self
+            .state
+            .conversation_state()
+            .active_conversation_id
+            .as_deref()
+            == Some(&conversation.id)
+        {
+            self.draft_tokens(&config)
+        } else {
+            0
+        };
+        ai_input_needs_compaction(next.saturating_add(draft), self.context_window(&config))
     }
 
     pub fn build_ai_stream_history(
@@ -102,7 +145,8 @@ impl AiConversationPrompt<'_> {
             .model_contexts
             .get(conversation_id)
             .map(|conversation| conversation.messages.clone())?;
-        let mut history = self.compose_ai_stream_history(
+        let mut history = self.compose_ai_stream_history_for_conversation(
+            Some(conversation_id),
             history,
             config,
             request_content,
@@ -113,17 +157,26 @@ impl AiConversationPrompt<'_> {
         if let Some(transcript_lookup_prompt) = transcript_lookup_prompt {
             insert_transcript_lookup(&mut history, transcript_lookup_prompt);
         }
-        let trimmed_count = trim_ai_stream_history_to_request_budget(
-            &mut history,
-            &config.tools,
-            &config.provider_type,
-            context_window,
-            config
-                .max_response_tokens
-                .and_then(|tokens| usize::try_from(tokens).ok())
-                .filter(|tokens| *tokens > 0)
-                .unwrap_or_else(|| ai_response_reserve(context_window)),
-        );
+        let reserve = config
+            .max_response_tokens
+            .and_then(|tokens| usize::try_from(tokens).ok())
+            .filter(|tokens| *tokens > 0)
+            .unwrap_or_else(|| ai_response_reserve(context_window));
+        let breakdown = ai_request_token_breakdown(&history, config, reserve);
+        let trimmed_count = if breakdown.next_input.is_some()
+            && breakdown.prompt_tokens()
+                <= compute_ai_prompt_budget(context_window, reserve, 0, None).usable_prompt_budget
+        {
+            0
+        } else {
+            trim_ai_stream_history_to_request_budget(
+                &mut history,
+                &config.tools,
+                &config.provider_type,
+                context_window,
+                reserve,
+            )
+        };
         Some((history, trimmed_count))
     }
 
@@ -135,20 +188,50 @@ impl AiConversationPrompt<'_> {
         task_system_prompt: Option<&str>,
         rag_system_prompt: Option<&str>,
     ) -> Vec<AiChatMessage> {
+        self.compose_ai_stream_history_for_conversation(
+            None,
+            history,
+            config,
+            request_content,
+            task_system_prompt,
+            rag_system_prompt,
+        )
+    }
+
+    fn compose_ai_stream_history_for_conversation(
+        &self,
+        conversation_id: Option<&str>,
+        history: Vec<AiChatMessage>,
+        config: &AiChatStreamConfig,
+        request_content: Option<String>,
+        task_system_prompt: Option<&str>,
+        rag_system_prompt: Option<&str>,
+    ) -> Vec<AiChatMessage> {
         let base_system_prompt = build_ai_base_system_prompt(
             self.settings,
             config,
             self.skills.prompt(self.settings.skills.enabled),
         );
-        let turn_context_prompt =
-            build_ai_turn_context_prompt(rag_system_prompt, task_system_prompt);
-        compose_ai_provider_history(
+        let turn_context_prompt = build_ai_turn_context_prompt(
+            self.settings,
+            config,
+            rag_system_prompt,
+            task_system_prompt,
+        );
+        let mut history = compose_ai_provider_history(
             history,
             config,
             request_content,
             base_system_prompt,
             turn_context_prompt,
-        )
+        );
+        if let Some(conversation_id) = conversation_id {
+            let replays = self
+                .state
+                .live_turn_replays_for(conversation_id, config.input_scope());
+            expand_ai_live_turn_replays(&mut history, &replays);
+        }
+        history
     }
 
     pub fn ai_send_budget_decision(
@@ -160,7 +243,8 @@ impl AiConversationPrompt<'_> {
         rag_system_prompt: Option<&str>,
     ) -> Option<AiPromptBudgetDecision> {
         let context_window = self.context_window(config);
-        let history = self.compose_ai_stream_history(
+        let history = self.compose_ai_stream_history_for_conversation(
+            Some(&conversation.id),
             conversation.messages.clone(),
             config,
             request_content.map(str::to_string),
@@ -186,7 +270,8 @@ impl AiConversationPrompt<'_> {
         trimmed_count: usize,
     ) -> serde_json::Value {
         let context_window = self.context_window(config);
-        let history = self.compose_ai_stream_history(
+        let history = self.compose_ai_stream_history_for_conversation(
+            Some(&conversation.id),
             conversation.messages.clone(),
             config,
             request_content.map(str::to_string),
@@ -245,6 +330,37 @@ impl AiConversationPrompt<'_> {
         &self,
         config: Option<&AiChatStreamConfig>,
     ) -> AiContextTokenBreakdown {
+        let mut result = self.breakdown_without_draft(config);
+        if let Some(config) = config {
+            let draft = self.draft_tokens(config);
+            result.messages = result.messages.saturating_add(draft);
+            result.total = result.total.saturating_add(draft);
+        }
+        result
+    }
+
+    fn draft_tokens(&self, config: &AiChatStreamConfig) -> usize {
+        let chat = self.state.chat_ui();
+        ai_estimated_tokens(&chat.draft)
+            + chat
+                .images
+                .iter()
+                .map(|image| {
+                    oxideterm_ai::estimate_image_tokens(
+                        &config.provider_type,
+                        &config.model,
+                        image.width,
+                        image.height,
+                    )
+                    .tokens
+                })
+                .sum::<usize>()
+    }
+
+    fn breakdown_without_draft(
+        &self,
+        config: Option<&AiChatStreamConfig>,
+    ) -> AiContextTokenBreakdown {
         let settings = self.settings;
         let provider_id = config
             .as_ref()
@@ -291,8 +407,16 @@ impl AiConversationPrompt<'_> {
                             conversation.messages.last().is_some_and(|message| {
                                 message.role == AiChatRole::User
                                     || (message.role == AiChatRole::Assistant
-                                        && message.is_streaming)
+                                        && message.is_streaming
+                                        && message.content.is_empty())
                             })
+                        })
+                        && config.is_some_and(|config| {
+                            prepared.breakdown.request_scope == config.input_scope()
+                                && config
+                                    .input_usage
+                                    .last_input_for(prepared.breakdown.request_scope)
+                                    == prepared.breakdown.last_actual_input
                         })
                         && prepared.provider_id == provider_id
                         && prepared.model == model
@@ -300,9 +424,10 @@ impl AiConversationPrompt<'_> {
         {
             return prepared.breakdown.clone();
         }
+        let conversation_id = conversation.map(|conversation| conversation.id.as_str());
         let request_configuration_fingerprint = config
             .as_ref()
-            .map(|config| self.ai_request_configuration_fingerprint(config))
+            .map(|config| self.ai_request_configuration_fingerprint(conversation_id, config))
             .unwrap_or(0);
         let cache_key = AiContextTokenBreakdownKey {
             conversation_id: conversation.map(|conversation| conversation.id.clone()),
@@ -321,7 +446,8 @@ impl AiConversationPrompt<'_> {
             }
         }
         let breakdown_without_draft = if let Some(config) = config.as_ref() {
-            let mut history = self.compose_ai_stream_history(
+            let mut history = self.compose_ai_stream_history_for_conversation(
+                conversation_id,
                 conversation
                     .map(|conversation| conversation.messages.clone())
                     .unwrap_or_default(),
@@ -347,26 +473,15 @@ impl AiConversationPrompt<'_> {
                 .and_then(|tokens| usize::try_from(tokens).ok())
                 .filter(|tokens| *tokens > 0)
                 .unwrap_or_else(|| ai_response_reserve(max_tokens));
-            // Match the send path exactly: the idle indicator describes the
-            // next provider request, including history that would be trimmed.
-            trim_ai_stream_history_to_request_budget(
-                &mut history,
-                &config.tools,
-                &config.provider_type,
-                max_tokens,
-                reserved_output,
-            );
+            // Show the proposed input before automatic compaction or emergency trimming.
             ai_context_token_breakdown_from_prompt(
-                ai_prompt_token_breakdown(
-                    &history,
-                    &config.tools,
-                    &config.provider_type,
-                    reserved_output,
-                ),
+                ai_request_token_breakdown(&history, config, reserved_output),
                 max_tokens,
             )
         } else {
             AiContextTokenBreakdown {
+                request_scope: 0,
+                last_actual_input: None,
                 system_instructions: 0,
                 tool_definitions: 0,
                 reserved_output: 0,
@@ -382,10 +497,22 @@ impl AiConversationPrompt<'_> {
         breakdown_without_draft
     }
 
-    fn ai_request_configuration_fingerprint(&self, config: &AiChatStreamConfig) -> u64 {
+    fn ai_request_configuration_fingerprint(
+        &self,
+        conversation_id: Option<&str>,
+        config: &AiChatStreamConfig,
+    ) -> u64 {
         let settings = self.settings;
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         std::hash::Hash::hash(&self.settings_updated_at, &mut hasher);
+        std::hash::Hash::hash(&config.input_scope(), &mut hasher);
+        std::hash::Hash::hash(&config.input_usage.cache_key(), &mut hasher);
+        std::hash::Hash::hash(
+            &self
+                .state
+                .live_turn_replay_fingerprint(conversation_id, config.input_scope()),
+            &mut hasher,
+        );
         std::hash::Hash::hash(&config.provider_id, &mut hasher);
         std::hash::Hash::hash(&config.provider_type, &mut hasher);
         std::hash::Hash::hash(&config.model, &mut hasher);
@@ -399,11 +526,6 @@ impl AiConversationPrompt<'_> {
         let providers = ai_provider_views(&settings.providers);
         if let Some(provider) = active_provider_view(&providers, config.provider_id.as_deref()) {
             ai_hash_text_shape(&provider.name, &mut hasher);
-        }
-        for tool in &config.tools {
-            ai_hash_text_shape(&tool.name, &mut hasher);
-            ai_hash_text_shape(&tool.description, &mut hasher);
-            ai_chat_hash_json_value(&tool.parameters, &mut hasher);
         }
         if settings.skills.enabled {
             // Skill content hashes make catalog edits invalidate the prompt

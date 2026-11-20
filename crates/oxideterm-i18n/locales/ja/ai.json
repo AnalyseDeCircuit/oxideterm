@@ -220,6 +220,8 @@
       "tool_results": "ツール結果",
       "compress_dialog": "対話を圧縮",
       "prompt_cache": "プロンプトキャッシュ",
+      "next_input": "次回の推定入力",
+      "last_actual_input": "前回の実際の入力",
       "cache_last_request": "直近のリクエスト",
       "cache_session_total": "セッション合計",
       "cache_write": "キャッシュ書き込み"

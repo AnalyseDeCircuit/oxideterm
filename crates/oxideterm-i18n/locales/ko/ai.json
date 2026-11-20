@@ -220,6 +220,8 @@
       "tool_results": "도구 결과",
       "compress_dialog": "대화 압축",
       "prompt_cache": "프롬프트 캐시",
+      "next_input": "다음 예상 입력량",
+      "last_actual_input": "지난 실제 입력량",
       "cache_last_request": "최근 요청",
       "cache_session_total": "세션 누적",
       "cache_write": "캐시 쓰기"

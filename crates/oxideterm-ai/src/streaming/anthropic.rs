@@ -247,10 +247,17 @@ fn anthropic_thinking_budget(config: &AiChatStreamConfig) -> Option<i64> {
 
 pub(crate) fn anthropic_chat_messages(messages: &[AiChatMessage]) -> (Option<String>, Vec<Value>) {
     let mut system: Option<String> = None;
-    let mut converted = Vec::<(String, Value)>::new();
+    let mut converted = Vec::<(String, Value, bool)>::new();
     for message in messages {
         if crate::runtime_context::is_user_context_system_message(message) {
-            converted.push(("user".to_string(), Value::String(message.content.clone())));
+            // Keep per-turn/runtime context in its own text block instead of
+            // concatenating it into the user's text string so prefix caching
+            // can cleanly reuse stable user blocks across turns.
+            converted.push((
+                "user".to_string(),
+                Value::String(message.content.clone()),
+                true,
+            ));
             continue;
         }
         match message.role {
@@ -272,6 +279,7 @@ pub(crate) fn anthropic_chat_messages(messages: &[AiChatMessage]) -> (Option<Str
                 } else {
                     crate::images::image_message_content(message, "anthropic")
                 },
+                false,
             )),
             AiChatRole::Tool => {
                 let mut tool_result = serde_json::json!({
@@ -286,7 +294,7 @@ pub(crate) fn anthropic_chat_messages(messages: &[AiChatMessage]) -> (Option<Str
                         Value::String(tool_call_id.clone()),
                     );
                 }
-                converted.push(("user".to_string(), Value::Array(vec![tool_result])));
+                converted.push(("user".to_string(), Value::Array(vec![tool_result]), false));
             }
             AiChatRole::Assistant => {
                 let calls = message
@@ -298,6 +306,7 @@ pub(crate) fn anthropic_chat_messages(messages: &[AiChatMessage]) -> (Option<Str
                     converted.push((
                         "assistant".to_string(),
                         Value::String(message.content.clone()),
+                        false,
                     ));
                 } else {
                     let mut parts = Vec::new();
@@ -314,41 +323,47 @@ pub(crate) fn anthropic_chat_messages(messages: &[AiChatMessage]) -> (Option<Str
                             "input": input,
                         })
                     }));
-                    converted.push(("assistant".to_string(), Value::Array(parts)));
+                    converted.push(("assistant".to_string(), Value::Array(parts), false));
                 }
             }
         }
     }
 
-    let mut merged = Vec::<(String, Value)>::new();
-    for (role, content) in converted {
-        if let Some((last_role, last_content)) = merged.last_mut()
+    let mut merged = Vec::<(String, Value, bool)>::new();
+    for (role, content, separate_block) in converted {
+        if let Some((last_role, last_content, last_separate)) = merged.last_mut()
             && *last_role == role
         {
-            if let (Some(last_text), Some(next_text)) = (last_content.as_str(), content.as_str()) {
+            if !separate_block
+                && !*last_separate
+                && let (Some(last_text), Some(next_text)) =
+                    (last_content.as_str(), content.as_str())
+            {
                 *last_content = Value::String(format!("{last_text}\n\n{next_text}"));
             } else {
                 let mut parts = anthropic_content_as_array(last_content);
                 parts.extend(anthropic_content_as_array(&content));
                 *last_content = Value::Array(parts);
+                *last_separate |= separate_block;
             }
             continue;
         }
-        merged.push((role, content));
+        merged.push((role, content, separate_block));
     }
-    if merged.first().is_some_and(|(role, _)| role != "user") {
+    if merged.first().is_some_and(|(role, _, _)| role != "user") {
         merged.insert(
             0,
             (
                 "user".to_string(),
                 Value::String("(Continue from previous context)".to_string()),
+                false,
             ),
         );
     }
 
     let messages = merged
         .into_iter()
-        .map(|(role, content)| serde_json::json!({ "role": role, "content": content }))
+        .map(|(role, content, _)| serde_json::json!({ "role": role, "content": content }))
         .collect::<Vec<_>>();
     (system, messages)
 }
@@ -612,6 +627,7 @@ mod tests {
             memory_context: None,
             memory_entry_ids: Vec::new(),
             prompt_cache_key: None,
+            input_usage: Default::default(),
             tool_policy: AiToolUsePolicy::default(),
             tools: Vec::new(),
             tool_choice: AiToolChoice::Auto,
@@ -770,8 +786,15 @@ mod tests {
             body["messages"][1]["content"][0]["cache_control"],
             serde_json::json!({"type":"ephemeral"})
         );
+        assert_eq!(body["messages"][2]["content"][0]["text"], "Second question");
+        assert!(
+            body["messages"][2]["content"][0]
+                .get("cache_control")
+                .is_none()
+        );
+        assert_eq!(body["messages"][2]["content"][1]["text"], "Volatile env");
         assert_eq!(
-            body["messages"][2]["content"][0]["cache_control"],
+            body["messages"][2]["content"][1]["cache_control"],
             serde_json::json!({"type":"ephemeral"})
         );
         assert!(body["messages"][0]["content"].is_string());

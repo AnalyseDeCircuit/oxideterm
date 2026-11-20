@@ -220,6 +220,8 @@
       "tool_results": "工具结果",
       "compress_dialog": "压缩对话",
       "prompt_cache": "提示词缓存",
+      "next_input": "下次预计输入",
+      "last_actual_input": "上次实际输入",
       "cache_last_request": "最近请求",
       "cache_session_total": "本会话累计",
       "cache_write": "缓存写入"

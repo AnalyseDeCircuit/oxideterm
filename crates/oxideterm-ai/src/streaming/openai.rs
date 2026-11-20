@@ -36,19 +36,28 @@ pub(crate) async fn stream_openai_completion(
 
         if !response.status().is_success() {
             super::retry::check_transient_response(&response)?;
-            let mut rejection =
-                chat_rejection(&mut response, body.get("tool_choice").is_some()).await;
-            if rejection.unsupported_tool_choice {
-                let fallback_body = body_without_tool_choice(&body);
-                response = match openai_stream_request(&client, url, &config, &fallback_body).await
-                {
+            let mut active_body = body.clone();
+            let mut rejection = chat_rejection(
+                &mut response,
+                active_body.get("tool_choice").is_some(),
+                active_body.get("stream_options").is_some(),
+            )
+            .await;
+            if rejection.unsupported_stream_options || rejection.unsupported_tool_choice {
+                if rejection.unsupported_stream_options {
+                    active_body = body_without_field(&active_body, "stream_options");
+                }
+                if rejection.unsupported_tool_choice {
+                    active_body = body_without_tool_choice(&active_body);
+                }
+                response = match openai_stream_request(&client, url, &config, &active_body).await {
                     Ok(response) => response,
                     Err(_) if has_fallback => continue,
                     Err(error) => return Err(error),
                 };
                 super::retry::check_transient_response(&response)?;
                 if !response.status().is_success() {
-                    rejection = chat_rejection(&mut response, false).await;
+                    rejection = chat_rejection(&mut response, false, false).await;
                 }
             }
             if !response.status().is_success() {
@@ -95,9 +104,14 @@ struct ChatRejection {
     reason: String,
     try_alternative_endpoint: bool,
     unsupported_tool_choice: bool,
+    unsupported_stream_options: bool,
 }
 
-async fn chat_rejection(response: &mut reqwest::Response, has_tool_choice: bool) -> ChatRejection {
+async fn chat_rejection(
+    response: &mut reqwest::Response,
+    has_tool_choice: bool,
+    has_stream_options: bool,
+) -> ChatRejection {
     let status = response.status().as_u16();
     let body = read_provider_error_body(response).await;
     let raw = std::str::from_utf8(&body).unwrap_or_default();
@@ -125,6 +139,8 @@ async fn chat_rejection(response: &mut reqwest::Response, has_tool_choice: bool)
             && (matches!(status, 400 | 404 | 405) || is_html),
         unsupported_tool_choice: has_tool_choice
             && is_tool_choice_unsupported_error(message.unwrap_or(raw)),
+        unsupported_stream_options: has_stream_options
+            && is_stream_options_unsupported_error(message.unwrap_or(raw)),
     }
 }
 
@@ -245,12 +261,21 @@ async fn stream_openai_response(
     Ok(result)
 }
 
-fn body_without_tool_choice(body: &Value) -> Value {
+fn body_without_field(body: &Value, key: &str) -> Value {
     let mut fallback_body = body.clone();
     if let Some(object) = fallback_body.as_object_mut() {
-        object.remove("tool_choice");
+        object.remove(key);
     }
     fallback_body
+}
+
+fn body_without_tool_choice(body: &Value) -> Value {
+    body_without_field(body, "tool_choice")
+}
+
+fn is_stream_options_unsupported_error(message: &str) -> bool {
+    let lower = Zeroizing::new(message.to_ascii_lowercase());
+    lower.contains("stream_options") || lower.contains("include_usage")
 }
 
 fn is_tool_choice_unsupported_error(message: &str) -> bool {

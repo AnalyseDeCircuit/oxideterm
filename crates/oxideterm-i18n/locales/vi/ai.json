@@ -220,6 +220,8 @@
       "tool_results": "Kết quả công cụ",
       "compress_dialog": "Nén hội thoại",
       "prompt_cache": "Bộ nhớ đệm prompt",
+      "next_input": "Đầu vào dự kiến lần tới",
+      "last_actual_input": "Đầu vào thực tế lần trước",
       "cache_last_request": "Yêu cầu gần nhất",
       "cache_session_total": "Tổng phiên",
       "cache_write": "Ghi vào bộ nhớ đệm"

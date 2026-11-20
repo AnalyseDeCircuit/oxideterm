@@ -1067,7 +1067,7 @@ impl AiAssistantSidebarView {
                     ))
                     .child(self.render_ai_context_breakdown_row(
                         self.i18n.t("ai.context.reserved_output"),
-                        ai_context_percent(breakdown.reserved_output, max_tokens),
+                        ai_format_tokens(breakdown.reserved_output),
                         cx,
                     )),
             )
@@ -1284,13 +1284,10 @@ impl AiAssistantSidebarView {
         items: &[AiAutocompleteCandidate],
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let active_index = self
-            .state
-            .read(cx)
-            .chat_ui()
-            .autocomplete_index
-            .min(items.len().saturating_sub(1));
-        let mut popup = ai_autocomplete_popup(&self.tokens, "ai-chat-autocomplete");
+        let chat = self.state.read(cx).chat_ui();
+        let active_index = chat.autocomplete_index.min(items.len().saturating_sub(1));
+        let mut popup = ai_autocomplete_popup(&self.tokens, "ai-chat-autocomplete")
+            .track_scroll(&chat.autocomplete_scroll);
         for (index, item) in items.iter().enumerate() {
             let prefix = match item.kind {
                 AiAutocompleteKind::Slash => "/",

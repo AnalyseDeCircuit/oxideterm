@@ -103,6 +103,7 @@ impl AiWorkspaceEntity {
 
     pub fn resolve_ai_stream_config(
         &self,
+        agents_enabled: bool,
         settings: &AiSettings,
         i18n: &I18n,
         allow_web: bool,
@@ -161,6 +162,7 @@ impl AiWorkspaceEntity {
                 profile_id: active_profile_id,
                 memory_context,
                 memory_entry_ids,
+                input_usage: Default::default(),
                 prompt_cache_key: None,
                 tool_policy,
                 tools,
@@ -196,13 +198,23 @@ impl AiWorkspaceEntity {
         )
         .as_str()
         .to_string();
-        let tools = ai_stream_tool_definitions(
+        let mut tools = ai_stream_tool_definitions(
             tool_policy.enabled,
             settings.skills.enabled,
             allow_web,
             &tool_policy,
             self.mcp_registry(),
         );
+        if tool_policy.enabled {
+            tools.extend(
+                oxideterm_ai::agent::agent_tool_definitions(false)
+                    .into_iter()
+                    .filter(|tool| {
+                        (agents_enabled || tool.name == "ask_user")
+                            && !tool_policy.disabled_tools.contains(&tool.name)
+                    }),
+            );
+        }
         let image_input =
             Self::ai_image_model_setting(settings, &provider.id, &provider.base_url, &model);
         let omit_history_images = self.ai_image_text_only(&provider.id, &provider.base_url, &model)
@@ -231,6 +243,12 @@ impl AiWorkspaceEntity {
             profile_id: active_profile_id,
             memory_context,
             memory_entry_ids,
+            input_usage: self
+                .conversation_state()
+                .active_conversation_id
+                .as_deref()
+                .map(|id| self.input_usage_for(id))
+                .unwrap_or_default(),
             prompt_cache_key: None,
             tool_policy,
             tools,
@@ -310,6 +328,7 @@ impl AiWorkspaceEntity {
             profile_id: None,
             memory_context: None,
             memory_entry_ids: Vec::new(),
+            input_usage: Default::default(),
             prompt_cache_key: None,
             tool_policy: AiToolUsePolicy::default(),
             tools: Vec::new(),
@@ -369,6 +388,22 @@ pub fn build_ai_base_system_prompt(
         prompt.push_str("\n\n");
         prompt.push_str(&skill_catalog_prompt);
     }
+    prompt
+}
+
+/// Builds volatile per-turn context (scope-filtered user memories, RAG hits,
+/// live workspace/terminal state, intent hints, and explicit slash/skill prompts)
+/// kept outside the static system prefix so prompt caching stays intact across
+/// turns, tab switches, and working-directory changes.
+pub fn build_ai_turn_context_prompt(
+    settings: &AiSettings,
+    config: &AiChatStreamConfig,
+    rag_system_prompt: Option<&str>,
+    task_system_prompt: Option<&str>,
+) -> Option<String> {
+    let mut parts = Vec::new();
+    let context_window =
+        ai_model_context_window(settings, config.provider_id.as_deref(), &config.model);
     let memory_character_budget = context_window
         .saturating_mul(4)
         .saturating_div(8)
@@ -380,20 +415,8 @@ pub fn build_ai_base_system_prompt(
             memory_character_budget,
         )
     }) {
-        prompt.push_str("\n\n");
-        prompt.push_str(&memory);
+        parts.push(memory);
     }
-    prompt
-}
-
-/// Builds volatile per-turn context (RAG hits, live workspace/terminal state,
-/// intent hints, and explicit slash/skill prompts) kept outside the static
-/// system prefix so prompt caching stays intact across turns.
-pub fn build_ai_turn_context_prompt(
-    rag_system_prompt: Option<&str>,
-    task_system_prompt: Option<&str>,
-) -> Option<String> {
-    let mut parts = Vec::new();
     if let Some(rag_system_prompt) = rag_system_prompt
         .map(str::trim)
         .filter(|prompt| !prompt.is_empty())

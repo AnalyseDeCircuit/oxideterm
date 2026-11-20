@@ -537,7 +537,7 @@ impl AiWorkspaceEntity {
         }
         replace_utf16(&mut self.chat_ui.draft, replacement_range, text);
         self.chat_ui.autocomplete_suppressed = false;
-        self.chat_ui.autocomplete_index = 0;
+        self.select_chat_autocomplete(0);
         true
     }
 
@@ -646,20 +646,27 @@ impl AiWorkspaceEntity {
             self.chat_ui.draft.len(),
             candidate,
         );
-        self.chat_ui.autocomplete_index = 0;
+        self.select_chat_autocomplete(0);
         self.chat_ui.autocomplete_suppressed = true;
+    }
+
+    fn select_chat_autocomplete(&mut self, index: usize) {
+        self.chat_ui.autocomplete_index = index;
+        self.chat_ui.autocomplete_scroll.scroll_to_item(index);
     }
 
     pub fn move_chat_autocomplete(&mut self, delta: isize, item_count: usize) {
         if item_count == 0 {
-            self.chat_ui.autocomplete_index = 0;
+            self.select_chat_autocomplete(0);
             return;
         }
-        self.chat_ui.autocomplete_index = if delta.is_negative() {
-            (self.chat_ui.autocomplete_index + item_count - 1) % item_count
+        let index = self.chat_ui.autocomplete_index.min(item_count - 1);
+        let next = if delta.is_negative() {
+            (index + item_count - 1) % item_count
         } else {
-            (self.chat_ui.autocomplete_index + 1) % item_count
+            (index + 1) % item_count
         };
+        self.select_chat_autocomplete(next);
     }
 
     pub fn suppress_chat_autocomplete(&mut self) {
@@ -671,7 +678,7 @@ impl AiWorkspaceEntity {
             || self.chat_ui.autocomplete_suppressed
             || self.chat_ui.autocomplete_index != 0;
         self.chat_ui.autocomplete_suppressed = false;
-        self.chat_ui.autocomplete_index = 0;
+        self.select_chat_autocomplete(0);
         changed
     }
 
@@ -760,7 +767,7 @@ impl AiWorkspaceEntity {
         self.clear_conversation_rename();
         self.chat_ui.draft.clear();
         self.chat_ui.input_focused = false;
-        self.chat_ui.autocomplete_index = 0;
+        self.select_chat_autocomplete(0);
         self.chat_ui.autocomplete_suppressed = false;
     }
 
@@ -811,7 +818,7 @@ impl AiWorkspaceEntity {
         self.chat_ui.image_import = None;
         self.chat_ui.image_preview = None;
         self.chat_ui.draft.clear();
-        self.chat_ui.autocomplete_index = 0;
+        self.select_chat_autocomplete(0);
         self.chat_ui.autocomplete_suppressed = false;
         self.chat_ui.include_context = false;
         self.chat_ui.include_all_panes = false;
@@ -864,6 +871,68 @@ impl AiWorkspaceEntity {
 
     pub fn set_model_switch_warning(&mut self, percentage: Option<usize>) {
         self.chat_ui.model_switch_warning_percentage = percentage;
+    }
+
+    pub(crate) fn input_usage_for(&self, id: &str) -> oxideterm_ai::AiInputUsage {
+        self.chat_ui
+            .input_usage
+            .borrow_mut()
+            .entry(id.to_owned())
+            .or_default()
+            .clone()
+    }
+
+    /// Stores the sanitized wire turn segment for a completed assistant message in
+    /// process memory only (never persisted) so follow-up turns preserve an exact
+    /// provider cache prefix while the request scope stays unchanged.
+    pub fn record_live_turn_replay(
+        &mut self,
+        conversation_id: &str,
+        assistant_id: &str,
+        scope: u64,
+        messages: Vec<oxideterm_ai::AiChatMessage>,
+    ) {
+        if messages.is_empty() {
+            return;
+        }
+        self.chat_ui
+            .live_turn_replays
+            .entry(conversation_id.to_owned())
+            .or_default()
+            .insert(assistant_id.to_owned(), (scope, messages));
+    }
+
+    pub fn live_turn_replays_for(
+        &self,
+        conversation_id: &str,
+        scope: u64,
+    ) -> HashMap<String, Vec<oxideterm_ai::AiChatMessage>> {
+        let Some(entries) = self.chat_ui.live_turn_replays.get(conversation_id) else {
+            return HashMap::new();
+        };
+        entries
+            .iter()
+            .filter_map(|(assistant_id, (entry_scope, messages))| {
+                (*entry_scope == scope).then(|| (assistant_id.clone(), messages.clone()))
+            })
+            .collect()
+    }
+
+    pub fn live_turn_replay_fingerprint(&self, conversation_id: Option<&str>, scope: u64) -> u64 {
+        let Some(entries) = conversation_id.and_then(|id| self.chat_ui.live_turn_replays.get(id))
+        else {
+            return 0;
+        };
+        let mut keys = entries
+            .iter()
+            .filter_map(|(assistant_id, (entry_scope, messages))| {
+                (*entry_scope == scope).then_some((assistant_id.as_str(), messages.len()))
+            })
+            .collect::<Vec<_>>();
+        keys.sort_unstable();
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        std::hash::Hash::hash(&keys, &mut hasher);
+        std::hash::Hasher::finish(&hasher)
     }
 
     pub fn set_prepared_prompt_usage(&mut self, usage: AiPreparedPromptUsage) {
@@ -1529,7 +1598,9 @@ impl AiWorkspaceEntity {
     pub fn delete_conversation(&mut self, id: &str) -> bool {
         self.history.deleted_conversations.insert(id.to_owned());
         self.history_deleted(id);
+        self.chat_ui.input_usage.get_mut().remove(id);
         self.chat_ui.prompt_cache_stats.remove(id);
+        self.chat_ui.live_turn_replays.remove(id);
         self.queued_chat_turns.remove(id);
         self.chat_launches.remove(id);
         self.chat_drafts.remove(id);
@@ -1646,7 +1717,9 @@ impl AiWorkspaceEntity {
             self.history_deleted(&conversation.id);
         }
         self.conversation_state.clear_conversations();
+        self.chat_ui.input_usage.get_mut().clear();
         self.chat_ui.prompt_cache_stats.clear();
+        self.chat_ui.live_turn_replays.clear();
         self.safety_modes_by_conversation.clear();
         self.clear_conversation_rename();
     }
@@ -4189,7 +4262,10 @@ pub struct AiChatWorkspaceState {
     pub message_signature_cache: RefCell<AiChatMessageSignatureCache>,
     pub context_token_cache: RefCell<AiContextTokenBreakdownCache>,
     pub prepared_prompt_usage: Option<AiPreparedPromptUsage>,
+    input_usage: RefCell<HashMap<String, oxideterm_ai::AiInputUsage>>,
     pub prompt_cache_stats: HashMap<String, AiPromptCacheStats>,
+    pub live_turn_replays:
+        HashMap<String, HashMap<String, (u64, Vec<oxideterm_ai::AiChatMessage>)>>,
     pub conversation_list_open: bool,
     pub show_archived_conversations: bool,
     pub menu_open: bool,
@@ -4219,6 +4295,7 @@ pub struct AiChatWorkspaceState {
     pub tool_call_expansion_state: HashSet<String>,
     pub tool_candidate_selection: Option<AiToolCandidateSelectionState>,
     pub autocomplete_index: usize,
+    pub autocomplete_scroll: ScrollHandle,
     pub autocomplete_suppressed: bool,
     pub context_popover_open: bool,
     pub model_switch_warning_percentage: Option<usize>,
@@ -4256,7 +4333,9 @@ impl AiChatWorkspaceState {
             message_signature_cache: RefCell::new(AiChatMessageSignatureCache::default()),
             context_token_cache: RefCell::new(AiContextTokenBreakdownCache::default()),
             prepared_prompt_usage: None,
+            input_usage: Default::default(),
             prompt_cache_stats: HashMap::new(),
+            live_turn_replays: HashMap::new(),
             conversation_list_open: false,
             show_archived_conversations: false,
             menu_open: false,
@@ -4286,6 +4365,7 @@ impl AiChatWorkspaceState {
             tool_call_expansion_state: HashSet::new(),
             tool_candidate_selection: None,
             autocomplete_index: 0,
+            autocomplete_scroll: ScrollHandle::new(),
             autocomplete_suppressed: false,
             context_popover_open: false,
             model_switch_warning_percentage: None,
@@ -4415,6 +4495,7 @@ mod entity_tests {
                 memory_context: None,
                 memory_entry_ids: Vec::new(),
                 prompt_cache_key: None,
+                input_usage: Default::default(),
                 tool_policy: Default::default(),
                 tools: Vec::new(),
                 tool_choice: oxideterm_ai::AiToolChoice::Auto,

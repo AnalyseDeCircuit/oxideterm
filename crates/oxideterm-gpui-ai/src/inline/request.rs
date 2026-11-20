@@ -150,6 +150,7 @@ pub fn resolve_terminal_ai_inline_config(
         memory_context: None,
         memory_entry_ids: Vec::new(),
         prompt_cache_key: None,
+        input_usage: Default::default(),
         tool_policy: AiToolUsePolicy::default(),
         tools: Vec::new(),
         tool_choice: oxideterm_ai::AiToolChoice::Auto,

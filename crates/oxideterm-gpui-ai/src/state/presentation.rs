@@ -90,6 +90,8 @@ impl AiChatMessageSignatureCache {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AiContextTokenBreakdown {
+    pub request_scope: u64,
+    pub last_actual_input: Option<usize>,
     pub system_instructions: usize,
     pub tool_definitions: usize,
     pub reserved_output: usize,

@@ -234,7 +234,7 @@ impl AiToolCall {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AiToolDefinition {
     pub name: String,
@@ -242,7 +242,7 @@ pub struct AiToolDefinition {
     pub parameters: serde_json::Value,
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum AiToolChoice {
     #[default]
@@ -261,6 +261,7 @@ pub enum AiApiProtocol {
 
 #[derive(Clone)]
 pub struct AiChatStreamConfig {
+    pub input_usage: crate::AiInputUsage,
     pub image_input: crate::AiImageInput,
     pub omit_history_images: bool,
     pub api_protocol: AiApiProtocol,

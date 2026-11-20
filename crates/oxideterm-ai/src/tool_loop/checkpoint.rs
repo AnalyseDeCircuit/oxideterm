@@ -96,6 +96,7 @@ async fn compact_running_ai_task(
         return Err("agent_context_full".into());
     }
     *history = compacted;
+    config.input_usage.clear();
     *checkpoint = next;
     Ok(())
 }
