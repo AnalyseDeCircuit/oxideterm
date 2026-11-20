@@ -259,11 +259,11 @@ fn integrated_zsh_loads_history_from_user_config_in_a_real_pty() {
     let user_config = tempfile::tempdir().expect("temporary user Zsh directory");
     std::fs::write(
         user_config.path().join(".zshrc"),
-        "HISTFILE=\"$ZDOTDIR/.zsh_history\"\nHISTSIZE=100\nSAVEHIST=100\nsetopt share_history\n",
+        "HISTFILE=\"$ZDOTDIR/custom.history\"\nHISTSIZE=100\nSAVEHIST=100\nsetopt share_history\n",
     )
     .expect("write user Zsh config");
     std::fs::write(
-        user_config.path().join(".zsh_history"),
+        user_config.path().join("custom.history"),
         "oxideterm-history-probe\n",
     )
     .expect("write user Zsh history");
@@ -289,6 +289,13 @@ fn integrated_zsh_loads_history_from_user_config_in_a_real_pty() {
     std::thread::sleep(Duration::from_secs(1));
     session.drain_output();
     session.take_events();
+    assert_eq!(
+        session
+            .take_local_history_file()
+            .expect("configured Zsh history file")
+            .commands(),
+        ["oxideterm-history-probe"]
+    );
     session
         .write_text("fc -l 1 -1\n")
         .expect("query Zsh history");

@@ -215,7 +215,7 @@ use oxideterm_terminal::{
     BleGattHandle, BleSessionConfig, LocalPtyConfig, MoshTerminalConfig,
     RemoteShellIntegrationStatus, SerialSessionConfig, ShellInfo, SshSessionConfig,
     TelnetSessionConfig, TerminalCommandMarkDetectionSource, TerminalCursorShape,
-    TerminalLifecycle, load_local_shell_history_commands, scan_shells,
+    TerminalLifecycle, scan_shells,
 };
 use oxideterm_theme::{ThemeTokens, UiDensityProfile, UiMotionProfile, UiRadii};
 use oxideterm_workspace::{
@@ -516,7 +516,8 @@ pub(crate) struct WorkspaceApp {
     terminal_selection_highlight_section_expanded: bool,
     terminal_command_sender: Entity<terminal_command_sender::TerminalCommandSenderEntity>,
     _terminal_command_sender_observation: Subscription,
-    local_terminal_command_history: SharedTerminalCommandHistory,
+    local_terminal_histories:
+        HashMap<oxideterm_terminal::LocalShellHistoryFile, SharedTerminalCommandHistory>,
     terminal_history_store: TerminalHistoryStore,
     _terminal_history_updates: Task<()>,
     terminal_history_all_connections: bool,
@@ -830,6 +831,7 @@ use oxideterm_terminal::command_completion::TerminalCommandSuggestion;
 
 #[derive(Clone)]
 struct DetachedLocalTerminalSession {
+    history: SharedTerminalCommandHistory,
     session_id: TerminalSessionId,
     title: String,
     session: SharedTerminalSession,

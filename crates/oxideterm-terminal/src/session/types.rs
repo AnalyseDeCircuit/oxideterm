@@ -138,6 +138,9 @@ pub trait TerminalSessionBackend: Send {
     fn launch_shell(&self) -> Option<crate::ShellInfo> {
         None
     }
+    fn take_local_history_file(&mut self) -> Option<crate::LocalShellHistoryFile> {
+        None
+    }
     fn process_info_probe(&self) -> Option<TerminalProcessProbe> {
         None
     }

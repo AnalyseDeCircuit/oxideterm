@@ -40,6 +40,7 @@ impl WorkspaceApp {
         self.detached_local_terminals.insert(
             session_id,
             DetachedLocalTerminalSession {
+                history: pane_ref.command_history(),
                 session_id,
                 title: title.clone(),
                 session,
@@ -180,8 +181,9 @@ impl WorkspaceApp {
         let tab_id = self.alloc_tab_id(cx);
         let pane_id = self.alloc_pane_id(cx);
         let title = detached.title.clone();
-        let preferences =
+        let mut preferences =
             self.prepare_terminal_preferences_for_tab_kind(&TabKind::LocalTerminal, cx);
+        preferences.command_history = detached.history;
         let session = detached.session.clone();
         let pane = cx.new(|cx| {
             TerminalPane::from_shared_session(session, preferences, window, cx)

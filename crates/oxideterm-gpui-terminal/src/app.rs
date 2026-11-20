@@ -169,6 +169,7 @@ const TERMINAL_AUTOSUGGEST_MAX_CANDIDATES: usize = 8;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TerminalPaneEvent {
     InputActivity,
+    LocalHistoryFile(oxideterm_terminal::LocalShellHistoryFile),
     X11ForwardingStatus(oxideterm_ssh::X11ForwardingStatus),
     Exited {
         exit_code: Option<i32>,
@@ -1919,6 +1920,15 @@ impl TerminalPane {
 
     pub fn command_history(&self) -> SharedTerminalCommandHistory {
         self.command_history.clone()
+    }
+
+    pub fn bind_local_shell_history(
+        &mut self,
+        history: SharedTerminalCommandHistory,
+        cx: &mut Context<Self>,
+    ) {
+        history.adopt_pending_local_commands(&self.command_history);
+        self.set_command_history(history, cx);
     }
 
     pub fn set_command_history(
@@ -3807,6 +3817,12 @@ impl TerminalPane {
         let (report, events, mode) = {
             let mut terminal = self.terminal.lock();
             let report = terminal.read_pending_with_budget(budget);
+            if self.session_kind == TerminalSessionKind::LocalPty
+                && report.drained_bytes > 0
+                && let Some(file) = terminal.take_local_history_file()
+            {
+                cx.emit(TerminalPaneEvent::LocalHistoryFile(file));
+            }
             let events = terminal.take_events();
             let mode = terminal.mode();
             (report, events, mode)

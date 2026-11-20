@@ -1,9 +1,15 @@
-use std::{collections::HashMap, fs, path::Path};
+use std::{
+    collections::HashMap,
+    fs,
+    io::Read,
+    path::{Path, PathBuf},
+};
 
 use anyhow::{Context, Result};
 use tempfile::TempDir;
 
 use crate::integration_scripts::normalize_integration_script;
+use crate::shell_completion::ShellHistoryFormat;
 
 use crate::{
     EMACS_FREE_TYPE_INTEGRATION_SOURCE, LocalPtyConfig, ShellInfo,
@@ -31,12 +37,45 @@ pub(crate) struct LocalShellIntegration {
     // The temporary startup files belong to the PTY session and remain valid
     // for shells which lazily reload their configuration after startup.
     _directories: Vec<TempDir>,
+    history_report: Option<(ShellHistoryFormat, PathBuf)>,
 }
 
 impl LocalShellIntegration {
     fn merge(mut self, other: Self) -> Self {
         self._directories.extend(other._directories);
+        self.history_report = self.history_report.or(other.history_report);
         self
+    }
+
+    pub(crate) fn take_history_file(&mut self) -> Option<crate::LocalShellHistoryFile> {
+        let (format, path) = self.history_report.as_ref()?;
+        // Only our local startup script can supply this path; PTY output is not a file-read API.
+        let mut options = fs::OpenOptions::new();
+        options.read(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+        }
+        let file = options.open(path).ok()?;
+        let metadata = file.metadata().ok()?;
+        if !metadata.is_file() || metadata.len() == 0 {
+            return None;
+        }
+        let mut data = Vec::new();
+        file.take(128 * 1024).read_to_end(&mut data).ok()?;
+        let bytes = data.strip_suffix(&[0])?;
+        let format = *format;
+        self.history_report = None;
+        #[cfg(unix)]
+        let path = {
+            use std::os::unix::ffi::OsStrExt;
+            PathBuf::from(std::ffi::OsStr::from_bytes(bytes))
+        };
+        #[cfg(not(unix))]
+        let path = PathBuf::from(std::str::from_utf8(bytes).ok()?);
+        path.is_absolute()
+            .then_some(crate::LocalShellHistoryFile { format, path })
     }
 }
 
@@ -72,7 +111,14 @@ pub(crate) fn prepare_local_shell_launch(
         }
     };
 
-    if !config.current_directory_shell_integration {
+    let format = match shell.id.as_str() {
+        "bash" | "git-bash" => Some(ShellHistoryFormat::Bash),
+        "zsh" => Some(ShellHistoryFormat::Zsh),
+        "fish" => Some(ShellHistoryFormat::Fish),
+        "pwsh" | "powershell" => Some(ShellHistoryFormat::PowerShell),
+        _ => None,
+    };
+    if !config.current_directory_shell_integration && format.is_none() {
         return LocalShellLaunch {
             args: default_args,
             env,
@@ -81,7 +127,7 @@ pub(crate) fn prepare_local_shell_launch(
         };
     }
 
-    let prepared = prepare_known_shell(config, shell, &mut env, &default_args);
+    let prepared = prepare_known_shell(config, shell, &mut env, &default_args, format);
     let (args, shell_integration, integration_state) = match prepared {
         Ok(Some((args, integration))) => (
             args,
@@ -115,7 +161,11 @@ pub(crate) fn prepare_local_shell_launch(
             (None, Some(editor)) => Some(editor),
             (None, None) => None,
         },
-        integration_state,
+        integration_state: if config.current_directory_shell_integration {
+            integration_state
+        } else {
+            TerminalCwdIntegrationLaunchState::NotRequested
+        },
     }
 }
 
@@ -144,6 +194,7 @@ fn prepare_editor_integration(env: &mut HashMap<String, String>) -> Result<Local
     );
     Ok(LocalShellIntegration {
         _directories: vec![directory],
+        history_report: None,
     })
 }
 
@@ -152,6 +203,7 @@ fn prepare_known_shell(
     shell: &ShellInfo,
     env: &mut HashMap<String, String>,
     default_args: &[String],
+    format: Option<ShellHistoryFormat>,
 ) -> Result<Option<(Vec<String>, LocalShellIntegration)>> {
     if shell.id.starts_with("wsl") {
         if default_args
@@ -166,16 +218,46 @@ fn prepare_known_shell(
         return Ok(None);
     }
 
-    let directory = tempfile::Builder::new()
+    let mut directory = tempfile::Builder::new();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        directory.permissions(fs::Permissions::from_mode(0o700));
+    }
+    let directory = directory
         .prefix("oxideterm-shell-")
         .tempdir()
         .context("create temporary shell integration directory")?;
+    let report = directory.path().join("history-source");
+    let hook = if let Some(format) = format {
+        write_private_file(&report, "")?;
+        history_report_hook(format, &report)
+    } else {
+        String::new()
+    };
     let args = match shell.id.as_str() {
-        "bash" | "git-bash" => prepare_bash(config, directory.path())?,
-        "zsh" => prepare_zsh(config, directory.path(), env)?,
-        "fish" => prepare_fish(config, directory.path())?,
+        "bash" | "git-bash"
+            if !config.current_directory_shell_integration && config.load_profile =>
+        {
+            // Preserve native login-shell startup; profiles may extend the inherited prompt command.
+            let previous = env
+                .get("PROMPT_COMMAND")
+                .cloned()
+                .or_else(|| std::env::var("PROMPT_COMMAND").ok())
+                .unwrap_or_default();
+            env.insert("PROMPT_COMMAND".into(), format!("{previous}\nif [[ -z \"${{__oxideterm_history_reported:-}}\" ]]; then {hook}; __oxideterm_history_reported=1; fi"));
+            default_args.to_vec()
+        }
+        "bash" | "git-bash" => prepare_bash(config, directory.path(), &hook)?,
+        "zsh" => prepare_zsh(config, directory.path(), env, &hook)?,
+        "fish" => prepare_fish(config, directory.path(), &hook)?,
         "nu" | "nu.exe" => prepare_nushell(config, directory.path())?,
-        "pwsh" | "powershell" => prepare_powershell(directory.path(), default_args)?,
+        "pwsh" | "powershell" => prepare_powershell(
+            directory.path(),
+            default_args,
+            &hook,
+            config.current_directory_shell_integration,
+        )?,
         _ => return Ok(None),
     };
 
@@ -183,11 +265,48 @@ fn prepare_known_shell(
         args,
         LocalShellIntegration {
             _directories: vec![directory],
+            history_report: format.map(|format| (format, report)),
         },
     )))
 }
 
-fn prepare_bash(config: &LocalPtyConfig, directory: &Path) -> Result<Vec<String>> {
+fn history_report_hook(format: ShellHistoryFormat, report: &Path) -> String {
+    let destination = report.to_string_lossy();
+    #[cfg(windows)]
+    let destination = destination.replace('\\', "/");
+    let quoted = posix_quote(&destination);
+    match format {
+        ShellHistoryFormat::Bash | ShellHistoryFormat::Zsh => {
+            let write_path = if cfg!(windows) {
+                r#"builtin printf '%s\0' "$(cygpath -aw -- "$HISTFILE")""#
+            } else {
+                r#"case "$HISTFILE" in /*) builtin printf '%s\0' "$HISTFILE";; *) builtin printf '%s/%s\0' "$PWD" "$HISTFILE";; esac"#
+            };
+            format!(
+                r#"if [[ -n "${{HISTFILE:-}}" ]]; then {write_path}; else builtin printf '\0'; fi >| {quoted}"#
+            )
+        }
+        ShellHistoryFormat::Fish => format!(
+            r#"if test -n "$fish_private_mode"; or begin; set -q fish_history; and test -z "$fish_history"; end
+    builtin printf '\0'
+else
+    set -l name fish
+    if set -q fish_history; set name "$fish_history"; end
+    builtin printf '%s/%s_history\0' "$__fish_user_data_dir" "$name"
+end > {quoted}"#
+        ),
+        ShellHistoryFormat::PowerShell => format!(
+            r#"& {{ try {{
+    $option = Get-PSReadLineOption -ErrorAction Stop
+    $path = if ($option.HistorySaveStyle -ne 'SaveNothing') {{ $option.HistorySavePath }}
+    [IO.File]::WriteAllText({0}, [string]$path + [char]0)
+}} catch {{ [IO.File]::WriteAllText({0}, [string][char]0) }} }}"#,
+            nu_quote(&destination)
+        ),
+    }
+}
+
+fn prepare_bash(config: &LocalPtyConfig, directory: &Path, history: &str) -> Result<Vec<String>> {
     let init_path = directory.join("bashrc");
     let profile_loader = if config.load_profile {
         r#"if [ -r /etc/profile ]; then . /etc/profile; fi
@@ -202,9 +321,12 @@ fi"#
     write_private_file(
         &init_path,
         &format!(
-            "{profile_loader}\n{}\n{}",
-            posix_prompt_hook(),
-            normalize_integration_script(include_str!("shell_integration/bash.sh")),
+            "{profile_loader}\n{history}\n{}",
+            integration_hooks(
+                config.current_directory_shell_integration,
+                posix_prompt_hook,
+                include_str!("shell_integration/bash.sh")
+            ),
         ),
     )?;
     Ok(vec![
@@ -219,6 +341,7 @@ fn prepare_zsh(
     config: &LocalPtyConfig,
     directory: &Path,
     env: &mut HashMap<String, String>,
+    history: &str,
 ) -> Result<Vec<String>> {
     let original_zdotdir = env
         .get("ZDOTDIR")
@@ -244,16 +367,24 @@ fn prepare_zsh(
         )
     };
     write_private_file(&directory.join(".zshenv"), &zshenv)?;
+    let user_rc = if config.load_profile {
+        zsh_source_user_file(".zshrc", true)
+    } else {
+        let restore = original
+            .map(|p| posix_quote(&p.display().to_string()))
+            .unwrap_or_else(|| "\"$HOME\"".to_string());
+        format!("export ZDOTDIR={restore}\nunsetopt RCS")
+    };
     write_private_file(
         &directory.join(".zshrc"),
         &format!(
-            "{}\n{}\n{}",
-            config
-                .load_profile
-                .then(|| zsh_source_user_file(".zshrc", true))
-                .unwrap_or_default(),
-            zsh_prompt_hook(config.load_profile),
-            normalize_integration_script(include_str!("shell_integration/zsh.zsh")),
+            "{user_rc}\n{history}\n{}\n{}",
+            zsh_import_history(config.load_profile),
+            integration_hooks(
+                config.current_directory_shell_integration,
+                zsh_prompt_hook,
+                include_str!("shell_integration/zsh.zsh")
+            ),
         ),
     )?;
     env.insert("ZDOTDIR".to_string(), directory.display().to_string());
@@ -262,14 +393,17 @@ fn prepare_zsh(
     Ok(Vec::new())
 }
 
-fn prepare_fish(config: &LocalPtyConfig, directory: &Path) -> Result<Vec<String>> {
+fn prepare_fish(config: &LocalPtyConfig, directory: &Path, history: &str) -> Result<Vec<String>> {
     let init_path = directory.join("fish.fish");
     write_private_file(
         &init_path,
         &format!(
-            "{}\n{}",
-            fish_prompt_hook(),
-            normalize_integration_script(include_str!("shell_integration/fish.fish"))
+            "{history}\n{}",
+            integration_hooks(
+                config.current_directory_shell_integration,
+                fish_prompt_hook,
+                include_str!("shell_integration/fish.fish")
+            )
         ),
     )?;
     let mut args =
@@ -300,14 +434,22 @@ fn prepare_nushell(config: &LocalPtyConfig, directory: &Path) -> Result<Vec<Stri
     ])
 }
 
-fn prepare_powershell(directory: &Path, default_args: &[String]) -> Result<Vec<String>> {
+fn prepare_powershell(
+    directory: &Path,
+    default_args: &[String],
+    history: &str,
+    cwd: bool,
+) -> Result<Vec<String>> {
     let init_path = directory.join("profile.ps1");
     write_private_file(
         &init_path,
         &format!(
-            "{}\n{}",
-            powershell_prompt_hook(),
-            normalize_integration_script(include_str!("shell_integration/powershell.ps1"))
+            "{history}\n{}",
+            integration_hooks(
+                cwd,
+                powershell_prompt_hook,
+                include_str!("shell_integration/powershell.ps1")
+            )
         ),
     )?;
     let mut args = default_args.to_vec();
@@ -339,9 +481,9 @@ fn prepare_wsl(
         .tempdir()
         .context("create temporary WSL integration directory")?;
     let path = directory.path();
-    prepare_bash(config, path)?;
-    prepare_fish(config, path)?;
-    prepare_powershell(path, &[])?;
+    prepare_bash(config, path, "")?;
+    prepare_fish(config, path, "")?;
+    prepare_powershell(path, &[], "", true)?;
     write_private_file(
         &path.join("nushell.nu"),
         &normalize_integration_script(include_str!("shell_integration/nushell.nu")),
@@ -368,12 +510,13 @@ fn prepare_wsl(
     write_private_file(
         &path.join(".zshrc"),
         &format!(
-            "{}\n{}\n{}",
+            "{}\n{}\n{}\n{}",
             config
                 .load_profile
                 .then(|| zsh_source_user_file(".zshrc", true))
                 .unwrap_or_default(),
-            zsh_prompt_hook(config.load_profile),
+            zsh_import_history(config.load_profile),
+            zsh_prompt_hook(),
             normalize_integration_script(include_str!("shell_integration/zsh.zsh")),
         ),
     )?;
@@ -399,6 +542,7 @@ fn prepare_wsl(
         args,
         LocalShellIntegration {
             _directories: vec![directory],
+            history_report: None,
         },
     ))
 }
@@ -430,6 +574,14 @@ fn zsh_source_user_file(name: &str, final_user_file: bool) -> String {
     }
 }
 
+fn integration_hooks(enabled: bool, prompt: fn() -> String, script: &'static str) -> String {
+    if enabled {
+        format!("{}\n{}", prompt(), normalize_integration_script(script))
+    } else {
+        String::new()
+    }
+}
+
 fn posix_prompt_hook() -> String {
     r#"if [[ ${__oxideterm_cwd_hooks:-0} != 1 ]]; then
 __oxideterm_pct_path() {
@@ -449,18 +601,20 @@ __oxideterm_emit_cwd
 fi"#.to_string()
 }
 
-fn zsh_prompt_hook(import_history: bool) -> String {
-    let history_hook = if import_history {
+fn zsh_import_history(import_history: bool) -> &'static str {
+    if import_history {
         r#"# The real .zshrc is nested, so import history after it has selected HISTFILE.
 if (( ${#history[@]} == 0 )) && [[ -n "$HISTFILE" && -r "$HISTFILE" ]]; then
     builtin fc -R "$HISTFILE"
 fi"#
     } else {
         ""
-    };
+    }
+}
+
+fn zsh_prompt_hook() -> String {
     format!(
-        r#"{history_hook}
-function __oxideterm_pct_path() {{
+        r#"function __oxideterm_pct_path() {{
     command printf '%s' "$1" | command od -An -tx1 -v | command tr -d ' \n' | command sed 's/../%&/g; s|%2f|/|g'
 }}
 function __oxideterm_emit_cwd() {{

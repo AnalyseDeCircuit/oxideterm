@@ -23,6 +23,10 @@ impl TerminalSessionBackend for LocalPtySession {
         Some(LocalPtySession::launch_shell(self).clone())
     }
 
+    fn take_local_history_file(&mut self) -> Option<crate::LocalShellHistoryFile> {
+        LocalPtySession::take_local_history_file(self)
+    }
+
     fn process_info_probe(&self) -> Option<TerminalProcessProbe> {
         LocalPtySession::process_info_probe(self)
     }

@@ -1,7 +1,6 @@
 use std::{
-    path::{Path, PathBuf},
-    sync::OnceLock,
-    time::SystemTime,
+    io::{Read, Seek, SeekFrom},
+    path::PathBuf,
 };
 use zeroize::{Zeroize, Zeroizing};
 
@@ -32,18 +31,6 @@ impl Drop for TerminalShellParseResult {
     fn drop(&mut self) {
         self.command_name.zeroize();
     }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct HistoryFileSnapshot {
-    path: std::path::PathBuf,
-    modified: Option<SystemTime>,
-    len: u64,
-}
-
-struct LocalShellHistoryCache {
-    files: Vec<HistoryFileSnapshot>,
-    commands: Zeroizing<Vec<String>>,
 }
 
 pub fn tokenize_terminal_command_line(
@@ -213,99 +200,64 @@ pub fn terminal_autosuggest_fuzzy_score(command: &str, query: &str) -> f64 {
     }
 }
 
-pub fn load_local_shell_history_commands() -> Vec<String> {
-    #[cfg(windows)]
-    let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME"));
-    #[cfg(not(windows))]
-    let home = std::env::var_os("HOME");
-    #[cfg(windows)]
-    let app_data = std::env::var_os("APPDATA");
-    #[cfg(not(windows))]
-    let app_data: Option<std::ffi::OsString> = None;
-    load_local_shell_history_commands_from_paths(&local_shell_history_paths(
-        home.as_deref().map(Path::new),
-        app_data.as_deref().map(Path::new),
-    ))
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(crate) enum ShellHistoryFormat {
+    Bash,
+    Zsh,
+    Fish,
+    PowerShell,
 }
 
-fn local_shell_history_paths(home: Option<&Path>, app_data: Option<&Path>) -> Vec<PathBuf> {
-    let mut files = Vec::new();
-    if let Some(home) = home {
-        files.extend(
-            [
-                ".zsh_history",
-                ".bash_history",
-                ".zhistory",
-                ".local/share/fish/fish_history",
-            ]
-            .map(|file| home.join(file)),
-        );
-    }
-    if let Some(app_data) = app_data {
-        files
-            .push(app_data.join("Microsoft/Windows/PowerShell/PSReadLine/ConsoleHost_history.txt"));
-    }
-    files
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct LocalShellHistoryFile {
+    pub(crate) format: ShellHistoryFormat,
+    pub(crate) path: PathBuf,
 }
 
-fn load_local_shell_history_commands_from_paths(files: &[PathBuf]) -> Vec<String> {
-    const MAX_HISTORY_BYTES: usize = 512 * 1024;
-    const MAX_COMMANDS: usize = 500;
-    static LOCAL_SHELL_HISTORY: OnceLock<std::sync::Mutex<Option<LocalShellHistoryCache>>> =
-        OnceLock::new();
-    let snapshots = history_file_snapshots(files);
-    let cache = LOCAL_SHELL_HISTORY.get_or_init(|| std::sync::Mutex::new(None));
-    if let Ok(guard) = cache.lock()
-        && let Some(cache) = guard.as_ref()
-        && cache.files == snapshots
-    {
-        return cache.commands.to_vec();
+impl LocalShellHistoryFile {
+    pub fn commands(&self) -> Vec<String> {
+        self.read_tail().unwrap_or_default()
     }
 
-    let mut commands = Vec::new();
-    for path in files {
-        let Ok(content) = std::fs::read(path) else {
-            continue;
+    fn read_tail(&self) -> std::io::Result<Vec<String>> {
+        const MAX_BYTES: u64 = 512 * 1024;
+        let mut options = std::fs::OpenOptions::new();
+        options.read(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.custom_flags(libc::O_NONBLOCK);
+        }
+        let mut file = options.open(&self.path)?;
+        let meta = file.metadata()?;
+        if !meta.is_file() {
+            return Ok(Vec::new());
+        }
+        let offset = meta.len().saturating_sub(MAX_BYTES);
+        file.seek(SeekFrom::Start(offset.saturating_sub(1)))?;
+        let mut bytes = Zeroizing::new(Vec::new());
+        file.take(MAX_BYTES + 1).read_to_end(&mut bytes)?;
+        let tail = if offset > 0 {
+            bytes
+                .iter()
+                .position(|b| *b == b'\n')
+                .map_or(&[][..], |i| &bytes[i + 1..])
+        } else {
+            &bytes
         };
-        // History remains shell-owned; temporary reads and cached copies are cleared on drop.
-        let content = Zeroizing::new(content);
-        let tail = &content[content.len().saturating_sub(MAX_HISTORY_BYTES)..];
-        let text = Zeroizing::new(String::from_utf8_lossy(tail).into_owned());
-        commands.extend(parse_terminal_history_file(
-            path.file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or_default(),
-            &text,
-        ));
+        let content = Zeroizing::new(String::from_utf8_lossy(tail).into_owned());
+        let mut commands = parse_terminal_history_file(self.format, &content);
+        if commands.len() > 500 {
+            for mut old in commands.drain(..commands.len() - 500) {
+                old.zeroize();
+            }
+        }
+        Ok(commands)
     }
-    if commands.len() > MAX_COMMANDS {
-        commands = commands.split_off(commands.len() - MAX_COMMANDS);
-    }
-    if let Ok(mut guard) = cache.lock() {
-        *guard = Some(LocalShellHistoryCache {
-            files: snapshots,
-            commands: Zeroizing::new(commands.clone()),
-        });
-    }
-    commands
 }
 
-fn history_file_snapshots(files: &[PathBuf]) -> Vec<HistoryFileSnapshot> {
-    files
-        .iter()
-        .filter_map(|path| {
-            let metadata = std::fs::metadata(&path).ok()?;
-            Some(HistoryFileSnapshot {
-                path: path.clone(),
-                modified: metadata.modified().ok(),
-                len: metadata.len(),
-            })
-        })
-        .collect()
-}
-
-fn parse_terminal_history_file(path: &str, content: &str) -> Vec<String> {
-    if path == "ConsoleHost_history.txt" {
+fn parse_terminal_history_file(format: ShellHistoryFormat, content: &str) -> Vec<String> {
+    if format == ShellHistoryFormat::PowerShell {
         let mut commands = Vec::new();
         let mut command = Zeroizing::new(String::new());
         for line in content.trim_start_matches('\u{feff}').lines() {
@@ -323,7 +275,7 @@ fn parse_terminal_history_file(path: &str, content: &str) -> Vec<String> {
         }
         return commands;
     }
-    if path.contains("fish_history") {
+    if format == ShellHistoryFormat::Fish {
         return content
             .lines()
             .filter_map(|line| line.strip_prefix("- cmd: "))
@@ -335,7 +287,8 @@ fn parse_terminal_history_file(path: &str, content: &str) -> Vec<String> {
         .lines()
         .filter_map(|line| {
             let trimmed = line.trim();
-            if let Some(rest) = trimmed.strip_prefix(": ")
+            if format == ShellHistoryFormat::Zsh
+                && let Some(rest) = trimmed.strip_prefix(": ")
                 && let Some((_, command)) = rest.split_once(';')
             {
                 return Some(command.trim().to_string());
@@ -352,28 +305,25 @@ mod tests {
     #[test]
     fn windows_history_loads_without_home_and_refreshes_after_shell_writes() {
         let app_data = tempfile::tempdir().unwrap();
-        let paths = local_shell_history_paths(None, Some(app_data.path()));
         let path = app_data
             .path()
             .join("Microsoft/Windows/PowerShell/PSReadLine/ConsoleHost_history.txt");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let source = LocalShellHistoryFile {
+            format: ShellHistoryFormat::PowerShell,
+            path: path.clone(),
+        };
         std::fs::write(&path, "Get-Date\r\n").unwrap();
-        assert_eq!(
-            load_local_shell_history_commands_from_paths(&paths),
-            ["Get-Date"]
-        );
+        assert_eq!(source.commands(), ["Get-Date"]);
         std::fs::write(&path, "Get-Date\r\nGet-Process\r\n").unwrap();
-        assert_eq!(
-            load_local_shell_history_commands_from_paths(&paths),
-            ["Get-Date", "Get-Process"]
-        );
+        assert_eq!(source.commands(), ["Get-Date", "Get-Process"]);
     }
 
     #[test]
     fn psreadline_history_restores_multiline_commands() {
         assert_eq!(
             parse_terminal_history_file(
-                "ConsoleHost_history.txt",
+                ShellHistoryFormat::PowerShell,
                 "Get-Date\r\nWrite-Output `\r\n  'hello'\r\n"
             ),
             ["Get-Date", "Write-Output \n  'hello'"]
@@ -405,10 +355,11 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            load_local_shell_history_commands_from_paths(&local_shell_history_paths(
-                Some(home.path()),
-                None
-            )),
+            LocalShellHistoryFile {
+                format: ShellHistoryFormat::Bash,
+                path: home.path().join(".bash_history")
+            }
+            .commands(),
             ["TOKEN=value deploy", "cargo test --workspace"]
         );
     }

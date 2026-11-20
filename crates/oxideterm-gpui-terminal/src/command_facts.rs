@@ -114,6 +114,17 @@ impl Drop for TerminalCommandHistoryState {
 }
 
 impl SharedTerminalCommandHistory {
+    pub(crate) fn adopt_pending_local_commands(&self, pending: &Self) {
+        if Arc::ptr_eq(&self.state, &pending.state) {
+            return;
+        }
+        // A slow shell profile can finish after the user has already submitted input.
+        let mut pending = pending.state.lock();
+        let mut state = self.state.lock();
+        state.records.append(&mut pending.records);
+        trim_autosuggest_records(&mut state.records);
+    }
+
     pub fn from_commands(commands: Vec<String>) -> Self {
         let now = now_millis();
         let command_count = commands.len();

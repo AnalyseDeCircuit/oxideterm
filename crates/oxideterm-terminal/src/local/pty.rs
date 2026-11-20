@@ -16,7 +16,7 @@ pub struct LocalPtySession {
     lifecycle: TerminalLifecycle,
     process: ProcessState,
     launch_shell: crate::ShellInfo,
-    _shell_integration: Option<LocalShellIntegration>,
+    shell_integration: Option<LocalShellIntegration>,
     shell_integration_launch_state: TerminalCwdIntegrationLaunchState,
     #[cfg(windows)]
     process_job: Option<WindowsTerminalJob>,
@@ -271,7 +271,7 @@ impl LocalPtySession {
             lifecycle: TerminalLifecycle::Running,
             process,
             launch_shell: shell,
-            _shell_integration: launch.integration,
+            shell_integration: launch.integration,
             shell_integration_launch_state: launch.integration_state,
             #[cfg(windows)]
             process_job,
@@ -281,6 +281,10 @@ impl LocalPtySession {
             tmux_display,
             palette: TerminalPalette::default(),
         })
+    }
+
+    pub fn take_local_history_file(&mut self) -> Option<LocalShellHistoryFile> {
+        self.shell_integration.as_mut()?.take_history_file()
     }
 
     pub fn drain_output(&mut self) -> bool {
@@ -747,7 +751,7 @@ impl LocalPtySession {
                 self.process.mark_exited();
                 // Startup files are session-owned and can be removed as soon
                 // as the shell exits, even if its closed pane remains mounted.
-                self._shell_integration.take();
+                self.shell_integration.take();
                 self.pending_events.push(TerminalEvent::ChildExited(code));
                 self.join_io_thread_if_finished();
                 true
@@ -777,7 +781,7 @@ impl LocalPtySession {
         self.lifecycle = TerminalLifecycle::Closed;
         self.tmux_display.reset();
         self.process.mark_exited();
-        self._shell_integration.take();
+        self.shell_integration.take();
     }
 
     fn audit_exit(&mut self, outcome: oxideterm_audit::AuditOutcome, exit_code: Option<i32>) {

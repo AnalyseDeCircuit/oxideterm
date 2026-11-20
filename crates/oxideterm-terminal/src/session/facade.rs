@@ -711,6 +711,10 @@ impl TerminalSession {
         self.backend.launch_shell()
     }
 
+    pub fn take_local_history_file(&mut self) -> Option<crate::LocalShellHistoryFile> {
+        self.backend.take_local_history_file()
+    }
+
     pub fn process_info_probe(&self) -> Option<TerminalProcessProbe> {
         self.backend.process_info_probe()
     }

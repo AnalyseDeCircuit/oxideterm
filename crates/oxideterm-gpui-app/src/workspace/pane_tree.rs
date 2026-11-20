@@ -274,6 +274,19 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         match event {
+            TerminalPaneEvent::LocalHistoryFile(file) => {
+                let Some(pane) = self.tab_host.read(cx).panes().get(&pane_id).cloned() else {
+                    return;
+                };
+                let history = self
+                    .local_terminal_histories
+                    .entry(file)
+                    .or_insert_with_key(|file| {
+                        SharedTerminalCommandHistory::from_commands(file.commands())
+                    })
+                    .clone();
+                pane.update(cx, |pane, cx| pane.bind_local_shell_history(history, cx));
+            }
             TerminalPaneEvent::X11ForwardingStatus(status) => {
                 self.push_workspace_notice(x11_forwarding_notice(status, &self.i18n), cx);
             }

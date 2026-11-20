@@ -49,10 +49,6 @@ impl WorkspaceApp {
             ));
         let settings = settings_store.settings().clone();
         let i18n = I18n::new(locale_from_settings(settings.general.language));
-        // Shell history is already the user's persistence boundary; OxideTerm keeps only a
-        // process-owned index and never copies the document into credential storage.
-        let local_terminal_command_history =
-            SharedTerminalCommandHistory::from_commands(load_local_shell_history_commands());
         let (terminal_history_store, history_updates) = TerminalHistoryStore::new(
             settings_store
                 .path()
@@ -865,7 +861,7 @@ impl WorkspaceApp {
             terminal_selection_highlight_section_expanded: true,
             terminal_command_sender,
             _terminal_command_sender_observation: terminal_command_sender_observation,
-            local_terminal_command_history,
+            local_terminal_histories: HashMap::new(),
             terminal_history_store,
             _terminal_history_updates: terminal_history_updates,
             terminal_history_all_connections: false,
@@ -1210,12 +1206,7 @@ impl WorkspaceApp {
                 "failed to load bundled CJK terminal fallback; falling back to system fonts: {error}"
             );
         }
-        let mut preferences =
-            self.terminal_preferences_for_background_key(tab_background_key(kind), cx);
-        if *kind == TabKind::LocalTerminal {
-            preferences.command_history = self.local_terminal_command_history.clone();
-        }
-        preferences
+        self.terminal_preferences_for_background_key(tab_background_key(kind), cx)
     }
 
     pub(crate) fn terminal_preferences_for_pane(
@@ -1252,7 +1243,8 @@ impl WorkspaceApp {
             .filter(|pane| {
                 matches!(
                     pane.session_kind(),
-                    TerminalSessionKind::Telnet
+                    TerminalSessionKind::LocalPty
+                        | TerminalSessionKind::Telnet
                         | TerminalSessionKind::Serial
                         | TerminalSessionKind::Ble
                         | TerminalSessionKind::Mosh
@@ -1264,7 +1256,6 @@ impl WorkspaceApp {
             return preferences;
         }
         preferences.command_history = match kind {
-            TabKind::LocalTerminal => self.local_terminal_command_history.clone(),
             TabKind::SshTerminal => session_id
                 .and_then(|session_id| {
                     self.workspace_runtime
