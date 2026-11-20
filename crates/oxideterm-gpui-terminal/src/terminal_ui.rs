@@ -1613,7 +1613,12 @@ pub(crate) fn terminal_font_with_family_and_cjk(
         "Noto Sans Mono",
         "Liberation Mono",
         "Courier New",
+        // Terminal output often contains emoji such as ℹ️ / 🆄. Without the
+        // platform emoji font they fall back to arbitrary symbol fonts, whose box
+        // size and baseline do not line up with the surrounding text.
+        "Segoe UI Emoji",
         "Apple Color Emoji",
+        "Noto Color Emoji",
     ] {
         push_font_fallback(&mut fallback_families, fallback);
     }
