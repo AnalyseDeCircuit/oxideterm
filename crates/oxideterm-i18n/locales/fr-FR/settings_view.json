@@ -952,6 +952,7 @@
       "ui_font_placeholder": "Par défaut du système",
       "ui_font_size": "Taille de police de l'interface",
       "ui_font_size_hint": "Ajuster la taille du texte dans toute l'interface de l'application",
+      "zen_mode_keep_tabbar": "Conserver la barre d’onglets en mode Zen",
       "show_window_titlebar": "Afficher la barre de titre de la fenêtre",
       "show_window_titlebar_hint": "Linux uniquement. Désactivez-la avec un compositeur en mosaïque et utilisez ses raccourcis pour déplacer, redimensionner ou fermer la fenêtre.",
       "window_opacity": "Opacité de la fenêtre",

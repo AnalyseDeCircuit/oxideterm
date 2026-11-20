@@ -952,6 +952,7 @@
       "ui_font_placeholder": "システムデフォルト",
       "ui_font_size": "UIフォントサイズ",
       "ui_font_size_hint": "アプリケーション全体の文字サイズを調整します",
+      "zen_mode_keep_tabbar": "Zen モードでもタブバーを表示",
       "show_window_titlebar": "ウィンドウタイトルバーを表示",
       "show_window_titlebar_hint": "Linux のみ。タイル型コンポジターでは無効にし、移動・サイズ変更・終了にはコンポジターのショートカットを使用してください。",
       "window_opacity": "ウィンドウの不透明度",

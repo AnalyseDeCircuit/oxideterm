@@ -952,6 +952,7 @@
       "ui_font_placeholder": "系统默认",
       "ui_font_size": "界面字号",
       "ui_font_size_hint": "调整整个应用界面的文字大小",
+      "zen_mode_keep_tabbar": "在禅模式中保留标签栏",
       "show_window_titlebar": "显示窗口标题栏",
       "show_window_titlebar_hint": "仅限 Linux。平铺式合成器可关闭此项；移动、缩放或关闭窗口时请使用合成器快捷键。",
       "window_opacity": "窗口透明度",

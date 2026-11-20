@@ -10,7 +10,10 @@ impl WorkspaceApp {
         settings: &PersistedSettings,
         cx: &mut Context<Self>,
     ) {
-        if previous_settings.sidebar_ui.zen_mode != settings.sidebar_ui.zen_mode {
+        if previous_settings.sidebar_ui.zen_mode != settings.sidebar_ui.zen_mode
+            || previous_settings.appearance.zen_mode_keep_tabbar
+                != settings.appearance.zen_mode_keep_tabbar
+        {
             self.zen_exit.reset();
             self.apply_workspace_overlay_intent(WorkspaceOverlayIntent::ClearZenHint, cx);
         }

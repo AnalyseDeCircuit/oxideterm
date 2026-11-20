@@ -157,6 +157,9 @@ impl WorkspaceApp {
         let has_window_background = self.window_background_preferences().is_some();
         let strip_bg = theme.shell_bg();
         let bar = div()
+            .when(self.settings_store.settings().sidebar_ui.zen_mode, |bar| {
+                bar.ml(px(self.tabbar_left_x(window)))
+            })
             .h(px(self.tokens.metrics.tabbar_height))
             .flex()
             .flex_row()
@@ -439,6 +442,43 @@ impl WorkspaceApp {
         let bar = bar
             .child(scroll_viewport)
             .child(self.render_tabbar_scrollbar(window, cx))
+            .when(self.settings_store.settings().sidebar_ui.zen_mode, |bar| {
+                let label = self.i18n.t("zen_mode.exit");
+                let shortcut = effective_shortcut_label(
+                    "app.zenMode",
+                    &self.settings_store.settings().keybindings.overrides,
+                );
+                let tokens = self.tokens;
+                let workspace = cx.entity().downgrade();
+                bar.child(
+                    oxideterm_gpui_ui::button::icon_button(
+                        &tokens,
+                        Self::render_lucide_icon(
+                            LucideIcon::Eye,
+                            tokens.metrics.sidebar_action_icon_size,
+                            rgb(theme.text_muted),
+                        ),
+                        oxideterm_gpui_ui::IconButtonOptions::compact(self.zen_exit_tabbar_width()),
+                    )
+                    .id("zen-exit-tabbar-button")
+                    .debug_selector(|| "zen-exit-tabbar-button".into())
+                    .flex_none()
+                    .role(gpui::Role::Button)
+                    .aria_label(label.clone())
+                    .on_a11y_action(gpui::AccessibleAction::Click, move |_, _, cx| {
+                        let _ = workspace.update(cx, |this, cx| this.toggle_zen_mode(cx));
+                    })
+                    .tooltip(move |_, cx| {
+                        oxideterm_gpui_ui::tooltip::tooltip_view(
+                            tokens,
+                            label.clone(),
+                            shortcut.clone(),
+                            cx,
+                        )
+                    })
+                    .on_click(cx.listener(|this, _, _, cx| this.toggle_zen_mode(cx))),
+                )
+            })
             .into_any_element();
         if has_window_background {
             oxideterm_gpui_ui::surface::tab_surface(&self.tokens, bar)
@@ -527,7 +567,7 @@ impl WorkspaceApp {
             .id("workspace-tabbar-thin-scrollbar")
             .absolute()
             .left(px(0.0))
-            .right(px(0.0))
+            .right(px(self.zen_exit_tabbar_width()))
             .bottom_0()
             .h(px(TABBAR_SCROLLBAR_DRAG_HEIGHT))
             .cursor(if scrollbar_dragging {
@@ -575,7 +615,7 @@ impl WorkspaceApp {
         let viewport_left = if measured_width > 1.0 {
             f32::from(viewport_bounds.origin.x)
         } else {
-            self.tabbar_left_x()
+            self.tabbar_left_x(window)
         };
         calculate_tabbar_scrollbar_geometry(
             viewport_left,
