@@ -38,6 +38,24 @@ pub enum ConnectionTraceStatus {
     Cancelled,
 }
 
+/// Progress safe to pass to non-interactive clients; no endpoint or worker error text.
+#[derive(Clone, Copy, Debug)]
+pub struct ConnectionChainProgress {
+    pub hop: usize,
+    pub stage: ConnectionTraceStage,
+    pub status: ConnectionTraceStatus,
+}
+
+impl ConnectionChainProgress {
+    pub fn queued(hop: usize) -> Self {
+        Self {
+            hop,
+            stage: ConnectionTraceStage::Queued,
+            status: ConnectionTraceStatus::Running,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ConnectionTraceMode {
     Connect,

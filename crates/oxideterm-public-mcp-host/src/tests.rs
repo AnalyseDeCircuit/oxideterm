@@ -112,6 +112,91 @@ fn router() -> NodeRouter {
     NodeRouter::new(SshConnectionRegistry::new(ConnectionPoolConfig::default()))
 }
 
+#[tokio::test]
+async fn cold_jump_chain_returns_only_the_ready_target_lease() {
+    use oxideterm_ssh::{
+        ConnectionChainProgress, ConnectionState, ConnectionTraceStage, ConnectionTraceStatus,
+        SshConfig,
+    };
+
+    let (_dir, host, mut backend, client, mut requests) =
+        dispatch_fixture(&[ToolGroup::NodeSession]);
+    let registry = SshConnectionRegistry::default();
+    backend.node_router = NodeRouter::new(registry.clone());
+    let jump = NodeId::new("jump");
+    let target = NodeId::new("target");
+    let config = |host: &str| SshConfig {
+        host: host.into(),
+        ..Default::default()
+    };
+    let router = &backend.node_router;
+    router.upsert_node(jump.clone(), config("jump.invalid"));
+    router
+        .runtime_store()
+        .upsert_child_node(jump.clone(), target.clone(), config("target.invalid"))
+        .unwrap();
+    let call = || {
+        PublicToolCall::ConnectNode(oxideterm_public_mcp::calls::ConnectNodeArgs {
+            connection_ref: ConnectionRef::new(),
+        })
+    };
+    let (request, mut response) = queued_request(&host, &mut requests, &client, call()).await;
+    let (tx, rx) = tokio::sync::watch::channel(ConnectionChainProgress {
+        stage: ConnectionTraceStage::SshHandshake,
+        ..ConnectionChainProgress::queued(1)
+    });
+    backend.acquire_node_lease(request, target.clone(), "saved".into(), Some(rx));
+    // The first hop is held at its handshake; the child has no physical id yet.
+    let pending = Duration::from_millis(30);
+    assert!(tokio::time::timeout(pending, &mut response).await.is_err());
+    let bind = |node: &NodeId, name| {
+        let handle = registry.acquire(config(name), ConnectionConsumer::NodeRouter(node.0.clone()));
+        handle.set_physical(Arc::new(()));
+        registry.mark_state(handle.connection_id(), ConnectionState::Active);
+        router
+            .bind_connection(node, handle.connection_id())
+            .unwrap();
+        handle
+    };
+    let parent_handle = bind(&jump, "jump.invalid");
+    tx.send_replace(ConnectionChainProgress::queued(2));
+    assert!(tokio::time::timeout(pending, &mut response).await.is_err());
+    let target_handle = bind(&target, "target.invalid");
+    tx.send_replace(ConnectionChainProgress {
+        hop: 2,
+        stage: ConnectionTraceStage::Ready,
+        status: ConnectionTraceStatus::Ready,
+    });
+    let result = response.await.unwrap();
+    let node_ref: NodeRef =
+        serde_json::from_value(result.data.unwrap()["node_ref"].clone()).unwrap();
+    let lease = host.node_lease(&client, &node_ref).unwrap();
+    assert_eq!(lease.node_id, target);
+    assert_eq!(
+        lease.physical_connection_id.as_deref(),
+        Some(target_handle.connection_id())
+    );
+    assert_eq!(
+        parent_handle.info().consumers,
+        vec![ConnectionConsumer::NodeRouter(jump.0)]
+    );
+
+    let (request, response) = queued_request(&host, &mut requests, &client, call()).await;
+    let (tx, rx) = tokio::sync::watch::channel(ConnectionChainProgress::queued(1));
+    backend.acquire_node_lease(request, target.clone(), "saved".into(), Some(rx));
+    tx.send_replace(ConnectionChainProgress {
+        hop: 1,
+        stage: ConnectionTraceStage::Authentication,
+        status: ConnectionTraceStatus::Failed,
+    });
+    assert_eq!(
+        response.await.unwrap().error.as_deref(),
+        Some("SSH hop 1 failed during Authentication")
+    );
+    assert_eq!(host.runtime_handles.lock().nodes.len(), 1);
+    assert!(target_handle.info().consumers.contains(&lease.consumer));
+}
+
 fn dispatch_fixture(
     groups: &[ToolGroup],
 ) -> (

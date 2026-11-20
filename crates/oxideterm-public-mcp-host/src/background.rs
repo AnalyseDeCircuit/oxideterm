@@ -1,6 +1,50 @@
 use super::*;
 use oxideterm_public_mcp::{DomainMessage, RecordingStatusTarget};
 
+async fn acquire_ready_target(
+    router: &NodeRouter,
+    target: &NodeId,
+    consumer: ConnectionConsumer,
+    chain: Option<tokio::sync::watch::Receiver<oxideterm_ssh::ConnectionChainProgress>>,
+) -> Result<oxideterm_ssh::ResolvedConnection, String> {
+    use oxideterm_ssh::ConnectionTraceStatus;
+    let budget = Duration::from_secs(30);
+    let Some(mut progress) = chain else {
+        return router
+            .acquire_connection_wait(target, consumer, budget)
+            .await
+            .map_err(|_| "The SSH node did not become ready".to_owned());
+    };
+    let deadline = tokio::time::Instant::now() + budget;
+    loop {
+        let step = *progress.borrow_and_update();
+        // Only the ordinal and the typed stage may cross the public boundary.
+        let failure = |reason| format!("SSH hop {} {reason} during {:?}", step.hop, step.stage);
+        match step.status {
+            ConnectionTraceStatus::Ready => {
+                return tokio::time::timeout_at(
+                    deadline,
+                    router.acquire_connection_wait(
+                        target,
+                        consumer,
+                        deadline.saturating_duration_since(tokio::time::Instant::now()),
+                    ),
+                )
+                .await
+                .map_err(|_| format!("SSH hop {} timed out acquiring the target lease", step.hop))?
+                .map_err(|_| format!("SSH hop {} failed acquiring the target lease", step.hop));
+            }
+            ConnectionTraceStatus::Failed => return Err(failure("failed")),
+            ConnectionTraceStatus::Cancelled => return Err(failure("was cancelled")),
+            ConnectionTraceStatus::Running => {}
+        }
+        tokio::time::timeout_at(deadline, progress.changed())
+            .await
+            .map_err(|_| failure("timed out"))?
+            .map_err(|_| failure("was interrupted"))?;
+    }
+}
+
 pub enum PublicMcpWindowRequest {
     Call(Box<DomainRequest>),
     ConnectionDirectory(Box<DomainRequest>),
@@ -300,6 +344,7 @@ impl PublicMcpBackground {
         request: DomainRequest,
         node_id: NodeId,
         connection_id: String,
+        chain: Option<tokio::sync::watch::Receiver<oxideterm_ssh::ConnectionChainProgress>>,
     ) {
         let node_ref = NodeRef::new();
         let consumer = ConnectionConsumer::PublicMcp(node_ref.to_string());
@@ -333,11 +378,7 @@ impl PublicMcpBackground {
                             handles.lock().nodes.remove(&node_ref);
                             return;
                         }
-                        result = router.acquire_connection_wait(
-                            &node_id,
-                            consumer.clone(),
-                            Duration::from_secs(30),
-                        ) => result,
+                        result = acquire_ready_target(&router, &node_id, consumer.clone(), chain) => result,
                     };
                     match acquired {
                         Ok(resolved) => {
@@ -367,10 +408,9 @@ impl PublicMcpBackground {
                                 json!({ "node_ref": node_ref, "state": "ready" }),
                             );
                         }
-                        Err(_) => {
+                        Err(message) => {
                             handles.lock().nodes.remove(&node_ref);
-                            request
-                                .finish(ToolEnvelope::failed("The SSH node did not become ready"));
+                            request.finish(ToolEnvelope::failed(message));
                         }
                     }
                 },

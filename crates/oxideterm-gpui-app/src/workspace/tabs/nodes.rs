@@ -1510,7 +1510,7 @@ impl WorkspaceApp {
         } else {
             ConnectionTraceMode::Connect
         };
-        self.connect_node_with_ancestors(node_id, trace_mode, cx)
+        self.connect_node_with_ancestors(node_id, trace_mode, None, cx)
     }
 
     pub(in crate::workspace) fn ensure_node_connection_started_without_ancestors(
@@ -1569,10 +1569,11 @@ impl WorkspaceApp {
         })
     }
 
-    fn connect_node_with_ancestors(
+    pub(in crate::workspace) fn connect_node_with_ancestors(
         &mut self,
         node_id: &NodeId,
         trace_mode: ConnectionTraceMode,
+        progress: Option<tokio::sync::watch::Sender<oxideterm_ssh::ConnectionChainProgress>>,
         cx: &mut Context<Self>,
     ) -> bool {
         if self
@@ -1593,14 +1594,26 @@ impl WorkspaceApp {
             .iter()
             .position(|candidate| !self.connection_trace_node_is_ready(candidate));
         let Some(start_index) = start_index else {
+            if let Some(tx) = progress {
+                tx.send_modify(|p| {
+                    p.hop = path_node_ids.len();
+                    p.stage = ConnectionTraceStage::Ready;
+                    p.status = ConnectionTraceStatus::Ready;
+                });
+            }
             return true;
         };
+        if let Some(tx) = &progress {
+            tx.send_replace(oxideterm_ssh::ConnectionChainProgress::queued(
+                start_index + 1,
+            ));
+        }
         let nodes_to_connect = path_node_ids[start_index..].to_vec();
         let trace_plan = self.workspace_runtime.update(cx, |runtime, _cx| {
             runtime.new_connection_trace_plan(trace_mode, nodes_to_connect.clone())
         });
         if !self.workspace_runtime.update(cx, |runtime, _cx| {
-            runtime.try_begin_connection_chain(trace_plan)
+            runtime.try_begin_connection_chain(trace_plan, progress)
         }) {
             return false;
         }
