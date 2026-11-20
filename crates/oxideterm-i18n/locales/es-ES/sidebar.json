@@ -91,7 +91,6 @@
       "packages": "Paquetes"
     },
     "tooltips": {
-      "select_sessions": "Seleccionar nodos de sesión",
       "switch_to_light": "Cambiar al tema claro",
       "switch_to_dark": "Cambiar al tema oscuro",
       "settings": "Configuración",
@@ -105,11 +104,11 @@
       "sort": "Ordenar",
       "lock_app": "Bloquear OxideTerm",
       "setup_app_lock": "Configurar bloqueo",
-      "collapse": "Contraer",
-      "select_connections": "Seleccionar conexiones"
+      "collapse": "Contraer"
     },
     "active_sessions": "Sesiones activas",
-    "active_session_count": "Sesiones activas: {{count}}",
+    "session_removed_count": "Eliminadas: {{count}}",
+    "session_removed_count_skipped": "Eliminadas: {{removed}} · Omitidas: {{skipped}}",
     "no_sessions": "Sin sesiones",
     "add_new_connection": "Haz clic en + para añadir una nueva conexión",
     "host_connection": {
@@ -889,25 +888,10 @@
         "partial_support": "La inspección de paquetes en {{os}} es de solo lectura.",
         "unknown_error": "Error desconocido al analizar paquetes."
       }
-    }
+    },
+    "session_footer_counts": "Activas: {{active}} · Seleccionadas: {{selected}}"
   },
   "sessions": {
-    "selection": {
-      "count": "Seleccionadas: {{count}} / {{total}}",
-      "select_all": "Seleccionar todo",
-      "remove": "Eliminar",
-      "exit": "Salir"
-    },
-    "remove": {
-      "title": "Eliminar nodos de sesión",
-      "body": "Se cerrarán {{count}} sesiones activas.",
-      "warning": "Esta acción no se puede deshacer. Se perderá el historial de desplazamiento de esas sesiones."
-    },
-    "menu": {
-      "remove_selected": "Eliminar seleccionadas ({{count}})",
-      "remove_others": "Eliminar otras ({{count}})",
-      "remove_inactive": "Eliminar inactivas ({{count}})"
-    },
     "tree": {
       "terminal": "Terminal #{{number}}",
       "no_sessions": "Sin sesiones",
@@ -920,6 +904,7 @@
         "reconnect": "Reconectar",
         "edit_and_reconnect": "Editar y reconectar",
         "remove_session": "Eliminar sesión",
+        "remove_selected": "Eliminar selección",
         "cancel_reconnect": "Cancelar reconexión",
         "port_forwarding": "Reenvío de puertos",
         "drill_in": "Siguiente salto",

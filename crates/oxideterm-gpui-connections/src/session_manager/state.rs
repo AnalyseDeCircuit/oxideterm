@@ -393,9 +393,6 @@ pub struct SessionManagerState {
     // Selectable rows in current render order. Range selection needs visual
     // adjacency, which `selected_items` (a HashSet) cannot provide.
     pub visible_selection_targets: Vec<SessionManagerSelectionTarget>,
-    /// Explicit "select, then act" mode: every selectable row shows a checkbox
-    /// and a click only toggles selection instead of opening the row.
-    pub selection_mode: bool,
     pub view_mode_menu_open: bool,
     pub sort_menu_open: bool,
     pub row_action_menu: Option<SessionManagerRowActionMenu>,
@@ -468,7 +465,6 @@ impl Default for SessionManagerState {
             selected_items: HashSet::new(),
             selection_anchor: None,
             visible_selection_targets: Vec::new(),
-            selection_mode: false,
             view_mode_menu_open: false,
             sort_menu_open: false,
             row_action_menu: None,

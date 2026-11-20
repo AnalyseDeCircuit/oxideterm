@@ -2149,6 +2149,7 @@ impl ConnectionFormView {
                         } else {
                             rgb(theme.text_muted)
                         },
+                        selected,
                     ))
                     .on_mouse_down(
                         MouseButton::Left,
@@ -2191,7 +2192,7 @@ impl ConnectionFormView {
                                 .flex()
                                 .items_center()
                                 .justify_center()
-                                .child(active_icon.render(18.0, rgb(preview_color))),
+                                .child(active_icon.render(18.0, rgb(preview_color), true)),
                         )
                         .child(
                             button(

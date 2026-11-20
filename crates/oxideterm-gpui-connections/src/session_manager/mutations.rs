@@ -183,8 +183,6 @@ impl SessionManagerState {
         self.selected_items.clear();
         self.selection_anchor = None;
         self.show_batch_move = false;
-        // The batch is done, so the checkbox mode has nothing left to act on.
-        self.selection_mode = false;
         self.status = (deleted > 0).then(|| connections_deleted_label(i18n, deleted));
         cx.notify();
     }

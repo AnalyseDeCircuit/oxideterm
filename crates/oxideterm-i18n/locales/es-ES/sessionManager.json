@@ -334,12 +334,6 @@
       "preset_aws_name": "Plantilla predefinida - AWS",
       "apply_blocked_issues": "Corrige los problemas listados antes de añadir",
       "templates_load_failed": "No se pudieron leer las plantillas guardadas"
-    },
-    "selection": {
-      "count": "{{count}} / {{total}} seleccionados",
-      "select_all": "Seleccionar todo",
-      "delete": "Eliminar",
-      "exit": "Salir"
     }
   }
 }
