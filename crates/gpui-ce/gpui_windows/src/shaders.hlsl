@@ -1532,7 +1532,7 @@ float4 blur_composite_fragment(BlurCompositeFragmentInput input): SV_Target {
         uint fw, fh, bw, bh;
         t_sprite.GetDimensions(fw, fh);
         t_blur_bloom.GetDimensions(bw, bh);
-        float2 rect_size = max(float2(blur_bounds.size.width, blur_bounds.size.height), float2(1.0, 1.0));
+        float2 rect_size = max(blur_bounds.size, float2(1.0, 1.0));
         float2 rect_origin = float2(blur_bounds.origin.x, blur_bounds.origin.y);
         float2 local_uv = (input.position.xy - rect_origin) / rect_size;
         float2 full_size = float2(fw, fh);

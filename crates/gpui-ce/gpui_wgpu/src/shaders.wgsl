@@ -1594,7 +1594,7 @@ fn fs_blur_composite(input: BlurVarying) -> @location(0) vec4<f32> {
 
     if (blur_locals.bloom_intensity > 0.001 || blur_locals.crt_curvature > 0.001 ||
         blur_locals.crt_scanlines > 0.001 || blur_locals.crt_collapse > 0.001) {
-        let rect_size = max(vec2<f32>(blur_locals.bounds.size.width, blur_locals.bounds.size.height), vec2<f32>(1.0));
+        let rect_size = max(blur_locals.bounds.size, vec2<f32>(1.0));
         let rect_origin = vec2<f32>(blur_locals.bounds.origin.x, blur_locals.bounds.origin.y);
         var local_uv = (input.position.xy - rect_origin) / rect_size;
         let full_size = globals.viewport_size;

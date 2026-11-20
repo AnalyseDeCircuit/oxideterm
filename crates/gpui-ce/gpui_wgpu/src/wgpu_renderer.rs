@@ -4674,7 +4674,8 @@ mod tests {
         });
         assert_struct_layout!(&module, BlurParams => "BlurParams" {
             bounds, content_mask, corner_radii, direction, sigma, opacity, tap_count, tap_step,
-            clip_rounded, downsample, corner_shape, corner_shape_padding_0, corner_shape_padding_1, corner_shape_padding_2
+            clip_rounded, downsample, corner_shape, corner_shape_padding_0, corner_shape_padding_1, corner_shape_padding_2,
+            bloom_intensity, crt_curvature, crt_scanlines, crt_collapse
         });
     }
 
