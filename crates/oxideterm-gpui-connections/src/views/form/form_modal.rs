@@ -35,7 +35,6 @@ struct ConnectionFormModalSnapshot {
     proxy_command: zeroize::Zeroizing<String>,
     proxy_command_configured: bool,
     legacy_ssh_compatibility: bool,
-    ssh_algorithm_editor_open: bool,
     agent_forwarding: bool,
     identity_agent: String,
     agent_available: Option<bool>,
@@ -55,7 +54,7 @@ struct ConnectionFormModalSnapshot {
     proxy_hops_len: usize,
     upstream_proxy_policy: NewConnectionUpstreamProxyPolicy,
     x11_enabled: bool,
-    ssh_algorithms_customized: bool,
+    ssh_algorithms_custom_count: usize,
     terminal_customized: bool,
     // True when the selected BLE service offers both notify and write, i.e. it
     // can back a read/write terminal channel.
@@ -99,7 +98,6 @@ impl ConnectionFormModalSnapshot {
             proxy_command: zeroize::Zeroizing::new(form.proxy_command.clone()),
             proxy_command_configured: form.proxy_command_keychain_id.is_some(),
             legacy_ssh_compatibility: form.legacy_ssh_compatibility,
-            ssh_algorithm_editor_open: form.ssh_algorithm_editor_open,
             agent_forwarding: form.agent_forwarding,
             identity_agent: form.identity_agent.clone(),
             agent_available: form.agent_available,
@@ -119,11 +117,16 @@ impl ConnectionFormModalSnapshot {
             proxy_hops_len: form.proxy_hops.len(),
             upstream_proxy_policy: form.upstream_proxy_policy,
             x11_enabled: form.x11_forwarding.enabled,
-            ssh_algorithms_customized: !form.ssh_algorithms.kex.is_empty()
-                || !form.ssh_algorithms.host_key.is_empty()
-                || !form.ssh_algorithms.cipher.is_empty()
-                || !form.ssh_algorithms.mac.is_empty()
-                || !form.ssh_algorithms.compression.is_empty(),
+            ssh_algorithms_custom_count: [
+                !form.ssh_algorithms.kex.is_empty(),
+                !form.ssh_algorithms.host_key.is_empty(),
+                !form.ssh_algorithms.cipher.is_empty(),
+                !form.ssh_algorithms.mac.is_empty(),
+                !form.ssh_algorithms.compression.is_empty(),
+            ]
+            .into_iter()
+            .filter(|customized| *customized)
+            .count(),
             terminal_customized: form.terminal != Default::default()
                 || !form.pre_connect_command.trim().is_empty()
                 || !form.post_connect_command.trim().is_empty(),
@@ -430,21 +433,10 @@ impl ConnectionFormView {
         } else {
             Some(composer::CONNECTION_STUDIO_MIN_HEIGHT.min(modal_max_height))
         };
-        let algorithm_editor_visible = form.ssh_algorithm_editor_open
-            && form.active_drawer == Some(crate::form_state::ConnectionFormDrawer::SshSecurity)
-            && (ssh_submission_mode || mosh_mode);
-        let requested_modal_width = if algorithm_editor_visible {
-            base_modal_width
-                + SSH_ALGORITHM_CATEGORY_COLUMN_WIDTH
-                + SSH_ALGORITHM_DETAIL_COLUMN_WIDTH
-                + self.tokens.metrics.modal_section_gap * 2.0
-        } else {
-            base_modal_width
-        };
         let available_modal_width = (f32::from(window.viewport_size().width)
             - NEW_CONNECTION_MODAL_VIEWPORT_MARGIN * 2.0)
             .max(TAURI_EDIT_MODAL_WIDTH);
-        let modal_width = requested_modal_width.min(available_modal_width);
+        let modal_width = base_modal_width.min(available_modal_width);
         let light = theme.is_light();
         let modal_shadows = vec![
             gpui::BoxShadow {
@@ -651,6 +643,8 @@ impl ConnectionFormView {
                 });
                 items
             } else if mosh_mode {
+                let algorithms_summary = (form.ssh_algorithms_custom_count > 0)
+                    .then(|| form.ssh_algorithms_custom_count.to_string());
                 vec![
                     composer::CategoryNavItem {
                         drawer: None,
@@ -671,6 +665,12 @@ impl ConnectionFormView {
                         summary: None,
                     },
                     composer::CategoryNavItem {
+                        drawer: Some(ConnectionFormDrawer::SshAlgorithms),
+                        icon: LucideIcon::KeyRound,
+                        label: self.i18n.t("ssh.form.ssh_algorithms"),
+                        summary: algorithms_summary,
+                    },
+                    composer::CategoryNavItem {
                         drawer: Some(ConnectionFormDrawer::Notes),
                         icon: LucideIcon::Sparkles,
                         label: self.i18n.t("ssh.form.appearance"),
@@ -680,15 +680,14 @@ impl ConnectionFormView {
             } else {
                 let security_summary = if form.gssapi_enabled {
                     Some("KRB".to_string())
-                } else if form.agent_forwarding
-                    || form.legacy_ssh_compatibility
-                    || form.x11_enabled
-                    || form.ssh_algorithms_customized
+                } else if form.agent_forwarding || form.legacy_ssh_compatibility || form.x11_enabled
                 {
                     Some("•".to_string())
                 } else {
                     None
                 };
+                let algorithms_summary = (form.ssh_algorithms_custom_count > 0)
+                    .then(|| form.ssh_algorithms_custom_count.to_string());
                 vec![
                     composer::CategoryNavItem {
                         drawer: None,
@@ -707,6 +706,12 @@ impl ConnectionFormView {
                         icon: LucideIcon::ShieldCheck,
                         label: self.i18n.t("ssh.form.ssh_options"),
                         summary: security_summary,
+                    },
+                    composer::CategoryNavItem {
+                        drawer: Some(ConnectionFormDrawer::SshAlgorithms),
+                        icon: LucideIcon::KeyRound,
+                        label: self.i18n.t("ssh.form.ssh_algorithms"),
+                        summary: algorithms_summary,
                     },
                     composer::CategoryNavItem {
                         drawer: Some(ConnectionFormDrawer::Terminal),
@@ -1561,6 +1566,9 @@ impl ConnectionFormView {
                                                     ))
                                                     .into_any_element(),
                                             ),
+                                            Some(ConnectionFormDrawer::SshAlgorithms) => {
+                                                Some(self.render_ssh_algorithms_page(cx))
+                                            }
                                             Some(ConnectionFormDrawer::Terminal) => Some(
                                                 div()
                                                     .flex()
@@ -1629,6 +1637,9 @@ impl ConnectionFormView {
                                                 cx,
                                             ))
                                         }
+                                        Some(ConnectionFormDrawer::SshAlgorithms) => {
+                                            Some(self.render_ssh_algorithms_page(cx))
+                                        }
                                         Some(ConnectionFormDrawer::Notes) => Some(
                                             div()
                                                 .flex()
@@ -1648,11 +1659,6 @@ impl ConnectionFormView {
                                     })
                                 ),
                         )
-                        .when(algorithm_editor_visible, |content| {
-                            content
-                                .child(self.render_ssh_algorithm_category_column(cx))
-                                .child(self.render_ssh_algorithm_detail_column(cx))
-                        })
                         ),
                 )
                 .child({

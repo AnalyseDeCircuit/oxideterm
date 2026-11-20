@@ -104,7 +104,6 @@ const TAURI_PROXY_CHAIN_CONNECTOR_THICKNESS: f32 = 2.0; // Tauri w-0.5 h-0.5
 const TAURI_PROXY_CHAIN_CARD_PADDING: f32 = 12.0; // Tauri p-3
 const TAURI_SERIAL_GRID_GAP: f32 = 16.0; // Tauri serial grid gap-4
 pub const NEW_CONNECTION_TYPE_SIDEBAR_WIDTH: f32 = 160.0;
-use super::algorithms::{SSH_ALGORITHM_CATEGORY_COLUMN_WIDTH, SSH_ALGORITHM_DETAIL_COLUMN_WIDTH};
 const NEW_CONNECTION_MODAL_VIEWPORT_MARGIN: f32 = 32.0;
 const CONNECTION_TERMINAL_CONTROL_MIN_WIDTH: f32 = 220.0;
 const CONNECTION_ICON_COLOR_CONTROL_MIN_WIDTH: f32 = 220.0;
@@ -409,14 +408,8 @@ impl ConnectionFormView {
         SshAlgorithmEditor::new(&self.flow, &self.tokens, &self.i18n, &self.dispatch)
     }
 
-    fn render_ssh_algorithms_navigation_row(&self, cx: &App) -> AnyElement {
-        self.algorithms().render_ssh_algorithms_navigation_row(cx)
-    }
-    fn render_ssh_algorithm_category_column(&self, cx: &App) -> AnyElement {
-        self.algorithms().render_ssh_algorithm_category_column(cx)
-    }
-    fn render_ssh_algorithm_detail_column(&self, cx: &App) -> AnyElement {
-        self.algorithms().render_ssh_algorithm_detail_column(cx)
+    fn render_ssh_algorithms_page(&self, cx: &App) -> AnyElement {
+        self.algorithms().render_ssh_algorithms_page(cx)
     }
 }
 

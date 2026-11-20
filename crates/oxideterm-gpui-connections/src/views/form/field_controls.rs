@@ -2758,7 +2758,6 @@ impl ConnectionFormView {
                         ),
                     )),
             )
-            .child(self.render_ssh_algorithms_navigation_row(cx))
             .child(self.render_connection_pre_connect_command(cx))
             .into_any_element()
     }
@@ -4504,7 +4503,6 @@ impl ConnectionFormView {
                 |form| form.legacy_ssh_compatibility = !form.legacy_ssh_compatibility,
                 cx,
             ))
-            .child(self.render_ssh_algorithms_navigation_row(cx))
             .into_any_element()
     }
 

@@ -781,6 +781,7 @@ impl Drop for StandaloneSftpSecondaryForm {
 pub enum ConnectionFormDrawer {
     Route,
     SshSecurity,
+    SshAlgorithms,
     Terminal,
     Notes,
     MoshOptions,
@@ -909,7 +910,6 @@ pub struct NewConnectionForm {
     pub agent_forwarding_socket: Option<String>,
     pub legacy_ssh_compatibility: bool,
     pub ssh_algorithms: SshAlgorithmPreferences,
-    pub ssh_algorithm_editor_open: bool,
     pub ssh_algorithm_selected: Option<String>,
     pub ssh_algorithm_menu: Option<(String, gpui::Point<gpui::Pixels>)>,
     pub ssh_algorithm_editor_category: oxideterm_ssh::SshAlgorithmCategory,
@@ -1345,7 +1345,6 @@ impl Default for NewConnectionForm {
             agent_forwarding_socket: None,
             legacy_ssh_compatibility: false,
             ssh_algorithms: oxideterm_connections::SshAlgorithmPreferences::default(),
-            ssh_algorithm_editor_open: false,
             ssh_algorithm_selected: None,
             ssh_algorithm_menu: None,
             ssh_algorithm_editor_category: oxideterm_ssh::SshAlgorithmCategory::Kex,

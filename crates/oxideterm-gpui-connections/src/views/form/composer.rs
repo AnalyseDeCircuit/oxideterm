@@ -146,7 +146,6 @@ impl ConnectionFormView {
                 if form.transport != transport {
                     form.standalone_connection_id = None;
                     form.active_drawer = None;
-                    form.ssh_algorithm_editor_open = false;
                 }
                 if transport != NewConnectionTransport::Ble {
                     form.ble.scan_generation += 1;
@@ -838,9 +837,7 @@ impl ConnectionFormView {
                         this.update_connection_form_state(cx, |state| {
                             if let Some(form) = state.form.as_mut() {
                                 form.active_drawer = target;
-                                if target != Some(ConnectionFormDrawer::SshSecurity) {
-                                    form.ssh_algorithm_editor_open = false;
-                                }
+                                form.ssh_algorithm_menu = None;
                                 form.field_focused = false;
                                 clear_connection_selection(form);
                             }
@@ -931,7 +928,7 @@ impl ConnectionFormView {
                                                 if let Some(drawer) = appearance_drawer_target {
                                                     form.active_drawer = Some(drawer);
                                                     form.icon_picker_expanded = true;
-                                                    form.ssh_algorithm_editor_open = false;
+                                                    form.ssh_algorithm_menu = None;
                                                 } else {
                                                     form.appearance_popover_open =
                                                         !form.appearance_popover_open;
