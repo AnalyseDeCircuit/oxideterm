@@ -562,6 +562,20 @@ impl Render for TerminalPane {
             .text_size(self.metrics.font_size)
             .line_height(self.metrics.line_height)
             .track_focus(&self.focus_handle)
+            // Releasing the left button outside the pane (or the window) ends the
+            // drag and stops the autoscroll. A `mouse_up` outside the window never
+            // reaches the pane's `on_mouse_up`, so this is the only place that can
+            // catch it; otherwise dragging past the window edge keeps scrolling.
+            .on_mouse_up_out(
+                MouseButton::Left,
+                cx.listener(|this, _event, _window, cx| {
+                    if this.selecting {
+                        this.selecting = false;
+                        this.selection_autoscroll_position = None;
+                        cx.notify();
+                    }
+                }),
+            )
             .when(accepts_ssh_path_drop, |pane| {
                 let accent = self.theme.tokens.ui.accent;
                 pane.drag_over::<ExternalPaths>(move |style, _paths, _window, _cx| {

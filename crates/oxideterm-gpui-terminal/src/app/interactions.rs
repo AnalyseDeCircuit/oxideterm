@@ -1902,6 +1902,14 @@ impl TerminalPane {
     }
 
     pub(crate) fn handle_mouse_move(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
+        // Releasing the left button outside the window never delivers `mouse_up`,
+        // so the drag autoscroll keeps running. When the pointer comes back with
+        // the button already released, finish the drag here.
+        if event.pressed_button.is_none() && self.selecting {
+            self.selecting = false;
+            self.selection_autoscroll_position = None;
+            cx.notify();
+        }
         let hovered = event.pressed_button.is_none()
             && !self.selecting
             && self.context_menu.is_none()
