@@ -1915,6 +1915,11 @@ impl App {
         self.platform.read_from_clipboard()
     }
 
+    /// Returns the native clipboard revision when the platform provides one.
+    pub fn clipboard_sequence_number(&self) -> Option<u32> {
+        self.platform.clipboard_sequence_number()
+    }
+
     /// Reads data from the platform clipboard, resolving once the contents
     /// are available.
     ///

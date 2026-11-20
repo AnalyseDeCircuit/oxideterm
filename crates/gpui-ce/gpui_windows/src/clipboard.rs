@@ -1,10 +1,16 @@
-use std::{borrow::Cow, sync::LazyLock};
+use std::{
+    borrow::Cow,
+    ffi::OsString,
+    os::windows::ffi::{OsStrExt, OsStringExt},
+    path::PathBuf,
+    sync::LazyLock,
+};
 
 use anyhow::Result;
 use collections::FxHashMap;
 use itertools::Itertools;
 use windows::Win32::{
-    Foundation::{HANDLE, HGLOBAL},
+    Foundation::{HANDLE, HGLOBAL, HWND},
     System::{
         DataExchange::{
             CloseClipboard, CountClipboardFormats, EmptyClipboard, EnumClipboardFormats,
@@ -14,7 +20,7 @@ use windows::Win32::{
         Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock},
         Ole::{CF_DIB, CF_HDROP, CF_UNICODETEXT},
     },
-    UI::Shell::{DragQueryFileW, HDROP},
+    UI::Shell::{DROPFILES, DragQueryFileW, HDROP},
 };
 use windows::core::{Owned, PCWSTR};
 
@@ -67,13 +73,17 @@ fn get_clipboard_data(format: u32) -> Option<LockedGlobal> {
     LockedGlobal::lock(global)
 }
 
-pub(crate) fn write_to_clipboard(item: ClipboardItem) {
-    let Some(_clip) = ClipboardGuard::open() else {
-        return;
-    };
-
+pub(crate) fn write_to_clipboard(owner: HWND, item: ClipboardItem) {
     let result: Result<()> = (|| {
+        // Prepare the movable file list before replacing the user's clipboard.
+        let files = prepare_file_drop(&item)?;
+        let Some(_clip) = ClipboardGuard::open(Some(owner)) else {
+            return Ok(());
+        };
         unsafe { EmptyClipboard()? };
+        if let Some(files) = files {
+            publish_clipboard_data(CF_HDROP.0 as u32, files)?;
+        }
         for entry in item.entries() {
             match entry {
                 ClipboardEntry::String(string) => write_string(string)?,
@@ -90,7 +100,7 @@ pub(crate) fn write_to_clipboard(item: ClipboardItem) {
 }
 
 pub(crate) fn read_from_clipboard() -> Option<ClipboardItem> {
-    let _clip = ClipboardGuard::open()?;
+    let _clip = ClipboardGuard::open(None)?;
 
     let mut entries = Vec::new();
     let mut have_text = false;
@@ -129,7 +139,7 @@ pub(crate) fn read_from_clipboard() -> Option<ClipboardItem> {
 
 pub(crate) fn with_file_names<F>(hdrop: HDROP, mut f: F)
 where
-    F: FnMut(String),
+    F: FnMut(PathBuf),
 {
     let file_count = unsafe { DragQueryFileW(hdrop, DRAGDROP_GET_FILES_COUNT, None) };
     for file_index in 0..file_count {
@@ -140,25 +150,76 @@ where
             log::error!("unable to read file name of dragged file");
             continue;
         }
-        match String::from_utf16(&buffer[0..filename_length]) {
-            Ok(file_name) => f(file_name),
-            Err(e) => log::error!("dragged file name is not UTF-16: {}", e),
-        }
+        f(PathBuf::from(OsString::from_wide(&buffer[..ret as usize])));
     }
 }
 
-fn set_clipboard_bytes<T>(data: &[T], format: u32) -> Result<()> {
+fn prepare_file_drop(item: &ClipboardItem) -> Result<Option<Owned<HGLOBAL>>> {
+    let mut lists = item
+        .entries()
+        .iter()
+        .filter_map(|entry| match entry {
+            ClipboardEntry::ExternalPaths(paths) => Some(paths.paths()),
+            _ => None,
+        })
+        .peekable();
+    if lists.peek().is_none() {
+        return Ok(None);
+    }
+    let header_bytes = size_of::<DROPFILES>();
+    let mut words = vec![0u16; header_bytes / size_of::<u16>()];
+    for path in lists.flatten() {
+        anyhow::ensure!(
+            path.is_absolute(),
+            "Expected an absolute clipboard file path"
+        );
+        for unit in path.as_os_str().encode_wide() {
+            anyhow::ensure!(unit != 0, "Invalid NUL in clipboard file path");
+            words.push(unit);
+        }
+        words.push(0);
+    }
+    anyhow::ensure!(
+        words.len() > header_bytes / size_of::<u16>(),
+        "Empty clipboard file list"
+    );
+    words.push(0);
+    // CF_HDROP starts with the packed Win32 header, followed by double-NUL-terminated UTF-16 paths.
+    unsafe {
+        words
+            .as_mut_ptr()
+            .cast::<DROPFILES>()
+            .write_unaligned(DROPFILES {
+                pFiles: header_bytes as u32,
+                fWide: true.into(),
+                ..Default::default()
+            });
+    }
+    Ok(Some(allocate_clipboard_data(&words)?))
+}
+
+fn allocate_clipboard_data<T>(data: &[T]) -> Result<Owned<HGLOBAL>> {
     unsafe {
         let global = Owned::new(GlobalAlloc(GMEM_MOVEABLE, std::mem::size_of_val(data))?);
         let ptr = GlobalLock(*global);
         anyhow::ensure!(!ptr.is_null(), "GlobalLock returned null");
         std::ptr::copy_nonoverlapping(data.as_ptr(), ptr as _, data.len());
         GlobalUnlock(*global).ok();
+        Ok(global)
+    }
+}
+
+fn publish_clipboard_data(format: u32, global: Owned<HGLOBAL>) -> Result<()> {
+    unsafe {
         SetClipboardData(format, Some(HANDLE(global.0)))?;
         // SetClipboardData succeeded — the system now owns the memory.
         std::mem::forget(global);
     }
     Ok(())
+}
+
+fn set_clipboard_bytes<T>(data: &[T], format: u32) -> Result<()> {
+    publish_clipboard_data(format, allocate_clipboard_data(data)?)
 }
 
 fn get_clipboard_string(format: u32) -> Option<String> {
@@ -265,10 +326,10 @@ fn read_image(format: u32) -> Option<ClipboardEntry> {
 }
 
 fn read_files() -> Option<ClipboardEntry> {
-    let locked = get_clipboard_data(CF_HDROP.0 as u32)?;
-    let hdrop = HDROP(locked.ptr as *mut _);
+    // DragQueryFileW takes the clipboard-owned handle, not its locked address.
+    let hdrop = HDROP(unsafe { GetClipboardData(CF_HDROP.0 as u32).ok()? }.0);
     let mut filenames = Vec::new();
-    with_file_names(hdrop, |name| filenames.push(std::path::PathBuf::from(name)));
+    with_file_names(hdrop, |path| filenames.push(path));
     Some(ClipboardEntry::ExternalPaths(ExternalPaths(
         filenames.into(),
     )))
@@ -343,8 +404,8 @@ fn gpui_to_image_format(value: ImageFormat) -> Option<image::ImageFormat> {
 struct ClipboardGuard;
 
 impl ClipboardGuard {
-    fn open() -> Option<Self> {
-        match unsafe { OpenClipboard(None) } {
+    fn open(owner: Option<HWND>) -> Option<Self> {
+        match unsafe { OpenClipboard(owner) } {
             Ok(()) => Some(Self),
             Err(e) => {
                 log::error!("Failed to open clipboard: {e}");

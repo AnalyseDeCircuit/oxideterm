@@ -460,7 +460,7 @@ pub struct RemoteDesktopSessionEntity {
     public_mcp_frame_observers: usize,
     public_mcp_clipboard: Option<RemoteDesktopPublicClipboard>,
     clipboard_activation: Option<Subscription>,
-    last_clipboard_files: Option<u64>,
+    last_clipboard_files: Option<(u64, Option<u32>)>,
     audit_context: Option<oxideterm_audit::AuditContext>,
     connect_audit: Option<oxideterm_audit::AuditOperation>,
     file_audits: HashMap<String, oxideterm_audit::AuditOperation>,

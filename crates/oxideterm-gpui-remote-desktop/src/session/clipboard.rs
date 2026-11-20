@@ -34,19 +34,20 @@ impl RemoteDesktopSessionEntity {
         {
             return;
         }
-        let paths = cx
-            .read_from_clipboard()
-            .and_then(|item| remote_desktop_clipboard_paths_from_item(&item));
-        let Some(paths) = paths else {
+        let revision = cx.clipboard_sequence_number();
+        let Some(item) = cx.read_from_clipboard() else {
+            return;
+        };
+        let Some(paths) = remote_desktop_clipboard_paths_from_item(&item) else {
             self.last_clipboard_files = None;
             return;
         };
-        let fingerprint = gpui::hash(&paths);
+        let fingerprint = (gpui::hash(&paths), revision);
         if self.last_clipboard_files == Some(fingerprint) {
             return;
         }
         // Advertise files before the remote context menu opens, without injecting a paste key.
-        // Remember only a digest; remote-origin files use the same marker to prevent echo.
+        // Recopying a path is a new offer; revisiting the same clipboard revision is not.
         self.last_clipboard_files = Some(fingerprint);
         self.send_request(RemoteDesktopHelperRequest::ClipboardFiles {
             transfer_id: uuid::Uuid::new_v4().to_string(),

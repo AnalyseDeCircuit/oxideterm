@@ -6,7 +6,6 @@ use std::{
     num::NonZeroIsize,
     path::PathBuf,
     rc::{Rc, Weak},
-    str::FromStr,
     sync::{Arc, Once, atomic::AtomicBool},
     time::{Duration, Instant},
 };
@@ -1306,11 +1305,7 @@ impl IDropTarget_Impl for WindowsDragDropHandler_Impl {
                 }
                 let hdrop = HDROP(idata.u.hGlobal.0);
                 let mut paths = SmallVec::<[PathBuf; 2]>::new();
-                with_file_names(hdrop, |file_name| {
-                    if let Some(path) = PathBuf::from_str(&file_name).log_err() {
-                        paths.push(path);
-                    }
-                });
+                with_file_names(hdrop, |path| paths.push(path));
                 ReleaseStgMedium(&mut idata);
                 let mut cursor_position = cursor_position;
                 ScreenToClient(self.0.hwnd, &mut cursor_position)

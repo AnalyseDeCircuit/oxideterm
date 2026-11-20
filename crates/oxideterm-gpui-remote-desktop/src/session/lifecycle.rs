@@ -294,6 +294,7 @@ impl RemoteDesktopSessionEntity {
                                 Zeroizing::new(text.clone()),
                             ));
                             cx.write_to_clipboard(ClipboardItem::new_string(text));
+                            self.last_clipboard_files = None;
                             changed = true;
                         }
                         RemoteDesktopHelperEvent::ClipboardData { data }
@@ -312,13 +313,14 @@ impl RemoteDesktopSessionEntity {
                             });
                             if let Some(item) = remote_desktop_clipboard_item_from_data(data) {
                                 cx.write_to_clipboard(item);
+                                self.last_clipboard_files = None;
                             }
                             changed = true;
                         }
                         RemoteDesktopHelperEvent::ClipboardFilesReady { paths, .. }
                             if self.profile.session_options.clipboard.files =>
                         {
-                            self.last_clipboard_files = Some(gpui::hash(&paths));
+                            let path_hash = gpui::hash(&paths);
                             self.observe_desktop(
                                 oxideterm_audit::AuditCategory::File,
                                 "desktop_file_transfer",
@@ -331,6 +333,8 @@ impl RemoteDesktopSessionEntity {
                                     paths.into(),
                                 ))],
                             });
+                            self.last_clipboard_files =
+                                Some((path_hash, cx.clipboard_sequence_number()));
                             changed = true;
                         }
                         RemoteDesktopHelperEvent::ClipboardTransferFailed {

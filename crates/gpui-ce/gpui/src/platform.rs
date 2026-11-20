@@ -604,6 +604,10 @@ pub trait Platform: 'static {
     fn should_auto_hide_scrollbars(&self) -> bool;
 
     fn read_from_clipboard(&self) -> Option<ClipboardItem>;
+    /// Identifies clipboard replacements, including a new copy of the same content.
+    fn clipboard_sequence_number(&self) -> Option<u32> {
+        None
+    }
     fn write_to_clipboard(&self, item: ClipboardItem);
 
     /// Reads the clipboard, resolving once its contents are available.

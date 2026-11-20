@@ -45,9 +45,7 @@ impl RemoteDesktopSessionEntity {
     ) {
         if desktop_shortcut_matches(&event.keystroke, "remoteDesktop.paste", overrides, matcher) {
             self.release_shortcut_modifiers(&event.keystroke);
-            if let Some(item) = cx.read_from_clipboard() {
-                self.paste_clipboard(item);
-            }
+            self.paste_from_system_clipboard(cx);
         } else if desktop_shortcut_matches(
             &event.keystroke,
             "remoteDesktop.copy",
@@ -357,7 +355,14 @@ impl RemoteDesktopSessionEntity {
         });
     }
 
-    pub fn paste_clipboard(&mut self, item: ClipboardItem) {
+    pub fn paste_from_system_clipboard(&mut self, cx: &App) {
+        let revision = cx.clipboard_sequence_number();
+        if let Some(item) = cx.read_from_clipboard() {
+            self.paste_clipboard_item(item, revision);
+        }
+    }
+
+    fn paste_clipboard_item(&mut self, item: ClipboardItem, revision: Option<u32>) {
         if let Some(paths) = remote_desktop_clipboard_paths_from_item(&item) {
             let files_enabled = self.provider.capabilities.clipboard_files
                 && self.profile.session_options.clipboard.files
@@ -371,7 +376,7 @@ impl RemoteDesktopSessionEntity {
                             capabilities.vendor_file_upload == NegotiatedCapabilityStatus::Supported
                         }));
             if files_enabled {
-                self.last_clipboard_files = Some(gpui::hash(&paths));
+                self.last_clipboard_files = Some((gpui::hash(&paths), revision));
                 self.send_request(RemoteDesktopHelperRequest::ClipboardFiles {
                     transfer_id: uuid::Uuid::new_v4().to_string(),
                     paths,
@@ -634,7 +639,7 @@ mod clipboard_tests {
         let (tx, rx) = mpsc::channel();
         session.worker = Some(RemoteDesktopWorkerOwner::new(tx, thread::spawn(|| {})));
         let text = "code\n\t中文🦀\r\n".repeat(512);
-        session.paste_clipboard(ClipboardItem::new_string(text.clone()));
+        session.paste_clipboard_item(ClipboardItem::new_string(text.clone()), None);
         match rx.try_recv().unwrap() {
             RemoteDesktopHelperRequest::PasteText { text: received } => {
                 assert_eq!(received.expose_secret(), text)
@@ -646,7 +651,7 @@ mod clipboard_tests {
             "paste must not also inject keyboard text"
         );
         session.profile.session_options.clipboard.text = false;
-        session.paste_clipboard(ClipboardItem::new_string("blocked".to_string()));
+        session.paste_clipboard_item(ClipboardItem::new_string("blocked".to_string()), None);
         assert!(
             rx.try_recv().is_err(),
             "disabled clipboard text must not be sent"

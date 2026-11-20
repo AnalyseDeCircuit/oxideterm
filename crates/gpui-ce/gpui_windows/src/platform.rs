@@ -1043,7 +1043,13 @@ impl Platform for WindowsPlatform {
     }
 
     fn write_to_clipboard(&self, item: ClipboardItem) {
-        write_to_clipboard(item);
+        write_to_clipboard(self.handle, item);
+    }
+
+    fn clipboard_sequence_number(&self) -> Option<u32> {
+        let sequence =
+            unsafe { windows::Win32::System::DataExchange::GetClipboardSequenceNumber() };
+        (sequence != 0).then_some(sequence)
     }
 
     fn read_from_clipboard(&self) -> Option<ClipboardItem> {
@@ -1935,8 +1941,8 @@ unsafe fn username_and_password(credential: &CREDENTIALW) -> Result<(String, Vec
 mod tests {
     use std::ffi::{OsStr, OsString};
 
-    use crate::{read_from_clipboard, write_to_clipboard};
-    use gpui::ClipboardItem;
+    use crate::{WindowsPlatform, read_from_clipboard};
+    use gpui::{ClipboardItem, Platform};
     use windows::Win32::Security::Credentials::{
         CRED_PERSIST_SESSION, CRED_TYPE_GENERIC, CREDENTIALW, CredDeleteW, CredFree, CredReadW,
         CredWriteW,
@@ -2038,21 +2044,22 @@ mod tests {
 
     #[test]
     fn test_clipboard() {
+        let platform = WindowsPlatform::new(true).unwrap();
         let item = ClipboardItem::new_string("你好，我是张小白".to_string());
-        write_to_clipboard(item.clone());
+        platform.write_to_clipboard(item.clone());
         assert_eq!(read_from_clipboard(), Some(item));
 
         let item = ClipboardItem::new_string("12345".to_string());
-        write_to_clipboard(item.clone());
+        platform.write_to_clipboard(item.clone());
         assert_eq!(read_from_clipboard(), Some(item));
 
         let item = ClipboardItem::new_string_with_json_metadata("abcdef".to_string(), vec![3, 4]);
-        write_to_clipboard(item.clone());
+        platform.write_to_clipboard(item.clone());
         assert_eq!(read_from_clipboard(), Some(item));
 
         let item =
             ClipboardItem::new_string_with_json_metadata("before\0after".to_string(), vec![12]);
-        write_to_clipboard(item);
+        platform.write_to_clipboard(item);
         assert_eq!(
             read_from_clipboard(),
             Some(ClipboardItem::new_string_with_json_metadata(

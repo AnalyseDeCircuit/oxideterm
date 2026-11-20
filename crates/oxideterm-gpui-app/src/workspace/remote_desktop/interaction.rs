@@ -96,11 +96,8 @@ impl WorkspaceApp {
         let Some(tab_id) = self.active_remote_desktop_tab_id(cx) else {
             return false;
         };
-        let Some(item) = cx.read_from_clipboard() else {
-            return true;
-        };
         if let Some(session) = self.remote_desktop_session_entity(tab_id, cx) {
-            session.update(cx, |session, _cx| session.paste_clipboard(item));
+            session.update(cx, |session, cx| session.paste_from_system_clipboard(cx));
         }
         true
     }
