@@ -63,26 +63,26 @@ pub fn orchestrator_tool_definitions() -> Vec<AiToolDefinition> {
     let mut tools = vec![
         tool(
             "list_targets",
-            "List available OxideTerm targets by view. Default view is connections for remote host discovery. Use view=all only for debugging or last-resort fallback.",
+            "List OxideTerm targets by view (default: connections; use all only as fallback).",
             json!({
                 "type": "object",
                 "properties": {
-                    "view": { "type": "string", "enum": TARGET_VIEW_ENUM, "description": "Target view. Default: connections. Use connections for remote hosts; live_sessions for active shells/SFTP; app_surfaces for settings/UI; files for file-capable targets; all only for debug/fallback." },
-                    "query": { "type": "string", "maxLength": MAX_QUERY_CHARS, "description": "Optional filter text. Leave empty for broad discovery." },
-                    "kind": { "type": "string", "enum": TARGET_KIND_ENUM, "description": "Optional fine-grained target kind filter. Prefer view for normal discovery." },
+                    "view": { "type": "string", "enum": TARGET_VIEW_ENUM, "description": "Default: connections (SSH); live_sessions (terminals/SFTP); app_surfaces (UI/local/RAG); files; all (fallback)." },
+                    "query": { "type": "string", "maxLength": MAX_QUERY_CHARS },
+                    "kind": { "type": "string", "enum": TARGET_KIND_ENUM },
                 },
                 "additionalProperties": false,
             }),
         ),
         tool(
             "select_target",
-            "Select exactly one target from OxideTerm targets. Use only when the user named a specific target. Do not use for broad list/discovery requests.",
+            "Select one named target (not for broad discovery).",
             json!({
                 "type": "object",
                 "properties": {
-                    "query": { "type": "string", "maxLength": MAX_QUERY_CHARS, "description": "Specific target name, host, user, session label, tab, or settings area." },
-                    "intent": { "type": "string", "enum": TARGET_INTENT_ENUM, "description": "Required intended operation. Use knowledge for RAG/knowledge-base/runbook/documentation queries. This constrains the candidate pool so commands are not mistaken for targets." },
-                    "kind": { "type": "string", "enum": TARGET_KIND_ENUM, "description": "Optional target kind filter." },
+                    "query": { "type": "string", "maxLength": MAX_QUERY_CHARS, "description": "Target name, host, user, label, tab, or settings area." },
+                    "intent": { "type": "string", "enum": TARGET_INTENT_ENUM, "description": "Intended operation; use knowledge for RAG/docs." },
+                    "kind": { "type": "string", "enum": TARGET_KIND_ENUM },
                 },
                 "required": ["query", "intent"],
                 "additionalProperties": false,
@@ -90,7 +90,7 @@ pub fn orchestrator_tool_definitions() -> Vec<AiToolDefinition> {
         ),
         tool(
             "connect_target",
-            "Connect a saved SSH connection selected from discovery. The resource_ref proves durable identity only; rediscover the resulting live terminal handle before running commands.",
+            "Connect a saved SSH connection by resource_ref; rediscover the resulting live terminal handle afterward.",
             json!({
                 "type": "object",
                 "properties": {
@@ -103,7 +103,6 @@ pub fn orchestrator_tool_definitions() -> Vec<AiToolDefinition> {
                         },
                         "required": ["kind", "id"],
                         "additionalProperties": false,
-                        "description": "Saved connection reference returned by discovery.",
                     },
                 },
                 "required": ["resource_ref"],
@@ -112,15 +111,15 @@ pub fn orchestrator_tool_definitions() -> Vec<AiToolDefinition> {
         ),
         tool(
             "run_command",
-            "Run a command through a current terminal handle returned by list_targets or select_target. Saved connections must be connected first, then discover the resulting terminal handle.",
+            "Run a shell command on a live terminal handle.",
             json!({
                 "type": "object",
                 "properties": {
-                    "handle_id": { "type": "string", "maxLength": 64, "description": "Current terminal handle from list_targets/select_target." },
-                    "command": { "type": "string", "maxLength": MAX_COMMAND_CHARS, "description": "Shell command to run." },
-                    "cwd": { "type": "string", "maxLength": MAX_PATH_CHARS, "description": "Optional working directory." },
-                    "timeout_secs": { "type": "number", "minimum": 1, "maximum": 1800, "description": "Observation budget in seconds, up to 1800. Visible terminals yield output or state within 30 seconds; owned backend processes retain the requested budget. An observation deadline never proves termination." },
-                    "await_output": { "type": "boolean", "description": "For terminal-session targets, wait for output. Default: true." },
+                    "handle_id": { "type": "string", "maxLength": 64 },
+                    "command": { "type": "string", "maxLength": MAX_COMMAND_CHARS },
+                    "cwd": { "type": "string", "maxLength": MAX_PATH_CHARS },
+                    "timeout_secs": { "type": "number", "minimum": 1, "maximum": 1800, "description": "Observation budget in seconds (visible terminals yield within 30s without interrupting)." },
+                    "await_output": { "type": "boolean", "description": "Wait for output (default: true)." },
                 },
                 "required": ["handle_id", "command"],
                 "additionalProperties": false,
@@ -128,12 +127,12 @@ pub fn orchestrator_tool_definitions() -> Vec<AiToolDefinition> {
         ),
         tool(
             "observe_terminal",
-            "Read a terminal target screen, buffer, readiness, and waiting-for-input hints. Use after run_command or before interactive input.",
+            "Read terminal screen, buffer, readiness, and input-wait hints.",
             json!({
                 "type": "object",
                 "properties": {
-                    "handle_id": { "type": "string", "maxLength": 64, "description": "Current terminal handle from list_targets/select_target." },
-                    "max_chars": { "type": "number", "minimum": 200, "maximum": 12000, "description": "Maximum returned buffer characters. Default: 4000." },
+                    "handle_id": { "type": "string", "maxLength": 64 },
+                    "max_chars": { "type": "number", "minimum": 200, "maximum": 12000, "description": "Default: 4000." },
                 },
                 "required": ["handle_id"],
                 "additionalProperties": false,
@@ -141,17 +140,17 @@ pub fn orchestrator_tool_definitions() -> Vec<AiToolDefinition> {
         ),
         tool(
             "send_terminal_input",
-            "Send literal interactive text, Enter, or one supported control/navigation key to a visible terminal target after observing its state. Do not use this to run shell commands; use run_command instead.",
+            "Send interactive text or one control/navigation key after observe_terminal (not for shell commands).",
             json!({
                 "type": "object",
                 "properties": {
-                    "handle_id": { "type": "string", "maxLength": 64, "description": "Current terminal handle from list_targets/select_target." },
-                    "text": { "type": "string", "maxLength": MAX_TERMINAL_INPUT_CHARS, "description": "Text to send." },
-                    "append_enter": { "type": "boolean", "description": "Append Enter after text. Default: false." },
+                    "handle_id": { "type": "string", "maxLength": 64 },
+                    "text": { "type": "string", "maxLength": MAX_TERMINAL_INPUT_CHARS },
+                    "append_enter": { "type": "boolean", "description": "Default: false." },
                     "key": {
                         "type": "string",
                         "enum": ["ctrl_c", "ctrl_d", "ctrl_z", "escape", "enter", "tab", "backspace", "up", "down", "left", "right", "home", "end", "page_up", "page_down", "delete"],
-                        "description": "A single terminal control or navigation key. It cannot be combined with text or append_enter."
+                        "description": "Single key; mutually exclusive with text/append_enter."
                     },
                 },
                 "required": ["handle_id"],
@@ -160,17 +159,17 @@ pub fn orchestrator_tool_definitions() -> Vec<AiToolDefinition> {
         ),
         tool(
             "wait_terminal_output",
-            "Observe a visible terminal for output changes, literal text, input prompts, TUI transitions, or tracked completion. A command wait can yield an output snapshot or restored shell prompt without a confirmed exit; inspect terminalObservation. Each visible-terminal observation lasts at most 30 seconds and never interrupts the command.",
+            "Observe a visible terminal for output, text, prompts, TUI transitions, or tracked completion (yields within 30s without interrupting; inspect terminalObservation).",
             json!({
                 "type": "object",
                 "properties": {
-                    "handle_id": { "type": "string", "maxLength": 64, "description": "Current terminal handle from list_targets/select_target." },
+                    "handle_id": { "type": "string", "maxLength": 64 },
                     "condition": { "type": "string", "enum": ["changed", "contains", "prompt", "tui_entered", "tui_exited", "command_completed"] },
-                    "text": { "type": "string", "maxLength": MAX_QUERY_CHARS, "description": "Literal text required by the contains condition." },
-                    "command_id": { "type": "string", "maxLength": 128, "description": "Command identifier returned by run_command." },
-                    "case_sensitive": { "type": "boolean", "description": "Whether contains matching is case-sensitive. Default: true." },
-                    "timeout_secs": { "type": "integer", "minimum": 1, "maximum": 1800, "description": "Requested observation deadline, default 30 seconds. Visible-terminal waits yield within 30 seconds even for longer requests; call again to keep observing." },
-                    "max_chars": { "type": "integer", "minimum": 200, "maximum": 12000, "description": "Maximum returned terminal text. Default: 4000." }
+                    "text": { "type": "string", "maxLength": MAX_QUERY_CHARS, "description": "Required for contains." },
+                    "command_id": { "type": "string", "maxLength": 128 },
+                    "case_sensitive": { "type": "boolean", "description": "Default: true." },
+                    "timeout_secs": { "type": "integer", "minimum": 1, "maximum": 1800, "description": "Default: 30; call again to keep observing." },
+                    "max_chars": { "type": "integer", "minimum": 200, "maximum": 12000, "description": "Default: 4000." }
                 },
                 "required": ["handle_id", "condition"],
                 "additionalProperties": false
@@ -178,13 +177,13 @@ pub fn orchestrator_tool_definitions() -> Vec<AiToolDefinition> {
         ),
         tool(
             "get_terminal_command_status",
-            "Read command lifecycle and exit status. shell_ready means the prompt returned without a confirmed exit; only completed records establish tracked completion.",
+            "Read tracked command lifecycle and exit status (shell_ready != confirmed exit).",
             json!({
                 "type": "object",
                 "properties": {
-                    "handle_id": { "type": "string", "maxLength": 64, "description": "Current terminal handle from list_targets/select_target." },
-                    "command_id": { "type": "string", "maxLength": 128, "description": "Optional command identifier returned by run_command. When omitted, returns recent commands." },
-                    "limit": { "type": "integer", "minimum": 1, "maximum": 20, "description": "Maximum recent commands when command_id is omitted. Default: 5." }
+                    "handle_id": { "type": "string", "maxLength": 64 },
+                    "command_id": { "type": "string", "maxLength": 128, "description": "Omit to list recent commands." },
+                    "limit": { "type": "integer", "minimum": 1, "maximum": 20, "description": "Default: 5." }
                 },
                 "required": ["handle_id"],
                 "additionalProperties": false
@@ -192,7 +191,7 @@ pub fn orchestrator_tool_definitions() -> Vec<AiToolDefinition> {
         ),
         tool(
             "read_resource",
-            "Read a durable OxideTerm resource or a live remote resource. Settings and knowledge use resource_ref; remote files, directories, SFTP, and IDE files require a current handle_id.",
+            "Read settings/rag (resource_ref) or remote file/directory/sftp/ide (handle_id).",
             json!({
                 "type": "object",
                 "properties": {
@@ -205,13 +204,12 @@ pub fn orchestrator_tool_definitions() -> Vec<AiToolDefinition> {
                         },
                         "required": ["kind", "id"],
                         "additionalProperties": false,
-                        "description": "Stable resource reference returned by discovery.",
                     },
-                    "handle_id": { "type": "string", "maxLength": 64, "description": "Current SFTP or IDE handle for live resources." },
-                    "resource": { "type": "string", "enum": READ_RESOURCE_KIND_ENUM, "description": "Resource kind." },
-                    "path": { "type": "string", "maxLength": MAX_PATH_CHARS, "description": "Remote file or directory path for live resources." },
-                    "section": { "type": "string", "maxLength": MAX_SETTINGS_COMPONENT_CHARS, "description": "Settings section when resource=settings." },
-                    "query": { "type": "string", "maxLength": MAX_QUERY_CHARS, "description": "Search query when resource=rag." },
+                    "handle_id": { "type": "string", "maxLength": 64 },
+                    "resource": { "type": "string", "enum": READ_RESOURCE_KIND_ENUM },
+                    "path": { "type": "string", "maxLength": MAX_PATH_CHARS },
+                    "section": { "type": "string", "maxLength": MAX_SETTINGS_COMPONENT_CHARS },
+                    "query": { "type": "string", "maxLength": MAX_QUERY_CHARS },
                 },
                 "required": ["resource"],
                 "oneOf": [
@@ -250,7 +248,7 @@ pub fn orchestrator_tool_definitions() -> Vec<AiToolDefinition> {
         ),
         tool(
             "write_resource",
-            "Safely write a durable OxideTerm settings value or a live remote file. Settings use resource_ref; remote files and IDE files require a current handle_id.",
+            "Write app settings (resource_ref) or replace a remote/IDE file (handle_id).",
             json!({
                 "type": "object",
                 "properties": {
@@ -263,17 +261,16 @@ pub fn orchestrator_tool_definitions() -> Vec<AiToolDefinition> {
                         },
                         "required": ["kind", "id"],
                         "additionalProperties": false,
-                        "description": "Application settings scope reference returned by discovery.",
                     },
-                    "handle_id": { "type": "string", "maxLength": 64, "description": "Current SFTP or IDE handle for live file writes." },
-                    "resource": { "type": "string", "enum": WRITE_RESOURCE_KIND_ENUM, "description": "Writable resource kind." },
-                    "path": { "type": "string", "maxLength": MAX_PATH_CHARS, "description": "Remote file path for live writes." },
-                    "content": { "type": "string", "maxLength": MAX_FILE_CONTENT_CHARS, "description": "Complete replacement content for a live file write." },
-                    "expected_hash": { "type": "string", "maxLength": MAX_CONTENT_HASH_CHARS, "description": "Optional content hash used to reject a stale overwrite." },
-                    "section": { "type": "string", "maxLength": MAX_SETTINGS_COMPONENT_CHARS, "description": "Settings section." },
-                    "key": { "type": "string", "maxLength": MAX_SETTINGS_COMPONENT_CHARS, "description": "Settings key." },
-                    "value": { "description": "Settings value or structured resource value." },
-                    "dry_run": { "type": "boolean", "description": "Validate without writing." },
+                    "handle_id": { "type": "string", "maxLength": 64 },
+                    "resource": { "type": "string", "enum": WRITE_RESOURCE_KIND_ENUM },
+                    "path": { "type": "string", "maxLength": MAX_PATH_CHARS },
+                    "content": { "type": "string", "maxLength": MAX_FILE_CONTENT_CHARS, "description": "Full replacement content." },
+                    "expected_hash": { "type": "string", "maxLength": MAX_CONTENT_HASH_CHARS, "description": "Reject stale overwrite." },
+                    "section": { "type": "string", "maxLength": MAX_SETTINGS_COMPONENT_CHARS },
+                    "key": { "type": "string", "maxLength": MAX_SETTINGS_COMPONENT_CHARS },
+                    "value": {},
+                    "dry_run": { "type": "boolean", "description": "Validate only." },
                 },
                 "required": ["resource"],
                 "oneOf": [
@@ -303,14 +300,14 @@ pub fn orchestrator_tool_definitions() -> Vec<AiToolDefinition> {
         ),
         tool(
             "transfer_resource",
-            "Start an SFTP transfer with a current SFTP handle. The capability is exposed only after a concrete SFTP owner is available.",
+            "Start an SFTP upload or download using a live SFTP handle.",
             json!({
                 "type": "object",
                 "properties": {
-                    "handle_id": { "type": "string", "maxLength": 64, "description": "Current SFTP handle from discovery." },
-                    "direction": { "type": "string", "enum": ["upload", "download"], "description": "Transfer direction." },
-                    "source_path": { "type": "string", "maxLength": MAX_PATH_CHARS, "description": "Local path for upload or remote path for download." },
-                    "destination_path": { "type": "string", "maxLength": MAX_PATH_CHARS, "description": "Remote path for upload or local path for download." },
+                    "handle_id": { "type": "string", "maxLength": 64 },
+                    "direction": { "type": "string", "enum": ["upload", "download"] },
+                    "source_path": { "type": "string", "maxLength": MAX_PATH_CHARS, "description": "Local (upload) or remote (download)." },
+                    "destination_path": { "type": "string", "maxLength": MAX_PATH_CHARS, "description": "Remote (upload) or local (download)." },
                 },
                 "required": ["handle_id", "direction", "source_path", "destination_path"],
                 "additionalProperties": false,
@@ -318,7 +315,7 @@ pub fn orchestrator_tool_definitions() -> Vec<AiToolDefinition> {
         ),
         tool(
             "open_app_surface",
-            "Open an OxideTerm application surface by durable resource_ref, or focus one exact mounted surface by its current handle_id.",
+            "Open an app surface (resource_ref) or focus a mounted one (handle_id).",
             json!({
                 "type": "object",
                 "properties": {
@@ -331,10 +328,9 @@ pub fn orchestrator_tool_definitions() -> Vec<AiToolDefinition> {
                         },
                         "required": ["kind", "id"],
                         "additionalProperties": false,
-                        "description": "Durable application surface reference returned by discovery.",
                     },
-                    "handle_id": { "type": "string", "maxLength": 64, "description": "Current mounted-surface handle returned by discovery." },
-                    "section": { "type": "string", "maxLength": MAX_SETTINGS_COMPONENT_CHARS, "description": "Optional settings section." },
+                    "handle_id": { "type": "string", "maxLength": 64 },
+                    "section": { "type": "string", "maxLength": MAX_SETTINGS_COMPONENT_CHARS },
                 },
                 "oneOf": [
                     { "required": ["resource_ref"] },
@@ -345,12 +341,12 @@ pub fn orchestrator_tool_definitions() -> Vec<AiToolDefinition> {
         ),
         tool(
             "get_state",
-            "Read compact global state, or inspect one exact live handle or durable resource reference without exposing internal runtime identifiers.",
+            "Read compact global state or inspect one handle_id/resource_ref (scope=target).",
             json!({
                 "type": "object",
                 "properties": {
-                    "scope": { "type": "string", "enum": ["connections", "transfers", "settings", "targets", "health", "active", "target"], "description": "State scope. Use target with exactly one authority field." },
-                    "handle_id": { "type": "string", "maxLength": 64, "description": "Current live target handle when scope=target." },
+                    "scope": { "type": "string", "enum": ["connections", "transfers", "settings", "targets", "health", "active", "target"] },
+                    "handle_id": { "type": "string", "maxLength": 64 },
                     "resource_ref": {
                         "type": "object",
                         "properties": {
@@ -360,7 +356,6 @@ pub fn orchestrator_tool_definitions() -> Vec<AiToolDefinition> {
                         },
                         "required": ["kind", "id"],
                         "additionalProperties": false,
-                        "description": "Durable target reference when scope=target.",
                     },
                 },
                 "required": ["scope"],
@@ -389,11 +384,11 @@ pub fn orchestrator_tool_definitions() -> Vec<AiToolDefinition> {
         ),
         tool(
             "remember_preference",
-            "Save a long-lived user preference for OxideSens memory. Do not use for transient task facts.",
+            "Save a long-lived user preference (not transient task facts).",
             json!({
                 "type": "object",
                 "properties": {
-                    "preference": { "type": "string", "maxLength": MAX_PREFERENCE_CHARS, "description": "Preference to remember." },
+                    "preference": { "type": "string", "maxLength": MAX_PREFERENCE_CHARS },
                 },
                 "required": ["preference"],
                 "additionalProperties": false,
@@ -401,7 +396,7 @@ pub fn orchestrator_tool_definitions() -> Vec<AiToolDefinition> {
         ),
         tool(
             "recall_preferences",
-            "Read saved long-lived OxideSens user preferences.",
+            "Read saved user preferences.",
             json!({
                 "type": "object",
                 "properties": {},
@@ -410,11 +405,11 @@ pub fn orchestrator_tool_definitions() -> Vec<AiToolDefinition> {
         ),
         tool(
             "load_skill",
-            "Load one Agent Skill when the request matches an entry in the available skills catalog. Skill instructions never grant additional tool permissions.",
+            "Load an Agent Skill by catalog ID (grants no extra permissions).",
             json!({
                 "type": "object",
                 "properties": {
-                    "id": { "type": "string", "maxLength": 64, "description": "Exact identifier from the available skills catalog." },
+                    "id": { "type": "string", "maxLength": 64 },
                 },
                 "required": ["id"],
                 "additionalProperties": false,
@@ -422,12 +417,12 @@ pub fn orchestrator_tool_definitions() -> Vec<AiToolDefinition> {
         ),
         tool(
             "read_skill_resource",
-            "Read one text resource referenced by a loaded Agent Skill. The relative path cannot escape the skill directory.",
+            "Read a relative text file inside a loaded skill directory.",
             json!({
                 "type": "object",
                 "properties": {
-                    "id": { "type": "string", "maxLength": 64, "description": "Exact loaded skill identifier." },
-                    "path": { "type": "string", "maxLength": 1024, "description": "Relative path inside the skill directory." },
+                    "id": { "type": "string", "maxLength": 64 },
+                    "path": { "type": "string", "maxLength": 1024 },
                 },
                 "required": ["id", "path"],
                 "additionalProperties": false,

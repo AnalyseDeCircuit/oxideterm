@@ -15,7 +15,7 @@ pub(crate) fn extended_application_tool_definitions() -> Vec<AiToolDefinition> {
     vec![
         tool(
             "create_background_task",
-            "Create a cancellable one-shot task or safe recurring monitor. Recurring tasks can call only monitor-safe read tools and must use stable resource references instead of live handles.",
+            "Create a one-shot or recurring monitor task (recurring tasks allow monitor-safe read tools with resource_ref only).",
             json!({
                 "type": "object",
                 "properties": {
@@ -24,7 +24,7 @@ pub(crate) fn extended_application_tool_definitions() -> Vec<AiToolDefinition> {
                         "type": "string",
                         "enum": ["list_targets", "get_state", "read_resource", "inspect_host_tools", "list_forwards", "list_plugins"]
                     },
-                    "arguments": { "type": "object", "description": "Arguments for the nested monitor-safe tool." },
+                    "arguments": { "type": "object" },
                     "mode": { "type": "string", "enum": ["one_shot", "interval", "condition"] },
                     "interval_seconds": { "type": "integer", "minimum": 5, "maximum": 86400 },
                     "max_runs": { "type": "integer", "minimum": 1, "maximum": 10000 },
@@ -39,22 +39,22 @@ pub(crate) fn extended_application_tool_definitions() -> Vec<AiToolDefinition> {
         ),
         tool(
             "list_background_tasks",
-            "List background tasks owned by the current OxideSens conversation.",
+            "List background tasks in this conversation.",
             empty_object_schema(),
         ),
         tool(
             "get_background_task",
-            "Inspect one background task owned by the current OxideSens conversation.",
+            "Inspect one background task.",
             id_schema("task_id"),
         ),
         tool(
             "cancel_background_task",
-            "Cancel one running or waiting background task owned by the current OxideSens conversation.",
+            "Cancel one running or waiting background task.",
             id_schema("task_id"),
         ),
         tool(
             "inspect_host_tools",
-            "Read an existing Host Tools snapshot or request a fresh snapshot through the selected live host. This reuses Host Tools and never opens another SSH connection.",
+            "Read or refresh a Host Tools snapshot on a live host (reuses existing SSH connection).",
             json!({
                 "type": "object",
                 "properties": {
@@ -82,7 +82,7 @@ pub(crate) fn extended_application_tool_definitions() -> Vec<AiToolDefinition> {
         ),
         tool(
             "control_host_tool",
-            "Run a supported Host Tools mutation using its existing availability checks and runtime owner.",
+            "Run a Host Tools action on a live host.",
             json!({
                 "type": "object",
                 "properties": {
@@ -98,12 +98,12 @@ pub(crate) fn extended_application_tool_definitions() -> Vec<AiToolDefinition> {
         ),
         tool(
             "list_forwards",
-            "List forwarding rules and runtime status for a current SSH node or stable saved connection.",
+            "List port-forwarding rules and status for a node or saved connection.",
             authority_schema(),
         ),
         tool(
             "manage_forward",
-            "Create, update, stop, restart, or delete a forwarding rule through the node-owned forwarding runtime.",
+            "Create, update, stop, restart, delete, or scan port-forwarding rules.",
             json!({
                 "type": "object",
                 "properties": {
@@ -118,12 +118,12 @@ pub(crate) fn extended_application_tool_definitions() -> Vec<AiToolDefinition> {
         ),
         tool(
             "list_plugins",
-            "List installed plugins, runtime state, capabilities, and granted permissions without exposing plugin secrets.",
+            "List installed plugins, state, capabilities, and permissions (no secrets).",
             empty_object_schema(),
         ),
         tool(
             "manage_plugin",
-            "Install, enable, disable, configure, uninstall, invoke, or open the manager for a native plugin. Password-type settings cannot be configured through AI.",
+            "Manage or invoke a native plugin (password settings disallowed).",
             json!({
                 "type": "object",
                 "properties": {
@@ -144,12 +144,12 @@ pub(crate) fn extended_application_tool_definitions() -> Vec<AiToolDefinition> {
         ),
         tool(
             "list_transport_profiles",
-            "List saved serial, Telnet, RDP, and VNC profiles using metadata only. Credentials are never returned.",
+            "List saved serial, Telnet, RDP, and VNC profile metadata (no credentials).",
             empty_object_schema(),
         ),
         tool(
             "open_transport_profile",
-            "Open a saved serial, Telnet, RDP, or VNC profile through its existing workspace session owner.",
+            "Open a saved serial, Telnet, RDP, or VNC profile; rediscover the live owner afterward.",
             json!({
                 "type": "object",
                 "properties": {
@@ -162,7 +162,7 @@ pub(crate) fn extended_application_tool_definitions() -> Vec<AiToolDefinition> {
         ),
         tool(
             "get_transport_session_state",
-            "Read the live transport and lifecycle state for an existing serial or Telnet terminal. Serial sessions also report control lines and runtime modes.",
+            "Read live state for a serial or Telnet terminal.",
             json!({
                 "type": "object",
                 "properties": {
@@ -174,7 +174,7 @@ pub(crate) fn extended_application_tool_definitions() -> Vec<AiToolDefinition> {
         ),
         tool(
             "manage_serial_session",
-            "Control an existing serial terminal without opening another port. Supports reconnect, port refresh, break, DTR/RTS, local echo, input/output line endings, and display/send modes.",
+            "Control a live serial terminal (reconnect, break, DTR/RTS, echo, line endings, modes).",
             json!({
                 "type": "object",
                 "properties": {
@@ -195,7 +195,7 @@ pub(crate) fn extended_application_tool_definitions() -> Vec<AiToolDefinition> {
         ),
         tool(
             "manage_telnet_session",
-            "Send a Telnet protocol control command or disconnect an existing Telnet session. Protocol controls are transmitted as IAC commands rather than escaped terminal text.",
+            "Send a Telnet IAC control command or disconnect (never emulate IAC as terminal text).",
             json!({
                 "type": "object",
                 "properties": {
@@ -211,12 +211,12 @@ pub(crate) fn extended_application_tool_definitions() -> Vec<AiToolDefinition> {
         ),
         tool(
             "list_remote_desktop_sessions",
-            "List live RDP and VNC session state, capabilities, endpoint metadata, and owning tab identifiers.",
+            "List live RDP/VNC sessions, capabilities, metadata, and tab IDs.",
             empty_object_schema(),
         ),
         tool(
             "manage_remote_desktop_session",
-            "Disconnect or reconnect one existing RDP or VNC session without affecting unrelated sessions.",
+            "Disconnect or reconnect one live RDP/VNC session.",
             json!({
                 "type": "object",
                 "properties": {
@@ -229,12 +229,12 @@ pub(crate) fn extended_application_tool_definitions() -> Vec<AiToolDefinition> {
         ),
         tool(
             "get_cloud_sync_state",
-            "Read non-secret Cloud Sync configuration, sync scope, operation state, conflict state, dirty state, and recent history.",
+            "Read non-secret Cloud Sync config, scope, status, conflicts, and history.",
             empty_object_schema(),
         ),
         tool(
             "configure_cloud_sync",
-            "Update non-secret Cloud Sync backend, scheduling, conflict, OAuth client-ID, and sync-scope settings. Existing passwords, tokens, and protected credentials are left unchanged.",
+            "Update non-secret Cloud Sync settings and scope (credentials unchanged).",
             json!({
                 "type": "object",
                 "properties": {
@@ -279,7 +279,7 @@ pub(crate) fn extended_application_tool_definitions() -> Vec<AiToolDefinition> {
         ),
         tool(
             "manage_cloud_sync",
-            "Open Cloud Sync or start a check, upload preview, or pull preview. Applying or overwriting remote data remains a user-confirmed UI action.",
+            "Open Cloud Sync or preview check/upload/pull (applying remains user-confirmed in UI).",
             json!({
                 "type": "object",
                 "properties": {
@@ -291,7 +291,7 @@ pub(crate) fn extended_application_tool_definitions() -> Vec<AiToolDefinition> {
         ),
         tool(
             "list_credentials",
-            "List managed SSH key and privilege-credential metadata. Secret values, private keys, passwords, and passphrases are never returned.",
+            "List managed SSH key and privilege credential metadata (no secret values).",
             json!({
                 "type": "object",
                 "properties": {
@@ -302,7 +302,7 @@ pub(crate) fn extended_application_tool_definitions() -> Vec<AiToolDefinition> {
         ),
         tool(
             "manage_credential",
-            "Open credential management or delete one managed SSH key, privilege credential, or saved remote-desktop credential. AI cannot read or create raw secret values.",
+            "Open credential manager or delete a managed credential (no secret read/create).",
             json!({
                 "type": "object",
                 "properties": {
@@ -318,12 +318,12 @@ pub(crate) fn extended_application_tool_definitions() -> Vec<AiToolDefinition> {
         ),
         tool(
             "list_memory_entries",
-            "List non-expired memory entries visible to a requested user, workspace, project, or host scope, including provenance and usage metadata.",
+            "List scoped memory entries and metadata (omit scope_id for current scope).",
             json!({
                 "type": "object",
                 "properties": {
                     "scope_kind": { "type": "string", "enum": ["user", "workspace", "project", "host"] },
-                    "scope_id": { "type": "string", "maxLength": MAX_IDENTIFIER_CHARS, "description": "Optional explicit scope identity. When omitted, OxideTerm resolves the current user, workspace, project, or host." },
+                    "scope_id": { "type": "string", "maxLength": MAX_IDENTIFIER_CHARS },
                     "memory_kind": { "type": "string", "enum": ["long_term", "temporary"] },
                     "include_expired": { "type": "boolean" }
                 },
@@ -332,7 +332,7 @@ pub(crate) fn extended_application_tool_definitions() -> Vec<AiToolDefinition> {
         ),
         tool(
             "manage_memory_entry",
-            "Create, update, delete, or mark one scoped memory entry as used. Updates require the current revision so concurrent edits cannot silently overwrite each other.",
+            "Create, update, delete, or touch a scoped memory entry (use narrowest scope, expires_at_ms for temporary facts, expected_revision for updates/deletes; omit scope_id for current scope).",
             json!({
                 "type": "object",
                 "properties": {
@@ -340,7 +340,7 @@ pub(crate) fn extended_application_tool_definitions() -> Vec<AiToolDefinition> {
                     "id": { "type": "string", "maxLength": MAX_IDENTIFIER_CHARS },
                     "content": { "type": "string", "maxLength": 16000 },
                     "scope_kind": { "type": "string", "enum": ["user", "workspace", "project", "host"] },
-                    "scope_id": { "type": "string", "maxLength": MAX_IDENTIFIER_CHARS, "description": "Optional explicit scope identity. When omitted, OxideTerm resolves the current user, workspace, project, or host." },
+                    "scope_id": { "type": "string", "maxLength": MAX_IDENTIFIER_CHARS },
                     "memory_kind": { "type": "string", "enum": ["long_term", "temporary"] },
                     "expires_at_ms": { "type": "integer", "minimum": 1 },
                     "expected_revision": { "type": "integer", "minimum": 1 }

@@ -99,17 +99,17 @@ impl McpRegistry {
         let mut definitions = vec![
             AiToolDefinition {
                 name: "list_mcp_resources".to_string(),
-                description: "List all resources available from connected MCP servers. Returns URI, name, description, and MIME type for each resource.".to_string(),
+                description: "List resources from connected MCP servers.".to_string(),
                 parameters: serde_json::json!({ "type": "object", "properties": {} }),
             },
             AiToolDefinition {
                 name: "read_mcp_resource".to_string(),
-                description: "Read the content of a specific MCP resource by its URI. Returns text or base64-encoded binary data.".to_string(),
+                description: "Read one MCP resource by server_id and URI.".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {
-                        "server_id": { "type": "string", "description": "The MCP server ID that owns this resource." },
-                        "uri": { "type": "string", "description": "The resource URI to read (as returned by list_mcp_resources)." },
+                        "server_id": { "type": "string" },
+                        "uri": { "type": "string" },
                     },
                     "required": ["server_id", "uri"],
                 }),
