@@ -262,17 +262,9 @@ impl ConnectionFormView {
                 cx,
             ))
             .child(
-                div()
-                    .flex_1()
-                    .min_h_0()
-                    .flex()
-                    .child(
-                        modal_body(&self.tokens).flex_1().min_w_0().min_h_0().child(
-                            div()
-                                .size_full()
-                                .min_h_0()
-                                .flex()
-                                .child(
+                div().flex_1().min_h_0().flex().child(
+                    modal_body(&self.tokens).flex_1().min_w_0().min_h_0().child(
+                        div().size_full().min_h_0().flex().child(
                             div()
                                 .id("ssh-tunnel-form-scroll")
                                 .flex_1()

@@ -294,7 +294,9 @@ impl ConnectionFormView {
             let (icon, label) = self.transport_display_meta(transport);
             let active = tile_index == active_index;
             let tile = div()
-                .id(SharedString::from(format!("studio-transport-{transport:?}")))
+                .id(SharedString::from(format!(
+                    "studio-transport-{transport:?}"
+                )))
                 .debug_selector(|| format!("new-connection-transport-{transport:?}"))
                 .relative()
                 .flex_none()
@@ -306,7 +308,9 @@ impl ConnectionFormView {
                 .when(!active, |el| {
                     el.hover(|el| el.bg(rgba((theme.bg_hover << 8) | 0x99)))
                 })
-                .when(active, |el| el.child(render_active_protocol_surface(tile_index)))
+                .when(active, |el| {
+                    el.child(render_active_protocol_surface(tile_index))
+                })
                 .flex()
                 .flex_col()
                 .items_center()
@@ -650,7 +654,8 @@ impl ConnectionFormView {
                                             .child(title),
                                     )
                                     .when_some(
-                                        subtitle.filter(|s| !s.is_empty() && !shows_transport_strip),
+                                        subtitle
+                                            .filter(|s| !s.is_empty() && !shows_transport_strip),
                                         |col, desc| {
                                             col.child(
                                                 div()

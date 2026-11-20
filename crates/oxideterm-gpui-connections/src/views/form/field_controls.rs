@@ -2953,12 +2953,14 @@ impl ConnectionFormView {
                             ),
                         );
                         if protocol == oxideterm_remote_desktop::RemoteDesktopProtocol::Rdp {
-                            gateway = gateway.child(self.render_connection_hint(
-                                self.i18n
-                                    .t("modals.new_connection.remote_desktop_proxy_route_hint"),
-                            ));
-                            gateway = gateway
-                                .child(self.render_upstream_proxy_policy_section(false, cx));
+                            gateway = gateway.child(
+                                self.render_connection_hint(
+                                    self.i18n
+                                        .t("modals.new_connection.remote_desktop_proxy_route_hint"),
+                                ),
+                            );
+                            gateway =
+                                gateway.child(self.render_upstream_proxy_policy_section(false, cx));
                         }
                         gateway.into_any_element()
                     }

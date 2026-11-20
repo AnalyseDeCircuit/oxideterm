@@ -46,9 +46,7 @@ impl ConnectionFlowEntity {
         };
         if !form.field_focused {
             return match key {
-                "escape"
-                    if form.transport_picker_open || form.appearance_popover_open =>
-                {
+                "escape" if form.transport_picker_open || form.appearance_popover_open => {
                     form.transport_picker_open = false;
                     form.appearance_popover_open = false;
                     cx.notify();

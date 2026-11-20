@@ -626,15 +626,19 @@ impl ConnectionFormView {
                     .flex()
                     .flex_row()
                     .gap(px(12.0))
-                    .child(div().flex_1().min_w_0().child(self.render_connection_field(
-                        self.i18n.t("modals.new_connection.ble_profile_name"),
-                        &ble_profile_name,
-                        self.i18n
-                            .t("modals.new_connection.ble_profile_name_placeholder"),
-                        NewConnectionField::BleProfileName,
-                        false,
-                        cx,
-                    )))
+                    .child(
+                        div().flex_1().min_w_0().child(
+                            self.render_connection_field(
+                                self.i18n.t("modals.new_connection.ble_profile_name"),
+                                &ble_profile_name,
+                                self.i18n
+                                    .t("modals.new_connection.ble_profile_name_placeholder"),
+                                NewConnectionField::BleProfileName,
+                                false,
+                                cx,
+                            ),
+                        ),
+                    )
                     .child(div().w(px(196.0)).flex_none().child(
                         self.render_connection_group_select(
                             self.i18n.t("ssh.form.group"),
@@ -647,7 +651,9 @@ impl ConnectionFormView {
 
         use crate::form_state::ConnectionFormDrawer;
         match active_drawer {
-            Some(ConnectionFormDrawer::BleTransportOptions) => self.render_ble_transport_options(cx),
+            Some(ConnectionFormDrawer::BleTransportOptions) => {
+                self.render_ble_transport_options(cx)
+            }
             Some(ConnectionFormDrawer::Terminal) => div()
                 .flex()
                 .flex_col()

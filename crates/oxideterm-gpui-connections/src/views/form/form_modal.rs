@@ -625,9 +625,7 @@ impl ConnectionFormView {
                     items.push(composer::CategoryNavItem {
                         drawer: Some(ConnectionFormDrawer::VncPreferences),
                         icon: LucideIcon::ShieldCheck,
-                        label: self
-                            .i18n
-                            .t("modals.new_connection.vnc_preferences_title"),
+                        label: self.i18n.t("modals.new_connection.vnc_preferences_title"),
                         summary: None,
                     });
                 }
