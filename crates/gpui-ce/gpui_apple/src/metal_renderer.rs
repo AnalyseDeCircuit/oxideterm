@@ -3,8 +3,8 @@ use anyhow::{Context as _, Result};
 use block2::RcBlock;
 use gpui::{
     AtlasTextureId, Background, Bounds, ContentMask, Corners, DevicePixels, FilterBoundary,
-    PaintSurface, Path, Point, PrimitiveBatch, ScaledFilter, ScaledPixels, Scene, Size, point,
-    size,
+    PaintSurface, Path, Point, PrimitiveBatch, ScaledFilter, ScaledPixels,
+    ScaledTerminalPostProcessFilter, Scene, Size, point, size,
 };
 
 /// The largest blur radius in a scene-space filter chain, in device pixels — used to size the
@@ -16,6 +16,16 @@ use gpui::{
 fn max_blur_radius(filters: &[ScaledFilter]) -> f32 {
     filters.iter().fold(0.0, |acc, filter| match filter {
         ScaledFilter::Blur(radius) => acc.max(radius.0),
+        ScaledFilter::TerminalPostProcess(_) => acc,
+    })
+}
+
+fn terminal_post_process_filter(
+    filters: &[ScaledFilter],
+) -> Option<ScaledTerminalPostProcessFilter> {
+    filters.iter().rev().find_map(|filter| match filter {
+        ScaledFilter::TerminalPostProcess(post) => Some(*post),
+        ScaledFilter::Blur(_) => None,
     })
 }
 #[cfg(any(test, feature = "bench-support", feature = "test-support"))]
@@ -220,6 +230,10 @@ struct BlurUniform {
     tap_step: f32,
     corner_shape: u32,
     corner_shape_padding: [u32; 3],
+    bloom_intensity: f32,
+    crt_curvature: f32,
+    crt_scanlines: f32,
+    crt_collapse: f32,
 }
 
 impl Default for BlurUniform {
@@ -237,6 +251,10 @@ impl Default for BlurUniform {
             corner_shape: 0,
             corner_shape_padding: [0; 3],
             tap_step: 0.0,
+            bloom_intensity: 0.0,
+            crt_curvature: 0.0,
+            crt_scanlines: 0.0,
+            crt_collapse: 0.0,
         }
     }
 }
@@ -1165,6 +1183,7 @@ impl MetalRenderer {
                                 filter.content_mask.bounds,
                                 filter.corner_radii,
                                 max_blur_radius(&filter.filters),
+                                None,
                                 filter.opacity,
                                 true,
                                 filter.corner_shape,
@@ -1222,6 +1241,7 @@ impl MetalRenderer {
                                     boundary.content_mask.bounds,
                                     boundary.corner_radii,
                                     max_blur_radius(&boundary.filters),
+                                    terminal_post_process_filter(&boundary.filters),
                                     boundary.opacity,
                                     boundary.clip_rounded,
                                     boundary.corner_shape,
@@ -1250,6 +1270,7 @@ impl MetalRenderer {
                 &self.blur_downsample_pipeline_state,
                 texture,
                 scene_color,
+                None,
                 viewport_size,
                 BlurUniform::default(),
                 false,
@@ -1269,6 +1290,7 @@ impl MetalRenderer {
         pipeline: &ProtocolObject<dyn MTLRenderPipelineState>,
         target: &ProtocolObject<dyn MTLTexture>,
         source: &ProtocolObject<dyn MTLTexture>,
+        secondary_source: Option<&ProtocolObject<dyn MTLTexture>>,
         target_viewport: Size<DevicePixels>,
         params: BlurUniform,
         load: bool,
@@ -1313,6 +1335,7 @@ impl MetalRenderer {
                 BlurInputIndex::ViewportSize as usize,
             );
             encoder.setFragmentTexture_atIndex(Some(source), 0);
+            encoder.setFragmentTexture_atIndex(Some(secondary_source.unwrap_or(source)), 1);
             encoder.drawPrimitives_vertexStart_vertexCount(MTLPrimitiveType::Triangle, 0, 6);
         }
         encoder.endEncoding();
@@ -1335,11 +1358,101 @@ impl MetalRenderer {
         content_mask: Bounds<ScaledPixels>,
         corner_radii: Corners<ScaledPixels>,
         blur_radius: f32,
+        post_process: Option<ScaledTerminalPostProcessFilter>,
         opacity: f32,
         // Backdrop clips to the rounded rect; content (`filter`) bleeds past its bounds.
         clip_rounded: bool,
         corner_shape: u32,
     ) -> Result<()> {
+        let half = Size {
+            width: DevicePixels((i32::from(viewport_size.width) / 2).max(1)),
+            height: DevicePixels((i32::from(viewport_size.height) / 2).max(1)),
+        };
+        let half_w = i32::from(half.width) as f32;
+        let half_h = i32::from(half.height) as f32;
+
+        if let Some(post) = post_process {
+            // Terminal micro-optical post-processing: keep full-resolution sharp source in slot 0
+            // and build an optional half-resolution bright/chroma bloom texture in `ping` (slot 1).
+            let has_bloom = post.bloom > 0.001;
+            if has_bloom {
+                let bloom_sigma = (post.bloom_radius.0 * 0.5).max(1.0);
+                let ideal_taps = (3.0 * bloom_sigma).ceil();
+                let tap_count = ideal_taps.clamp(1.0, 32.0);
+                let tap_step = (ideal_taps / tap_count).max(1.0);
+                self.run_metal_blur_pass(
+                    command_buffer,
+                    &self.blur_downsample_pipeline_state,
+                    ping,
+                    source,
+                    None,
+                    half,
+                    BlurUniform {
+                        downsample: 1.0,
+                        bloom_intensity: post.bloom,
+                        ..Default::default()
+                    },
+                    false,
+                )?;
+                self.run_metal_blur_pass(
+                    command_buffer,
+                    &self.blur_pipeline_state,
+                    pong,
+                    ping,
+                    None,
+                    half,
+                    BlurUniform {
+                        direction: [1.0 / half_w, 0.0],
+                        sigma: bloom_sigma,
+                        tap_count,
+                        tap_step,
+                        ..Default::default()
+                    },
+                    false,
+                )?;
+                self.run_metal_blur_pass(
+                    command_buffer,
+                    &self.blur_pipeline_state,
+                    ping,
+                    pong,
+                    None,
+                    half,
+                    BlurUniform {
+                        direction: [0.0, 1.0 / half_h],
+                        sigma: bloom_sigma,
+                        tap_count,
+                        tap_step,
+                        ..Default::default()
+                    },
+                    false,
+                )?;
+            }
+            self.run_metal_blur_pass(
+                command_buffer,
+                &self.blur_composite_pipeline_state,
+                target,
+                source,
+                Some(if has_bloom { ping } else { source }),
+                viewport_size,
+                BlurUniform {
+                    bounds,
+                    content_mask,
+                    corner_radii,
+                    opacity,
+                    clip_rounded: 1.0,
+                    corner_shape,
+                    downsample: 0.0,
+                    bloom_intensity: post.bloom,
+                    crt_curvature: post.crt_curvature,
+                    crt_scanlines: post.crt_scanlines,
+                    crt_collapse: post.crt_collapse,
+                    ..Default::default()
+                },
+                true,
+            )?;
+            return Ok(());
+        }
+
         // Sigma is halved because the blur runs at half resolution.
         let sigma = (blur_radius * 0.5).max(0.0);
         // Span ±3σ. If that needs more than 32 taps, spread the taps apart (tap_step > 1) rather
@@ -1353,12 +1466,6 @@ impl MetalRenderer {
         } else {
             bounds.dilate(ScaledPixels(3.0 * blur_radius))
         };
-        let half = Size {
-            width: DevicePixels((i32::from(viewport_size.width) / 2).max(1)),
-            height: DevicePixels((i32::from(viewport_size.height) / 2).max(1)),
-        };
-        let half_w = i32::from(half.width) as f32;
-        let half_h = i32::from(half.height) as f32;
 
         // Clip-only layers preserve full-resolution pixels.
         if sigma > 0.0 {
@@ -1368,6 +1475,7 @@ impl MetalRenderer {
                 &self.blur_downsample_pipeline_state,
                 ping,
                 source,
+                None,
                 half,
                 BlurUniform {
                     downsample: 1.0,
@@ -1380,6 +1488,7 @@ impl MetalRenderer {
                 &self.blur_pipeline_state,
                 pong,
                 ping,
+                None,
                 half,
                 BlurUniform {
                     direction: [1.0 / half_w, 0.0],
@@ -1395,6 +1504,7 @@ impl MetalRenderer {
                 &self.blur_pipeline_state,
                 ping,
                 pong,
+                None,
                 half,
                 BlurUniform {
                     direction: [0.0, 1.0 / half_h],
@@ -1412,6 +1522,7 @@ impl MetalRenderer {
             &self.blur_composite_pipeline_state,
             target,
             if sigma > 0.0 { ping } else { source },
+            None,
             viewport_size,
             BlurUniform {
                 bounds: composite_bounds,

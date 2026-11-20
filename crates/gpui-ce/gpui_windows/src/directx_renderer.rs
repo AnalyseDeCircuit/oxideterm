@@ -36,6 +36,16 @@ mod tests;
 fn max_blur_radius(filters: &[ScaledFilter]) -> f32 {
     filters.iter().fold(0.0, |acc, filter| match filter {
         ScaledFilter::Blur(radius) => acc.max(radius.0),
+        ScaledFilter::TerminalPostProcess(_) => acc,
+    })
+}
+
+fn terminal_post_process_filter(
+    filters: &[ScaledFilter],
+) -> Option<ScaledTerminalPostProcessFilter> {
+    filters.iter().rev().find_map(|filter| match filter {
+        ScaledFilter::TerminalPostProcess(post) => Some(*post),
+        ScaledFilter::Blur(_) => None,
     })
 }
 
@@ -569,6 +579,7 @@ impl DirectXRenderer {
                                 filter.content_mask.bounds,
                                 corner_radii_array(filter.corner_radii),
                                 max_blur_radius(&filter.filters),
+                                None,
                                 filter.opacity,
                                 true,
                                 filter.corner_shape,
@@ -614,6 +625,7 @@ impl DirectXRenderer {
                                 boundary.content_mask.bounds,
                                 corner_radii_array(boundary.corner_radii),
                                 max_blur_radius(&boundary.filters),
+                                terminal_post_process_filter(&boundary.filters),
                                 boundary.opacity,
                                 boundary.clip_rounded,
                                 boundary.corner_shape,
@@ -1127,6 +1139,7 @@ impl DirectXRenderer {
         blend: &ID3D11BlendState,
         target_rtv: &Option<ID3D11RenderTargetView>,
         source_srv: &Option<ID3D11ShaderResourceView>,
+        secondary_srv: Option<&Option<ID3D11ShaderResourceView>>,
         params: BlurParams,
         viewport: &D3D11_VIEWPORT,
         topology: D3D_PRIMITIVE_TOPOLOGY,
@@ -1136,11 +1149,15 @@ impl DirectXRenderer {
         let devices = self.devices.as_ref().context("devices missing")?;
         let ctx = &devices.device_context;
         update_buffer(ctx, &self.pipelines.blur_params_buffer, &[params])?;
-        let null_srv: [Option<ID3D11ShaderResourceView>; 1] = [None];
+        let null_srvs: [Option<ID3D11ShaderResourceView>; 2] = [None, None];
+        let srvs: [Option<ID3D11ShaderResourceView>; 2] = [
+            source_srv.clone(),
+            secondary_srv.unwrap_or(source_srv).clone(),
+        ];
         let blur_params = [Some(self.pipelines.blur_params_buffer.clone())];
         unsafe {
-            // Unbind any SRV at slot 0 so the target texture isn't simultaneously bound as input.
-            ctx.PSSetShaderResources(0, Some(&null_srv));
+            // Unbind SRV slots 0..2 so the target texture isn't simultaneously bound as input.
+            ctx.PSSetShaderResources(0, Some(&null_srvs));
             if clear {
                 ctx.ClearRenderTargetView(
                     target_rtv.as_ref().context("blur target view missing")?,
@@ -1157,11 +1174,11 @@ impl DirectXRenderer {
             ctx.VSSetConstantBuffers(1, Some(&blur_params));
             ctx.PSSetConstantBuffers(1, Some(&blur_params));
             ctx.PSSetSamplers(0, Some(slice::from_ref(&self.globals.sampler)));
-            ctx.PSSetShaderResources(0, Some(slice::from_ref(source_srv)));
+            ctx.PSSetShaderResources(0, Some(&srvs));
             ctx.OMSetBlendState(blend, None, 0xFFFFFFFF);
             ctx.DrawInstanced(vertex_count, 1, 0, 0);
-            // Unbind the source so the target can be rebound as a render target next.
-            ctx.PSSetShaderResources(0, Some(&null_srv));
+            // Unbind both sources so the target can be rebound as a render target next.
+            ctx.PSSetShaderResources(0, Some(&null_srvs));
         }
         Ok(())
     }
@@ -1178,24 +1195,12 @@ impl DirectXRenderer {
         content_mask: Bounds<ScaledPixels>,
         corner_radii: [f32; 4],
         blur_radius: f32,
+        post_process: Option<ScaledTerminalPostProcessFilter>,
         opacity: f32,
         // Backdrop clips to the rounded rect; content (`filter`) bleeds past its bounds.
         clip_rounded: bool,
         corner_shape: u32,
     ) -> Result<()> {
-        // Sigma is halved because the blur runs at half resolution.
-        let sigma = (blur_radius * 0.5).max(0.0);
-        // Span ±3σ. If that needs more than 32 taps, spread the taps apart (tap_step > 1) rather
-        // than truncating the kernel — keeps very large radii from clipping. Matches wgpu.
-        let ideal_taps = (3.0 * sigma).ceil();
-        let tap_count = ideal_taps.clamp(1.0, 32.0);
-        let tap_step = (ideal_taps / tap_count).max(1.0);
-        // Content blur bleeds ~3·radius past the box, so its composite quad covers a dilated rect.
-        let composite_bounds = if clip_rounded {
-            bounds
-        } else {
-            bounds.dilate(ScaledPixels(3.0 * blur_radius))
-        };
         let half_w = (self.width / 2).max(1);
         let half_h = (self.height / 2).max(1);
         let half_vp = D3D11_VIEWPORT {
@@ -1217,6 +1222,122 @@ impl DirectXRenderer {
             )
         };
 
+        if let Some(post) = post_process {
+            let has_bloom = post.bloom > 0.001;
+            if has_bloom {
+                let bloom_sigma = (post.bloom_radius.0 * 0.5).max(1.0);
+                let ideal_taps = (3.0 * bloom_sigma).ceil();
+                let tap_count = ideal_taps.clamp(1.0, 32.0);
+                let tap_step = (ideal_taps / tap_count).max(1.0);
+                self.dx_blur_pass(
+                    &self.pipelines.blur_downsample_vertex,
+                    &self.pipelines.blur_downsample_fragment,
+                    &self.pipelines.blur_blend_replace,
+                    &ping_rtv,
+                    source_srv,
+                    None,
+                    BlurParams {
+                        downsample: 1.0,
+                        bloom_intensity: post.bloom,
+                        ..Default::default()
+                    },
+                    &half_vp,
+                    D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST,
+                    3,
+                    true,
+                )?;
+                self.dx_blur_pass(
+                    &self.pipelines.blur_vertex,
+                    &self.pipelines.blur_fragment,
+                    &self.pipelines.blur_blend_replace,
+                    &pong_rtv,
+                    &ping_srv,
+                    None,
+                    BlurParams {
+                        direction: [1.0 / half_w as f32, 0.0],
+                        sigma: bloom_sigma,
+                        tap_count,
+                        tap_step,
+                        ..Default::default()
+                    },
+                    &half_vp,
+                    D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST,
+                    3,
+                    true,
+                )?;
+                self.dx_blur_pass(
+                    &self.pipelines.blur_vertex,
+                    &self.pipelines.blur_fragment,
+                    &self.pipelines.blur_blend_replace,
+                    &ping_rtv,
+                    &pong_srv,
+                    None,
+                    BlurParams {
+                        direction: [0.0, 1.0 / half_h as f32],
+                        sigma: bloom_sigma,
+                        tap_count,
+                        tap_step,
+                        ..Default::default()
+                    },
+                    &half_vp,
+                    D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST,
+                    3,
+                    true,
+                )?;
+            }
+            self.dx_blur_pass(
+                &self.pipelines.blur_composite_vertex,
+                &self.pipelines.blur_composite_fragment,
+                &self.pipelines.blur_blend_composite,
+                target_rtv,
+                source_srv,
+                Some(if has_bloom { &ping_srv } else { source_srv }),
+                BlurParams {
+                    bounds,
+                    content_mask,
+                    corner_radii,
+                    opacity,
+                    clip_rounded: 1.0,
+                    corner_shape,
+                    downsample: 0.0,
+                    bloom_intensity: post.bloom,
+                    crt_curvature: post.crt_curvature,
+                    crt_scanlines: post.crt_scanlines,
+                    crt_collapse: post.crt_collapse,
+                    ..Default::default()
+                },
+                &full_vp,
+                D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP,
+                4,
+                false,
+            )?;
+            unsafe {
+                self.devices
+                    .as_ref()
+                    .context("devices missing")?
+                    .device_context
+                    .VSSetConstantBuffers(
+                        1,
+                        Some(slice::from_ref(&self.globals.batch_params_buffer)),
+                    );
+            }
+            return Ok(());
+        }
+
+        // Sigma is halved because the blur runs at half resolution.
+        let sigma = (blur_radius * 0.5).max(0.0);
+        // Span ±3σ. If that needs more than 32 taps, spread the taps apart (tap_step > 1) rather
+        // than truncating the kernel — keeps very large radii from clipping. Matches wgpu.
+        let ideal_taps = (3.0 * sigma).ceil();
+        let tap_count = ideal_taps.clamp(1.0, 32.0);
+        let tap_step = (ideal_taps / tap_count).max(1.0);
+        // Content blur bleeds ~3·radius past the box, so its composite quad covers a dilated rect.
+        let composite_bounds = if clip_rounded {
+            bounds
+        } else {
+            bounds.dilate(ScaledPixels(3.0 * blur_radius))
+        };
+
         // A clip-only layer samples the original texture without downsampling or blur.
         if sigma > 0.0 {
             // Downsample source -> ping, then separable gaussian ping -> pong -> ping.
@@ -1226,6 +1347,7 @@ impl DirectXRenderer {
                 &self.pipelines.blur_blend_replace,
                 &ping_rtv,
                 source_srv,
+                None,
                 BlurParams {
                     downsample: 1.0,
                     ..Default::default()
@@ -1241,6 +1363,7 @@ impl DirectXRenderer {
                 &self.pipelines.blur_blend_replace,
                 &pong_rtv,
                 &ping_srv,
+                None,
                 BlurParams {
                     direction: [1.0 / half_w as f32, 0.0],
                     sigma,
@@ -1259,6 +1382,7 @@ impl DirectXRenderer {
                 &self.pipelines.blur_blend_replace,
                 &ping_rtv,
                 &pong_srv,
+                None,
                 BlurParams {
                     direction: [0.0, 1.0 / half_h as f32],
                     sigma,
@@ -1279,6 +1403,7 @@ impl DirectXRenderer {
             &self.pipelines.blur_blend_composite,
             target_rtv,
             if sigma > 0.0 { &ping_srv } else { source_srv },
+            None,
             BlurParams {
                 bounds: composite_bounds,
                 content_mask,
@@ -1323,6 +1448,7 @@ impl DirectXRenderer {
             &self.pipelines.blur_blend_replace,
             target_rtv,
             source_srv,
+            None,
             BlurParams::default(),
             &full_vp,
             D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST,
@@ -1669,6 +1795,10 @@ struct BlurParams {
     tap_step: f32,
     corner_shape: u32,
     corner_shape_padding: [u32; 3],
+    bloom_intensity: f32,
+    crt_curvature: f32,
+    crt_scanlines: f32,
+    crt_collapse: f32,
 }
 
 impl Default for BlurParams {
@@ -1686,6 +1816,10 @@ impl Default for BlurParams {
             corner_shape: 0,
             corner_shape_padding: [0; 3],
             tap_step: 0.0,
+            bloom_intensity: 0.0,
+            crt_curvature: 0.0,
+            crt_scanlines: 0.0,
+            crt_collapse: 0.0,
         }
     }
 }

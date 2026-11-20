@@ -412,6 +412,32 @@ impl BoxShadow {
     }
 }
 
+/// Micro-optical post-processing applied to an isolated content layer (e.g. a terminal canvas).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TerminalPostProcessFilter {
+    /// Subtle OLED bloom/halation intensity (`0.0` disables bloom).
+    pub bloom: f32,
+    /// Bloom blur radius in logical pixels.
+    pub bloom_radius: Pixels,
+    /// Subtle CRT barrel curvature (`0.0` disables curvature; typical `0.026`).
+    pub crt_curvature: f32,
+    /// CRT scanline, edge subpixel convergence shift, and vignette strength (`0.0` disables).
+    pub crt_scanlines: f32,
+    /// CRT power-off beam collapse progress (`0.0` = open, `1.0` = collapsed off).
+    pub crt_collapse: f32,
+}
+
+/// Device-pixel scaled form of [`TerminalPostProcessFilter`].
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[expect(missing_docs)]
+pub struct ScaledTerminalPostProcessFilter {
+    pub bloom: f32,
+    pub bloom_radius: ScaledPixels,
+    pub crt_curvature: f32,
+    pub crt_scanlines: f32,
+    pub crt_collapse: f32,
+}
+
 /// A graphical filter that can be applied either to an element's own content
 /// (via [`Styled::filter`], like CSS `filter`) or to the content rendered behind
 /// it (via [`Styled::backdrop_filter`], like CSS `backdrop-filter`).
@@ -419,6 +445,8 @@ impl BoxShadow {
 pub enum Filter {
     /// A gaussian blur with the given radius, in logical pixels. Maps to CSS `blur(<px>)`.
     Blur(Pixels),
+    /// Micro-optical terminal post-processing (OLED bloom/halation and CRT tube effects).
+    TerminalPostProcess(TerminalPostProcessFilter),
 }
 
 impl Filter {
@@ -431,6 +459,12 @@ impl Filter {
     pub fn is_identity(&self) -> bool {
         match self {
             Filter::Blur(radius) => *radius <= Pixels::ZERO,
+            Filter::TerminalPostProcess(post) => {
+                post.bloom <= 0.0
+                    && post.crt_curvature <= 0.0
+                    && post.crt_scanlines <= 0.0
+                    && post.crt_collapse <= 0.0
+            }
         }
     }
 
@@ -439,6 +473,15 @@ impl Filter {
     pub fn scale(&self, factor: f32) -> ScaledFilter {
         match self {
             Filter::Blur(radius) => ScaledFilter::Blur(radius.scale(factor)),
+            Filter::TerminalPostProcess(post) => {
+                ScaledFilter::TerminalPostProcess(ScaledTerminalPostProcessFilter {
+                    bloom: post.bloom,
+                    bloom_radius: post.bloom_radius.scale(factor),
+                    crt_curvature: post.crt_curvature,
+                    crt_scanlines: post.crt_scanlines,
+                    crt_collapse: post.crt_collapse,
+                })
+            }
         }
     }
 }
@@ -454,6 +497,8 @@ impl Filter {
 pub enum ScaledFilter {
     /// A gaussian blur with the given radius, in scaled (device) pixels.
     Blur(ScaledPixels),
+    /// Micro-optical terminal post-processing in device pixels.
+    TerminalPostProcess(ScaledTerminalPostProcessFilter),
 }
 
 /// How to handle whitespace in text

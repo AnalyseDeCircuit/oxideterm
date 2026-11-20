@@ -59,6 +59,16 @@ pub trait Styled: Sized {
         self
     }
 
+    /// Apply micro-optical post-processing (OLED bloom/halation and/or CRT effects)
+    /// to this element's isolated offscreen content layer.
+    fn terminal_post_process(mut self, filter: crate::TerminalPostProcessFilter) -> Self {
+        self.style()
+            .filter
+            .get_or_insert_with(Vec::new)
+            .push(Filter::TerminalPostProcess(filter));
+        self
+    }
+
     /// Clip the painted subtree to this element's rounded border box.
     /// Uses an isolated GPU layer; prefer per-primitive radii for simple images.
     fn clip_rounded(mut self) -> Self {

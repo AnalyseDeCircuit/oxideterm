@@ -8,8 +8,9 @@ use collections::FxHashMap;
 use gpui::{
     AtlasTextureId, AtlasTextureKind, AtlasTile, BackdropFilter, Background, BorderStyle, Bounds,
     Corners, DevicePixels, Edges, FilterBoundary, GpuSpecs, LinearColorStop, MonochromeSprite,
-    Path, PolychromeSprite, PrimitiveBatch, Quad, ScaledFilter, ScaledPixels, Scene, SceneHsla,
-    Shadow, Size, SubpixelSprite, TransformationMatrix, Underline, get_gamma_correction_ratios,
+    Path, PolychromeSprite, PrimitiveBatch, Quad, ScaledFilter, ScaledPixels,
+    ScaledTerminalPostProcessFilter, Scene, SceneHsla, Shadow, Size, SubpixelSprite,
+    TransformationMatrix, Underline, get_gamma_correction_ratios,
 };
 use log::warn;
 
@@ -22,6 +23,16 @@ use log::warn;
 fn max_blur_radius(filters: &[ScaledFilter]) -> f32 {
     filters.iter().fold(0.0, |acc, filter| match filter {
         ScaledFilter::Blur(radius) => acc.max(radius.0),
+        ScaledFilter::TerminalPostProcess(_) => acc,
+    })
+}
+
+fn terminal_post_process_filter(
+    filters: &[ScaledFilter],
+) -> Option<ScaledTerminalPostProcessFilter> {
+    filters.iter().rev().find_map(|filter| match filter {
+        ScaledFilter::TerminalPostProcess(post) => Some(*post),
+        ScaledFilter::Blur(_) => None,
     })
 }
 #[cfg(not(target_family = "wasm"))]
@@ -142,6 +153,10 @@ struct BlurParams {
     corner_shape_padding_0: u32,
     corner_shape_padding_1: u32,
     corner_shape_padding_2: u32,
+    bloom_intensity: f32,
+    crt_curvature: f32,
+    crt_scanlines: f32,
+    crt_collapse: f32,
 }
 
 #[repr(C)]
@@ -1261,6 +1276,16 @@ impl WgpuRendererCore {
                     binding: 2,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
                     count: None,
                 },
             ],
@@ -2460,6 +2485,7 @@ impl WgpuRendererCore {
                                         boundary.corner_radii.bottom_left.0,
                                     ],
                                     max_blur_radius(&boundary.filters),
+                                    terminal_post_process_filter(&boundary.filters),
                                     boundary.opacity,
                                     boundary.clip_rounded,
                                     boundary.corner_shape,
@@ -2617,6 +2643,7 @@ impl WgpuRendererCore {
         &self,
         params: BlurParams,
         source: &wgpu::TextureView,
+        secondary_source: Option<&wgpu::TextureView>,
     ) -> wgpu::BindGroup {
         let resources = self.resources();
         let slot = self.blur_params_slot.get() % BLUR_PARAMS_SLOTS;
@@ -2649,6 +2676,12 @@ impl WgpuRendererCore {
                         binding: 2,
                         resource: wgpu::BindingResource::Sampler(&resources.surface_sampler),
                     },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::TextureView(
+                            secondary_source.unwrap_or(source),
+                        ),
+                    },
                 ],
             })
     }
@@ -2663,7 +2696,7 @@ impl WgpuRendererCore {
         params: BlurParams,
         scissor: [u32; 4],
     ) {
-        let bind_group = self.make_blur_bind_group(params, source);
+        let bind_group = self.make_blur_bind_group(params, source, None);
         let resources = self.resources();
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some(label),
@@ -2695,11 +2728,140 @@ impl WgpuRendererCore {
         content_mask: Bounds<ScaledPixels>,
         corner_radii: [f32; 4],
         blur_radius: f32,
+        post_process: Option<ScaledTerminalPostProcessFilter>,
         opacity: f32,
         // Backdrop clips to the rounded rect; content (`filter`) bleeds past its bounds.
         clip_rounded: bool,
         corner_shape: u32,
     ) {
+        let full_w = self.frame_size.width.0 as u32;
+        let full_h = self.frame_size.height.0 as u32;
+        let blur_width = (full_w / 2).max(1) as f32;
+        let blur_height = (full_h / 2).max(1) as f32;
+        let hw = (full_w / 2).max(1);
+        let hh = (full_h / 2).max(1);
+
+        // Owned handles so the passes below don't borrow `self`.
+        let (ping, pong) = {
+            let resources = self.resources();
+            match (
+                resources.blur_ping_view.as_ref(),
+                resources.blur_pong_view.as_ref(),
+            ) {
+                (Some(ping), Some(pong)) => (ping.clone(), pong.clone()),
+                _ => return,
+            }
+        };
+
+        if let Some(post) = post_process {
+            let has_bloom = post.bloom > 0.001;
+            if has_bloom {
+                let bloom_radius = post.bloom_radius.0.max(2.0);
+                let bloom_sigma = (bloom_radius * 0.5).max(1.0);
+                let ideal_taps = (3.0 * bloom_sigma).ceil();
+                let tap_count = ideal_taps.clamp(1.0, 32.0);
+                let tap_step = (ideal_taps / tap_count).max(1.0);
+                let dilation = 3.0 * bloom_radius;
+                let x0 = (((bounds.origin.x.0 - dilation) * 0.5).floor().max(0.0) as u32).min(hw);
+                let y0 = (((bounds.origin.y.0 - dilation) * 0.5).floor().max(0.0) as u32).min(hh);
+                let x1 = ((((bounds.origin.x.0 + bounds.size.width.0 + dilation) * 0.5)
+                    .ceil()
+                    .max(0.0) as u32)
+                    .min(hw))
+                .max(x0);
+                let y1 = ((((bounds.origin.y.0 + bounds.size.height.0 + dilation) * 0.5)
+                    .ceil()
+                    .max(0.0) as u32)
+                    .min(hh))
+                .max(y0);
+                let scissor = [x0, y0, x1 - x0, y1 - y0];
+                if scissor[2] > 0 && scissor[3] > 0 {
+                    self.run_blur_pass(
+                        encoder,
+                        "terminal_bloom_downsample",
+                        &self.resources().pipelines.blur_downsample,
+                        &ping,
+                        source,
+                        BlurParams {
+                            downsample: 1.0,
+                            bloom_intensity: post.bloom,
+                            ..Default::default()
+                        },
+                        scissor,
+                    );
+                    self.run_blur_pass(
+                        encoder,
+                        "terminal_bloom_horizontal",
+                        &self.resources().pipelines.blur,
+                        &pong,
+                        &ping,
+                        BlurParams {
+                            direction: [1.0 / blur_width, 0.0],
+                            sigma: bloom_sigma,
+                            tap_count,
+                            tap_step,
+                            ..Default::default()
+                        },
+                        scissor,
+                    );
+                    self.run_blur_pass(
+                        encoder,
+                        "terminal_bloom_vertical",
+                        &self.resources().pipelines.blur,
+                        &ping,
+                        &pong,
+                        BlurParams {
+                            direction: [0.0, 1.0 / blur_height],
+                            sigma: bloom_sigma,
+                            tap_count,
+                            tap_step,
+                            ..Default::default()
+                        },
+                        scissor,
+                    );
+                }
+            }
+            let params = BlurParams {
+                bounds: bounds.into(),
+                content_mask: content_mask.into(),
+                corner_radii,
+                opacity,
+                clip_rounded: 1.0,
+                corner_shape,
+                downsample: 0.0,
+                bloom_intensity: post.bloom,
+                crt_curvature: post.crt_curvature,
+                crt_scanlines: post.crt_scanlines,
+                crt_collapse: post.crt_collapse,
+                ..Default::default()
+            };
+            let bind_group = self.make_blur_bind_group(
+                params,
+                source,
+                Some(if has_bloom { &ping } else { source }),
+            );
+            let resources = self.resources();
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("terminal_post_composite"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: target,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                ..Default::default()
+            });
+            pass.set_pipeline(&resources.pipelines.blur_composite);
+            pass.set_bind_group(0, &resources.globals_bind_group, &[]);
+            pass.set_bind_group(1, &bind_group, &[]);
+            pass.draw(0..4, 0..1);
+            return;
+        }
+
         // Sigma is halved because the blur runs at half resolution.
         let sigma = (blur_radius * 0.5).max(0.0);
         // Span ±3σ. If that needs more than 32 taps, spread the taps apart (tap_step > 1) rather
@@ -2707,16 +2869,10 @@ impl WgpuRendererCore {
         let ideal_taps = (3.0 * sigma).ceil();
         let tap_count = ideal_taps.clamp(1.0, 32.0);
         let tap_step = (ideal_taps / tap_count).max(1.0);
-        let full_w = self.frame_size.width.0 as u32;
-        let full_h = self.frame_size.height.0 as u32;
-        let blur_width = (full_w / 2).max(1) as f32;
-        let blur_height = (full_h / 2).max(1) as f32;
 
         // Limit the half-res passes to the element bounds dilated by the kernel radius (3·sigma,
         // full-res) — outside that the composite never samples, so there's no reason to blur it.
         let dilation = 3.0 * blur_radius;
-        let hw = (full_w / 2).max(1);
-        let hh = (full_h / 2).max(1);
         let x0 = (((bounds.origin.x.0 - dilation) * 0.5).floor().max(0.0) as u32).min(hw);
         let y0 = (((bounds.origin.y.0 - dilation) * 0.5).floor().max(0.0) as u32).min(hh);
         let x1 = ((((bounds.origin.x.0 + bounds.size.width.0 + dilation) * 0.5)
@@ -2733,18 +2889,6 @@ impl WgpuRendererCore {
         if sigma > 0.0 && (scissor[2] == 0 || scissor[3] == 0) {
             return;
         }
-
-        // Owned handles so the passes below don't borrow `self`.
-        let (ping, pong) = {
-            let resources = self.resources();
-            match (
-                resources.blur_ping_view.as_ref(),
-                resources.blur_pong_view.as_ref(),
-            ) {
-                (Some(ping), Some(pong)) => (ping.clone(), pong.clone()),
-                _ => return,
-            }
-        };
 
         // Clip-only layers preserve full-resolution pixels.
         if sigma > 0.0 {
@@ -2812,7 +2956,7 @@ impl WgpuRendererCore {
             ..Default::default()
         };
         let bind_group =
-            self.make_blur_bind_group(params, if sigma > 0.0 { &ping } else { source });
+            self.make_blur_bind_group(params, if sigma > 0.0 { &ping } else { source }, None);
         let resources = self.resources();
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("blur_composite"),
@@ -2853,6 +2997,7 @@ impl WgpuRendererCore {
                 filter.corner_radii.bottom_left.0,
             ],
             max_blur_radius(&filter.filters),
+            None,
             filter.opacity,
             true,
             filter.corner_shape,
@@ -2865,7 +3010,7 @@ impl WgpuRendererCore {
         source: &wgpu::TextureView,
         frame_view: &wgpu::TextureView,
     ) {
-        let bind_group = self.make_blur_bind_group(BlurParams::default(), source);
+        let bind_group = self.make_blur_bind_group(BlurParams::default(), source, None);
         let resources = self.resources();
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("scene_blit"),

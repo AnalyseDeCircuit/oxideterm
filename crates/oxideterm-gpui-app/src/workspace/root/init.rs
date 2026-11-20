@@ -1461,6 +1461,8 @@ impl WorkspaceApp {
             cursor_blink: terminal.cursor_blink,
             scrollback_lines: terminal.scrollback.clamp(500, 20_000) as usize,
             smooth_scroll: terminal.smooth_scroll,
+            optical_bloom: terminal.optical_bloom,
+            crt_effect: terminal.crt_effect,
             paste_protection: terminal.paste_protection,
             smart_copy: terminal.smart_copy,
             osc52_clipboard: terminal.osc52_clipboard,

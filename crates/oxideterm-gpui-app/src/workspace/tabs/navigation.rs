@@ -1025,6 +1025,42 @@ impl WorkspaceApp {
         {
             return;
         }
+        if self.settings_store.settings().terminal.crt_effect
+            && let Some(tab) = self.tabs(cx).get(index)
+            && Some(tab.id) == self.active_tab_id(cx)
+            && let Some(root_pane) = tab.root_pane.as_ref()
+        {
+            let tab_id = tab.id;
+            let mut pane_ids = Vec::new();
+            root_pane.collect_pane_ids(&mut pane_ids);
+            let panes = {
+                let tab_host = self.tab_host.read(cx);
+                pane_ids
+                    .into_iter()
+                    .filter_map(|pane_id| tab_host.panes().get(&pane_id).cloned())
+                    .collect::<Vec<_>>()
+            };
+            let mut started_any = false;
+            for pane in panes {
+                if pane.update(cx, |pane, cx| pane.start_crt_power_off(cx)) {
+                    started_any = true;
+                }
+            }
+            if started_any {
+                // Let the 260ms CRT beam-collapse animation play before detaching the tab.
+                // A second close action skips this branch because collapse is already running.
+                cx.spawn_in(window, async move |workspace, cx| {
+                    cx.background_executor()
+                        .timer(std::time::Duration::from_millis(260))
+                        .await;
+                    let _ = workspace.update_in(cx, |this, window, cx| {
+                        this.close_tab_by_id(tab_id, window, cx);
+                    });
+                })
+                .detach();
+                return;
+            }
+        }
         let exiting_visual = self.tab_exit_visual(index, window, cx);
         let Some(transition) = self
             .tab_host

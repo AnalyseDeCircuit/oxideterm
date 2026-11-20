@@ -633,6 +633,7 @@ pub struct TerminalPane {
     last_session_log_path: Option<std::path::PathBuf>,
     bell_flash: bool,
     terminal_exited: bool,
+    crt_power_off_started_at: Option<Instant>,
     ssh_reconnect_state: SshReconnectState,
     scroll_input_remainder_px: Pixels,
     smooth_scroll_offset_px: Pixels,
@@ -1448,6 +1449,7 @@ impl TerminalPane {
             last_session_log_path: None,
             bell_flash: false,
             terminal_exited: false,
+            crt_power_off_started_at: None,
             ssh_reconnect_state: SshReconnectState::Idle,
             scroll_input_remainder_px: px(0.0),
             smooth_scroll_offset_px: px(0.0),
@@ -2289,6 +2291,9 @@ impl TerminalPane {
         if !next_settings.smooth_scroll {
             self.clear_smooth_scroll_remainder();
         }
+        if !preferences.crt_effect {
+            self.crt_power_off_started_at = None;
+        }
         self.settings = next_settings;
         self.apply_theme_transition(preferences.theme.clone(), cx);
         self.command_history = preferences.command_history.clone();
@@ -2312,6 +2317,17 @@ impl TerminalPane {
         self.reset_cursor_blink();
         self.wake_terminal_scheduler();
         cx.notify();
+    }
+
+    /// Starts the 260ms retro CRT beam-collapse animation before closing this pane.
+    /// Returns `true` when freshly started, or `false` if CRT is off or already collapsing.
+    pub fn start_crt_power_off(&mut self, cx: &mut Context<Self>) -> bool {
+        if !self.preferences.crt_effect || self.crt_power_off_started_at.is_some() {
+            return false;
+        }
+        self.crt_power_off_started_at = Some(Instant::now());
+        cx.notify();
+        true
     }
 
     pub fn set_appearance(

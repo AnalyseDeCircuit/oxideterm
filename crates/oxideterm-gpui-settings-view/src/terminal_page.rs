@@ -198,6 +198,22 @@ impl SettingsControls<'_> {
                         cx,
                     ),
                     self.card_separator(),
+                    self.bool_row(
+                        "settings_view.terminal.optical_bloom",
+                        "settings_view.terminal.optical_bloom_hint",
+                        settings.terminal.optical_bloom,
+                        set_terminal_optical_bloom,
+                        cx,
+                    ),
+                    self.card_separator(),
+                    self.bool_row(
+                        "settings_view.terminal.crt_effect",
+                        "settings_view.terminal.crt_effect_hint",
+                        settings.terminal.crt_effect,
+                        set_terminal_crt_effect,
+                        cx,
+                    ),
+                    self.card_separator(),
                     self.select_setting_row(
                         "settings_view.terminal.encoding",
                         "settings_view.terminal.encoding_hint",

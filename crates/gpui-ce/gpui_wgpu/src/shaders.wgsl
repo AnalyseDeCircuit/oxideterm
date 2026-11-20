@@ -1493,11 +1493,16 @@ struct BlurParams {
     corner_shape_padding_0: u32,
     corner_shape_padding_1: u32,
     corner_shape_padding_2: u32,
+    bloom_intensity: f32,
+    crt_curvature: f32,
+    crt_scanlines: f32,
+    crt_collapse: f32,
 }
 
 @group(1) @binding(0) var<uniform> blur_locals: BlurParams;
 @group(1) @binding(1) var t_blur: texture_2d<f32>;
 @group(1) @binding(2) var s_blur: sampler;
+@group(1) @binding(3) var t_bloom: texture_2d<f32>;
 
 struct BlurVarying {
     @builtin(position) position: vec4<f32>,
@@ -1526,7 +1531,17 @@ fn fs_blur_downsample(input: BlurVarying) -> @location(0) vec4<f32> {
         // otherwise the implicit `floor(W/2)` grid stretches and the halo wobbles by ~1px on resize.
         let dst = floor(input.position.xy);
         let src_uv = (dst * 2.0 + 1.0) / globals.viewport_size;
-        return textureSampleLevel(t_blur, s_blur, src_uv, 0.0);
+        let sample = textureSampleLevel(t_blur, s_blur, src_uv, 0.0);
+        if (blur_locals.bloom_intensity > 0.001) {
+            let luma = dot(sample.rgb, vec3<f32>(0.2126, 0.7152, 0.0722));
+            let cmax = max(sample.r, max(sample.g, sample.b));
+            let cmin = min(sample.r, min(sample.g, sample.b));
+            let chroma = cmax - cmin;
+            let energy = max(luma * 0.88 + chroma * 0.85, chroma * 1.15);
+            let weight = smoothstep(0.30, 0.82, energy);
+            return vec4<f32>(sample.rgb * weight, sample.a * weight);
+        }
+        return sample;
     }
     // 1:1 copy at matching resolution (used to blit the offscreen scene into the swapchain).
     return textureSampleLevel(t_blur, s_blur, input.uv, 0.0);
@@ -1565,15 +1580,6 @@ fn fs_blur_composite(input: BlurVarying) -> @location(0) vec4<f32> {
         return vec4<f32>(0.0);
     }
 
-    // Sample the half-res blur by screen position, using the SAME fixed 2:1 grid the snapped
-    // downsample wrote (anchored at the origin, independent of viewport parity). `2*floor(W/2)` is
-    // the source span the half-res texture covers; dividing by it maps screen pixel p to half-res
-    // texel p/2 at every window size, so the composite stays put rather than wobbling on resize.
-    // Clip-only groups retain full resolution; blurred groups use the fixed 2:1 grid.
-    let blur_span = select(globals.viewport_size, 2.0 * floor(globals.viewport_size * 0.5), blur_locals.downsample > 0.5);
-    let uv = input.position.xy / blur_span;
-    let blurred = textureSampleLevel(t_blur, s_blur, uv, 0.0);
-
     let corner_radii = Corners(
         blur_locals.corner_radii.x,
         blur_locals.corner_radii.y,
@@ -1585,6 +1591,89 @@ fn fs_blur_composite(input: BlurVarying) -> @location(0) vec4<f32> {
     // isn't sharply truncated at the edge; its shape comes from the blurred group's own alpha.
     let distance = quad_sdf(input.position.xy, blur_locals.bounds, corner_radii, blur_locals.corner_shape);
     let coverage = select(1.0, saturate(0.5 - distance), blur_locals.clip_rounded > 0.5);
+
+    if (blur_locals.bloom_intensity > 0.001 || blur_locals.crt_curvature > 0.001 ||
+        blur_locals.crt_scanlines > 0.001 || blur_locals.crt_collapse > 0.001) {
+        let rect_size = max(vec2<f32>(blur_locals.bounds.size.width, blur_locals.bounds.size.height), vec2<f32>(1.0));
+        let rect_origin = vec2<f32>(blur_locals.bounds.origin.x, blur_locals.bounds.origin.y);
+        var local_uv = (input.position.xy - rect_origin) / rect_size;
+        let full_size = globals.viewport_size;
+        let bloom_span = 2.0 * floor(globals.viewport_size * 0.5);
+
+        var collapse_mask = 1.0;
+        var collapse_flash = 0.0;
+        if (blur_locals.crt_collapse > 0.001) {
+            let t = saturate(blur_locals.crt_collapse);
+            let t1 = saturate(t / 0.52);
+            let t2 = saturate((t - 0.52) / 0.34);
+            let t3 = saturate((t - 0.86) / 0.14);
+            let ease1 = t1 * t1 * (3.0 - 2.0 * t1);
+            let ease2 = t2 * t2;
+            let scale_y = mix(1.0, 0.008, ease1);
+            let scale_x = mix(1.0, 0.008, ease2);
+            let c_uv = (local_uv - vec2<f32>(0.5)) / vec2<f32>(scale_x, scale_y) + vec2<f32>(0.5);
+            let edge_d = abs(c_uv - vec2<f32>(0.5));
+            let inside_beam =
+                (1.0 - smoothstep(0.48, 0.54, edge_d.x)) * (1.0 - smoothstep(0.48, 0.54, edge_d.y));
+            let beam_glow = exp(-abs(local_uv.y - 0.5) / max(scale_y * 0.9, 0.004)) *
+                            exp(-abs(local_uv.x - 0.5) / max(scale_x * 0.9, 0.004));
+            collapse_flash = (0.35 * ease1 + 0.95 * ease2) * (1.0 - t3) * beam_glow;
+            collapse_mask = inside_beam * (1.0 - t3);
+            local_uv = clamp(c_uv, vec2<f32>(0.0), vec2<f32>(1.0));
+        }
+
+        var centered = local_uv * 2.0 - vec2<f32>(1.0);
+        var bezel_mask = 1.0;
+        if (blur_locals.crt_curvature > 0.001) {
+            let r2 = dot(centered, centered);
+            let warped = centered * (1.0 + blur_locals.crt_curvature * r2);
+            local_uv = warped * 0.5 + vec2<f32>(0.5);
+            let oob = max(abs(warped) - vec2<f32>(1.0), vec2<f32>(0.0));
+            bezel_mask = 1.0 - smoothstep(0.0, 0.012, length(oob));
+            centered = warped;
+        }
+
+        let sample_px = rect_origin + clamp(local_uv, vec2<f32>(0.0), vec2<f32>(1.0)) * rect_size;
+        let sharp_uv = clamp(sample_px / full_size, vec2<f32>(0.0005), vec2<f32>(0.9995));
+        var sharp = textureSampleLevel(t_blur, s_blur, sharp_uv, 0.0);
+        if (blur_locals.crt_scanlines > 0.001) {
+            let edge_factor = 0.25 + 0.75 * saturate(length(centered));
+            let shift_x = (0.55 * blur_locals.crt_scanlines * edge_factor) / full_size.x;
+            let r = textureSampleLevel(t_blur, s_blur, clamp(sharp_uv + vec2<f32>(shift_x, 0.0), vec2<f32>(0.0005), vec2<f32>(0.9995)), 0.0).r;
+            let b = textureSampleLevel(t_blur, s_blur, clamp(sharp_uv - vec2<f32>(shift_x, 0.0), vec2<f32>(0.0005), vec2<f32>(0.9995)), 0.0).b;
+            sharp = vec4<f32>(r, sharp.g, b, sharp.a);
+        }
+
+        var rgb = sharp.rgb;
+        if (blur_locals.bloom_intensity > 0.001) {
+            let bloom_uv = clamp(sample_px / max(bloom_span, vec2<f32>(1.0)), vec2<f32>(0.001), vec2<f32>(0.999));
+            let glow = textureSampleLevel(t_bloom, s_blur, bloom_uv, 0.0).rgb;
+            let halation = glow * vec3<f32>(1.05, 1.0, 0.97);
+            rgb = saturate(rgb + halation * blur_locals.bloom_intensity * (vec3<f32>(1.0) - rgb * 0.42));
+        }
+
+        if (blur_locals.crt_scanlines > 0.001) {
+            let luma = dot(rgb, vec3<f32>(0.2126, 0.7152, 0.0722));
+            let scan = 0.5 - 0.5 * sin(sample_px.y * 1.5707963);
+            let scan_depth = blur_locals.crt_scanlines * 0.14 * (1.0 - saturate(luma) * 0.55);
+            let vignette = 1.0 - blur_locals.crt_scanlines * 0.18 * pow(saturate(length(centered) * 0.72), 2.2);
+            rgb = rgb * ((1.0 - scan_depth * scan) * vignette);
+        }
+
+        rgb = saturate(rgb * bezel_mask * collapse_mask + vec3<f32>(0.92, 0.97, 1.0) * collapse_flash);
+        let out_alpha = max(sharp.a, saturate(collapse_flash));
+        let c = coverage * blur_locals.opacity;
+        return vec4<f32>(rgb * c, out_alpha * c);
+    }
+
+    // Sample the half-res blur by screen position, using the SAME fixed 2:1 grid the snapped
+    // downsample wrote (anchored at the origin, independent of viewport parity). `2*floor(W/2)` is
+    // the source span the half-res texture covers; dividing by it maps screen pixel p to half-res
+    // texel p/2 at every window size, so the composite stays put rather than wobbling on resize.
+    // Clip-only groups retain full resolution; blurred groups use the fixed 2:1 grid.
+    let blur_span = select(globals.viewport_size, 2.0 * floor(globals.viewport_size * 0.5), blur_locals.downsample > 0.5);
+    let uv = input.position.xy / blur_span;
+    let blurred = textureSampleLevel(t_blur, s_blur, uv, 0.0);
 
     // The blurred sample is premultiplied (blurring against the transparent, rgb=0 surround scales
     // rgb with the fading alpha), so output premultiplied and let the pipeline blend premultiplied.

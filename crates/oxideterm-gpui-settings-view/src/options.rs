@@ -29,6 +29,14 @@ pub fn set_terminal_smooth_scroll(settings: &mut PersistedSettings, value: bool)
     settings.terminal.smooth_scroll = value;
 }
 
+pub fn set_terminal_optical_bloom(settings: &mut PersistedSettings, value: bool) {
+    settings.terminal.optical_bloom = value;
+}
+
+pub fn set_terminal_crt_effect(settings: &mut PersistedSettings, value: bool) {
+    settings.terminal.crt_effect = value;
+}
+
 pub fn set_paste_protection(settings: &mut PersistedSettings, value: bool) {
     settings.terminal.paste_protection = value;
 }

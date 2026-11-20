@@ -1430,7 +1430,13 @@ cbuffer BlurParams: register(b1) {
     float blur_tap_step;
     uint blur_corner_shape;
     uint3 blur_corner_shape_padding;
+    float blur_bloom_intensity;
+    float blur_crt_curvature;
+    float blur_crt_scanlines;
+    float blur_crt_collapse;
 };
+
+Texture2D t_blur_bloom : register(t1);
 
 struct BlurVertexOutput {
     float4 position: SV_Position;
@@ -1459,7 +1465,17 @@ float4 blur_downsample_fragment(BlurVertexOutput input): SV_Target {
         uint sw, sh;
         t_sprite.GetDimensions(sw, sh);
         float2 src_uv = (floor(input.position.xy) * 2.0 + 1.0) / float2(sw, sh);
-        return t_sprite.SampleLevel(s_sprite, src_uv, 0.0);
+        float4 sample = t_sprite.SampleLevel(s_sprite, src_uv, 0.0);
+        if (blur_bloom_intensity > 0.001) {
+            float luma = dot(sample.rgb, float3(0.2126, 0.7152, 0.0722));
+            float cmax = max(sample.r, max(sample.g, sample.b));
+            float cmin = min(sample.r, min(sample.g, sample.b));
+            float chroma = cmax - cmin;
+            float energy = max(luma * 0.88 + chroma * 0.85, chroma * 1.15);
+            float weight = smoothstep(0.30, 0.82, energy);
+            return float4(sample.rgb * weight, sample.a * weight);
+        }
+        return sample;
     }
     // 1:1 copy at matching resolution (used to blit the offscreen scene into the swapchain).
     return t_sprite.SampleLevel(s_sprite, input.uv, 0.0);
@@ -1501,15 +1517,6 @@ BlurCompositeVertexOutput blur_composite_vertex(uint vertex_id: SV_VertexID) {
 }
 
 float4 blur_composite_fragment(BlurCompositeFragmentInput input): SV_Target {
-    // Sample the half-res blur by screen position, on the SAME fixed 2:1 grid the snapped downsample
-    // wrote (anchored at the origin, independent of viewport parity): 2 * the half-res texture size
-    // maps screen pixel p to half-res texel p/2 at every window size, so it doesn't wobble on resize.
-    uint hw, hh;
-    t_sprite.GetDimensions(hw, hh);
-    // Clip-only groups retain full resolution; blurred groups use the fixed 2:1 grid.
-    float source_scale = blur_downsample > 0.5 ? 2.0 : 1.0;
-    float2 uv = input.position.xy / (source_scale * float2(hw, hh));
-    float4 blurred = t_sprite.SampleLevel(s_sprite, uv, 0.0);
     Corners radii;
     radii.top_left = blur_corner_radii.x;
     radii.top_right = blur_corner_radii.y;
@@ -1519,6 +1526,93 @@ float4 blur_composite_fragment(BlurCompositeFragmentInput input): SV_Target {
     // Backdrop clips to the rounded rect (the panel has a defined shape); content blur bleeds past
     // its bounds like CSS `filter: blur`, so its shape comes from the blurred group's own alpha.
     float coverage = blur_clip_rounded > 0.5 ? saturate(0.5 - distance) : 1.0;
+
+    if (blur_bloom_intensity > 0.001 || blur_crt_curvature > 0.001 ||
+        blur_crt_scanlines > 0.001 || blur_crt_collapse > 0.001) {
+        uint fw, fh, bw, bh;
+        t_sprite.GetDimensions(fw, fh);
+        t_blur_bloom.GetDimensions(bw, bh);
+        float2 rect_size = max(float2(blur_bounds.size.width, blur_bounds.size.height), float2(1.0, 1.0));
+        float2 rect_origin = float2(blur_bounds.origin.x, blur_bounds.origin.y);
+        float2 local_uv = (input.position.xy - rect_origin) / rect_size;
+        float2 full_size = float2(fw, fh);
+        float2 bloom_half_size = float2(bw, bh);
+
+        float collapse_mask = 1.0;
+        float collapse_flash = 0.0;
+        if (blur_crt_collapse > 0.001) {
+            float t = saturate(blur_crt_collapse);
+            float t1 = saturate(t / 0.52);
+            float t2 = saturate((t - 0.52) / 0.34);
+            float t3 = saturate((t - 0.86) / 0.14);
+            float ease1 = t1 * t1 * (3.0 - 2.0 * t1);
+            float ease2 = t2 * t2;
+            float scale_y = lerp(1.0, 0.008, ease1);
+            float scale_x = lerp(1.0, 0.008, ease2);
+            float2 c_uv = (local_uv - 0.5) / float2(scale_x, scale_y) + 0.5;
+            float2 edge_d = abs(c_uv - 0.5);
+            float inside_beam =
+                (1.0 - smoothstep(0.48, 0.54, edge_d.x)) * (1.0 - smoothstep(0.48, 0.54, edge_d.y));
+            float beam_glow = exp(-abs(local_uv.y - 0.5) / max(scale_y * 0.9, 0.004)) *
+                              exp(-abs(local_uv.x - 0.5) / max(scale_x * 0.9, 0.004));
+            collapse_flash = (0.35 * ease1 + 0.95 * ease2) * (1.0 - t3) * beam_glow;
+            collapse_mask = inside_beam * (1.0 - t3);
+            local_uv = clamp(c_uv, 0.0, 1.0);
+        }
+
+        float2 centered = local_uv * 2.0 - 1.0;
+        float bezel_mask = 1.0;
+        if (blur_crt_curvature > 0.001) {
+            float r2 = dot(centered, centered);
+            float2 warped = centered * (1.0 + blur_crt_curvature * r2);
+            local_uv = warped * 0.5 + 0.5;
+            float2 oob = max(abs(warped) - 1.0, float2(0.0, 0.0));
+            bezel_mask = 1.0 - smoothstep(0.0, 0.012, length(oob));
+            centered = warped;
+        }
+
+        float2 sample_px = rect_origin + clamp(local_uv, 0.0, 1.0) * rect_size;
+        float2 sharp_uv = clamp(sample_px / full_size, float2(0.0005, 0.0005), float2(0.9995, 0.9995));
+        float4 sharp = t_sprite.SampleLevel(s_sprite, sharp_uv, 0.0);
+        if (blur_crt_scanlines > 0.001) {
+            float edge_factor = 0.25 + 0.75 * saturate(length(centered));
+            float shift_x = (0.55 * blur_crt_scanlines * edge_factor) / full_size.x;
+            float r = t_sprite.SampleLevel(s_sprite, clamp(sharp_uv + float2(shift_x, 0.0), float2(0.0005, 0.0005), float2(0.9995, 0.9995)), 0.0).r;
+            float b = t_sprite.SampleLevel(s_sprite, clamp(sharp_uv - float2(shift_x, 0.0), float2(0.0005, 0.0005), float2(0.9995, 0.9995)), 0.0).b;
+            sharp = float4(r, sharp.g, b, sharp.a);
+        }
+
+        float3 rgb = sharp.rgb;
+        if (blur_bloom_intensity > 0.001) {
+            float2 bloom_uv = clamp(sample_px / (2.0 * bloom_half_size), float2(0.001, 0.001), float2(0.999, 0.999));
+            float3 glow = t_blur_bloom.SampleLevel(s_sprite, bloom_uv, 0.0).rgb;
+            float3 halation = glow * float3(1.05, 1.0, 0.97);
+            rgb = saturate(rgb + halation * blur_bloom_intensity * (1.0 - rgb * 0.42));
+        }
+
+        if (blur_crt_scanlines > 0.001) {
+            float luma = dot(rgb, float3(0.2126, 0.7152, 0.0722));
+            float scan = 0.5 - 0.5 * sin(sample_px.y * 1.5707963);
+            float scan_depth = blur_crt_scanlines * 0.14 * (1.0 - saturate(luma) * 0.55);
+            float vignette = 1.0 - blur_crt_scanlines * 0.18 * pow(saturate(length(centered) * 0.72), 2.2);
+            rgb *= (1.0 - scan_depth * scan) * vignette;
+        }
+
+        rgb = saturate(rgb * bezel_mask * collapse_mask + float3(0.92, 0.97, 1.0) * collapse_flash);
+        float out_alpha = max(sharp.a, saturate(collapse_flash));
+        float a = coverage * blur_opacity;
+        return float4(rgb * a, out_alpha * a);
+    }
+
+    // Sample the half-res blur by screen position, on the SAME fixed 2:1 grid the snapped downsample
+    // wrote (anchored at the origin, independent of viewport parity): 2 * the half-res texture size
+    // maps screen pixel p to half-res texel p/2 at every window size, so it doesn't wobble on resize.
+    uint hw, hh;
+    t_sprite.GetDimensions(hw, hh);
+    // Clip-only groups retain full resolution; blurred groups use the fixed 2:1 grid.
+    float source_scale = blur_downsample > 0.5 ? 2.0 : 1.0;
+    float2 uv = input.position.xy / (source_scale * float2(hw, hh));
+    float4 blurred = t_sprite.SampleLevel(s_sprite, uv, 0.0);
     // The blurred sample is premultiplied (blurring against the transparent surround scales rgb
     // with the fading alpha), so output premultiplied and use a premultiplied-blend state. A
     // backdrop's scene is opaque (so this replaces); a content-filter group is transparent outside

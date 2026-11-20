@@ -542,10 +542,40 @@ impl Render for TerminalPane {
             cfg!(target_os = "macos") && self.session_kind() == TerminalSessionKind::LocalPty;
         let accepts_ssh_path_drop = self.session_kind() == TerminalSessionKind::SshPty;
         let accepts_external_path_drop = accepts_local_path_drop || accepts_ssh_path_drop;
+        let crt_collapse = if let Some(started) = self.crt_power_off_started_at {
+            let progress = (started.elapsed().as_secs_f32() / 0.26).clamp(0.0, 1.0);
+            if progress < 1.0 {
+                window.request_animation_frame();
+            }
+            progress
+        } else {
+            0.0
+        };
+        let optical_bloom = self.preferences.optical_bloom;
+        let crt_effect = self.preferences.crt_effect;
+        let post_process = (optical_bloom || crt_effect || crt_collapse > 0.0).then(|| {
+            gpui::TerminalPostProcessFilter {
+                bloom: if optical_bloom {
+                    0.42
+                } else if crt_effect {
+                    // Subtle phosphor bloom pairs naturally with CRT scanlines without blurring text.
+                    0.22
+                } else {
+                    0.0
+                },
+                bloom_radius: px(if optical_bloom { 9.0 } else { 6.5 }),
+                crt_curvature: if crt_effect { 0.026 } else { 0.0 },
+                crt_scanlines: if crt_effect { 1.0 } else { 0.0 },
+                crt_collapse,
+            }
+        });
         div()
             .id("terminal-pane")
             .size_full()
             .relative()
+            .when_some(post_process, |pane, filter| {
+                pane.terminal_post_process(filter)
+            })
             .cursor(if self.scrollbar_drag.is_some() {
                 gpui::CursorStyle::ClosedHand
             } else if self.scrollbar_hovered {

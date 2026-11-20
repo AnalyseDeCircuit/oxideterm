@@ -449,6 +449,12 @@ pub struct TerminalSettings {
     pub scrollback: i64,
     #[serde(default = "default_terminal_smooth_scroll")]
     pub smooth_scroll: bool,
+    /// Subtle OLED bloom and warm halation on bright and vivid terminal glyphs.
+    #[serde(default)]
+    pub optical_bloom: bool,
+    /// Retro CRT tube post-processing (curvature, scanlines, edge convergence, power-off collapse).
+    #[serde(default)]
+    pub crt_effect: bool,
     pub renderer: RendererType,
     pub terminal_encoding: TerminalEncoding,
     // Legacy terminal applications disagree on the bytes produced by these physical keys.
@@ -678,6 +684,8 @@ impl Default for TerminalSettings {
             cursor_blink: true,
             scrollback: DEFAULT_TERMINAL_SCROLLBACK,
             smooth_scroll: true,
+            optical_bloom: false,
+            crt_effect: false,
             renderer: RendererType::default(),
             terminal_encoding: TerminalEncoding::Utf8,
             backspace_sequence: TerminalBackspaceSequence::default(),
