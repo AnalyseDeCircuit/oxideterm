@@ -2919,6 +2919,7 @@ mod tests {
         settings.settings_mut().onboarding_completed = true;
         settings.settings_mut().general.language = oxideterm_settings::Language::En;
         settings.settings_mut().ssh_config.auto_load_hosts = false;
+        settings.settings_mut().onboarding_completed = true;
         settings.save().unwrap();
 
         let (shell, cx) = cx.add_window_view(|window, cx| {

@@ -11,6 +11,8 @@ pub(crate) enum HostToolsReliableDelivery {
     ProcessAction(HostProcessActionDelivery),
     DockerAction(HostDockerActionDelivery),
     DockerLogs(HostDockerLogsDelivery),
+    ContainerCapture(HostContainerCaptureDelivery),
+    ContainerAction(HostContainerConfirmDelivery),
     ServiceSnapshot(HostServiceSnapshotDelivery),
     ServiceAction(HostServiceActionDelivery),
     ServiceLogs(HostServiceLogsDelivery),
@@ -22,6 +24,12 @@ pub(crate) enum HostToolsReliableDelivery {
     MuxRead(MuxReadDelivery),
     LogSnapshot(HostLogSnapshotDelivery),
     PortSnapshot(HostPortSnapshotDelivery),
+    RedisSnapshot(HostRedisSnapshotDelivery),
+    RedisKeys(HostRedisKeysDelivery),
+    RedisValue(HostRedisValueDelivery),
+    RedisMutation(HostRedisMutationDelivery),
+    RedisSetValue(HostRedisSetValueDelivery),
+    RedisCreateKey(HostRedisCreateKeyDelivery),
     FilesystemSnapshot(HostFilesystemSnapshotDelivery),
     PackageSnapshot(HostPackageSnapshotDelivery),
     ScheduleSnapshot(HostScheduleSnapshotDelivery),
@@ -192,6 +200,12 @@ impl HostToolsEntity {
                 HostToolsReliableDelivery::DockerLogs(delivery) => {
                     self.finish_host_docker_logs(delivery, cx);
                 }
+                HostToolsReliableDelivery::ContainerCapture(delivery) => {
+                    self.finish_host_container_capture(delivery, cx);
+                }
+                HostToolsReliableDelivery::ContainerAction(delivery) => {
+                    self.finish_host_container_action(delivery, cx);
+                }
                 HostToolsReliableDelivery::ServiceSnapshot(delivery) => {
                     self.finish_host_service_snapshot(delivery, cx);
                 }
@@ -224,6 +238,24 @@ impl HostToolsEntity {
                 }
                 HostToolsReliableDelivery::PortSnapshot(delivery) => {
                     self.finish_host_ports_snapshot(delivery, cx);
+                }
+                HostToolsReliableDelivery::RedisSnapshot(delivery) => {
+                    self.finish_host_redis_snapshot(delivery, cx);
+                }
+                HostToolsReliableDelivery::RedisKeys(delivery) => {
+                    self.finish_host_redis_keys(delivery, cx);
+                }
+                HostToolsReliableDelivery::RedisValue(delivery) => {
+                    self.finish_host_redis_value(delivery, cx);
+                }
+                HostToolsReliableDelivery::RedisMutation(delivery) => {
+                    self.finish_host_redis_mutation(delivery, cx);
+                }
+                HostToolsReliableDelivery::RedisSetValue(delivery) => {
+                    self.finish_host_redis_set_value(delivery, cx);
+                }
+                HostToolsReliableDelivery::RedisCreateKey(delivery) => {
+                    self.finish_host_redis_create_key(delivery, cx);
                 }
                 HostToolsReliableDelivery::FilesystemSnapshot(delivery) => {
                     self.finish_host_filesystems_snapshot(delivery, cx);

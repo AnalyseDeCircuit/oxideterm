@@ -7672,6 +7672,7 @@ dependencies = [
 name = "oxideterm-gpui-host-tools"
 version = "2.4.0"
 dependencies = [
+ "base64 0.22.1",
  "chrono",
  "gpui-pre",
  "libc",

@@ -4258,8 +4258,15 @@ mod tests {
         std::fs::write(&license, "Packaged license").unwrap();
         let resolved =
             native_plugin_package_document_url(&root, &["LICENSE", "LICENSE.txt"]).unwrap();
+        // Windows canonicalizes to verbatim paths while `to_file_path` drops the
+        // prefix, so compare both sides through the same canonical form.
         assert_eq!(
-            url::Url::parse(&resolved).unwrap().to_file_path().unwrap(),
+            url::Url::parse(&resolved)
+                .unwrap()
+                .to_file_path()
+                .unwrap()
+                .canonicalize()
+                .unwrap(),
             license.canonicalize().unwrap()
         );
         assert_eq!(native_plugin_package_document_url(&root, &["NOTICE"]), None);

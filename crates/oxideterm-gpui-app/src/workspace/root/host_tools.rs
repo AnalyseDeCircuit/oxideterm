@@ -371,6 +371,47 @@ impl WorkspaceApp {
                     )
                 }
             }
+            HostToolsNotice::ContainerCopied { label } => (
+                self.i18n_replace("sidebar.host_container.toast.copied", &[("name", label)]),
+                TerminalNoticeVariant::Success,
+            ),
+            HostToolsNotice::ContainerActionFinished {
+                description,
+                succeeded,
+            } => {
+                if succeeded {
+                    (
+                        self.i18n_replace(
+                            "sidebar.host_container.toast.action_succeeded",
+                            &[("name", description)],
+                        ),
+                        TerminalNoticeVariant::Success,
+                    )
+                } else {
+                    (
+                        self.i18n.t("sidebar.host_container.toast.action_failed"),
+                        TerminalNoticeVariant::Error,
+                    )
+                }
+            }
+            HostToolsNotice::ContainerActionAlreadyRunning => (
+                self.i18n
+                    .t("sidebar.host_container.toast.action_already_running"),
+                TerminalNoticeVariant::Warning,
+            ),
+            HostToolsNotice::ContainerConnectionMissing => (
+                self.i18n
+                    .t("sidebar.host_container.toast.connection_missing"),
+                TerminalNoticeVariant::Error,
+            ),
+            HostToolsNotice::ContainerActionFailed => (
+                self.i18n.t("sidebar.host_container.toast.action_failed"),
+                TerminalNoticeVariant::Error,
+            ),
+            HostToolsNotice::ContainerCaptureFailed => (
+                self.i18n.t("sidebar.host_container.toast.capture_failed"),
+                TerminalNoticeVariant::Error,
+            ),
             HostToolsNotice::ServiceActionAlreadyRunning => (
                 self.i18n
                     .t("sidebar.host_services.toast.action_already_running"),
@@ -806,6 +847,73 @@ impl WorkspaceApp {
                     )
                 }
             }
+            HostToolsNotice::RedisKeyCopied { key } => (
+                self.i18n_replace("sidebar.host_redis.toast.key_copied", &[("key", key)]),
+                TerminalNoticeVariant::Success,
+            ),
+            HostToolsNotice::RedisValueCopied { key } => (
+                self.i18n_replace("sidebar.host_redis.toast.value_copied", &[("key", key)]),
+                TerminalNoticeVariant::Success,
+            ),
+            HostToolsNotice::RedisValueCopyFailed { key } => (
+                self.i18n_replace(
+                    "sidebar.host_redis.toast.value_copy_failed",
+                    &[("key", key)],
+                ),
+                TerminalNoticeVariant::Error,
+            ),
+            HostToolsNotice::RedisKeyDeleted { key } => (
+                self.i18n_replace("sidebar.host_redis.toast.key_deleted", &[("key", key)]),
+                TerminalNoticeVariant::Success,
+            ),
+            HostToolsNotice::RedisKeyRenamed { key } => (
+                self.i18n_replace("sidebar.host_redis.toast.key_renamed", &[("key", key)]),
+                TerminalNoticeVariant::Success,
+            ),
+            HostToolsNotice::RedisValueSet { key } => (
+                self.i18n_replace("sidebar.host_redis.toast.value_set", &[("key", key)]),
+                TerminalNoticeVariant::Success,
+            ),
+            HostToolsNotice::RedisTtlUpdated { key } => (
+                self.i18n_replace("sidebar.host_redis.toast.ttl_updated", &[("key", key)]),
+                TerminalNoticeVariant::Success,
+            ),
+            HostToolsNotice::RedisKeyCreated { key } => (
+                self.i18n_replace("sidebar.host_redis.toast.key_created", &[("key", key)]),
+                TerminalNoticeVariant::Success,
+            ),
+            HostToolsNotice::RedisPrefixDeleteIncomplete => (
+                self.i18n
+                    .t("sidebar.host_redis.toast.prefix_delete_incomplete"),
+                TerminalNoticeVariant::Warning,
+            ),
+            HostToolsNotice::RedisKeyActionFailed { message } => {
+                // The dialog fallback is already a complete sentence, so only a
+                // raw Redis error carries the detail the prefix expects. An
+                // unsubstituted template is never shown to the user either.
+                let fallback = self.i18n.t("sidebar.host_redis.toast.action_failed");
+                let text = if message == fallback || message.contains("{{") {
+                    fallback
+                } else {
+                    self.i18n_replace(
+                        "sidebar.host_redis.toast.key_action_failed",
+                        &[("message", message)],
+                    )
+                };
+                (text, TerminalNoticeVariant::Error)
+            }
+            HostToolsNotice::RedisValueEditCapped => (
+                self.i18n
+                    .t("sidebar.host_redis.value.edit_capped")
+                    .to_string(),
+                TerminalNoticeVariant::Error,
+            ),
+            HostToolsNotice::RedisValueEditUnsupported => (
+                self.i18n
+                    .t("sidebar.host_redis.value.edit_unsupported")
+                    .to_string(),
+                TerminalNoticeVariant::Error,
+            ),
         };
         self.push_workspace_notice(
             TerminalNotice {

@@ -237,7 +237,9 @@ impl HostToolsEntity {
                 ConfirmDialogView {
                     variant: if matches!(
                         request.action,
-                        DockerActionKind::Stop | DockerActionKind::Restart
+                        DockerActionKind::Stop
+                            | DockerActionKind::Restart
+                            | DockerActionKind::Remove
                     ) {
                         ConfirmDialogVariant::Danger
                     } else {

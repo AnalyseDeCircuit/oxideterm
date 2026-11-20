@@ -1,7 +1,57 @@
 use super::*;
 
+impl Drop for HostToolsEntity {
+    fn drop(&mut self) {
+        // A discovery probe can hold its SSH route for its full 40s timeout.
+        // Releasing it here keeps Entity teardown from leaving that work behind.
+        self.cancel_container_discovery();
+    }
+}
+
 impl HostToolsEntity {
-    pub(super) fn schedule_lifecycle_refresh(&mut self, cx: &mut Context<Self>) {
+    /// Container discovery is host-scoped state. Retire the previous host's
+    /// engines as soon as the selection moves, so neither a panel render nor a
+    /// command builder can resolve an instance that belongs to another host,
+    /// and cancel the superseded probe instead of letting it hold an SSH route
+    /// for its full timeout. The task handle dies with the Entity too.
+    fn retire_foreign_container_state(&mut self, cx: &mut Context<Self>) {
+        let selected = self.selected_connection_id().map(str::to_owned);
+        let foreign = |owner: Option<&str>| match (owner, selected.as_deref()) {
+            (Some(owner), Some(selected)) => owner != selected,
+            _ => false,
+        };
+        let discovery_foreign = foreign(self.host_container.discovery_connection_id.as_deref());
+        let snapshot_foreign = foreign(self.host_container.snapshot_connection_id.as_deref());
+        if !discovery_foreign && !snapshot_foreign {
+            return;
+        }
+        if discovery_foreign {
+            // The probe belongs to another host: aborting it releases the SSH
+            // route immediately, and the reset marker lets the current host
+            // start from scratch.
+            self.cancel_container_discovery();
+            self.host_container.discovery_connection_id = None;
+            self.host_container.discovery = None;
+            self.host_container.selected_instance_id = None;
+            self.host_container.selected_row = None;
+            // Inventory tabs describe the retired engine; Containers is the
+            // only tab every engine supports.
+            self.host_container.tab = HostContainerTab::Containers;
+            // A confirm or capture dialog was composed for the retired host.
+            self.dismiss_container_confirm(cx);
+            self.dismiss_container_text_dialog(cx);
+            self.dismiss_container_input_dialog(cx);
+        }
+        if discovery_foreign || snapshot_foreign {
+            self.host_container.snapshot = None;
+            self.host_container.snapshot_connection_id = None;
+            self.host_container.stats = None;
+            self.host_container.registries = None;
+        }
+        cx.notify();
+    }
+
+    pub(crate) fn schedule_lifecycle_refresh(&mut self, cx: &mut Context<Self>) {
         // Pool/topology freshness belongs to Host Tools and stops with the Entity.
         let executor = cx.background_executor().clone();
         self.lifecycle_refresh_task = Some(cx.spawn(async move |host_tools, cx| {
@@ -20,7 +70,7 @@ impl HostToolsEntity {
         }));
     }
 
-    pub(super) fn refresh_lifecycle_tick(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn refresh_lifecycle_tick(&mut self, cx: &mut Context<Self>) {
         let Some(runtime) = self.lifecycle_runtime.clone() else {
             return;
         };
@@ -56,6 +106,7 @@ impl HostToolsEntity {
         self.monitoring = monitoring;
         self.sampling_config = sampling_config;
         self.lifecycle_runtime = Some(runtime.clone());
+        self.retire_foreign_container_state(cx);
         let gpu_visible = self.monitoring.gpu_enabled
             && visibility.sidebar_is_visible()
             && self.active_tool() == ContextSidebarTool::Gpu;
@@ -96,7 +147,7 @@ impl HostToolsEntity {
         }
     }
 
-    pub(super) fn sync_live_connections(
+    pub(crate) fn sync_live_connections(
         &mut self,
         connections: Vec<MonitorConnectionOption>,
         sampling_config: oxideterm_connection_monitor::ResourceSamplingConfig,
@@ -126,12 +177,23 @@ impl HostToolsEntity {
         let Some(connection_id) = self.ensure_selected_connection(&live_connection_ids, cx) else {
             return;
         };
+        // The selection can move here when the previous host disappears, which
+        // happens after the lifecycle refresh already retired container state.
+        // Retire again before the probe flips the discovery marker to this
+        // connection, otherwise the previous host's engines would be shown as
+        // this host's until the new result lands.
+        self.retire_foreign_container_state(cx);
         if !self.visibility.sidebar_is_visible() || sampling_config.is_empty() {
             self.stop_profiler_sampling();
             return;
         }
         if self.profiler_connection_missing(&connection_id) {
             self.start_profiler(connection_id, sampling_config, runtime, cx);
+        }
+        if self.active_tool() == ContextSidebarTool::Container {
+            // Detection is one-shot per connection; the panel refreshes it on
+            // demand and after every mutation.
+            self.request_container_discovery_if_needed(cx);
         }
     }
 

@@ -43,6 +43,9 @@ pub enum DockerActionKind {
     Start,
     Stop,
     Restart,
+    Pause,
+    Unpause,
+    Remove,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -50,20 +53,29 @@ pub struct DockerActionAvailability {
     pub can_start: bool,
     pub can_stop: bool,
     pub can_restart: bool,
+    pub can_pause: bool,
+    pub can_unpause: bool,
+    /// Removal is limited to containers that never ran or fully exited, so a
+    /// destructive remove never sits behind a running workload.
+    pub can_remove: bool,
+    /// Live log reads tolerate a paused freezer; exec does not.
     pub can_use_live_tools: bool,
+    pub can_exec: bool,
 }
 
 /// Returns the actions supported by the container's current lifecycle state.
 pub fn docker_action_availability(state: &str) -> DockerActionAvailability {
-    let is_live = matches!(
-        state.trim().to_ascii_lowercase().as_str(),
-        "running" | "restarting" | "paused"
-    );
+    let state = state.trim().to_ascii_lowercase();
+    let is_live = matches!(state.as_str(), "running" | "restarting" | "paused");
     DockerActionAvailability {
         can_start: !is_live,
-        can_stop: is_live,
-        can_restart: is_live,
+        can_stop: matches!(state.as_str(), "running" | "paused"),
+        can_restart: matches!(state.as_str(), "running" | "paused"),
+        can_pause: state == "running",
+        can_unpause: state == "paused",
+        can_remove: matches!(state.as_str(), "exited" | "created" | "dead"),
         can_use_live_tools: is_live,
+        can_exec: state == "running",
     }
 }
 
@@ -283,6 +295,9 @@ pub fn build_docker_action_command(
         DockerActionKind::Start => "start",
         DockerActionKind::Stop => "stop",
         DockerActionKind::Restart => "restart",
+        DockerActionKind::Pause => "pause",
+        DockerActionKind::Unpause => "unpause",
+        DockerActionKind::Remove => "rm",
     };
     let command = build_docker_cli_command(os_type, operation, container_id);
     Ok(DockerActionCommand { command })
@@ -480,7 +495,7 @@ fn docker_container_matches_query(container: &ResourceDockerContainer, query: &s
             .is_some_and(|ports| ports.to_lowercase().contains(query))
 }
 
-fn validated_container_id(container_id: &str) -> Result<&str, String> {
+pub(crate) fn validated_container_id(container_id: &str) -> Result<&str, String> {
     let container_id = container_id.trim();
     if container_id.len() < 12
         || !container_id
@@ -520,7 +535,7 @@ fn clean_error_marker_message(value: &str) -> String {
     }
 }
 
-fn compact_docker_command_message(value: &str) -> Option<String> {
+pub(crate) fn compact_docker_command_message(value: &str) -> Option<String> {
     let summary = value
         .lines()
         .map(str::trim)
@@ -809,9 +824,13 @@ mod tests {
                 docker_action_availability(&snapshot.containers[0].state),
                 DockerActionAvailability {
                     can_start: !live,
-                    can_stop: live,
-                    can_restart: live,
+                    can_stop: matches!(state, "running" | "paused"),
+                    can_restart: matches!(state, "running" | "paused"),
+                    can_pause: state == "running",
+                    can_unpause: state == "paused",
+                    can_remove: matches!(state, "exited" | "created" | "dead"),
                     can_use_live_tools: live,
+                    can_exec: state == "running",
                 },
                 "{status}"
             );
@@ -915,6 +934,34 @@ mod tests {
             build_docker_action_command("Linux", "abc123;rm -rf /", DockerActionKind::Stop)
                 .is_err()
         );
+        let pause =
+            build_docker_action_command("Linux", "abc123def456", DockerActionKind::Pause).unwrap();
+        assert!(pause.command.contains("docker pause abc123def456"));
+        let remove =
+            build_docker_action_command("Linux", "abc123def456", DockerActionKind::Remove).unwrap();
+        assert!(remove.command.contains("docker rm abc123def456"));
+    }
+
+    #[test]
+    fn docker_availability_splits_exec_from_paused_live_tools() {
+        let running = docker_action_availability("running");
+        assert!(running.can_pause && running.can_exec && running.can_use_live_tools);
+        assert!(!running.can_unpause && !running.can_remove);
+
+        let paused = docker_action_availability("paused");
+        assert!(paused.can_unpause && paused.can_use_live_tools);
+        assert!(paused.can_stop && paused.can_restart);
+        assert!(!paused.can_exec && !paused.can_pause && !paused.can_remove);
+
+        // Docker rejects `pause` while a restart is in flight, and the state
+        // also blocks stop/restart until the container settles.
+        let restarting = docker_action_availability("restarting");
+        assert!(!restarting.can_pause && !restarting.can_stop && !restarting.can_restart);
+        // Docker refuses `exec` while the container restarts.
+        assert!(!restarting.can_unpause && restarting.can_use_live_tools && !restarting.can_exec);
+
+        let exited = docker_action_availability("exited");
+        assert!(exited.can_start && exited.can_remove && !exited.can_exec);
     }
 
     #[test]

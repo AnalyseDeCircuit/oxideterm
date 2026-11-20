@@ -557,6 +557,9 @@ impl WorkspaceApp {
                 } else if this.handle_host_docker_search_key(event, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
+                } else if this.handle_host_container_search_key(event, cx) {
+                    window.prevent_default();
+                    cx.stop_propagation();
                 } else if this.handle_host_service_search_key(event, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
@@ -573,6 +576,9 @@ impl WorkspaceApp {
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this.handle_host_filesystem_search_key(event, cx) {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                } else if this.handle_host_redis_key(event, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this.handle_host_package_search_key(event, cx) {
@@ -1345,6 +1351,29 @@ impl WorkspaceApp {
             .when_some(self.render_host_docker_logs_dialog(cx), |root, dialog| {
                 root.child(dialog)
             })
+            .when_some(
+                self.render_host_container_confirm_dialog(cx),
+                |root, dialog| root.child(dialog),
+            )
+            .when_some(
+                self.render_host_container_text_dialog(cx),
+                |root, dialog| root.child(dialog),
+            )
+            .when_some(
+                self.render_host_container_input_dialog(cx),
+                |root, dialog| root.child(dialog),
+            )
+            .when_some(
+                self.render_host_redis_value_dialog(window, cx),
+                |root, dialog| root.child(dialog),
+            )
+            .when_some(self.render_host_redis_delete_dialog(cx), |root, dialog| {
+                root.child(dialog)
+            })
+            .when_some(
+                self.render_host_redis_create_key_dialog(cx),
+                |root, dialog| root.child(dialog),
+            )
             .when_some(
                 self.render_host_service_confirm_dialog(cx),
                 |root, dialog| root.child(dialog),

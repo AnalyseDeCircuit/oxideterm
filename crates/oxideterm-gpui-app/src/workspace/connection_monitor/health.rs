@@ -1,5 +1,7 @@
 use super::*;
 
+#[path = "health/container.rs"]
+mod container;
 #[path = "health/docker.rs"]
 mod docker;
 #[path = "health/filesystems.rs"]
@@ -14,6 +16,8 @@ mod packages;
 mod ports;
 #[path = "health/process.rs"]
 mod process;
+#[path = "health/redis.rs"]
+mod redis;
 #[path = "health/scheduled_tasks.rs"]
 mod scheduled_tasks;
 #[path = "health/services.rs"]
@@ -51,6 +55,20 @@ impl WorkspaceApp {
             self.host_tools
                 .update(cx, |host_tools, _cx| host_tools.pause_service_refreshes());
         }
+        if !enabled && tool == ContextSidebarTool::Redis {
+            // A disabled Redis tool owns no probe. Dropping the queued and
+            // in-flight reads makes their deliveries stale, and clearing the
+            // credential focus stops Enter from starting a new one.
+            self.host_tools.update(cx, |host_tools, _cx| {
+                host_tools.ui.clear_input_focus();
+                host_tools.host_redis.snapshot_pending = None;
+                host_tools.host_redis.keys_pending = None;
+                host_tools.host_redis.snapshot_running = None;
+                host_tools.host_redis.snapshot_in_flight = false;
+                host_tools.host_redis.keys_running = None;
+                host_tools.host_redis.keys_in_flight = false;
+            });
+        }
         if enabled && self.host_tools.read(cx).active_tool() == tool {
             self.request_host_tool_snapshot_if_needed(tool, cx);
         }
@@ -61,11 +79,22 @@ impl WorkspaceApp {
         tool: ContextSidebarTool,
         cx: &mut Context<Self>,
     ) {
+        if !self.host_tool_monitoring_enabled(tool) {
+            // A disabled tool never probes: the toggle only starts sampling
+            // for tools that are actually enabled.
+            return;
+        }
         if tool == ContextSidebarTool::Monitor {
             self.host_tools.update(cx, |host_tools, cx| {
                 if let Some(connection_id) = host_tools.selected_connection_id_owned() {
                     host_tools.request_profiler_refresh(connection_id, cx);
                 }
+            });
+            return;
+        }
+        if tool == ContextSidebarTool::Container {
+            self.host_tools.update(cx, |host_tools, cx| {
+                host_tools.request_container_discovery_if_needed(cx)
             });
             return;
         }
@@ -113,10 +142,12 @@ impl WorkspaceApp {
                 ContextSidebarTool::Logs => self.render_host_logs_panel(cx),
                 ContextSidebarTool::Tmux => self.render_host_tmux_panel(cx),
                 ContextSidebarTool::Docker => self.render_host_docker_panel(cx),
+                ContextSidebarTool::Container => self.render_host_container_panel(cx),
                 ContextSidebarTool::Ports => self.render_host_ports_panel(cx),
                 ContextSidebarTool::Schedules => self.render_host_schedules_panel(cx),
                 ContextSidebarTool::Filesystems => self.render_host_filesystems_panel(cx),
                 ContextSidebarTool::Packages => self.render_host_packages_panel(cx),
+                ContextSidebarTool::Redis => self.render_host_redis_panel(cx),
             }
         } else {
             self.render_host_tool_monitoring_disabled(active_tool, cx)

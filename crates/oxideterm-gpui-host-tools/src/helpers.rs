@@ -36,6 +36,48 @@ pub fn host_tools_tooltip_icon_button(
     )
 }
 
+/// Same button with an explicit element id, so a virtualized row can scope the
+/// control to the resource it belongs to instead of a recycled slot.
+pub(crate) fn host_tools_scoped_tooltip_icon_button(
+    tokens: &ThemeTokens,
+    icon_path: &'static str,
+    icon_size: f32,
+    icon_color: Rgba,
+    options: oxideterm_gpui_ui::button::IconButtonOptions,
+    tooltip: String,
+    element_id: gpui::ElementId,
+    flex_none: bool,
+    listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+) -> AnyElement {
+    let actionable = !(options.disabled || options.loading);
+    let tooltip_label = tooltip.clone();
+    let tooltip_tokens = *tokens;
+
+    oxideterm_gpui_ui::button::icon_button(
+        tokens,
+        svg()
+            .path(icon_path)
+            .size(px(icon_size))
+            .text_color(icon_color)
+            .into_any_element(),
+        options,
+    )
+    .id(element_id)
+    .tooltip(move |_window, cx| {
+        oxideterm_gpui_ui::tooltip::tooltip_view(tooltip_tokens, tooltip_label.clone(), None, cx)
+    })
+    .when(actionable, |button| {
+        button.on_mouse_down(MouseButton::Left, listener)
+    })
+    .when(!actionable, |button| {
+        button.on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+            cx.stop_propagation();
+        })
+    })
+    .when(flex_none, |button| button.flex_none())
+    .into_any_element()
+}
+
 pub fn host_tools_center_state(
     icon: &'static str,
     color: u32,
