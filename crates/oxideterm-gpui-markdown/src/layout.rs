@@ -150,6 +150,7 @@ pub struct MarkdownBlockLayout {
     document: Option<MarkdownDocument>,
     footnotes: bool,
     item_sizes: Rc<Vec<Size<Pixels>>>,
+    top_spacings: Rc<Vec<f32>>,
     geometry: Rc<RefCell<MeasuredGeometry>>,
     measured: bool,
     pub(crate) disclosures: crate::disclosure::DisclosureState,
@@ -238,16 +239,27 @@ impl MarkdownMeasurements {
                 && !previous.document_released
             {
                 let old_heights = previous.layout.geometry.borrow();
+                let same_content_estimate = |old_idx: usize, new_idx: usize| {
+                    let old_content = f32::from(previous.layout.item_sizes[old_idx].height)
+                        - previous.layout.top_spacings[old_idx];
+                    let new_content = f32::from(layout.item_sizes[new_idx].height)
+                        - layout.top_spacings[new_idx];
+                    (old_content - new_content).abs() < 0.01
+                };
+                let adjusted_height = |old_idx: usize, new_idx: usize, measured: f32| {
+                    (measured - previous.layout.top_spacings[old_idx]).max(0.0)
+                        + layout.top_spacings[new_idx]
+                };
                 for index in 0..previous.layout.len().min(layout.len()) {
                     if previous
                         .layout
                         .item(index)
                         .unwrap()
                         .same_content(layout.item(index).unwrap())
-                        && previous.layout.item_sizes[index] == layout.item_sizes[index]
+                        && same_content_estimate(index, index)
                         && let Some(height) = old_heights.heights[index]
                     {
-                        layout.record_height(index, height);
+                        layout.record_height(index, adjusted_height(index, index, height));
                     }
                 }
                 for offset in 0..previous.layout.len().min(layout.len()) {
@@ -261,10 +273,10 @@ impl MarkdownMeasurements {
                     {
                         break;
                     }
-                    if previous.layout.item_sizes[a] == layout.item_sizes[b]
+                    if same_content_estimate(a, b)
                         && let Some(height) = old_heights.heights[a]
                     {
-                        layout.record_height(b, height);
+                        layout.record_height(b, adjusted_height(a, b, height));
                     }
                 }
             }
@@ -294,32 +306,39 @@ impl MarkdownBlockLayout {
             document: Some(document.clone()),
             footnotes: opts.enable_footnotes,
             item_sizes: Rc::new(Vec::new()),
+            top_spacings: Rc::new(Vec::new()),
             geometry: Rc::new(RefCell::new(MeasuredGeometry {
                 heights: Vec::new(),
-                index: BlockHeights::new(&[], opts.block_gap),
+                index: BlockHeights::new(&[], 0.0),
                 sizes: None,
             })),
             measured: false,
             disclosures: Default::default(),
         };
+        let mut top_spacings = Vec::with_capacity(layout.len());
         let sizes = layout
             .items()
             .enumerate()
             .map(|(index, item)| {
-                let padding = match item {
+                let spacing = match item {
                     MarkdownLayoutItem::Block(block) => {
-                        crate::style::block_top_padding(block, index, opts)
+                        let prev = index
+                            .checked_sub(1)
+                            .and_then(|prev_index| document.blocks.get(prev_index));
+                        crate::style::block_spacing_before(prev, block, opts)
                     }
                     MarkdownLayoutItem::Footnotes(_) => 0.0,
                 };
+                top_spacings.push(spacing);
                 size(
                     px(ESTIMATED_CONTENT_WIDTH),
-                    px(estimate_item_height(&item, opts) + padding),
+                    px(estimate_item_height(&item, opts) + spacing),
                 )
             })
             .collect::<Vec<_>>();
-        layout.geometry.borrow_mut().index = BlockHeights::new(&sizes, opts.block_gap);
+        layout.geometry.borrow_mut().index = BlockHeights::new(&sizes, 0.0);
         layout.item_sizes = Rc::new(sizes);
+        layout.top_spacings = Rc::new(top_spacings);
         layout
     }
 
@@ -434,11 +453,15 @@ fn estimate_item_height(item: &MarkdownLayoutItem, opts: &MarkdownOptions) -> f3
 }
 
 fn estimate_blocks_height(blocks: &[Block], opts: &MarkdownOptions) -> f32 {
-    let content: f32 = blocks
+    blocks
         .iter()
-        .map(|block| estimate_block_height(block, opts))
-        .sum();
-    content + opts.block_gap * blocks.len().saturating_sub(1) as f32
+        .enumerate()
+        .map(|(index, block)| {
+            let prev = index.checked_sub(1).and_then(|i| blocks.get(i));
+            estimate_block_height(block, opts)
+                + crate::style::block_spacing_before(prev, block, opts)
+        })
+        .sum()
 }
 
 fn estimate_block_height(block: &Block, opts: &MarkdownOptions) -> f32 {
@@ -621,13 +644,14 @@ mod tests {
         assert!(Rc::ptr_eq(&layout.item_sizes(), &reused.item_sizes()));
         let changed = crate::parser::parse_with_source_ranges(&format!("new\n\n{source}"));
         let changed = measurements.prepare(&changed, 640.0, &opts);
+        // Block 0 (list) shifted behind a lead-in paragraph, adding 7.2px (0.45 * 16.0) of top spacing.
         assert_eq!(
             changed
                 .item_sizes()
                 .iter()
                 .map(|size| f32::from(size.height))
                 .collect::<Vec<_>>(),
-            [22.0, 111.0, 222.0, 333.0, 444.0, 555.0]
+            [22.0, 118.2, 222.0, 333.0, 444.0, 555.0]
         );
     }
 
@@ -642,13 +666,14 @@ mod tests {
         layout.record_height(2, 60.0);
         let document = crate::parser::parse_with_source_ranges("new\n\nfirst\n\nsecond\n\nthird");
         let changed = measurements.prepare(&document, 640.0, &opts);
+        // "first" moved from index 0 (0px top spacing) to index 1 (11.2px paragraph-to-paragraph spacing).
         assert_eq!(
             changed
                 .item_sizes()
                 .iter()
                 .map(|size| f32::from(size.height))
                 .collect::<Vec<_>>(),
-            [22.0, 40.0, 80.0, 60.0]
+            [22.0, 51.2, 80.0, 60.0]
         );
         let document =
             crate::parser::parse_with_source_ranges("new\n\nfirst\n\nreplacement\n\nthird");
@@ -659,7 +684,7 @@ mod tests {
                 .iter()
                 .map(|size| f32::from(size.height))
                 .collect::<Vec<_>>(),
-            [22.0, 40.0, 22.0, 60.0]
+            [22.0, 51.2, 33.2, 60.0]
         );
     }
 

@@ -804,7 +804,9 @@ impl AiAssistantSidebarView {
 
         let mut options = self.localized_markdown_options();
         options.base_font_size = 13.0;
-        options.block_gap = 8.0;
+        options.block_gap = 10.0;
+        // Compact heading scale keeps headings proportional inside the narrow chat sidebar.
+        options.heading_font_scales = [1.45, 1.25, 1.12, 1.0, 0.92, 0.88];
         // AI markdown lives directly above the window image in the companion
         // sidebar, so its code surfaces must use the same translucent contract.
         options.background_surface_active = self.frame().window_background;

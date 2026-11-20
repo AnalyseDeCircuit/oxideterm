@@ -14,6 +14,7 @@ pub const MARKDOWN_IMAGE_CACHE_ID: &str = "oxideterm-markdown-images";
 pub struct MarkdownOptions {
     pub scroll_sync: Option<crate::scroll_sync::MarkdownScrollSync>,
     pub(crate) code_source: Option<crate::model::SourceSpan>,
+    pub(crate) list_depth: usize,
     pub(crate) disclosures: crate::disclosure::DisclosureState,
     pub html_details_label: String,
     pub navigation: Option<crate::navigation::MarkdownNavigation>,
@@ -124,6 +125,7 @@ impl MarkdownOptions {
         Self {
             scroll_sync: None,
             code_source: None,
+            list_depth: 0,
             disclosures: Default::default(),
             html_details_label: "Details".into(),
             navigation: None,

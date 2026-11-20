@@ -6,14 +6,21 @@
 //! This module converts OxideTerm-owned markdown model nodes into composed
 //! GPUI `Div` / `AnyElement` trees using only semantic theme tokens.
 
-use std::{ops::Range, path::PathBuf, rc::Rc, sync::Arc};
+use std::{
+    hash::{Hash, Hasher},
+    ops::Range,
+    path::PathBuf,
+    rc::Rc,
+    sync::Arc,
+    time::Duration,
+};
 
 use gpui::{
-    AnyElement, App, ClipboardItem, ElementId, Font, FontFeatures, FontStyle, FontWeight, Hsla,
-    Image, InteractiveElement, IntoElement, MouseButton, ParentElement, SharedString,
-    StatefulInteractiveElement, StrikethroughStyle, Styled, StyledImage, StyledText, TextAlign,
-    TextRun, UnderlineStyle, Window, div, image_cache, img, prelude::FluentBuilder, px, relative,
-    retain_recent,
+    AnyElement, App, ClipboardItem, Context, ElementId, Font, FontFeatures, FontStyle, FontWeight,
+    Hsla, Image, InteractiveElement, IntoElement, MouseButton, ParentElement, RenderOnce,
+    SharedString, StatefulInteractiveElement, StrikethroughStyle, Styled, StyledImage, StyledText,
+    Task, TextAlign, TextRun, Timer, UnderlineStyle, Window, div, image_cache, img,
+    prelude::FluentBuilder, px, relative, retain_recent, svg,
 };
 use oxideterm_gpui_ui::{ScrollableElement, Scrollbar};
 use oxideterm_theme::ThemeTokens;
@@ -88,10 +95,10 @@ fn markdown_layout_memory() {
             let layout = measurements.prepare(&document, 640.0, &opts);
             navigation.prepare(&document, &layout, &opts);
             let heights = layout.heights();
-            let window = markdown_virtual_window(&heights, 550_000.0, 600.0, 0.0).unwrap();
+            let window = markdown_virtual_window(&heights, 500_000.0, 600.0, 0.0).unwrap();
             assert_eq!(window.range, 5000..5006);
-            assert_eq!(window.top_spacer, 550_000.0);
-            assert_eq!(window.bottom_spacer, 549_340.0);
+            assert_eq!(window.top_spacer, 500_000.0);
+            assert_eq!(window.bottom_spacer, 499_400.0);
         }
         stop.store(true, Ordering::Release);
     });
@@ -166,7 +173,6 @@ fn render_document_with_code_actions(
         .min_w_0()
         .flex()
         .flex_col()
-        .gap(px(opts.block_gap))
         .child(render_blocks_with_code_actions(
             &document.blocks,
             tokens,
@@ -251,6 +257,9 @@ fn render_document_windowed_with_code_actions(
     {
         match item {
             MarkdownLayoutItem::Block(block) => {
+                let prev = index
+                    .checked_sub(1)
+                    .and_then(|prev_index| document.blocks.get(prev_index));
                 rendered.push(
                     layout.measure(
                         index,
@@ -258,7 +267,7 @@ fn render_document_windowed_with_code_actions(
                             .id(("markdown-block", index))
                             .w_full()
                             .min_w_0()
-                            .pt(px(style::block_top_padding(block, index, opts)))
+                            .pt(px(style::block_spacing_before(prev, block, opts)))
                             .child(render_block_with_code_actions(
                                 block,
                                 tokens,
@@ -294,22 +303,13 @@ fn render_document_windowed_with_code_actions(
         .w_full()
         .min_w_0()
         .flex()
-        .flex_col()
-        .gap(px(opts.block_gap));
+        .flex_col();
     if virtual_window.top_spacer > 0.0 {
-        content = content.child(
-            div()
-                .w_full()
-                .h(px((virtual_window.top_spacer - opts.block_gap).max(0.0))),
-        );
+        content = content.child(div().w_full().h(px(virtual_window.top_spacer)));
     }
     content = content.children(rendered);
     if virtual_window.bottom_spacer > 0.0 {
-        content = content.child(
-            div()
-                .w_full()
-                .h(px((virtual_window.bottom_spacer - opts.block_gap).max(0.0))),
-        );
+        content = content.child(div().w_full().h(px(virtual_window.bottom_spacer)));
     }
 
     if opts.enable_async_images {
@@ -356,7 +356,6 @@ pub fn render_document_selectable_with_code_actions(
         .min_w_0()
         .flex()
         .flex_col()
-        .gap(px(opts.block_gap))
         .child(render_selectable_blocks(
             &document.blocks,
             tokens,
@@ -477,6 +476,9 @@ pub fn render_document_windowed_selectable_with_code_actions(
     {
         match item {
             MarkdownLayoutItem::Block(block) => {
+                let prev = index
+                    .checked_sub(1)
+                    .and_then(|prev_index| document.blocks.get(prev_index));
                 rendered.push(
                     layout.measure(
                         index,
@@ -484,7 +486,7 @@ pub fn render_document_windowed_selectable_with_code_actions(
                             .id(("markdown-block", index))
                             .w_full()
                             .min_w_0()
-                            .pt(px(style::block_top_padding(block, index, opts)))
+                            .pt(px(style::block_spacing_before(prev, block, opts)))
                             .child(render_selectable_block(
                                 block,
                                 tokens,
@@ -525,22 +527,13 @@ pub fn render_document_windowed_selectable_with_code_actions(
         .w_full()
         .min_w_0()
         .flex()
-        .flex_col()
-        .gap(px(opts.block_gap));
+        .flex_col();
     if virtual_window.top_spacer > 0.0 {
-        content = content.child(
-            div()
-                .w_full()
-                .h(px((virtual_window.top_spacer - opts.block_gap).max(0.0))),
-        );
+        content = content.child(div().w_full().h(px(virtual_window.top_spacer)));
     }
     content = content.children(rendered);
     if virtual_window.bottom_spacer > 0.0 {
-        content = content.child(
-            div()
-                .w_full()
-                .h(px((virtual_window.bottom_spacer - opts.block_gap).max(0.0))),
-        );
+        content = content.child(div().w_full().h(px(virtual_window.bottom_spacer)));
     }
 
     if opts.enable_async_images {
@@ -587,7 +580,7 @@ pub fn render_document_virtual_with_code_actions(
     let opts = &options;
     let viewport_top = opts.scroll_sync.as_ref().map_or_else(
         || markdown_scroll_top_from_gpui_offset(scroll_handle.offset().y),
-        |sync| sync.begin(&layout, opts.block_gap, scroll_handle),
+        |sync| sync.begin(&layout, 0.0, scroll_handle),
     );
     if let Some(navigation) = &opts.navigation {
         navigation.prepare(document, &layout, opts);
@@ -660,7 +653,7 @@ pub fn render_document_virtual_selectable(
     let opts = &options;
     let viewport_top = opts.scroll_sync.as_ref().map_or_else(
         || markdown_scroll_top_from_gpui_offset(scroll_handle.offset().y),
-        |sync| sync.begin(&layout, opts.block_gap, scroll_handle),
+        |sync| sync.begin(&layout, 0.0, scroll_handle),
     );
     if let Some(navigation) = &opts.navigation {
         navigation.prepare(document, &layout, opts);
@@ -774,13 +767,13 @@ fn render_blocks_with_code_actions(
         .min_w_0()
         .flex()
         .flex_col()
-        .gap(px(opts.block_gap))
         .children(blocks.iter().enumerate().map(|(index, block)| {
+            let prev = index.checked_sub(1).and_then(|i| blocks.get(i));
             div()
                 .id(("markdown-block", index))
                 .w_full()
                 .min_w_0()
-                .pt(px(style::block_top_padding(block, index, opts)))
+                .pt(px(style::block_spacing_before(prev, block, opts)))
                 .child(render_block_with_code_actions(
                     block,
                     tokens,
@@ -809,13 +802,13 @@ fn render_selectable_blocks(
         .min_w_0()
         .flex()
         .flex_col()
-        .gap(px(opts.block_gap))
         .children(blocks.iter().enumerate().map(|(index, block)| {
+            let prev = index.checked_sub(1).and_then(|i| blocks.get(i));
             div()
                 .id(SharedString::from(format!("{path}:{index}")))
                 .w_full()
                 .min_w_0()
-                .pt(px(style::block_top_padding(block, index, opts)))
+                .pt(px(style::block_spacing_before(prev, block, opts)))
                 .child(render_selectable_block(
                     block,
                     tokens,
@@ -1011,6 +1004,14 @@ fn details_summary(summary: &[Inline], opts: &MarkdownOptions) -> Vec<Inline> {
     }
 }
 
+fn heading_text_color(level: u8, tokens: &ThemeTokens) -> Hsla {
+    if level >= 5 {
+        style::muted_color(tokens)
+    } else {
+        style::heading_color(tokens)
+    }
+}
+
 fn render_heading(
     level: u8,
     id: &str,
@@ -1019,6 +1020,7 @@ fn render_heading(
     opts: &MarkdownOptions,
 ) -> AnyElement {
     let font_size = style::heading_font_size(level, opts);
+    let has_divider = level <= 2;
     div()
         .relative()
         .child(heading_anchor(id, opts))
@@ -1026,6 +1028,11 @@ fn render_heading(
         .min_w_0()
         .flex()
         .flex_col()
+        .when(has_divider, |el| {
+            el.pb(px(if level == 1 { 8.0 } else { 6.0 }))
+                .border_b_1()
+                .border_color(style::heading_divider_color(tokens))
+        })
         .child(
             div()
                 .w_full()
@@ -1033,13 +1040,14 @@ fn render_heading(
                 .whitespace_normal()
                 .text_size(font_size)
                 .line_height(relative(1.25))
-                .text_color(style::heading_color(tokens))
+                .text_color(heading_text_color(level, tokens))
                 .child(render_styled_inlines_with_style(
                     inlines,
                     tokens,
                     opts,
                     FlatRunStyle {
                         semibold: true,
+                        color_override: Some(heading_text_color(level, tokens)),
                         ..Default::default()
                     },
                 )),
@@ -1062,6 +1070,7 @@ fn render_selectable_heading(
     ) -> AnyElement,
 ) -> AnyElement {
     let font_size = style::heading_font_size(level, opts);
+    let has_divider = level <= 2;
     div()
         .relative()
         .child(heading_anchor(id, opts))
@@ -1069,6 +1078,11 @@ fn render_selectable_heading(
         .min_w_0()
         .flex()
         .flex_col()
+        .when(has_divider, |el| {
+            el.pb(px(if level == 1 { 8.0 } else { 6.0 }))
+                .border_b_1()
+                .border_color(style::heading_divider_color(tokens))
+        })
         .child(
             div()
                 .w_full()
@@ -1076,7 +1090,7 @@ fn render_selectable_heading(
                 .whitespace_normal()
                 .text_size(font_size)
                 .line_height(relative(1.25))
-                .text_color(style::heading_color(tokens))
+                .text_color(heading_text_color(level, tokens))
                 .child(render_selectable_inlines_with_style(
                     path,
                     inlines,
@@ -1084,6 +1098,7 @@ fn render_selectable_heading(
                     opts,
                     FlatRunStyle {
                         semibold: true,
+                        color_override: Some(heading_text_color(level, tokens)),
                         ..Default::default()
                     },
                     render_text,
@@ -1222,6 +1237,14 @@ fn code_display_text(code: &str) -> &str {
         .unwrap_or(code)
 }
 
+fn code_block_scroll_key(path: Option<&str>, language: Option<&str>, code: &str) -> String {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    path.hash(&mut hasher);
+    language.hash(&mut hasher);
+    code.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
+}
+
 fn render_code_block(
     language: Option<&str>,
     code: &str,
@@ -1234,10 +1257,11 @@ fn render_code_block(
     }
 
     let display_code = code_display_text(code);
-    // Attempt syntax highlighting; fall back to plain monospace text.
+    // Attempt theme-aware cached syntax highlighting; fall back to plain monospace text.
     let code_element: AnyElement = if let Some(lang) = language {
-        if let Some(runs) = highlight::highlight_code(lang, display_code, opts) {
-            let (text, text_runs) = highlight::highlighted_runs_to_text_runs(&runs);
+        if let Some((text, text_runs)) =
+            highlight::highlight_code_for_theme(lang, display_code, tokens, opts)
+        {
             StyledText::new(text)
                 .with_runs(text_runs)
                 .into_any_element()
@@ -1248,7 +1272,17 @@ fn render_code_block(
         SharedString::from(display_code.to_string()).into_any_element()
     };
 
-    render_code_block_shell(language, code, tokens, opts, None, code_element).into_any_element()
+    let scroll_key = code_block_scroll_key(None, language, code);
+    render_code_block_shell(
+        &scroll_key,
+        language,
+        code,
+        tokens,
+        opts,
+        code_actions,
+        code_element,
+    )
+    .into_any_element()
 }
 
 fn render_selectable_code_block(
@@ -1271,8 +1305,9 @@ fn render_selectable_code_block(
 
     let display_code = code_display_text(code);
     let code_element: AnyElement = if let Some(lang) = language {
-        if let Some(runs) = highlight::highlight_code(lang, display_code, opts) {
-            let (text, text_runs) = highlight::highlighted_runs_to_text_runs(&runs);
+        if let Some((text, text_runs)) =
+            highlight::highlight_code_for_theme(lang, display_code, tokens, opts)
+        {
             render_text(format!("{path}:code").into(), text, text_runs, Vec::new())
         } else {
             render_text(
@@ -1291,8 +1326,17 @@ fn render_selectable_code_block(
         )
     };
 
-    render_code_block_shell(language, code, tokens, opts, code_actions, code_element)
-        .into_any_element()
+    let scroll_key = code_block_scroll_key(Some(path), language, code);
+    render_code_block_shell(
+        &scroll_key,
+        language,
+        code,
+        tokens,
+        opts,
+        code_actions,
+        code_element,
+    )
+    .into_any_element()
 }
 
 fn render_mermaid_block(
@@ -1324,8 +1368,8 @@ pub(crate) fn render_mermaid_header(
         .flex_row()
         .items_center()
         .justify_between()
-        .px(px(8.0))
-        .py(px(4.0))
+        .px(px(opts.code_block_padding))
+        .py(px(6.0))
         .border_b_1()
         .border_color(style::code_block_header_border_color(tokens))
         .bg(style::code_block_header_bg_color(tokens, opts))
@@ -1336,7 +1380,10 @@ pub(crate) fn render_mermaid_header(
             div()
                 .text_size(style::code_label_font_size(opts))
                 .text_color(style::muted_color(tokens))
-                .font(style::code_font(opts))
+                .font(Font {
+                    weight: FontWeight::MEDIUM,
+                    ..style::code_font(opts)
+                })
                 .child(SharedString::from("MERMAID")),
         )
         .child(render_mermaid_actions(
@@ -1448,6 +1495,7 @@ pub(crate) fn render_mermaid_body(
 }
 
 fn render_code_block_shell(
+    scroll_key: &str,
     language: Option<&str>,
     code: &str,
     tokens: &ThemeTokens,
@@ -1464,6 +1512,7 @@ fn render_code_block_shell(
         .bg(style::code_block_bg_color(tokens, opts))
         .rounded(px(tokens.radii.md))
         .child(render_code_block_header(
+            scroll_key,
             language,
             code,
             tokens,
@@ -1472,7 +1521,9 @@ fn render_code_block_shell(
         ))
         .child(
             div()
-                .id("markdown-code-body")
+                .id(SharedString::from(format!(
+                    "markdown-code-body:{scroll_key}"
+                )))
                 .w_full()
                 .min_w_0()
                 .whitespace_nowrap()
@@ -1494,6 +1545,7 @@ fn render_code_block_shell(
 }
 
 fn render_code_block_header(
+    scroll_key: &str,
     language: Option<&str>,
     code: &str,
     tokens: &ThemeTokens,
@@ -1508,8 +1560,8 @@ fn render_code_block_header(
         .flex_row()
         .items_center()
         .justify_between()
-        .px(px(8.0))
-        .py(px(4.0))
+        .px(px(opts.code_block_padding))
+        .py(px(6.0))
         .border_b_1()
         .border_color(style::code_block_header_border_color(tokens))
         .bg(style::code_block_header_bg_color(tokens, opts))
@@ -1521,10 +1573,14 @@ fn render_code_block_header(
             div()
                 .text_size(style::code_label_font_size(opts))
                 .text_color(style::muted_color(tokens))
-                .font(style::code_font(opts))
+                .font(Font {
+                    weight: FontWeight::MEDIUM,
+                    ..style::code_font(opts)
+                })
                 .child(SharedString::from(code_block_language_label(language))),
         )
         .child(render_code_actions(
+            scroll_key,
             language,
             code,
             tokens,
@@ -1535,13 +1591,14 @@ fn render_code_block_header(
 }
 
 fn render_code_actions(
+    scroll_key: &str,
     language: Option<&str>,
     code: &str,
     tokens: &ThemeTokens,
     opts: &MarkdownOptions,
     code_actions: Option<&MarkdownCodeBlockActions>,
 ) -> AnyElement {
-    let mut actions = div().flex().flex_row().items_center().gap(px(10.0));
+    let mut actions = div().flex().flex_row().items_center().gap(px(4.0));
 
     if is_shell_language(language)
         && let Some(on_run) = code_actions.and_then(|actions| actions.on_run.clone())
@@ -1550,7 +1607,15 @@ fn render_code_actions(
     }
 
     actions
-        .child(render_code_copy_action(code, tokens, opts))
+        .child(
+            CodeCopyAction {
+                key: scroll_key.to_string(),
+                code: code.to_string(),
+                tokens: *tokens,
+                opts: opts.clone(),
+            }
+            .into_any_element(),
+        )
         .into_any_element()
 }
 
@@ -1563,26 +1628,87 @@ fn render_code_run_action(
     let code = code.to_string();
     let hover_color = style::accent_color(tokens);
 
-    render_code_action_label("RUN", tokens, opts, hover_color)
-        .on_mouse_down(MouseButton::Left, move |_event, window, cx| {
-            // Tauri emits ai-insert-command; the caller maps that to the active terminal surface.
-            on_run(code.clone(), window, cx);
-            cx.stop_propagation();
-        })
-        .into_any_element()
+    render_code_action_button(
+        Some("lucide/play.svg"),
+        "RUN",
+        style::code_action_color(tokens),
+        hover_color,
+        tokens,
+        opts,
+    )
+    .on_mouse_down(MouseButton::Left, move |_event, window, cx| {
+        // Tauri emits ai-insert-command; the caller maps that to the active terminal surface.
+        on_run(code.clone(), window, cx);
+        cx.stop_propagation();
+    })
+    .into_any_element()
 }
 
-fn render_code_copy_action(code: &str, tokens: &ThemeTokens, opts: &MarkdownOptions) -> AnyElement {
-    let code = code.to_string();
-    let hover_color = style::text_color(tokens);
+#[derive(Default)]
+struct CodeCopyState {
+    copied: bool,
+    // Owning the reset timer guarantees cancellation when the code block unmounts.
+    _reset_task: Option<Task<()>>,
+}
 
-    render_code_action_label("COPY", tokens, opts, hover_color)
+impl CodeCopyState {
+    fn mark_copied(&mut self, cx: &mut Context<Self>) {
+        self.copied = true;
+        self._reset_task = Some(cx.spawn(async move |state, cx| {
+            Timer::after(Duration::from_millis(1600)).await;
+            let _ = state.update(cx, |state, cx| {
+                state.copied = false;
+                state._reset_task = None;
+                cx.notify();
+            });
+        }));
+        cx.notify();
+    }
+}
+
+#[derive(IntoElement)]
+struct CodeCopyAction {
+    key: String,
+    code: String,
+    tokens: ThemeTokens,
+    opts: MarkdownOptions,
+}
+
+impl RenderOnce for CodeCopyAction {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let state = window.use_keyed_state(
+            SharedString::from(format!("markdown-code-copy:{}", self.key)),
+            cx,
+            |_, _| CodeCopyState::default(),
+        );
+        let copied = state.read(cx).copied;
+        let (icon, label, base_color, hover_color) = if copied {
+            let success = style::hex_to_hsla(self.tokens.ui.success);
+            ("lucide/check.svg", "COPIED", success, success)
+        } else {
+            (
+                "lucide/copy.svg",
+                "COPY",
+                style::code_action_color(&self.tokens),
+                style::text_color(&self.tokens),
+            )
+        };
+        let code = self.code;
+        render_code_action_button(
+            Some(icon),
+            label,
+            base_color,
+            hover_color,
+            &self.tokens,
+            &self.opts,
+        )
         .on_mouse_down(MouseButton::Left, move |_event, _window, cx| {
             // Keep COPY local to the markdown renderer; command insertion belongs to the AI workspace.
             cx.write_to_clipboard(ClipboardItem::new_string(code.clone()));
+            state.update(cx, |state, cx| state.mark_copied(cx));
             cx.stop_propagation();
         })
-        .into_any_element()
+    }
 }
 
 fn render_code_action_label(
@@ -1591,21 +1717,45 @@ fn render_code_action_label(
     opts: &MarkdownOptions,
     hover_color: Hsla,
 ) -> gpui::Div {
+    render_code_action_button(
+        None,
+        label,
+        style::code_action_color(tokens),
+        hover_color,
+        tokens,
+        opts,
+    )
+}
+
+fn render_code_action_button(
+    icon_path: Option<&'static str>,
+    label: impl Into<SharedString>,
+    base_color: Hsla,
+    hover_color: Hsla,
+    tokens: &ThemeTokens,
+    opts: &MarkdownOptions,
+) -> gpui::Div {
     let label = label.into();
+    let hover_bg = style::code_action_hover_bg(tokens);
     div()
         .flex()
         .flex_row()
         .items_center()
         .gap(px(4.0))
+        .px(px(6.0))
         .py(px(2.0))
+        .rounded(px(tokens.radii.sm))
         .cursor_pointer()
         .text_size(style::code_label_font_size(opts))
-        .text_color(style::code_action_color(tokens))
+        .text_color(base_color)
         .font(Font {
-            weight: FontWeight::BOLD,
+            weight: FontWeight::SEMIBOLD,
             ..style::code_font(opts)
         })
-        .hover(move |style| style.text_color(hover_color))
+        .hover(move |style| style.text_color(hover_color).bg(hover_bg))
+        .when_some(icon_path, |button, path| {
+            button.child(svg().path(path).size(px(11.0)).text_color(base_color))
+        })
         .child(label)
 }
 
@@ -1648,6 +1798,51 @@ fn is_plain_text_code_language(language: Option<&str>) -> bool {
 
 // ─── blockquote ─────────────────────────────────────────────────────────
 
+fn render_blockquote_shell(
+    kind: Option<CalloutKind>,
+    tokens: &ThemeTokens,
+    opts: &MarkdownOptions,
+    body: AnyElement,
+) -> AnyElement {
+    let is_callout = kind.is_some();
+    let accent = callout_color(kind, tokens);
+    let bg = style::blockquote_bg_color(is_callout, accent, tokens, opts);
+    div()
+        .w_full()
+        .min_w_0()
+        .overflow_hidden()
+        .bg(bg)
+        .rounded(px(tokens.radii.md))
+        .when(is_callout, |el| {
+            el.border_1()
+                .border_color(style::callout_outer_border_color(accent))
+        })
+        .flex()
+        .flex_row()
+        .child(
+            // Paint the left accent stripe as its own element so a callout's
+            // faint outer border colour stays distinct from the solid accent bar.
+            div()
+                .w(px(opts.blockquote_border_width))
+                .flex_shrink_0()
+                .bg(accent),
+        )
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .px(px(opts.code_block_padding))
+                .py(px(10.0))
+                .flex()
+                .flex_col()
+                .when_some(kind, |content, kind| {
+                    content.child(render_callout_label(kind, accent, opts))
+                })
+                .child(body),
+        )
+        .into_any_element()
+}
+
 fn render_blockquote_with_code_actions(
     kind: Option<CalloutKind>,
     blocks: &[Block],
@@ -1655,29 +1850,8 @@ fn render_blockquote_with_code_actions(
     opts: &MarkdownOptions,
     code_actions: Option<&MarkdownCodeBlockActions>,
 ) -> AnyElement {
-    let accent = callout_color(kind, tokens);
-    div()
-        .flex()
-        .flex_row()
-        .bg(style::code_bg_color(tokens, opts))
-        .border_l(px(opts.blockquote_border_width))
-        .border_color(accent)
-        .rounded(px(tokens.radii.sm))
-        .child(
-            div()
-                .flex_1()
-                .pl(px(opts.list_indent))
-                .when_some(kind, |content, kind| {
-                    content.child(render_callout_label(kind, accent, tokens, opts))
-                })
-                .child(render_blocks_with_code_actions(
-                    blocks,
-                    tokens,
-                    opts,
-                    code_actions,
-                )),
-        )
-        .into_any_element()
+    let body = render_blocks_with_code_actions(blocks, tokens, opts, code_actions);
+    render_blockquote_shell(kind, tokens, opts, body)
 }
 
 fn render_selectable_blockquote(
@@ -1694,52 +1868,41 @@ fn render_selectable_blockquote(
         Vec<MarkdownTextLink>,
     ) -> AnyElement,
 ) -> AnyElement {
-    let accent = callout_color(kind, tokens);
-    div()
-        .flex()
-        .flex_row()
-        .bg(style::code_bg_color(tokens, opts))
-        .border_l(px(opts.blockquote_border_width))
-        .border_color(accent)
-        .rounded(px(tokens.radii.sm))
-        .child(
-            div()
-                .flex_1()
-                .pl(px(opts.list_indent))
-                .when_some(kind, |content, kind| {
-                    content.child(render_callout_label(kind, accent, tokens, opts))
-                })
-                .child(render_selectable_blocks(
-                    blocks,
-                    tokens,
-                    opts,
-                    code_actions,
-                    &format!("{path}:quote"),
-                    render_text,
-                )),
-        )
-        .into_any_element()
+    let body = render_selectable_blocks(
+        blocks,
+        tokens,
+        opts,
+        code_actions,
+        &format!("{path}:quote"),
+        render_text,
+    );
+    render_blockquote_shell(kind, tokens, opts, body)
 }
 
-fn render_callout_label(
-    kind: CalloutKind,
-    accent: Hsla,
-    tokens: &ThemeTokens,
-    opts: &MarkdownOptions,
-) -> AnyElement {
+fn render_callout_label(kind: CalloutKind, accent: Hsla, opts: &MarkdownOptions) -> AnyElement {
     div()
-        .mb(px(opts.block_gap * 0.5))
+        .mb(px(6.0))
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(px(6.0))
         .text_size(style::code_label_font_size(opts))
         .text_color(accent)
         .font(Font {
-            weight: FontWeight::BOLD,
+            weight: FontWeight::SEMIBOLD,
             ..style::body_font(opts)
         })
-        .child(SharedString::from(callout_label(kind, tokens)))
+        .child(
+            svg()
+                .path(callout_icon_path(kind))
+                .size(px(13.0))
+                .text_color(accent),
+        )
+        .child(SharedString::from(callout_label(kind)))
         .into_any_element()
 }
 
-fn callout_label(kind: CalloutKind, _tokens: &ThemeTokens) -> &'static str {
+fn callout_label(kind: CalloutKind) -> &'static str {
     match kind {
         CalloutKind::Note => "NOTE",
         CalloutKind::Tip => "TIP",
@@ -1749,14 +1912,23 @@ fn callout_label(kind: CalloutKind, _tokens: &ThemeTokens) -> &'static str {
     }
 }
 
+fn callout_icon_path(kind: CalloutKind) -> &'static str {
+    match kind {
+        CalloutKind::Note => "lucide/info.svg",
+        CalloutKind::Tip => "lucide/sparkles.svg",
+        CalloutKind::Important => "lucide/alert-circle.svg",
+        CalloutKind::Warning => "lucide/alert-triangle.svg",
+        CalloutKind::Caution => "lucide/shield-alert.svg",
+    }
+}
+
 fn callout_color(kind: Option<CalloutKind>, tokens: &ThemeTokens) -> Hsla {
     match kind {
+        Some(CalloutKind::Note) => style::hex_to_hsla(tokens.ui.info),
         Some(CalloutKind::Tip) => style::hex_to_hsla(tokens.ui.success),
-        Some(CalloutKind::Warning) | Some(CalloutKind::Caution) => {
-            style::hex_to_hsla(tokens.ui.warning)
-        }
-        Some(CalloutKind::Important) => style::hex_to_hsla(tokens.ui.error),
-        Some(CalloutKind::Note) => style::accent_color(tokens),
+        Some(CalloutKind::Important) => style::hex_to_hsla(tokens.ui.accent_secondary),
+        Some(CalloutKind::Warning) => style::hex_to_hsla(tokens.ui.warning),
+        Some(CalloutKind::Caution) => style::hex_to_hsla(tokens.ui.error),
         None => style::blockquote_border_color(tokens),
     }
 }
@@ -1830,6 +2002,7 @@ fn render_table_cell(
                         opts,
                         FlatRunStyle {
                             semibold: header,
+                            color_override: header.then(|| style::heading_color(tokens)),
                             ..Default::default()
                         },
                         render_text,
@@ -1860,6 +2033,10 @@ fn render_selectable_table(
 
     // Both rendering paths share minimum widths so selection does not alter table layout.
     let has_body_rows = !rows.is_empty();
+    let table_radius = px(tokens.radii.md);
+    let cell_divider = style::table_cell_divider_color(tokens);
+    let zebra_bg = style::table_zebra_bg(tokens, opts);
+    let hover_bg = style::table_row_hover_bg(tokens);
     let header_row = div()
         .id("table-header")
         .w_full()
@@ -1872,8 +2049,8 @@ fn render_selectable_table(
         .border_color(style::table_border_color(tokens))
         // Selectable table rows need their own corner radii for the same
         // reason as normal tables: selection text is not the clipping owner.
-        .rounded_t(px(tokens.radii.sm))
-        .when(!has_body_rows, |row| row.rounded_b(px(tokens.radii.sm)))
+        .rounded_t(table_radius)
+        .when(!has_body_rows, |row| row.rounded_b(table_radius))
         .children((0..col_count).map(|ci| {
             let cell: &[Block] = headers.get(ci).map(|v| v.as_slice()).unwrap_or(&[]);
             div()
@@ -1883,8 +2060,9 @@ fn render_selectable_table(
                 .min_w(px(0.0))
                 .overflow_hidden()
                 .whitespace_normal()
-                .px(px(10.0))
-                .py(px(5.0))
+                .when(ci > 0, |col| col.border_l_1().border_color(cell_divider))
+                .px(px(12.0))
+                .py(px(7.0))
                 .text_align(table_alignment_text_align(alignment_for_column(
                     alignments, ci,
                 )))
@@ -1920,13 +2098,13 @@ fn render_selectable_table(
             .flex()
             .flex_row()
             .overflow_hidden()
+            .when(ri % 2 == 1, |row| row.bg(zebra_bg))
+            .hover(move |row| row.bg(hover_bg))
             .when(ri + 1 != rows.len(), |row| {
                 row.border_b_1()
                     .border_color(style::table_border_color(tokens))
             })
-            .when(ri + 1 == rows.len(), |row| {
-                row.rounded_b(px(tokens.radii.sm))
-            })
+            .when(ri + 1 == rows.len(), |row| row.rounded_b(table_radius))
             .children((0..col_count).map(|ci| {
                 let cell: &[Block] = row.get(ci).map(|v| v.as_slice()).unwrap_or(&[]);
                 div()
@@ -1936,8 +2114,9 @@ fn render_selectable_table(
                     .min_w(px(0.0))
                     .overflow_hidden()
                     .whitespace_normal()
-                    .px(px(10.0))
-                    .py(px(5.0))
+                    .when(ci > 0, |col| col.border_l_1().border_color(cell_divider))
+                    .px(px(12.0))
+                    .py(px(7.0))
                     .text_align(table_alignment_text_align(alignment_for_column(
                         alignments, ci,
                     )))
@@ -1979,7 +2158,7 @@ fn render_selectable_table(
                 .min_w(px(min_width))
                 .border_1()
                 .border_color(style::table_border_color(tokens))
-                .rounded(px(tokens.radii.sm))
+                .rounded(table_radius)
                 .overflow_hidden()
                 .child(header_row)
                 .children(body_rows),
@@ -2119,25 +2298,105 @@ fn block_alignment_text_align(alignment: BlockAlignment) -> TextAlign {
 
 // ─── lists ──────────────────────────────────────────────────────────────
 
+fn unordered_bullet_for_depth(depth: usize) -> &'static str {
+    match depth % 3 {
+        0 => "•",
+        1 => "◦",
+        _ => "▪",
+    }
+}
+
+fn ordered_marker_width(start: u64, count: usize, opts: &MarkdownOptions) -> f32 {
+    let max_number = start.saturating_add(count.saturating_sub(1) as u64);
+    let digits = max_number.to_string().len() + 1; // digits + '.'
+    opts.list_indent.max(digits as f32 * opts.base_font_size * 0.62)
+}
+
+fn render_list_marker(
+    marker: &str,
+    checked: Option<bool>,
+    marker_width: f32,
+    ordered: bool,
+    tokens: &ThemeTokens,
+    opts: &MarkdownOptions,
+) -> AnyElement {
+    if opts.enable_task_lists
+        && let Some(is_checked) = checked
+    {
+        let box_size = 14.0_f32;
+        let line_px = opts.base_font_size * style::BODY_LINE_HEIGHT;
+        let top_offset = ((line_px - box_size) * 0.5).max(0.0);
+        let checkbox = div()
+            .size(px(box_size))
+            .mt(px(top_offset))
+            .rounded(px(3.5))
+            .flex()
+            .items_center()
+            .justify_center()
+            .when(is_checked, |el| {
+                el.bg(style::accent_color(tokens)).child(
+                    svg()
+                        .path("lucide/check.svg")
+                        .size(px(10.0))
+                        .text_color(style::accent_text_color(tokens)),
+                )
+            })
+            .when(!is_checked, |el| {
+                el.border_1()
+                    .border_color(style::checkbox_border_color(tokens))
+            });
+        return div()
+            .w(px(marker_width))
+            .flex_none()
+            .flex()
+            .justify_center()
+            .child(checkbox)
+            .into_any_element();
+    }
+
+    div()
+        .w(px(marker_width))
+        .flex_none()
+        .flex()
+        .when(ordered, |el| el.justify_end())
+        .when(!ordered, |el| el.justify_center())
+        .text_color(style::muted_color(tokens))
+        .child(SharedString::from(marker.to_string()))
+        .into_any_element()
+}
+
+fn list_item_gap(opts: &MarkdownOptions) -> f32 {
+    (opts.base_font_size * 0.42).round().max(4.0)
+}
+
 fn render_unordered_list(
     items: &[ListItem],
     tokens: &ThemeTokens,
     opts: &MarkdownOptions,
     code_actions: Option<&MarkdownCodeBlockActions>,
 ) -> AnyElement {
+    let bullet = unordered_bullet_for_depth(opts.list_depth);
+    let marker_width = opts.list_indent.min(18.0);
     div()
         .w_full()
         .min_w_0()
         .flex()
         .flex_col()
-        .gap(px(tokens.spacing.one))
-        .pl(px(opts.list_indent))
+        .gap(px(list_item_gap(opts)))
         .children(items.iter().enumerate().map(|(index, item)| {
             div()
                 .id(("markdown-list-item", index))
                 .w_full()
                 .min_w_0()
-                .child(render_list_item("•", item, tokens, opts, code_actions))
+                .child(render_list_item(
+                    bullet,
+                    marker_width,
+                    false,
+                    item,
+                    tokens,
+                    opts,
+                    code_actions,
+                ))
         }))
         .into_any_element()
 }
@@ -2149,20 +2408,28 @@ fn render_ordered_list(
     opts: &MarkdownOptions,
     code_actions: Option<&MarkdownCodeBlockActions>,
 ) -> AnyElement {
+    let marker_width = ordered_marker_width(start, items.len(), opts);
     div()
         .w_full()
         .min_w_0()
         .flex()
         .flex_col()
-        .gap(px(tokens.spacing.one))
-        .pl(px(opts.list_indent))
+        .gap(px(list_item_gap(opts)))
         .children(items.iter().enumerate().map(|(i, item)| {
             let marker = format!("{}.", start + i as u64);
             div()
                 .id(("markdown-list-item", i))
                 .w_full()
                 .min_w_0()
-                .child(render_list_item(&marker, item, tokens, opts, code_actions))
+                .child(render_list_item(
+                    &marker,
+                    marker_width,
+                    true,
+                    item,
+                    tokens,
+                    opts,
+                    code_actions,
+                ))
         }))
         .into_any_element()
 }
@@ -2180,16 +2447,19 @@ fn render_selectable_unordered_list(
         Vec<MarkdownTextLink>,
     ) -> AnyElement,
 ) -> AnyElement {
+    let bullet = unordered_bullet_for_depth(opts.list_depth);
+    let marker_width = opts.list_indent.min(18.0);
     div()
         .w_full()
         .min_w_0()
         .flex()
         .flex_col()
-        .gap(px(tokens.spacing.one))
-        .pl(px(opts.list_indent))
+        .gap(px(list_item_gap(opts)))
         .children(items.iter().enumerate().map(|(index, item)| {
             render_selectable_list_item(
-                "•",
+                bullet,
+                marker_width,
+                false,
                 item,
                 tokens,
                 opts,
@@ -2215,17 +2485,19 @@ fn render_selectable_ordered_list(
         Vec<MarkdownTextLink>,
     ) -> AnyElement,
 ) -> AnyElement {
+    let marker_width = ordered_marker_width(start, items.len(), opts);
     div()
         .w_full()
         .min_w_0()
         .flex()
         .flex_col()
-        .gap(px(tokens.spacing.one))
-        .pl(px(opts.list_indent))
+        .gap(px(list_item_gap(opts)))
         .children(items.iter().enumerate().map(|(index, item)| {
             let marker = format!("{}.", start + index as u64);
             render_selectable_list_item(
                 &marker,
+                marker_width,
+                true,
                 item,
                 tokens,
                 opts,
@@ -2239,20 +2511,18 @@ fn render_selectable_ordered_list(
 
 fn render_list_item(
     marker: &str,
+    marker_width: f32,
+    ordered: bool,
     item: &ListItem,
     tokens: &ThemeTokens,
     opts: &MarkdownOptions,
     code_actions: Option<&MarkdownCodeBlockActions>,
 ) -> AnyElement {
-    // Task list checkbox overrides the bullet/number marker when enabled.
-    let effective_marker = if opts.enable_task_lists {
-        match item.checked {
-            Some(true) => "☑",
-            Some(false) => "☐",
-            None => marker,
-        }
+    let completed_task = opts.enable_task_lists && item.checked == Some(true);
+    let item_text_color = if completed_task {
+        style::checked_item_text_color(tokens)
     } else {
-        marker
+        style::text_color(tokens)
     };
 
     let mut col = div()
@@ -2265,21 +2535,31 @@ fn render_list_item(
             let header = div()
                 .flex()
                 .flex_row()
+                .items_start()
                 .gap(px(tokens.spacing.two))
-                .child(
-                    div()
-                        .w(px(opts.list_indent))
-                        .flex_none()
-                        .text_color(style::muted_color(tokens))
-                        .child(SharedString::from(effective_marker.to_string())),
-                )
+                .child(render_list_marker(
+                    marker,
+                    item.checked,
+                    marker_width,
+                    ordered,
+                    tokens,
+                    opts,
+                ))
                 .child(
                     div()
                         .flex_1()
                         .min_w_0()
                         .whitespace_normal()
-                        .text_color(style::text_color(tokens))
-                        .child(render_styled_inlines(&item.inlines, tokens, opts)),
+                        .text_color(item_text_color)
+                        .child(render_styled_inlines_with_style(
+                            &item.inlines,
+                            tokens,
+                            opts,
+                            FlatRunStyle {
+                                color_override: completed_task.then_some(item_text_color),
+                                ..Default::default()
+                            },
+                        )),
                 )
                 .into_any_element();
             if let (Some(sync), Some(span)) = (&opts.scroll_sync, item.source) {
@@ -2291,14 +2571,16 @@ fn render_list_item(
 
     // Render nested child blocks if present.
     if !item.children.is_empty() {
+        let mut child_opts = opts.clone();
+        child_opts.list_depth = opts.list_depth.saturating_add(1);
         col = col.child(
             div()
-                .mt(px(opts.block_gap))
-                .pl(px(opts.list_indent + tokens.spacing.two))
+                .mt(px(list_item_gap(opts)))
+                .pl(px(marker_width + tokens.spacing.two))
                 .child(render_blocks_with_code_actions(
                     &item.children,
                     tokens,
-                    opts,
+                    &child_opts,
                     code_actions,
                 )),
         );
@@ -2307,8 +2589,11 @@ fn render_list_item(
     col.into_any_element()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_selectable_list_item(
     marker: &str,
+    marker_width: f32,
+    ordered: bool,
     item: &ListItem,
     tokens: &ThemeTokens,
     opts: &MarkdownOptions,
@@ -2321,14 +2606,11 @@ fn render_selectable_list_item(
         Vec<MarkdownTextLink>,
     ) -> AnyElement,
 ) -> AnyElement {
-    let effective_marker = if opts.enable_task_lists {
-        match item.checked {
-            Some(true) => "☑",
-            Some(false) => "☐",
-            None => marker,
-        }
+    let completed_task = opts.enable_task_lists && item.checked == Some(true);
+    let item_text_color = if completed_task {
+        style::checked_item_text_color(tokens)
     } else {
-        marker
+        style::text_color(tokens)
     };
 
     let mut col = div()
@@ -2341,25 +2623,31 @@ fn render_selectable_list_item(
             let header = div()
                 .flex()
                 .flex_row()
+                .items_start()
                 .gap(px(tokens.spacing.two))
-                .child(
-                    div()
-                        .w(px(opts.list_indent))
-                        .flex_none()
-                        .text_color(style::muted_color(tokens))
-                        .child(SharedString::from(effective_marker.to_string())),
-                )
+                .child(render_list_marker(
+                    marker,
+                    item.checked,
+                    marker_width,
+                    ordered,
+                    tokens,
+                    opts,
+                ))
                 .child(
                     div()
                         .flex_1()
                         .min_w_0()
                         .whitespace_normal()
-                        .text_color(style::text_color(tokens))
-                        .child(render_selectable_inlines(
+                        .text_color(item_text_color)
+                        .child(render_selectable_inlines_with_style(
                             path,
                             &item.inlines,
                             tokens,
                             opts,
+                            FlatRunStyle {
+                                color_override: completed_task.then_some(item_text_color),
+                                ..Default::default()
+                            },
                             render_text,
                         )),
                 )
@@ -2372,23 +2660,20 @@ fn render_selectable_list_item(
         });
 
     if !item.children.is_empty() {
+        let mut child_opts = opts.clone();
+        child_opts.list_depth = opts.list_depth.saturating_add(1);
         col = col.child(
             div()
-                .flex()
-                .flex_col()
-                .gap(px(opts.block_gap))
-                .mt(px(opts.block_gap))
-                .pl(px(opts.list_indent + tokens.spacing.two))
-                .children(item.children.iter().enumerate().map(|(index, block)| {
-                    render_selectable_block(
-                        block,
-                        tokens,
-                        opts,
-                        code_actions,
-                        &format!("{path}:child:{index}"),
-                        render_text,
-                    )
-                })),
+                .mt(px(list_item_gap(opts)))
+                .pl(px(marker_width + tokens.spacing.two))
+                .child(render_selectable_blocks(
+                    &item.children,
+                    tokens,
+                    &child_opts,
+                    code_actions,
+                    &format!("{path}:child"),
+                    render_text,
+                )),
         );
     }
 
@@ -2655,8 +2940,9 @@ fn render_selectable_inlines_with_style(
             let depth = math::render_math_svg(latex, run.math_display, tokens, opts)
                 .ok()
                 .map(|image| image.baseline_depth);
+            let math_key = format!("{key}:math:{index}");
             children.push(InlineFlowChild {
-                element: render_math(latex, run.math_display, tokens, opts),
+                element: render_math(&math_key, latex, run.math_display, tokens, opts),
                 depth,
                 block: run.math_display,
                 break_before: run.math_display || breaks.contains(&logical_cursor),
@@ -3015,6 +3301,7 @@ fn should_open_link(url: &str, opts: &MarkdownOptions) -> bool {
 }
 
 fn render_math(
+    math_key: &str,
     latex: &str,
     display: bool,
     tokens: &ThemeTokens,
@@ -3027,8 +3314,14 @@ fn render_math(
                 .h(px(rendered.display_height))
                 .flex_shrink_0();
             if display {
+                let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                math_key.hash(&mut hasher);
+                latex.hash(&mut hasher);
                 div()
-                    .id("markdown-display-math")
+                    .id(SharedString::from(format!(
+                        "markdown-display-math:{:016x}",
+                        hasher.finish()
+                    )))
                     .w_full()
                     .min_w_0()
                     .restrict_scroll_to_axis()
@@ -3095,6 +3388,10 @@ fn text_run_for_flat(
 
     let color: Hsla = if run.link {
         style::accent_color(tokens)
+    } else if let Some(override_color) = run.color_override {
+        override_color
+    } else if run.code {
+        style::inline_code_text_color(tokens)
     } else {
         style::text_color(tokens)
     };
@@ -3111,7 +3408,7 @@ fn text_run_for_flat(
         Some(UnderlineStyle {
             thickness: px(1.0),
             color: Some(if run.link {
-                style::accent_color(tokens)
+                style::link_underline_color(tokens)
             } else {
                 style::text_color(tokens)
             }),
@@ -3166,6 +3463,7 @@ struct FlatRun {
     strikethrough: bool,
     underline: bool,
     highlight: bool,
+    color_override: Option<Hsla>,
     script_position: ScriptPosition,
     /// If set, this run represents an image and should be rendered via `img()`.
     image_url: Option<String>,
@@ -3203,6 +3501,7 @@ struct FlatRunStyle {
     strikethrough: bool,
     underline: bool,
     highlight: bool,
+    color_override: Option<Hsla>,
     script_position: ScriptPosition,
 }
 
@@ -3221,6 +3520,7 @@ fn collect_runs(inlines: &[Inline], run_style: FlatRunStyle, out: &mut Vec<FlatR
                     strikethrough: run_style.strikethrough,
                     underline: run_style.underline,
                     highlight: run_style.highlight,
+                    color_override: run_style.color_override,
                     script_position: run_style.script_position,
                     image_url: None,
                     image_dimensions: Default::default(),
@@ -3261,6 +3561,7 @@ fn collect_runs(inlines: &[Inline], run_style: FlatRunStyle, out: &mut Vec<FlatR
                     strikethrough: run_style.strikethrough,
                     underline: run_style.underline,
                     highlight: run_style.highlight,
+                    color_override: run_style.color_override,
                     script_position: run_style.script_position,
                     image_url: None,
                     image_dimensions: Default::default(),
@@ -3362,6 +3663,7 @@ fn collect_runs(inlines: &[Inline], run_style: FlatRunStyle, out: &mut Vec<FlatR
                     strikethrough: false,
                     underline: false,
                     highlight: false,
+                    color_override: None,
                     script_position: ScriptPosition::Normal,
                     image_url: Some(url.clone()),
                     image_dimensions: *dimensions,
@@ -3382,6 +3684,7 @@ fn collect_runs(inlines: &[Inline], run_style: FlatRunStyle, out: &mut Vec<FlatR
                     strikethrough: false,
                     underline: false,
                     highlight: false,
+                    color_override: None,
                     script_position: ScriptPosition::Normal,
                     image_url: None,
                     image_dimensions: Default::default(),
@@ -3404,6 +3707,7 @@ fn collect_runs(inlines: &[Inline], run_style: FlatRunStyle, out: &mut Vec<FlatR
                     strikethrough: run_style.strikethrough,
                     underline: run_style.underline,
                     highlight: run_style.highlight,
+                    color_override: run_style.color_override,
                     script_position: run_style.script_position,
                     image_url: None,
                     image_dimensions: Default::default(),
@@ -3424,6 +3728,7 @@ fn collect_runs(inlines: &[Inline], run_style: FlatRunStyle, out: &mut Vec<FlatR
                     strikethrough: run_style.strikethrough,
                     underline: run_style.underline,
                     highlight: run_style.highlight,
+                    color_override: run_style.color_override,
                     script_position: run_style.script_position,
                     image_url: None,
                     image_dimensions: Default::default(),
@@ -3444,6 +3749,7 @@ fn collect_runs(inlines: &[Inline], run_style: FlatRunStyle, out: &mut Vec<FlatR
                     strikethrough: run_style.strikethrough,
                     underline: run_style.underline,
                     highlight: run_style.highlight,
+                    color_override: run_style.color_override,
                     script_position: run_style.script_position,
                     image_url: None,
                     image_dimensions: Default::default(),
@@ -3525,18 +3831,18 @@ mod tests {
         layout.record_height(30, 22.0);
         let layout = measurements.prepare(&document, 640.0, &opts);
         let heights = layout.heights();
-        assert_eq!(heights.total(), 2902.0);
-        for viewport_top in [2702.0, 2802.0, 3702.0] {
+        assert_eq!(heights.total(), 2422.0);
+        for viewport_top in [2222.0, 2322.0, 3222.0] {
             let window =
                 super::markdown_virtual_window(&heights, viewport_top, 200.0, 0.0).unwrap();
-            assert_eq!(window.range, 28..31);
-            assert_eq!(window.top_spacer, 2688.0, "scroll top {viewport_top}");
+            assert_eq!(window.range, 27..31);
+            assert_eq!(window.top_spacer, 2160.0, "scroll top {viewport_top}");
             assert_eq!(window.bottom_spacer, 0.0);
         }
-        let window = super::markdown_virtual_window(&heights, 2602.0, 200.0, 0.0).unwrap();
-        assert_eq!(window.range, 27..30);
-        assert_eq!(window.top_spacer, 2592.0);
-        assert_eq!(window.bottom_spacer, 38.0);
+        let window = super::markdown_virtual_window(&heights, 2122.0, 200.0, 0.0).unwrap();
+        assert_eq!(window.range, 26..30);
+        assert_eq!(window.top_spacer, 2080.0);
+        assert_eq!(window.bottom_spacer, 22.0);
         let resized = measurements.prepare(&document, 320.0, &opts);
         assert_eq!(f32::from(resized.item_sizes()[0].height), 22.0);
         let changed = crate::parser::parse("Replacement paragraph");
@@ -3549,6 +3855,29 @@ mod tests {
                 }
             )]
         );
+    }
+
+    #[test]
+    fn adjacent_block_spacing_enforces_heading_proximity_and_tight_pairs() {
+        let opts = super::MarkdownOptions::default();
+        let doc = crate::parser::parse(
+            "# Main\n\n## Sub\n\nLead paragraph:\n\n- item 1\n\nSecond paragraph.\n\n### Deep\n\nBody.\n\n```rust\nfn x() {}\n```",
+        );
+        let blocks = &doc.blocks;
+        let gap = |i: usize| {
+            crate::style::block_spacing_before(i.checked_sub(1).map(|p| &blocks[p]), &blocks[i], &opts)
+        };
+
+        assert_eq!(gap(0), 0.0);
+        // Consecutive H1 -> H2 stays tight instead of inserting a full section break.
+        assert!(gap(1) < gap(5));
+        // Headings sit noticeably closer to their own following body than to preceding content.
+        assert!(gap(6) < gap(5));
+        assert!(gap(2) < gap(5));
+        // Lead-in paragraph -> list is tighter than paragraph -> paragraph.
+        assert!(gap(3) < gap(4));
+        // Heavy visual block (code block) gets more breathing room than prose -> prose.
+        assert!(gap(7) > gap(4));
     }
 
     #[test]

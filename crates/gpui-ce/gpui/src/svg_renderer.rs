@@ -32,6 +32,98 @@ const EMOJI_FONT_FAMILIES: &[&str] = &[
 )))]
 const EMOJI_FONT_FAMILIES: &[&str] = &[];
 
+#[cfg(target_os = "macos")]
+const CJK_FONT_FAMILIES: &[&str] = &[
+    "PingFang SC",
+    "Hiragino Sans GB",
+    "Noto Sans SC",
+    "Noto Sans CJK SC",
+    "Heiti SC",
+    "STHeiti",
+    "PingFang TC",
+    "PingFang HK",
+    "Hiragino Sans",
+    "Apple SD Gothic Neo",
+];
+
+#[cfg(target_os = "windows")]
+const CJK_FONT_FAMILIES: &[&str] = &[
+    "Microsoft YaHei UI",
+    "Microsoft YaHei",
+    "Noto Sans SC",
+    "Noto Sans CJK SC",
+    "DengXian",
+    "SimHei",
+    "Meiryo",
+    "Yu Gothic UI",
+    "Malgun Gothic",
+];
+
+#[cfg(any(target_os = "linux", target_os = "freebsd"))]
+const CJK_FONT_FAMILIES: &[&str] = &[
+    "Noto Sans CJK SC",
+    "Noto Sans SC",
+    "Source Han Sans SC",
+    "WenQuanYi Micro Hei",
+    "WenQuanYi Zen Hei",
+    "Droid Sans Fallback",
+    "Noto Sans CJK JP",
+    "Noto Sans CJK TC",
+];
+
+#[cfg(not(any(
+    target_os = "macos",
+    target_os = "windows",
+    target_os = "linux",
+    target_os = "freebsd",
+)))]
+const CJK_FONT_FAMILIES: &[&str] = &[];
+
+fn is_cjk_char(ch: char) -> bool {
+    matches!(
+        ch as u32,
+        0x2E80..=0x2FFF
+            | 0x3000..=0x30FF
+            | 0x3100..=0x31FF
+            | 0x3200..=0x4DBF
+            | 0x4E00..=0x9FFF
+            | 0xAC00..=0xD7AF
+            | 0xF900..=0xFAFF
+            | 0xFE30..=0xFE4F
+            | 0xFF00..=0xFFEF
+            | 0x20000..=0x2FA1F
+    )
+}
+
+#[cfg(target_os = "macos")]
+fn load_macos_asset_fonts(db: &mut usvg::fontdb::Database) {
+    // macOS 15+ stores PingFang.ttc in MobileAsset bundles under
+    // /System/Library/AssetsV2/com_apple_MobileAsset_Font*, which fontdb's
+    // load_system_fonts() does not scan.
+    let Ok(root) = std::fs::read_dir("/System/Library/AssetsV2") else {
+        return;
+    };
+    for entry in root.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        if !name.starts_with("com_apple_MobileAsset_Font") {
+            continue;
+        }
+        let Ok(bundles) = std::fs::read_dir(entry.path()) else {
+            continue;
+        };
+        for bundle in bundles.flatten() {
+            let pingfang = bundle.path().join("AssetData").join("PingFang.ttc");
+            if pingfang.is_file() {
+                let _ = db.load_font_file(&pingfang);
+                return;
+            }
+        }
+    }
+}
+
 fn is_emoji_presentation(c: char) -> bool {
     static EMOJI_PRESENTATION_REGEX: LazyLock<regex::Regex> =
         LazyLock::new(|| regex::Regex::new("\\p{Emoji_Presentation}").unwrap());
@@ -77,17 +169,65 @@ fn select_emoji_font(
     None
 }
 
+fn select_preferred_cjk_font(
+    ch: char,
+    base: &usvg::fontdb::FaceInfo,
+    used: &[usvg::fontdb::ID],
+    db: &usvg::fontdb::Database,
+    families: &[&str],
+) -> Option<usvg::fontdb::ID> {
+    let queries = [
+        (base.weight, base.stretch, base.style),
+        (
+            usvg::fontdb::Weight::NORMAL,
+            usvg::fontdb::Stretch::Normal,
+            usvg::fontdb::Style::Normal,
+        ),
+    ];
+    for (weight, stretch, style) in queries {
+        for family_name in families {
+            let query = usvg::fontdb::Query {
+                families: &[usvg::fontdb::Family::Name(family_name)],
+                weight,
+                stretch,
+                style,
+            };
+            let Some(id) = db.query(&query) else {
+                continue;
+            };
+            if used.contains(&id) || !font_has_char(db, id, ch) {
+                continue;
+            }
+            return Some(id);
+        }
+    }
+    None
+}
+
 fn select_text_fallback(
     ch: char,
     used: &[usvg::fontdb::ID],
     db: &usvg::fontdb::Database,
 ) -> Option<usvg::fontdb::ID> {
     let base = db.face(*used.first()?)?;
+    if is_cjk_char(ch)
+        && let Some(id) = select_preferred_cjk_font(ch, base, used, db, CJK_FONT_FAMILIES)
+    {
+        return Some(id);
+    }
     let supports = |id| !used.contains(&id) && font_has_char(db, id, ch);
+    let is_last_resort = |face: &usvg::fontdb::FaceInfo| {
+        face.families
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case(".LastResort") || name == "LastResort")
+    };
     // Prefer matching text metrics before accepting any face that can supply the glyph.
-    // Keep the exact-style and relaxed search passes disjoint.
+    // Keep the exact-style and relaxed search passes disjoint, skipping LastResort faces.
     for exact_match in [true, false] {
         for face in db.faces() {
+            if is_last_resort(face) {
+                continue;
+            }
             let matching = face.style == base.style
                 && face.weight == base.weight
                 && face.stretch == base.stretch
@@ -148,6 +288,8 @@ impl SvgRenderer {
         static SYSTEM_FONT_DB: LazyLock<Arc<usvg::fontdb::Database>> = LazyLock::new(|| {
             let mut db = usvg::fontdb::Database::new();
             db.load_system_fonts();
+            #[cfg(target_os = "macos")]
+            load_macos_asset_fonts(&mut db);
             Arc::new(db)
         });
 
@@ -614,5 +756,47 @@ mod tests {
             "Monospace should map to Lilex, got {:?}",
             face.families
         );
+    }
+
+    #[test]
+    fn cjk_text_fallback_prefers_platform_sans_serif_cjk_font() {
+        assert!(is_cjk_char('项'));
+        assert!(is_cjk_char('，'));
+        assert!(!is_cjk_char('A'));
+        assert!(!is_cjk_char('😀'));
+
+        let mut db = Database::new();
+        db.load_system_fonts();
+        #[cfg(target_os = "macos")]
+        load_macos_asset_fonts(&mut db);
+        db.load_font_data(IBM_PLEX_REGULAR.to_vec());
+        let base = db
+            .query(&Query {
+                families: &[Family::Name("IBM Plex Sans")],
+                ..Default::default()
+            })
+            .expect("IBM Plex Sans should resolve");
+
+        if let Some(selected) = select_text_fallback('项', &[base], &db) {
+            let face = db.face(selected).expect("selected fallback face");
+            let has_preferred = CJK_FONT_FAMILIES.iter().any(|preferred| {
+                db.query(&Query {
+                    families: &[Family::Name(preferred)],
+                    ..Default::default()
+                })
+                .is_some_and(|id| font_has_char(&db, id, '项'))
+            });
+            if has_preferred {
+                assert!(
+                    face.families.iter().any(|(name, _)| {
+                        CJK_FONT_FAMILIES
+                            .iter()
+                            .any(|preferred| name.eq_ignore_ascii_case(preferred))
+                    }),
+                    "Expected a preferred CJK sans-serif fallback, got {:?}",
+                    face.families
+                );
+            }
+        }
     }
 }

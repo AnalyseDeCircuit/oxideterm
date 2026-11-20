@@ -72,7 +72,7 @@ impl MarkdownNavigation {
         let mut top = 0.0;
         for (block, size) in document.blocks.iter().zip(layout.item_sizes().iter()) {
             register_targets(block, top, &[], &mut state);
-            top += f32::from(size.height) + opts.block_gap;
+            top += f32::from(size.height);
         }
         for (index, footnote) in document.footnotes.iter().enumerate() {
             register_target(format!("fn:{}", index + 1), top, &[], &mut state);

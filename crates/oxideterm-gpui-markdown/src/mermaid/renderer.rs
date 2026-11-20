@@ -129,7 +129,7 @@ impl MermaidRenderRequest {
         };
         let mut theme = Theme::modern();
         theme.font_family = format!(
-            "{}, system-ui, 'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif",
+            "{}, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', 'Noto Sans CJK SC', 'Heiti SC', system-ui, sans-serif",
             self.font_family
         );
         theme.font_size = f32::from_bits(self.font_size);
