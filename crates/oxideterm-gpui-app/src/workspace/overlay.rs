@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use super::*;
-use gpui::{Task, WeakEntity};
+use gpui::{Task, WeakEntity, point};
 use oxideterm_gpui_settings_view::{SettingsSelectAnchorExt, settings_slider_anchor_id};
 use oxideterm_gpui_ui::select::{OverlayAnchor, SelectAnchorId};
 
@@ -1620,31 +1620,53 @@ fn render_connection_card(
     phase: oxideterm_gpui_ui::motion::ExitPhase,
     overlay: Entity<WorkspaceOverlayEntity>,
 ) -> AnyElement {
-    let status_color = match event.status {
-        ConnectionTraceStatus::Ready => tokens.ui.success,
-        ConnectionTraceStatus::Failed => tokens.ui.error,
-        ConnectionTraceStatus::Running | ConnectionTraceStatus::Cancelled => tokens.ui.accent,
+    let theme = tokens.ui;
+    let ready = event.status == ConnectionTraceStatus::Ready;
+    let failed = event.status == ConnectionTraceStatus::Failed;
+    let status_color = if ready {
+        theme.success
+    } else if failed {
+        theme.error
+    } else {
+        theme.accent
+    };
+    let transport = connection_trace_transport(event.stage);
+    let transport_icon = match transport {
+        TraceTransport::Ssh => "lucide/terminal.svg",
+        TraceTransport::Ble => "lucide/bluetooth.svg",
     };
     let title = connection_trace_title(i18n, event);
-    let transport_badge = match connection_trace_transport(event.stage) {
-        TraceTransport::Ssh => "SSH",
-        TraceTransport::Ble => "BLE",
-    };
-    let status = (event.status != ConnectionTraceStatus::Failed)
-        .then(|| connection_trace_status_text(i18n, event));
+    let status_text = (!failed).then(|| connection_trace_status_text(i18n, event));
     let endpoint = event.endpoint.clone();
+    let elapsed_badge =
+        (event.elapsed_ms > 0).then(|| format_connection_trace_elapsed(event.elapsed_ms));
     let attempt_id_for_close = attempt_id.to_string();
-    // Reserve header space for the close action; the absolute toast control
-    // overlaps connection labels in the narrower corner card.
+
+    let (stages, current) = connection_trace_stage_list(event.stage, history);
+    let step_total = stages.len();
+    let step_current = if ready {
+        step_total
+    } else {
+        (current + 1).min(step_total)
+    };
+    let top_progress = if ready {
+        1.0
+    } else if failed {
+        ((current as f32 + 0.5) / step_total.max(1) as f32).clamp(0.12, 0.92)
+    } else {
+        (event.progress / 100.0).clamp(0.08, 0.96)
+    };
+
+    // Reserve dedicated header space for close so long hostnames truncate cleanly.
     let close = oxideterm_gpui_ui::icon_button(
         tokens,
         svg()
             .path("lucide/x.svg")
-            .size(px(tokens.metrics.ui_toast_close_size))
-            .text_color(rgb(tokens.ui.text))
+            .size(px(13.0))
+            .text_color(rgb(theme.text_muted))
             .into_any_element(),
         oxideterm_gpui_ui::IconButtonOptions::opaque_toolbar(
-            tokens.metrics.ui_toast_close_size + tokens.spacing.two,
+            24.0,
             oxideterm_gpui_ui::button::ButtonRadius::Sm,
         ),
     )
@@ -1668,22 +1690,24 @@ fn render_connection_card(
         .w_full()
         .flex()
         .items_center()
-        .gap(px(tokens.spacing.three))
+        .gap(px(10.0))
         .child(
             div()
-                .size(px(44.0))
+                .size(px(28.0))
                 .flex_none()
                 .rounded(px(tokens.radii.md))
-                .bg(rgba((status_color << 8) | 0x24))
+                .bg(rgba((status_color << 8) | 0x1a))
                 .border_1()
-                .border_color(rgba((status_color << 8) | 0x66))
+                .border_color(rgba((status_color << 8) | 0x45))
                 .flex()
                 .items_center()
                 .justify_center()
-                .text_size(px(12.0))
-                .font_weight(gpui::FontWeight::SEMIBOLD)
-                .text_color(rgb(status_color))
-                .child(transport_badge),
+                .child(
+                    svg()
+                        .path(transport_icon)
+                        .size(px(14.0))
+                        .text_color(rgb(status_color)),
+                ),
         )
         .child(
             div()
@@ -1693,56 +1717,144 @@ fn render_connection_card(
                 .overflow_hidden()
                 .flex()
                 .flex_col()
-                .gap(px(3.0))
+                .gap(px(1.5))
                 .child(
                     div()
-                        .text_size(px(18.0))
+                        .truncate()
+                        .text_size(px(13.0))
+                        .line_height(px(17.0))
                         .font_weight(gpui::FontWeight::SEMIBOLD)
-                        .text_color(rgb(tokens.ui.text))
+                        .text_color(rgb(theme.text_heading))
                         .child(title),
                 )
                 .when_some(endpoint, |header, endpoint| {
                     header.child(
                         div()
-                            .text_size(px(12.0))
-                            .text_color(rgb(tokens.ui.text_muted))
-                            .child(format!("{transport_badge}  {endpoint}")),
-                    )
-                })
-                .when_some(status, |header, status| {
-                    header.child(
-                        div()
-                            .text_size(px(13.0))
-                            .text_color(rgb(status_color))
-                            .child(status),
+                            .truncate()
+                            .font_family(tokens.metrics.markdown_code_font_family)
+                            .text_size(px(11.0))
+                            .line_height(px(14.0))
+                            .text_color(rgb(theme.text_muted))
+                            .child(endpoint),
                     )
                 }),
         )
+        .when_some(elapsed_badge, |row, elapsed| {
+            row.child(
+                div()
+                    .flex_none()
+                    .px(px(6.0))
+                    .py(px(2.0))
+                    .rounded(px(tokens.radii.xs))
+                    .bg(rgba(
+                        (if ready { theme.success } else { theme.border } << 8)
+                            | if ready { 0x1e } else { 0x33 },
+                    ))
+                    .font_family(tokens.metrics.markdown_code_font_family)
+                    .text_size(px(10.5))
+                    .line_height(px(13.0))
+                    .text_color(rgb(if ready {
+                        theme.success
+                    } else {
+                        theme.text_muted
+                    }))
+                    .child(elapsed),
+            )
+        })
         .child(close);
 
-    let mut card = oxideterm_gpui_ui::semantic_surface(
+    let top_rail = div()
+        .w_full()
+        .h(px(2.0))
+        .bg(rgba((theme.border << 8) | 0x40))
+        .child(
+            div()
+                .h_full()
+                .w(relative(top_progress))
+                .bg(rgb(status_color)),
+        );
+
+    let mut body = div()
+        .w_full()
+        .px(px(14.0))
+        .py(px(12.0))
+        .flex()
+        .flex_col()
+        .gap(px(10.0))
+        .child(header)
+        .child(render_connection_stage_path(
+            tokens, i18n, attempt_id, event, history,
+        ));
+
+    if let Some(error_log) = render_connection_error_log(tokens, event) {
+        body = body.child(error_log);
+    } else if let Some(status_line) = status_text {
+        body = body.child(
+            div()
+                .w_full()
+                .pt(px(8.0))
+                .border_t_1()
+                .border_color(rgba((theme.border << 8) | 0x45))
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap(px(8.0))
+                .child(
+                    div()
+                        .min_w_0()
+                        .flex_1()
+                        .flex()
+                        .items_center()
+                        .gap(px(6.0))
+                        .child(
+                            div()
+                                .size(px(5.0))
+                                .flex_none()
+                                .rounded_full()
+                                .bg(rgb(status_color)),
+                        )
+                        .child(
+                            div()
+                                .min_w_0()
+                                .flex_1()
+                                .truncate()
+                                .text_size(px(11.5))
+                                .line_height(px(15.0))
+                                .text_color(rgb(if ready {
+                                    theme.success
+                                } else {
+                                    theme.text_secondary
+                                }))
+                                .child(status_line),
+                        ),
+                )
+                .child(
+                    div()
+                        .flex_none()
+                        .font_family(tokens.metrics.markdown_code_font_family)
+                        .text_size(px(10.5))
+                        .text_color(rgb(theme.text_muted))
+                        .child(format!("{step_current}/{step_total}")),
+                ),
+        );
+    }
+
+    let card = oxideterm_gpui_ui::semantic_surface(
         tokens,
         oxideterm_gpui_ui::SurfaceOptions::new(oxideterm_gpui_ui::SurfaceKind::TerminalOverlay)
-            .padding(oxideterm_gpui_ui::SurfacePadding::Spacious),
+            .padding(oxideterm_gpui_ui::SurfacePadding::None),
     )
     .w_full()
+    .overflow_hidden()
     .debug_selector(|| "connection-card".to_string())
     .flex()
     .flex_col()
-    .gap(px(tokens.spacing.three * 2.0))
     .occlude()
     .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
         cx.stop_propagation();
     })
-    .child(header)
-    .child(render_connection_stage_path(
-        tokens, i18n, attempt_id, event, history,
-    ));
-
-    if let Some(error_log) = render_connection_error_log(tokens, event) {
-        card = card.child(error_log);
-    }
-    card = card.child(render_connection_history(tokens, i18n, history));
+    .child(top_rail)
+    .child(body);
 
     oxideterm_gpui_ui::motion::fade(
         tokens,
@@ -1789,6 +1901,32 @@ const BLE_SCAN_STAGES: [(ConnectionTraceStage, &str); 4] = [
     ),
 ];
 
+const SSH_STAGES: [(ConnectionTraceStage, &str); 4] = [
+    (
+        ConnectionTraceStage::OpeningTransport,
+        "connections.trace.stage.opening_transport",
+    ),
+    (
+        ConnectionTraceStage::SshHandshake,
+        "connections.trace.stage.ssh_handshake",
+    ),
+    (
+        ConnectionTraceStage::Authentication,
+        "connections.trace.stage.authentication",
+    ),
+    (ConnectionTraceStage::Ready, "connections.trace.stage.ready"),
+];
+
+fn connection_trace_stage_list(
+    event_stage: ConnectionTraceStage,
+    history: &VecDeque<ConnectionTraceEvent>,
+) -> (&'static [(ConnectionTraceStage, &'static str)], usize) {
+    match connection_trace_transport(event_stage) {
+        TraceTransport::Ble => ble_stage_path(event_stage, history),
+        TraceTransport::Ssh => (&SSH_STAGES, connection_trace_path_index(event_stage)),
+    }
+}
+
 /// BLE stage vocabulary and current-node index for an attempt. Split from the
 /// renderer so the direct/scan fallback rules are testable without gpui.
 fn ble_stage_path(
@@ -1818,6 +1956,276 @@ fn ble_stage_path(
     (stages, current)
 }
 
+fn trace_hsla(hex: u32, alpha: f32) -> gpui::Hsla {
+    let mut color: gpui::Hsla = rgb(hex).into();
+    color.a = alpha.clamp(0.0, 1.0);
+    color
+}
+
+fn trace_circle_fill(
+    center: gpui::Point<gpui::Pixels>,
+    radius: f32,
+) -> Option<gpui::Path<gpui::Pixels>> {
+    if radius <= 0.1 {
+        return None;
+    }
+    let mut builder = gpui::PathBuilder::fill();
+    let cx = f32::from(center.x);
+    let cy = f32::from(center.y);
+    let r = px(radius);
+    builder.move_to(point(px(cx + radius), px(cy)));
+    builder.arc_to(
+        point(r, r),
+        px(0.0),
+        false,
+        true,
+        point(px(cx - radius), px(cy)),
+    );
+    builder.arc_to(
+        point(r, r),
+        px(0.0),
+        false,
+        true,
+        point(px(cx + radius), px(cy)),
+    );
+    builder.close();
+    builder.build().ok()
+}
+
+fn trace_circle_ring(
+    center: gpui::Point<gpui::Pixels>,
+    radius: f32,
+    stroke_w: f32,
+) -> Option<gpui::Path<gpui::Pixels>> {
+    if radius <= 0.1 {
+        return None;
+    }
+    let mut builder = gpui::PathBuilder::stroke(px(stroke_w));
+    let cx = f32::from(center.x);
+    let cy = f32::from(center.y);
+    let r = px(radius);
+    builder.move_to(point(px(cx + radius), px(cy)));
+    builder.arc_to(
+        point(r, r),
+        px(0.0),
+        false,
+        true,
+        point(px(cx - radius), px(cy)),
+    );
+    builder.arc_to(
+        point(r, r),
+        px(0.0),
+        false,
+        true,
+        point(px(cx + radius), px(cy)),
+    );
+    builder.build().ok()
+}
+
+fn paint_connection_signal_track(
+    tokens: &ThemeTokens,
+    stage_count: usize,
+    current: usize,
+    ready: bool,
+    failed: bool,
+    phase: f32,
+    window: &mut Window,
+    bounds: gpui::Bounds<gpui::Pixels>,
+) {
+    let count = stage_count.max(2);
+    let theme = tokens.ui;
+    let light = theme.is_light();
+    let left = f32::from(bounds.origin.x);
+    let width = f32::from(bounds.size.width).max(1.0);
+    let cy = f32::from(bounds.origin.y) + f32::from(bounds.size.height) * 0.5;
+
+    let node_x = |index: usize| -> f32 { left + ((index as f32 + 0.5) / count as f32) * width };
+    let first_x = node_x(0);
+    let last_x = node_x(count - 1);
+    let active_idx = current.min(count - 1);
+    let active_color = if failed {
+        theme.error
+    } else if ready {
+        theme.success
+    } else {
+        theme.accent
+    };
+
+    // Baseline recessed optical track connecting all nodes.
+    window.paint_quad(gpui::fill(
+        gpui::Bounds::new(
+            point(px(first_x), px(cy - 1.0)),
+            gpui::size(px((last_x - first_x).max(0.0)), px(2.0)),
+        ),
+        trace_hsla(theme.border, if light { 0.55 } else { 0.42 }),
+    ));
+
+    // Lit completed rail up to the active node (or full span when Ready).
+    let lit_end_x = if ready { last_x } else { node_x(active_idx) };
+    if lit_end_x > first_x + 0.5 {
+        let rail_color = if ready {
+            theme.success
+        } else if failed {
+            theme.error
+        } else {
+            theme.accent
+        };
+        // Soft ambient under-glow along the energized rail.
+        window.paint_quad(gpui::fill(
+            gpui::Bounds::new(
+                point(px(first_x), px(cy - 3.0)),
+                gpui::size(px(lit_end_x - first_x), px(6.0)),
+            ),
+            trace_hsla(rail_color, if light { 0.14 } else { 0.18 }),
+        ));
+        window.paint_quad(gpui::fill(
+            gpui::Bounds::new(
+                point(px(first_x), px(cy - 1.1)),
+                gpui::size(px(lit_end_x - first_x), px(2.2)),
+            ),
+            trace_hsla(rail_color, 0.92),
+        ));
+    }
+
+    // Live traveling signal comet along the frontier segment while connecting,
+    // or a single emerald confirmation shimmer sweeping the whole track on Ready.
+    let motion_active = tokens.motion.enabled && tokens.motion.spatial_enabled;
+    if !failed && motion_active {
+        let (seg_start, seg_end, comet_color) = if ready {
+            (first_x, last_x, theme.success)
+        } else if active_idx + 1 < count {
+            (node_x(active_idx), node_x(active_idx + 1), theme.accent)
+        } else {
+            (
+                node_x(active_idx.saturating_sub(1)),
+                node_x(active_idx),
+                theme.accent,
+            )
+        };
+        let seg_len = (seg_end - seg_start).max(1.0);
+        let travel = oxideterm_gpui_ui::motion::ease_in_out_cubic(phase);
+        let head_x = seg_start + seg_len * travel;
+        let tail_len = (seg_len * 0.42).min(48.0);
+        // 8-step fading luminous comet tail.
+        let steps = 8usize;
+        for step in 0..steps {
+            let f0 = step as f32 / steps as f32;
+            let f1 = (step + 1) as f32 / steps as f32;
+            let x0 = (head_x - tail_len * f1).max(seg_start);
+            let x1 = (head_x - tail_len * f0).max(seg_start);
+            if x1 > x0 + 0.25 {
+                let fade = (1.0 - f0).powi(2) * (1.0 - (travel - 0.5).abs() * 0.7).max(0.2);
+                window.paint_quad(gpui::fill(
+                    gpui::Bounds::new(
+                        point(px(x0), px(cy - 1.25)),
+                        gpui::size(px(x1 - x0), px(2.5)),
+                    ),
+                    trace_hsla(comet_color, fade * 0.85),
+                ));
+            }
+        }
+        // Bright specular pulse head.
+        let head_alpha = (1.0 - (travel - 0.5).abs() * 1.4).clamp(0.0, 1.0);
+        if head_alpha > 0.05 {
+            if let Some(halo) = trace_circle_fill(point(px(head_x), px(cy)), 4.5) {
+                window.paint_path(halo, trace_hsla(comet_color, head_alpha * 0.34));
+            }
+            if let Some(core) = trace_circle_fill(point(px(head_x), px(cy)), 2.2) {
+                window.paint_path(core, trace_hsla(0xffffff, head_alpha * 0.92));
+            }
+        }
+    }
+
+    // Paint each precision stage node.
+    for index in 0..count {
+        let cx = node_x(index);
+        let center = point(px(cx), px(cy));
+        let completed = ready || index < current;
+        let active = !ready && index == active_idx;
+
+        if active && !failed {
+            // Dual concentric sonar radar rings on the active handshake node.
+            if motion_active {
+                let p1 = oxideterm_gpui_ui::motion::ease_out_cubic(phase);
+                let r1 = oxideterm_gpui_ui::motion::lerp(6.5, 16.0, p1);
+                if let Some(ring1) = trace_circle_ring(center, r1, 1.35) {
+                    window.paint_path(ring1, trace_hsla(active_color, (1.0 - p1) * 0.48));
+                }
+                let p2 = oxideterm_gpui_ui::motion::ease_out_cubic((phase + 0.5) % 1.0);
+                let r2 = oxideterm_gpui_ui::motion::lerp(6.5, 15.0, p2);
+                if let Some(ring2) = trace_circle_ring(center, r2, 1.0) {
+                    window.paint_path(ring2, trace_hsla(active_color, (1.0 - p2) * 0.28));
+                }
+            }
+            // Soft ambient halo + crisp bezel + bright inner spark.
+            if let Some(halo) = trace_circle_fill(center, 10.0) {
+                window.paint_path(
+                    halo,
+                    trace_hsla(active_color, if light { 0.16 } else { 0.22 }),
+                );
+            }
+            if let Some(base) = trace_circle_fill(center, 6.5) {
+                window.paint_path(base, trace_hsla(theme.bg_elevated, 1.0));
+            }
+            if let Some(ring) = trace_circle_ring(center, 6.5, 1.6) {
+                window.paint_path(ring, trace_hsla(active_color, 0.95));
+            }
+            if let Some(core) = trace_circle_fill(center, 3.2) {
+                window.paint_path(core, trace_hsla(active_color, 1.0));
+            }
+            if let Some(glint) = trace_circle_fill(point(px(cx - 0.8), px(cy - 0.8)), 1.1) {
+                window.paint_path(glint, trace_hsla(0xffffff, 0.85));
+            }
+        } else if active && failed {
+            // Crisp crimson fault beacon with vector × mark.
+            if let Some(halo) = trace_circle_fill(center, 11.0) {
+                window.paint_path(halo, trace_hsla(theme.error, 0.20));
+            }
+            if let Some(disc) = trace_circle_fill(center, 6.8) {
+                window.paint_path(disc, trace_hsla(theme.error, 1.0));
+            }
+            let mut cross = gpui::PathBuilder::stroke(px(1.6));
+            cross.move_to(point(px(cx - 2.6), px(cy - 2.6)));
+            cross.line_to(point(px(cx + 2.6), px(cy + 2.6)));
+            cross.move_to(point(px(cx + 2.6), px(cy - 2.6)));
+            cross.line_to(point(px(cx - 2.6), px(cy + 2.6)));
+            if let Ok(path) = cross.build() {
+                window.paint_path(path, trace_hsla(0xffffff, 0.96));
+            }
+        } else if completed {
+            // Completed emerald jewel node with crisp vector checkmark.
+            let done_color = theme.success;
+            if let Some(halo) = trace_circle_fill(center, 8.5) {
+                window.paint_path(
+                    halo,
+                    trace_hsla(done_color, if light { 0.14 } else { 0.18 }),
+                );
+            }
+            if let Some(disc) = trace_circle_fill(center, 6.0) {
+                window.paint_path(disc, trace_hsla(done_color, 1.0));
+            }
+            let mut check = gpui::PathBuilder::stroke(px(1.55));
+            check.move_to(point(px(cx - 2.6), px(cy + 0.1)));
+            check.line_to(point(px(cx - 0.7), px(cy + 2.1)));
+            check.line_to(point(px(cx + 2.9), px(cy - 2.0)));
+            if let Ok(path) = check.build() {
+                window.paint_path(path, trace_hsla(0xffffff, 0.96));
+            }
+        } else {
+            // Quiet pending node.
+            if let Some(disc) = trace_circle_fill(center, 3.8) {
+                window.paint_path(disc, trace_hsla(theme.bg_elevated, 1.0));
+            }
+            if let Some(ring) = trace_circle_ring(center, 3.8, 1.35) {
+                window.paint_path(
+                    ring,
+                    trace_hsla(theme.border, if light { 0.85 } else { 0.72 }),
+                );
+            }
+        }
+    }
+}
+
 fn render_connection_stage_path(
     tokens: &ThemeTokens,
     i18n: &I18n,
@@ -1825,213 +2233,102 @@ fn render_connection_stage_path(
     event: &ConnectionTraceEvent,
     history: &VecDeque<ConnectionTraceEvent>,
 ) -> AnyElement {
-    const SSH_STAGES: [(ConnectionTraceStage, &str); 4] = [
-        (
-            ConnectionTraceStage::OpeningTransport,
-            "connections.trace.stage.opening_transport",
-        ),
-        (
-            ConnectionTraceStage::SshHandshake,
-            "connections.trace.stage.ssh_handshake",
-        ),
-        (
-            ConnectionTraceStage::Authentication,
-            "connections.trace.stage.authentication",
-        ),
-        (ConnectionTraceStage::Ready, "connections.trace.stage.ready"),
-    ];
-    let (stages, current): (&[(ConnectionTraceStage, &str)], usize) =
-        match connection_trace_transport(event.stage) {
-            TraceTransport::Ble => ble_stage_path(event.stage, history),
-            TraceTransport::Ssh => (&SSH_STAGES, connection_trace_path_index(event.stage)),
-        };
+    let (stages, current) = connection_trace_stage_list(event.stage, history);
     let failed = event.status == ConnectionTraceStatus::Failed;
     let ready = event.status == ConnectionTraceStatus::Ready;
+    let stage_count = stages.len();
+    let tokens_copy = *tokens;
 
-    let nodes = stages
+    let build_track_canvas = move |phase: f32| {
+        canvas(
+            |_, _, _| (),
+            move |bounds, (), window, _| {
+                paint_connection_signal_track(
+                    &tokens_copy,
+                    stage_count,
+                    current,
+                    ready,
+                    failed,
+                    phase,
+                    window,
+                    bounds,
+                );
+            },
+        )
+        .w_full()
+        .h(px(34.0))
+    };
+
+    let track_visual: AnyElement =
+        if !failed && tokens.motion.enabled && tokens.motion.spatial_enabled {
+            if ready {
+                div()
+                    .w_full()
+                    .h(px(34.0))
+                    .with_animation(
+                        format!("connection-signal-ready-{attempt_id}"),
+                        Animation::new(oxideterm_gpui_ui::motion::scaled_duration(tokens, 560)),
+                        move |slot, progress| slot.child(build_track_canvas(progress)),
+                    )
+                    .into_any_element()
+            } else {
+                div()
+                    .w_full()
+                    .h(px(34.0))
+                    .with_animation(
+                        format!("connection-signal-live-{attempt_id}-{current}"),
+                        Animation::new(oxideterm_gpui_ui::motion::scaled_duration(tokens, 1350))
+                            .repeat(),
+                        move |slot, progress| slot.child(build_track_canvas(progress)),
+                    )
+                    .into_any_element()
+            }
+        } else {
+            build_track_canvas(0.0).into_any_element()
+        };
+
+    let labels = stages
         .iter()
         .enumerate()
         .map(|(index, (_, label_key))| {
             let completed = ready || index < current;
-            let active = !ready && index == current;
-            let color = if failed && active {
-                tokens.ui.error
-            } else if completed {
-                tokens.ui.success
+            let active = !ready && index == current.min(stage_count.saturating_sub(1));
+            let text_color = if failed && active {
+                rgb(tokens.ui.error)
             } else if active {
-                tokens.ui.accent
+                rgb(tokens.ui.text_heading)
+            } else if completed {
+                rgb(tokens.ui.text_secondary)
             } else {
-                tokens.ui.text_muted
+                rgba((tokens.ui.text_muted << 8) | 0xa8)
             };
-            let marker_text = if completed { "✓" } else { "" };
-            let marker = div()
-                .size(px(30.0))
-                .flex_none()
-                .rounded_full()
-                .border_1()
-                .border_color(rgba((color << 8) | 0xaa))
-                .bg(rgb(tokens.ui.bg_elevated))
-                .flex()
-                .items_center()
-                .justify_center()
-                .text_size(px(14.0))
-                .font_weight(gpui::FontWeight::SEMIBOLD)
-                .text_color(rgb(color))
-                .child(marker_text);
-            let marker =
-                if active && !failed && tokens.motion.enabled && tokens.motion.spatial_enabled {
-                    marker
-                        .with_animation(
-                            format!("connection-stage-{attempt_id}-{index}"),
-                            Animation::new(oxideterm_gpui_ui::motion::scaled_duration(
-                                tokens, 1200,
-                            ))
-                            .repeat(),
-                            |marker, progress| {
-                                let wave = if progress < 0.5 {
-                                    progress * 2.0
-                                } else {
-                                    (1.0 - progress) * 2.0
-                                };
-                                marker.opacity(0.7 + wave * 0.3)
-                            },
-                        )
-                        .into_any_element()
-                } else {
-                    marker.into_any_element()
-                };
             div()
                 .flex_1()
                 .min_w_0()
-                .flex()
-                .flex_col()
-                .items_center()
-                .gap(px(tokens.spacing.two))
-                .child(marker)
-                .child(
-                    // Full width + centered alignment so long translations
-                    // (ja/de) wrap inside the quarter-width cell instead of
-                    // spilling over the neighbouring stage labels.
-                    div()
-                        .w_full()
-                        .px(px(2.0))
-                        .text_align(gpui::TextAlign::Center)
-                        .text_size(px(12.0))
-                        .text_color(rgb(color))
-                        .child(i18n.t(label_key)),
-                )
-                .into_any_element()
-        })
-        .collect::<Vec<_>>();
-
-    let current_connector = current.min(stages.len() - 1);
-    let connectors = (0..stages.len() - 1)
-        .map(|index| {
-            let complete = ready || index < current_connector;
-            div()
-                .absolute()
-                .top(px(14.0))
-                .left(relative((index as f32 + 0.5) / stages.len() as f32))
-                .w(relative(1.0 / stages.len() as f32))
-                .h(px(2.0))
-                .bg(rgb(if complete {
-                    tokens.ui.success
+                .px(px(2.0))
+                .truncate()
+                .text_align(gpui::TextAlign::Center)
+                .text_size(px(11.0))
+                .line_height(px(14.0))
+                .font_weight(if active {
+                    gpui::FontWeight::MEDIUM
                 } else {
-                    tokens.ui.border
-                }))
+                    gpui::FontWeight::NORMAL
+                })
+                .text_color(text_color)
+                .child(i18n.t(label_key))
                 .into_any_element()
         })
         .collect::<Vec<_>>();
 
     div()
-        .relative()
         .w_full()
-        .child(
-            div()
-                .absolute()
-                .top_0()
-                .left_0()
-                .right_0()
-                .children(connectors),
-        )
-        .child(div().relative().w_full().flex().children(nodes))
+        .flex()
+        .flex_col()
+        .gap(px(2.0))
+        .child(track_visual)
+        .child(div().w_full().flex().items_center().children(labels))
         .into_any_element()
-}
-
-fn render_connection_history(
-    tokens: &ThemeTokens,
-    i18n: &I18n,
-    history: &VecDeque<ConnectionTraceEvent>,
-) -> AnyElement {
-    let rows = history.iter().map(|entry| {
-        let color = match entry.status {
-            ConnectionTraceStatus::Ready => tokens.ui.success,
-            ConnectionTraceStatus::Failed => tokens.ui.error,
-            ConnectionTraceStatus::Running | ConnectionTraceStatus::Cancelled => {
-                tokens.ui.text_muted
-            }
-        };
-        let detail = entry
-            .detail
-            .clone()
-            .filter(|detail| !detail.is_empty())
-            .filter(|_| entry.status != ConnectionTraceStatus::Failed);
-        let text_color = if entry.status == ConnectionTraceStatus::Failed {
-            tokens.ui.error
-        } else {
-            tokens.ui.text_muted
-        };
-        div()
-            .w_full()
-            .flex()
-            .items_start()
-            .gap(px(tokens.spacing.two))
-            .child(
-                div()
-                    .mt(px(7.0))
-                    .size(px(6.0))
-                    .flex_none()
-                    .rounded_full()
-                    .bg(rgb(color)),
-            )
-            .child(
-                div()
-                    .min_w_0()
-                    .flex_1()
-                    .flex()
-                    .flex_col()
-                    .gap(px(2.0))
-                    .text_size(px(12.0))
-                    .line_height(px(18.0))
-                    .text_color(rgb(text_color))
-                    .child(i18n.t(connection_trace_stage_key(entry.stage)))
-                    .when_some(detail, |row, detail| {
-                        row.child(
-                            div()
-                                .text_color(rgb(if entry.status == ConnectionTraceStatus::Failed {
-                                    tokens.ui.error
-                                } else {
-                                    tokens.ui.text_muted
-                                }))
-                                .child(detail),
-                        )
-                    }),
-            )
-    });
-
-    oxideterm_gpui_ui::semantic_surface(
-        tokens,
-        oxideterm_gpui_ui::SurfaceOptions::new(oxideterm_gpui_ui::SurfaceKind::InsetGroup)
-            .padding(oxideterm_gpui_ui::SurfacePadding::Normal),
-    )
-    .w_full()
-    .max_h(px(210.0))
-    .overflow_y_scrollbar()
-    .flex()
-    .flex_col()
-    .gap(px(tokens.spacing.two))
-    .children(rows)
-    .into_any_element()
 }
 
 fn render_connection_error_log(
@@ -2043,22 +2340,23 @@ fn render_connection_error_log(
     }
     let detail = event.detail.clone().filter(|detail| !detail.is_empty())?;
     Some(
-        oxideterm_gpui_ui::semantic_surface(
-            tokens,
-            oxideterm_gpui_ui::SurfaceOptions::new(oxideterm_gpui_ui::SurfaceKind::InsetGroup)
-                .padding(oxideterm_gpui_ui::SurfacePadding::Normal),
-        )
-        .w_full()
-        .max_h(px(210.0))
-        .overflow_y_scrollbar()
-        .border_color(rgba((tokens.ui.error << 8) | 0x88))
-        .bg(rgba((tokens.ui.error << 8) | 0x12))
-        .text_size(px(13.0))
-        .line_height(px(19.0))
-        .text_color(rgb(tokens.ui.error))
-        .whitespace_normal()
-        .child(detail)
-        .into_any_element(),
+        div()
+            .w_full()
+            .max_h(px(140.0))
+            .overflow_y_scrollbar()
+            .px(px(10.0))
+            .py(px(8.0))
+            .rounded(px(tokens.radii.md))
+            .border_1()
+            .border_color(rgba((tokens.ui.error << 8) | 0x66))
+            .bg(rgba((tokens.ui.error << 8) | 0x12))
+            .font_family(tokens.metrics.markdown_code_font_family)
+            .text_size(px(11.5))
+            .line_height(px(17.0))
+            .text_color(rgb(tokens.ui.error))
+            .whitespace_normal()
+            .child(detail)
+            .into_any_element(),
     )
 }
 
