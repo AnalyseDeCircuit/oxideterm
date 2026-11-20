@@ -248,7 +248,9 @@ pub(crate) use self::root::helpers::tokens_from_settings as portable_bootstrap_t
 use self::root::state::{ReconnectWorkerResult, WorkspaceSshNode, WorkspaceSshNodeEndpoint};
 use self::root::{background::*, helpers::*};
 use self::session_manager::{SessionManagerInput, SessionManagerWorkspaceEvent};
-use self::sidebar::{ActiveSessionSidebarViewMode, SidebarSection};
+use self::sidebar::{
+    ActiveSessionSidebarViewMode, SessionNodeSelection, SessionRowMenu, SidebarSection,
+};
 use self::tabs::{TabRemovalTransition, TerminalLocation};
 use self::terminal_entity::{WorkspaceTerminalEntity, WorkspaceTerminalEvent};
 use self::window_intent::WorkspaceWindowIntentEntity;
@@ -588,6 +590,11 @@ pub(crate) struct WorkspaceApp {
     context_tools_menu_scroll: ScrollHandle,
     session_search_open: bool,
     session_search_query: String,
+    // Multi-select rows for batch removal inside Active Sessions. Transient UI
+    // state only: the mode never persists and never targets saved connections.
+    session_node_selection: SessionNodeSelection,
+    // Right-click menu anchored to one Active Sessions node row.
+    session_row_menu: Option<SessionRowMenu>,
     // Session manager sidebar search disclosure and sort menu open state.
     // These are sidebar-only flags so the tab's toolbar menus don't conflict.
     // Set only across the tabbar's "show in sidebar" handoff: it closes the

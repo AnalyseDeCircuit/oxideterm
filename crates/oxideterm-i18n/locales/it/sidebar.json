@@ -89,6 +89,7 @@
       "packages": "Pacchetti"
     },
     "tooltips": {
+      "select_sessions": "Seleziona nodi sessione",
       "switch_to_light": "Passa al tema chiaro",
       "switch_to_dark": "Passa al tema scuro",
       "settings": "Impostazioni",
@@ -102,7 +103,8 @@
       "sort": "Ordina",
       "lock_app": "Blocca OxideTerm",
       "setup_app_lock": "Configura blocco applicazione",
-      "collapse": "Comprimi"
+      "collapse": "Comprimi",
+      "select_connections": "Seleziona connessioni"
     },
     "active_sessions": "Sessioni attive",
     "active_session_count": "Sessioni attive: {{count}}",
@@ -888,6 +890,22 @@
     }
   },
   "sessions": {
+    "selection": {
+      "count": "Selezionate: {{count}} / {{total}}",
+      "select_all": "Seleziona tutto",
+      "remove": "Rimuovi",
+      "exit": "Esci"
+    },
+    "remove": {
+      "title": "Rimuovi nodi sessione",
+      "body": "Verranno chiuse {{count}} sessioni attive.",
+      "warning": "Questa operazione non può essere annullata. Lo scrollback di queste sessioni andrà perso."
+    },
+    "menu": {
+      "remove_selected": "Rimuovi selezionate ({{count}})",
+      "remove_others": "Rimuovi altre ({{count}})",
+      "remove_inactive": "Rimuovi inattive ({{count}})"
+    },
     "tree": {
       "terminal": "Terminale #{{number}}",
       "no_sessions": "Nessuna sessione",

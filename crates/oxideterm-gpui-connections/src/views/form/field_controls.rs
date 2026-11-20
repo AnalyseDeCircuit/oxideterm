@@ -4,95 +4,33 @@ use oxideterm_connections::{ConnectionTerminalSessionLogPolicy, SshChannelStrate
 use oxideterm_remote_desktop::RemoteDesktopRdpNetworkProfile;
 use oxideterm_settings_model::parse_rgb24_hex;
 
-const NEW_CONNECTION_TRANSPORT_ROW_HEIGHT: f32 = 36.0;
-const NEW_CONNECTION_TRANSPORT_ROW_GAP: f32 = 4.0;
-const NEW_CONNECTION_ADVANCED_GROUP_HEIGHT: f32 = 28.0;
-const NEW_CONNECTION_ADVANCED_GROUP_OFFSET: f32 =
-    NEW_CONNECTION_ADVANCED_GROUP_HEIGHT + NEW_CONNECTION_TRANSPORT_ROW_GAP;
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum ConnectionFormSection {
-    Basic,
-    Authentication,
     Route,
     StandaloneSftpSecondaryRoute,
-    SshOptions,
-    Terminal,
-    Appearance,
-    RemoteGateway,
-    VncPreferences,
-    RemoteFeatures,
-    SerialParameters,
-    MoshOptions,
-    SftpOptions,
-    LocalShell,
-    BleDiscovery,
-    BleTransportOptions,
 }
 
 impl ConnectionFormSection {
     fn element_id(self) -> &'static str {
         match self {
-            Self::Basic => "new-connection-basic-section",
-            Self::Authentication => "new-connection-authentication-section",
             Self::Route => "new-connection-route-section",
             Self::StandaloneSftpSecondaryRoute => {
                 "new-connection-standalone-sftp-secondary-route-section"
             }
-            Self::SshOptions => "new-connection-ssh-options-section",
-            Self::Terminal => "new-connection-terminal-section",
-            Self::Appearance => "new-connection-appearance-section",
-            Self::RemoteGateway => "new-connection-remote-gateway-section",
-            Self::VncPreferences => "new-connection-vnc-preferences-section",
-            Self::RemoteFeatures => "new-connection-remote-features-section",
-            Self::SerialParameters => "new-connection-serial-parameters-section",
-            Self::MoshOptions => "new-connection-mosh-options-section",
-            Self::SftpOptions => "new-connection-sftp-options-section",
-            Self::LocalShell => "new-connection-local-shell-section",
-            Self::BleDiscovery => "new-connection-ble-discovery-section",
-            Self::BleTransportOptions => "new-connection-ble-transport-options-section",
         }
     }
 
     fn title_key(self) -> &'static str {
         match self {
-            Self::Basic => "ssh.form.basic_information",
-            Self::Authentication => "ssh.form.authentication",
-            Self::Route => "ssh.form.connection_route",
-            Self::StandaloneSftpSecondaryRoute => "ssh.form.connection_route",
-            Self::SshOptions => "ssh.form.ssh_options",
-            Self::Terminal => "ssh.form.terminal_options",
-            Self::Appearance => "ssh.form.appearance",
-            Self::RemoteGateway => "modals.new_connection.remote_desktop_ssh_gateway",
-            Self::VncPreferences => "modals.new_connection.vnc_preferences_title",
-            Self::RemoteFeatures => "modals.new_connection.remote_desktop_features_title",
-            Self::SerialParameters => "modals.new_connection.serial_section_title",
-            Self::MoshOptions => "mosh.form.advanced",
-            Self::SftpOptions => "sftp.standalone.options_title",
-            Self::LocalShell => "settings_view.local_terminal.available_shells",
-            Self::BleDiscovery => "modals.new_connection.ble_form_title",
-            Self::BleTransportOptions => "modals.new_connection.ble_transport_options_title",
+            Self::Route | Self::StandaloneSftpSecondaryRoute => "ssh.form.connection_route",
         }
     }
 
     fn hint_key(self) -> Option<&'static str> {
         match self {
-            Self::Basic => Some("ssh.form.basic_information_hint"),
-            Self::Authentication => Some("ssh.form.authentication_hint"),
-            Self::Route => Some("ssh.form.connection_route_hint"),
-            Self::StandaloneSftpSecondaryRoute => Some("ssh.form.connection_route_hint"),
-            Self::SshOptions => Some("ssh.form.ssh_options_hint"),
-            Self::Terminal => Some("ssh.form.terminal_options_hint"),
-            Self::Appearance => Some("ssh.form.appearance_hint"),
-            Self::RemoteGateway => Some("modals.new_connection.remote_desktop_ssh_gateway_hint"),
-            Self::VncPreferences => Some("modals.new_connection.vnc_preferences_hint"),
-            Self::RemoteFeatures => Some("modals.new_connection.remote_desktop_features_hint"),
-            Self::SerialParameters => Some("modals.new_connection.serial_connect_hint"),
-            Self::MoshOptions => Some("mosh.form.capability_hint"),
-            Self::SftpOptions => Some("sftp.standalone.options_hint"),
-            Self::LocalShell => Some("modals.new_connection.local_terminal_detail"),
-            Self::BleDiscovery => Some("modals.new_connection.ble_discovery_section_hint"),
-            Self::BleTransportOptions => Some("modals.new_connection.ble_transport_options_hint"),
+            Self::Route | Self::StandaloneSftpSecondaryRoute => {
+                Some("ssh.form.connection_route_hint")
+            }
         }
     }
 }
@@ -101,27 +39,11 @@ fn connection_form_section_expanded_for_form(
     form: &NewConnectionForm,
     section: ConnectionFormSection,
 ) -> bool {
-    // Every section starts open; an explicit user toggle remains authoritative
-    // for the lifetime of this form only.
     let override_value = match section {
-        ConnectionFormSection::Basic => form.basic_section_expanded,
-        ConnectionFormSection::Authentication => form.authentication_section_expanded,
         ConnectionFormSection::Route => form.route_section_expanded,
         ConnectionFormSection::StandaloneSftpSecondaryRoute => {
             form.standalone_sftp_secondary_route_section_expanded
         }
-        ConnectionFormSection::SshOptions => form.ssh_options_section_expanded,
-        ConnectionFormSection::Terminal => form.terminal_section_expanded,
-        ConnectionFormSection::Appearance => form.appearance_section_expanded,
-        ConnectionFormSection::RemoteGateway => form.remote_gateway_section_expanded,
-        ConnectionFormSection::VncPreferences => form.vnc_preferences_section_expanded,
-        ConnectionFormSection::RemoteFeatures => form.remote_features_section_expanded,
-        ConnectionFormSection::SerialParameters => form.serial_parameters_section_expanded,
-        ConnectionFormSection::MoshOptions => form.mosh_options_section_expanded,
-        ConnectionFormSection::SftpOptions => form.sftp_options_section_expanded,
-        ConnectionFormSection::LocalShell => form.local_shell_section_expanded,
-        ConnectionFormSection::BleDiscovery => form.ble.discovery_section_expanded,
-        ConnectionFormSection::BleTransportOptions => form.ble.transport_section_expanded,
     };
     override_value.unwrap_or(true)
 }
@@ -245,40 +167,6 @@ const VNC_COMPRESSION_PREFERENCES: &[(RemoteDesktopVncPreference, &str)] = &[
     ),
 ];
 
-fn new_connection_transport_index(transport: NewConnectionTransport) -> usize {
-    match transport {
-        NewConnectionTransport::Ssh => 0,
-        NewConnectionTransport::Ftp => {
-            if cfg!(target_os = "windows") {
-                9
-            } else {
-                8
-            }
-        }
-        NewConnectionTransport::Mosh => 1,
-        NewConnectionTransport::Telnet => 2,
-        NewConnectionTransport::Serial => 3,
-        NewConnectionTransport::Ble => 4,
-        NewConnectionTransport::Rdp => 5,
-        NewConnectionTransport::Vnc => 6,
-        NewConnectionTransport::WslGraphics => 7,
-        NewConnectionTransport::LocalTerminal => {
-            if cfg!(target_os = "windows") {
-                8
-            } else {
-                7
-            }
-        }
-        NewConnectionTransport::StandaloneSftp => {
-            if cfg!(target_os = "windows") {
-                9
-            } else {
-                8
-            }
-        }
-    }
-}
-
 /// Icon shown when a connection has no explicit icon, matching the fallback the
 /// session manager uses after the profile is saved.
 fn default_icon_for_transport(transport: NewConnectionTransport) -> LucideIcon {
@@ -297,26 +185,6 @@ fn default_icon_for_transport(transport: NewConnectionTransport) -> LucideIcon {
         | NewConnectionTransport::Vnc
         | NewConnectionTransport::WslGraphics => LucideIcon::Monitor,
     }
-}
-
-fn new_connection_transport_visual_offset(transport: NewConnectionTransport) -> f32 {
-    let row_stride = NEW_CONNECTION_TRANSPORT_ROW_HEIGHT + NEW_CONNECTION_TRANSPORT_ROW_GAP;
-    let advanced_offset = if matches!(
-        transport,
-        NewConnectionTransport::StandaloneSftp | NewConnectionTransport::Ftp
-    ) {
-        NEW_CONNECTION_ADVANCED_GROUP_OFFSET
-    } else {
-        0.0
-    };
-    new_connection_transport_index(transport) as f32 * row_stride + advanced_offset
-}
-
-fn new_connection_transport_vertical_offset(
-    source: NewConnectionTransport,
-    target: NewConnectionTransport,
-) -> f32 {
-    new_connection_transport_visual_offset(source) - new_connection_transport_visual_offset(target)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -428,20 +296,9 @@ impl ConnectionFormView {
         div()
             .flex()
             .flex_col()
-            .when(
-                !matches!(
-                    section,
-                    ConnectionFormSection::Basic
-                        | ConnectionFormSection::LocalShell
-                        | ConnectionFormSection::BleDiscovery
-                ),
-                |content| {
-                    content
-                        .border_t_1()
-                        .border_color(rgb(self.tokens.ui.border))
-                        .pt(px(self.tokens.spacing.three))
-                },
-            )
+            .border_t_1()
+            .border_color(rgb(self.tokens.ui.border))
+            .pt(px(self.tokens.spacing.three))
             .child(
                 div()
                     .id(element_id)
@@ -488,54 +345,12 @@ impl ConnectionFormView {
                                 };
                                 let override_value = Some(!expanded);
                                 match section {
-                                    ConnectionFormSection::Basic => {
-                                        form.basic_section_expanded = override_value;
-                                    }
-                                    ConnectionFormSection::Authentication => {
-                                        form.authentication_section_expanded = override_value;
-                                    }
                                     ConnectionFormSection::Route => {
                                         form.route_section_expanded = override_value;
                                     }
                                     ConnectionFormSection::StandaloneSftpSecondaryRoute => {
                                         form.standalone_sftp_secondary_route_section_expanded =
                                             override_value;
-                                    }
-                                    ConnectionFormSection::SshOptions => {
-                                        form.ssh_options_section_expanded = override_value;
-                                    }
-                                    ConnectionFormSection::Terminal => {
-                                        form.terminal_section_expanded = override_value;
-                                    }
-                                    ConnectionFormSection::Appearance => {
-                                        form.appearance_section_expanded = override_value;
-                                    }
-                                    ConnectionFormSection::RemoteGateway => {
-                                        form.remote_gateway_section_expanded = override_value;
-                                    }
-                                    ConnectionFormSection::VncPreferences => {
-                                        form.vnc_preferences_section_expanded = override_value;
-                                    }
-                                    ConnectionFormSection::RemoteFeatures => {
-                                        form.remote_features_section_expanded = override_value;
-                                    }
-                                    ConnectionFormSection::SerialParameters => {
-                                        form.serial_parameters_section_expanded = override_value;
-                                    }
-                                    ConnectionFormSection::MoshOptions => {
-                                        form.mosh_options_section_expanded = override_value;
-                                    }
-                                    ConnectionFormSection::SftpOptions => {
-                                        form.sftp_options_section_expanded = override_value;
-                                    }
-                                    ConnectionFormSection::LocalShell => {
-                                        form.local_shell_section_expanded = override_value;
-                                    }
-                                    ConnectionFormSection::BleDiscovery => {
-                                        form.ble.discovery_section_expanded = override_value;
-                                    }
-                                    ConnectionFormSection::BleTransportOptions => {
-                                        form.ble.transport_section_expanded = override_value;
                                     }
                                 }
                                 form.field_focused = false;
@@ -2609,421 +2424,12 @@ impl ConnectionFormView {
         )
     }
 
-    pub(in crate::views) fn render_transport_selector(&self, cx: &mut Context<Self>) -> AnyElement {
-        let theme = self.tokens.ui;
-        let tunnel_active = self.environment.tunnel.is_some();
-        let (active_transport, advanced_connections_expanded) = self
-            .connection_form_state(cx)
-            .form
-            .as_ref()
-            .map(|form| (form.transport, form.advanced_connections_expanded))
-            .unwrap_or((NewConnectionTransport::Ssh, false));
-        let mut choices = vec![
-            (
-                NewConnectionTransport::Ssh,
-                self.i18n.t("modals.new_connection.transport_ssh"),
-                NewConnectionField::Name,
-                LucideIcon::Server,
-                false,
-            ),
-            (
-                NewConnectionTransport::Mosh,
-                self.i18n.t("modals.new_connection.transport_mosh"),
-                NewConnectionField::Name,
-                LucideIcon::Wifi,
-                false,
-            ),
-            (
-                NewConnectionTransport::Telnet,
-                self.i18n.t("modals.new_connection.transport_telnet"),
-                NewConnectionField::Host,
-                LucideIcon::Network,
-                false,
-            ),
-            (
-                NewConnectionTransport::Serial,
-                self.i18n.t("modals.new_connection.transport_serial"),
-                NewConnectionField::SerialPortPath,
-                LucideIcon::Radio,
-                false,
-            ),
-            (
-                NewConnectionTransport::Ble,
-                self.i18n.t("modals.new_connection.transport_ble"),
-                NewConnectionField::BleProfileName,
-                LucideIcon::Bluetooth,
-                false,
-            ),
-            (
-                NewConnectionTransport::Rdp,
-                self.i18n.t("modals.new_connection.transport_rdp"),
-                NewConnectionField::Host,
-                LucideIcon::Monitor,
-                false,
-            ),
-            (
-                NewConnectionTransport::Vnc,
-                self.i18n.t("modals.new_connection.transport_vnc"),
-                NewConnectionField::Host,
-                LucideIcon::Monitor,
-                false,
-            ),
-        ];
-        if cfg!(target_os = "windows") {
-            choices.push((
-                NewConnectionTransport::WslGraphics,
-                self.i18n.t("modals.new_connection.transport_wsl_graphics"),
-                NewConnectionField::Name,
-                LucideIcon::AppWindow,
-                false,
-            ));
-        }
-        // Local profiles share the same saved-session entry point as remote transports.
-        choices.push((
-            NewConnectionTransport::LocalTerminal,
-            self.i18n
-                .t("modals.new_connection.transport_local_terminal"),
-            NewConnectionField::Name,
-            LucideIcon::Terminal,
-            false,
-        ));
-        choices.push((
-            NewConnectionTransport::StandaloneSftp,
-            self.i18n
-                .t("modals.new_connection.transport_standalone_sftp"),
-            NewConnectionField::Name,
-            LucideIcon::FolderSync,
-            true,
-        ));
-        choices.push((
-            NewConnectionTransport::Ftp,
-            self.i18n.t("modals.new_connection.transport_ftp"),
-            NewConnectionField::Name,
-            LucideIcon::FolderSync,
-            true,
-        ));
-        let plugin_types = self.environment.plugin_types.clone();
-        let mut sidebar = div()
-            .min_h_full()
-            .flex()
-            .flex_col()
-            .gap(px(4.0))
-            .pr(px(self.tokens.spacing.three));
-
-        let mut advanced_group_started = false;
-        for (transport, label, focus_field, icon, advanced) in choices {
-            if advanced && !advanced_group_started {
-                advanced_group_started = true;
-                sidebar = sidebar.child(div().flex_1()).child(
-                    div()
-                        .id("new-connection-advanced-group")
-                        .debug_selector(|| "new-connection-advanced-group".into())
-                        .h(px(NEW_CONNECTION_ADVANCED_GROUP_HEIGHT))
-                        .flex_none()
-                        .flex()
-                        .items_center()
-                        .justify_between()
-                        .px(px(self.tokens.spacing.two))
-                        .border_t_1()
-                        .border_color(rgba((theme.border << 8) | 0x80))
-                        .cursor_pointer()
-                        .text_size(px(self.tokens.metrics.ui_text_xs))
-                        .text_color(rgb(theme.text_muted))
-                        .child(self.i18n.t("modals.new_connection.advanced_group"))
-                        .child(self.render_animated_chevron(
-                            (
-                                "new-connection-advanced-group-chevron",
-                                advanced_connections_expanded as usize,
-                            ),
-                            advanced_connections_expanded,
-                            14.0,
-                            rgb(theme.text_muted),
-                        ))
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _event, _window, cx| {
-                                this.update_connection_form_state(cx, |state| {
-                                    if let Some(form) = state.form.as_mut() {
-                                        form.advanced_connections_expanded =
-                                            !form.advanced_connections_expanded;
-                                        form.field_focused = false;
-                                        clear_connection_selection(form);
-                                    }
-                                });
-                                cx.stop_propagation();
-                                cx.notify();
-                            }),
-                        ),
-                );
-            }
-            if advanced && !advanced_connections_expanded {
-                continue;
-            }
-            let active = !tunnel_active && active_transport == transport;
-            let transport_index = new_connection_transport_index(transport);
-            let row_text = if active {
-                theme.text_heading
-            } else {
-                theme.text
-            };
-            let icon_color = if active {
-                theme.accent
-            } else {
-                theme.text_muted
-            };
-            let selection_surface = active.then(|| {
-                let surface = div()
-                    .absolute()
-                    .inset_0()
-                    .rounded(px(self.tokens.radii.md))
-                    .border_1()
-                    .border_color(rgb(theme.border))
-                    .bg(self.settings_panel_background(theme.bg_panel));
-                let surface = oxideterm_gpui_ui::theme_card_surface_shadow(surface, &self.tokens);
-
-                self.render_vertical_selection_surface(
-                    NEW_CONNECTION_TRANSPORT_SELECTOR_ID,
-                    transport_index,
-                    surface,
-                )
-            });
-            let row = div()
-                .debug_selector(|| format!("new-connection-transport-{transport:?}"))
-                .w_full()
-                .h(px(NEW_CONNECTION_TRANSPORT_ROW_HEIGHT))
-                .flex_none()
-                .relative()
-                .flex()
-                .items_center()
-                .gap(px(self.tokens.spacing.two))
-                .px(px(self.tokens.spacing.two))
-                .cursor_pointer()
-                .text_size(px(self.tokens.metrics.ui_text_sm))
-                .text_color(rgb(row_text))
-                .when(!active, |row| {
-                    row.hover(|row| row.bg(rgba((theme.bg_hover << 8) | 0x80)))
-                })
-                .when_some(selection_surface, |row, surface| row.child(surface))
-                .child(Self::render_lucide_icon(icon, 14.0, rgb(icon_color)))
-                .child(div().min_w(px(0.0)).truncate().child(label))
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _event, window, cx| {
-                        if this.environment.tunnel.is_some() {
-                            this.request(ConnectionsWindowRequest::LeaveTunnel, Some(window), cx);
-                            this.update_connection_form_state(cx, |state| {
-                                if let Some(form) = state.form.as_mut() {
-                                    form.advanced_connections_expanded = true;
-                                }
-                            });
-                        }
-                        let mut should_refresh_ports = false;
-                        let mut should_refresh_ble_adapters = false;
-                        let mut selection_offset = None;
-                        this.update_connection_form_state(cx, |state| {
-                            if let Some(form) = state.form.as_mut() {
-                                let previous_transport = form.transport;
-                                if previous_transport != transport
-                                    && previous_transport != NewConnectionTransport::StandaloneSftp
-                                    && transport != NewConnectionTransport::StandaloneSftp
-                                    && previous_transport != NewConnectionTransport::Ftp
-                                    && transport != NewConnectionTransport::Ftp
-                                {
-                                    // The advanced group is pinned below a flexible spacer, so its
-                                    // absolute row offset cannot use the fixed-list slide animation.
-                                    selection_offset =
-                                        Some(new_connection_transport_vertical_offset(
-                                            previous_transport,
-                                            transport,
-                                        ));
-                                }
-                                apply_transport_default_port(form, previous_transport, transport);
-                                apply_transport_default_username(
-                                    form,
-                                    previous_transport,
-                                    transport,
-                                );
-                                if matches!(
-                                    transport,
-                                    NewConnectionTransport::Rdp | NewConnectionTransport::Telnet
-                                ) && previous_transport != transport
-                                {
-                                    form.upstream_proxy_policy =
-                                        NewConnectionUpstreamProxyPolicy::Direct;
-                                    form.upstream_proxy_protocol =
-                                        SavedUpstreamProxyProtocol::Socks5;
-                                }
-                                if form.transport != transport {
-                                    form.standalone_connection_id = None;
-                                }
-                                if transport != NewConnectionTransport::Ble {
-                                    // Leaving the BLE form: stop any in-flight scan
-                                    // or inspection, drop the adapter guard so its
-                                    // discovery window closes, and clear the stale
-                                    // device list. A re-scan is required after
-                                    // returning to BLE.
-                                    form.ble.scan_generation += 1;
-                                    form.ble.scanning = false;
-                                    form.ble.scan_started = false;
-                                    form.ble.inspecting = false;
-                                    form.ble.devices.clear();
-                                    form.ble.adapter_guard = None;
-                                    form.ble.selected_device_id = None;
-                                    form.ble.device_details = None;
-                                    form.ble.inspect_error = None;
-                                    form.ble.selected_service_uuid = None;
-                                }
-                                form.transport = transport;
-                                form.focused_field = focus_field;
-                                form.field_focused = false;
-                                form.error = None;
-                                clear_connection_selection(form);
-                                should_refresh_ports = transport == NewConnectionTransport::Serial
-                                    && form.serial_ports.is_empty()
-                                    && !form.serial_ports_loading;
-                                should_refresh_ble_adapters = transport
-                                    == NewConnectionTransport::Ble
-                                    && form.ble.adapters.is_empty()
-                                    && !form.ble.adapters_loading;
-                            }
-                        });
-                        if let Some(vertical_offset_y) = selection_offset {
-                            this.begin_user_segmented_control_transition_with_vertical_offset(
-                                NEW_CONNECTION_TRANSPORT_SELECTOR_ID,
-                                transport_index,
-                                Some(vertical_offset_y),
-                                cx,
-                            );
-                        }
-                        this.close_new_connection_select(cx);
-                        if should_refresh_ports {
-                            this.refresh_serial_ports(cx);
-                        }
-                        if should_refresh_ble_adapters {
-                            this.refresh_ble_adapters(cx);
-                        }
-                        cx.notify();
-                    }),
-                );
-            sidebar = sidebar.child(row);
-        }
-        if advanced_connections_expanded {
-            sidebar = sidebar.child(
-                div()
-                    .w_full()
-                    .h(px(NEW_CONNECTION_TRANSPORT_ROW_HEIGHT))
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .px_2()
-                    .cursor_pointer()
-                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                    .text_color(rgb(if tunnel_active {
-                        theme.text_heading
-                    } else {
-                        theme.text
-                    }))
-                    .when(tunnel_active, |row| {
-                        oxideterm_gpui_ui::theme_card_surface_shadow(
-                            row.rounded(px(self.tokens.radii.md))
-                                .border_1()
-                                .border_color(rgb(theme.border))
-                                .bg(self.settings_panel_background(theme.bg_panel)),
-                            &self.tokens,
-                        )
-                    })
-                    .when(!tunnel_active, |row| {
-                        row.hover(|row| row.bg(rgba((theme.bg_hover << 8) | 0x80)))
-                    })
-                    .child(Self::render_lucide_icon(
-                        LucideIcon::Network,
-                        14.0,
-                        rgb(if tunnel_active {
-                            theme.accent
-                        } else {
-                            theme.text_muted
-                        }),
-                    ))
-                    .child(self.i18n.t("ssh_tunnel.title"))
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(|this, _, window, cx| {
-                            if this.environment.tunnel.is_none() {
-                                this.request(
-                                    ConnectionsWindowRequest::OpenTunnel,
-                                    Some(window),
-                                    cx,
-                                );
-                            }
-                            cx.stop_propagation();
-                        }),
-                    ),
-            );
-        }
-        for (plugin, definition) in plugin_types {
-            sidebar = sidebar.child(
-                div()
-                    .w_full()
-                    .h(px(NEW_CONNECTION_TRANSPORT_ROW_HEIGHT))
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .px_2()
-                    .cursor_pointer()
-                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                    .text_color(rgb(theme.text))
-                    .hover(|row| row.bg(rgba((theme.bg_hover << 8) | 0x80)))
-                    .child(Self::render_lucide_icon(
-                        LucideIcon::from_plugin_name(&definition.icon),
-                        14.0,
-                        rgb(theme.text_muted),
-                    ))
-                    .child(definition.title)
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _, window, cx| {
-                            this.close_new_connection_select(cx);
-                            this.request(
-                                ConnectionsWindowRequest::OpenPluginForm {
-                                    plugin: plugin.clone(),
-                                    type_id: definition.id.clone(),
-                                },
-                                Some(window),
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        }),
-                    ),
-            );
-        }
-        // Built-in advanced choices can overflow in short windows too.
-        let scroll = self.selectable_text_scroll_handle("new-connection-transport-scroll");
-        div()
-            .w(px(NEW_CONNECTION_TYPE_SIDEBAR_WIDTH))
-            .min_h_0()
-            .flex_none()
-            .relative()
-            .border_r_1()
-            .border_color(rgba((theme.border << 8) | 0x80))
-            .child(
-                div()
-                    .id("new-connection-transport-scroll")
-                    .size_full()
-                    .overflow_y_scroll()
-                    .track_scroll(&scroll)
-                    .restrict_scroll_to_axis()
-                    .child(sidebar),
-            )
-            .child(oxideterm_gpui_ui::scroll::vertical_scrollbar_layer(
-                "new-connection-transport-scrollbar",
-                &scroll,
-            ))
-            .into_any_element()
-    }
-
-    pub(super) fn render_local_terminal_form_branch(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_local_terminal_form_branch(
+        &self,
+        active_drawer: Option<crate::form_state::ConnectionFormDrawer>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        use crate::form_state::ConnectionFormDrawer;
         let form = self
             .connection_form_state(cx)
             .form
@@ -3032,7 +2438,18 @@ impl ConnectionFormView {
         let name = form.name.clone();
         let cwd = form.local_cwd.clone();
         let group = form.group.clone();
+        let notes = form.notes.clone();
         let selected_shell_id = form.local_shell_id.as_deref();
+        if active_drawer == Some(ConnectionFormDrawer::Notes) {
+            return div()
+                .flex()
+                .flex_col()
+                .gap(px(self.tokens.metrics.modal_section_gap))
+                .child(self.render_connection_appearance_options(cx))
+                .child(div().h(px(1.0)).bg(rgb(self.tokens.ui.border)))
+                .child(self.render_connection_notes_fields(&notes, cx))
+                .into_any_element();
+        }
         let resolved_shell = match selected_shell_id {
             Some(id) => self
                 .environment
@@ -3098,18 +2515,31 @@ impl ConnectionFormView {
             })
             .into_any_element();
 
-        let content = div()
+        div()
             .flex()
             .flex_col()
-            .gap(px(self.tokens.metrics.modal_section_gap))
-            .child(self.render_connection_field(
-                self.i18n.t("ssh.form.name"),
-                &name,
-                self.i18n.t("ssh.form.name_placeholder"),
-                NewConnectionField::Name,
-                false,
-                cx,
-            ))
+            .gap(px(14.0))
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .gap(px(12.0))
+                    .child(div().flex_1().min_w_0().child(self.render_connection_field(
+                        self.i18n.t("ssh.form.name"),
+                        &name,
+                        self.i18n.t("ssh.form.name_placeholder"),
+                        NewConnectionField::Name,
+                        false,
+                        cx,
+                    )))
+                    .child(div().w(px(196.0)).flex_none().child(
+                        self.render_connection_group_select(
+                            self.i18n.t("ssh.form.group"),
+                            &group,
+                            cx,
+                        ),
+                    )),
+            )
             .child(shell_field)
             .child(self.render_connection_field(
                 self.i18n.t("local_session.directory"),
@@ -3119,13 +2549,9 @@ impl ConnectionFormView {
                 false,
                 cx,
             ))
-            .child(self.render_connection_group_select(self.i18n.t("ssh.form.group"), &group, cx))
-            .child(self.render_connection_pre_connect_command(cx));
-        self.render_connection_form_section(
-            ConnectionFormSection::LocalShell,
-            content.into_any_element(),
-            cx,
-        )
+            .child(div().h(px(1.0)).bg(rgb(self.tokens.ui.border)))
+            .child(self.render_connection_pre_connect_command(cx))
+            .into_any_element()
     }
 
     pub(super) fn render_wsl_graphics_form_branch(&self, _cx: &mut Context<Self>) -> AnyElement {
@@ -3340,6 +2766,7 @@ impl ConnectionFormView {
     pub(super) fn render_remote_desktop_form_branch(
         &self,
         protocol: oxideterm_remote_desktop::RemoteDesktopProtocol,
+        active_drawer: Option<crate::form_state::ConnectionFormDrawer>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let Some((
@@ -3423,7 +2850,6 @@ impl ConnectionFormView {
                     ),
                 )
             })
-            .child(self.render_connection_notes_fields(&notes, cx))
             .into_any_element();
         let username_placeholder =
             if protocol == oxideterm_remote_desktop::RemoteDesktopProtocol::Rdp {
@@ -3516,59 +2942,55 @@ impl ConnectionFormView {
                         ))
                     })
             })
-            .child(self.render_connection_form_section(ConnectionFormSection::Basic, basic, cx))
-            .child(self.render_connection_form_section(
-                ConnectionFormSection::Authentication,
-                authentication,
-                cx,
-            ))
             .child({
-                let mut gateway = div().flex().flex_col().gap_4().child(
-                    self.render_remote_desktop_ssh_gateway_select(
-                        ssh_gateway_connection_id.as_deref(),
-                        cx,
-                    ),
-                );
-                if protocol == oxideterm_remote_desktop::RemoteDesktopProtocol::Rdp {
-                    gateway = gateway.child(
-                        self.render_connection_hint(
-                            self.i18n
-                                .t("modals.new_connection.remote_desktop_proxy_route_hint"),
-                        ),
-                    );
-                    gateway = gateway.child(self.render_upstream_proxy_policy_section(false, cx));
+                use crate::form_state::ConnectionFormDrawer;
+                match active_drawer {
+                    Some(ConnectionFormDrawer::Route) => {
+                        let mut gateway = div().flex().flex_col().gap_4().child(
+                            self.render_remote_desktop_ssh_gateway_select(
+                                ssh_gateway_connection_id.as_deref(),
+                                cx,
+                            ),
+                        );
+                        if protocol == oxideterm_remote_desktop::RemoteDesktopProtocol::Rdp {
+                            gateway = gateway.child(self.render_connection_hint(
+                                self.i18n
+                                    .t("modals.new_connection.remote_desktop_proxy_route_hint"),
+                            ));
+                            gateway = gateway
+                                .child(self.render_upstream_proxy_policy_section(false, cx));
+                        }
+                        gateway.into_any_element()
+                    }
+                    Some(ConnectionFormDrawer::VncPreferences)
+                        if protocol == oxideterm_remote_desktop::RemoteDesktopProtocol::Vnc =>
+                    {
+                        self.render_vnc_connection_preferences(cx)
+                    }
+                    Some(ConnectionFormDrawer::RemoteFeatures) => {
+                        self.render_remote_desktop_features(protocol, &capabilities, cx)
+                    }
+                    Some(ConnectionFormDrawer::Terminal) => {
+                        self.render_connection_pre_connect_command(cx)
+                    }
+                    Some(ConnectionFormDrawer::Notes) => div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(self.tokens.metrics.modal_section_gap))
+                        .child(self.render_connection_appearance_options(cx))
+                        .child(div().h(px(1.0)).bg(rgb(self.tokens.ui.border)))
+                        .child(self.render_connection_notes_fields(&notes, cx))
+                        .into_any_element(),
+                    _ => div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(self.tokens.metrics.modal_section_gap))
+                        .child(basic)
+                        .child(div().h(px(1.0)).bg(rgb(self.tokens.ui.border)))
+                        .child(authentication)
+                        .into_any_element(),
                 }
-                let gateway = gateway.into_any_element();
-                self.render_connection_form_section(
-                    ConnectionFormSection::RemoteGateway,
-                    gateway,
-                    cx,
-                )
             })
-            .when(
-                protocol == oxideterm_remote_desktop::RemoteDesktopProtocol::Vnc,
-                |section| {
-                    let preferences = self.render_vnc_connection_preferences(cx);
-                    section.child(self.render_connection_form_section(
-                        ConnectionFormSection::VncPreferences,
-                        preferences,
-                        cx,
-                    ))
-                },
-            )
-            .child({
-                let features = self.render_remote_desktop_features(protocol, &capabilities, cx);
-                self.render_connection_form_section(
-                    ConnectionFormSection::RemoteFeatures,
-                    features,
-                    cx,
-                )
-            })
-            .child(self.render_connection_form_section(
-                ConnectionFormSection::Terminal,
-                self.render_connection_pre_connect_command(cx),
-                cx,
-            ))
             .into_any_element()
     }
 
@@ -3875,7 +3297,11 @@ impl ConnectionFormView {
             .into_any_element()
     }
 
-    pub(super) fn render_telnet_form_branch(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_telnet_form_branch(
+        &self,
+        active_drawer: Option<crate::form_state::ConnectionFormDrawer>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let Some((host, port, profile_name, notes)) =
             self.connection_form_state(cx).form.as_ref().map(|form| {
                 (
@@ -3934,28 +3360,29 @@ impl ConnectionFormView {
                     self.tokens.ui.error,
                 ))
             })
-            .child(self.render_connection_notes_fields(&notes, cx))
             .into_any_element();
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(self.tokens.metrics.modal_section_gap))
-            .child(self.render_connection_form_section(ConnectionFormSection::Basic, basic, cx))
-            .child(self.render_upstream_proxy_policy_section(false, cx))
-            .child(
-                self.render_connection_form_section(
-                    ConnectionFormSection::Terminal,
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap(px(self.tokens.metrics.modal_section_gap))
-                        .child(self.render_connection_terminal_options(cx))
-                        .child(self.render_connection_pre_connect_command(cx))
-                        .into_any_element(),
-                    cx,
-                ),
-            )
-            .into_any_element()
+        use crate::form_state::ConnectionFormDrawer;
+        match active_drawer {
+            Some(ConnectionFormDrawer::Route) => {
+                self.render_upstream_proxy_policy_section(false, cx)
+            }
+            Some(ConnectionFormDrawer::Terminal) => div()
+                .flex()
+                .flex_col()
+                .gap(px(self.tokens.metrics.modal_section_gap))
+                .child(self.render_connection_terminal_options(cx))
+                .child(self.render_connection_pre_connect_command(cx))
+                .into_any_element(),
+            Some(ConnectionFormDrawer::Notes) => div()
+                .flex()
+                .flex_col()
+                .gap(px(self.tokens.metrics.modal_section_gap))
+                .child(self.render_connection_appearance_options(cx))
+                .child(div().h(px(1.0)).bg(rgb(self.tokens.ui.border)))
+                .child(self.render_connection_notes_fields(&notes, cx))
+                .into_any_element(),
+            _ => basic,
+        }
     }
 
     pub(in crate::views) fn refresh_serial_ports(&mut self, cx: &mut Context<Self>) {
@@ -3993,7 +3420,11 @@ impl ConnectionFormView {
         cx.notify();
     }
 
-    pub(super) fn render_serial_form_branch(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_serial_form_branch(
+        &self,
+        active_drawer: Option<crate::form_state::ConnectionFormDrawer>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let Some((
             ports,
             baud_rate,
@@ -4077,39 +3508,35 @@ impl ConnectionFormView {
                     .child(self.render_serial_flow_select(flow_control, cx)),
             )
             .into_any_element();
-        let basic = div()
-            .flex()
-            .flex_col()
-            .gap(px(self.tokens.metrics.modal_section_gap))
-            .child(
-                self.render_connection_field(
-                    self.i18n.t("modals.new_connection.serial_profile_name"),
-                    &profile_name,
-                    self.i18n
-                        .t("modals.new_connection.serial_profile_name_placeholder"),
-                    NewConnectionField::SerialProfileName,
-                    false,
-                    cx,
-                ),
-            )
-            .child(self.render_connection_notes_fields(&notes, cx))
-            .into_any_element();
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(self.tokens.metrics.modal_section_gap))
-            .child(self.render_connection_form_section(ConnectionFormSection::Basic, basic, cx))
-            .child(self.render_connection_form_section(
-                ConnectionFormSection::SerialParameters,
-                parameters,
-                cx,
-            ))
-            .child(self.render_connection_form_section(
-                ConnectionFormSection::Terminal,
-                self.render_connection_pre_connect_command(cx),
-                cx,
-            ))
-            .into_any_element()
+        let basic = self.render_connection_field(
+            self.i18n.t("modals.new_connection.serial_profile_name"),
+            &profile_name,
+            self.i18n
+                .t("modals.new_connection.serial_profile_name_placeholder"),
+            NewConnectionField::SerialProfileName,
+            false,
+            cx,
+        );
+        use crate::form_state::ConnectionFormDrawer;
+        match active_drawer {
+            Some(ConnectionFormDrawer::Terminal) => self.render_connection_pre_connect_command(cx),
+            Some(ConnectionFormDrawer::Notes) => div()
+                .flex()
+                .flex_col()
+                .gap(px(self.tokens.metrics.modal_section_gap))
+                .child(self.render_connection_appearance_options(cx))
+                .child(div().h(px(1.0)).bg(rgb(self.tokens.ui.border)))
+                .child(self.render_connection_notes_fields(&notes, cx))
+                .into_any_element(),
+            _ => div()
+                .flex()
+                .flex_col()
+                .gap(px(self.tokens.metrics.modal_section_gap))
+                .child(basic)
+                .child(div().h(px(1.0)).bg(rgb(self.tokens.ui.border)))
+                .child(parameters)
+                .into_any_element(),
+        }
     }
 
     fn render_serial_port_field(

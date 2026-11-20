@@ -10,7 +10,11 @@ struct FormPreview {
 
 impl Render for FormPreview {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        self.views.form_body()
+        gpui::div()
+            .relative()
+            .size_full()
+            .child(self.views.form_body())
+            .child(self.views.form_overlays())
     }
 }
 
@@ -78,10 +82,9 @@ fn mount_form(
 }
 
 #[gpui::test]
-fn standalone_sftp_keeps_advanced_navigation_and_scrolls_both_axes(cx: &mut gpui::TestAppContext) {
+fn standalone_sftp_keeps_transport_switcher_and_scrolls_both_axes(cx: &mut gpui::TestAppContext) {
     let (view, cx) = cx.add_window_view(|_, cx| {
         mount_form(cx, |form| {
-            form.advanced_connections_expanded = true;
             form.set_standalone_sftp_transfer_mode(
                 oxideterm_connections::StandaloneSftpTransferMode::RemoteRemote,
             );
@@ -94,7 +97,7 @@ fn standalone_sftp_keeps_advanced_navigation_and_scrolls_both_axes(cx: &mut gpui
     draw(cx);
     let sftp = cx
         .debug_bounds("new-connection-transport-StandaloneSftp")
-        .expect("expanded advanced group contains standalone SFTP");
+        .expect("protocol rail contains standalone SFTP");
     cx.simulate_click(sftp.center(), gpui::Modifiers::default());
 
     let fields = view.read_with(cx, |view, cx| {
@@ -113,7 +116,9 @@ fn standalone_sftp_keeps_advanced_navigation_and_scrolls_both_axes(cx: &mut gpui
     });
     cx.simulate_resize(gpui::size(px(960.0), px(460.0)));
     draw(cx);
-    let advanced = cx.debug_bounds("new-connection-advanced-group").unwrap();
+    let rail_item = cx
+        .debug_bounds("new-connection-transport-Ssh")
+        .expect("protocol rail remains pinned outside scrolling fields");
     let viewport = fields.bounds();
     assert!(viewport.size.height > px(0.0) && viewport.size.height < px(460.0));
     assert!(fields.max_offset().y > px(0.0));
@@ -137,30 +142,9 @@ fn standalone_sftp_keeps_advanced_navigation_and_scrolls_both_axes(cx: &mut gpui
         draw(cx);
         assert_eq!(fields.offset(), expected);
         assert_eq!(
-            cx.debug_bounds("new-connection-advanced-group").unwrap(),
-            advanced,
-            "the advanced group stays outside the scrolling fields",
+            cx.debug_bounds("new-connection-transport-Ssh").unwrap(),
+            rail_item,
+            "the protocol rail stays pinned outside the scrolling fields",
         );
     }
-
-    let navigation = view.read_with(cx, |view, app| {
-        view.views
-            .form_scroll("new-connection-transport-scroll", app)
-    });
-    let navigation_viewport = navigation.bounds();
-    assert!(!navigation_viewport.contains(&advanced.center()));
-    cx.simulate_event(gpui::ScrollEvent {
-        position: navigation_viewport.center(),
-        delta: gpui::ScrollDelta::Pixels(gpui::point(px(0.0), px(-4000.0))),
-        ..Default::default()
-    });
-    draw(cx);
-    assert!(
-        navigation_viewport.contains(
-            &cx.debug_bounds("new-connection-advanced-group")
-                .unwrap()
-                .center()
-        ),
-        "the advanced group can be reached even when the dialog is short",
-    );
 }

@@ -654,6 +654,7 @@ impl CatalogView {
         let has_background = self.environment.has_background;
         let items = std::mem::take(&mut self.environment.items);
         let body = self.render_session_manager_sidebar_tree(items, cx);
+        let selection_mode = self.session_manager.read(cx).selection_mode;
         let row_action_menu = self.session_manager.read(cx).row_action_menu.clone();
         let sort_menu_open = self.session_manager.read(cx).sidebar_sort_open;
         // Operation output shares the tab's status field; mirror the compact
@@ -665,6 +666,9 @@ impl CatalogView {
             .min_h_0()
             .flex()
             .flex_col()
+            .when(selection_mode, |surface| {
+                surface.child(self.render_session_manager_selection_bar(cx))
+            })
             .child(div().flex_1().min_h(px(0.0)).child(body))
             .when_some(status, |surface, status| {
                 surface.child(
@@ -714,6 +718,93 @@ impl CatalogView {
                     }),
             )
             .into_any_element()
+    }
+
+    /// Header strip for the explicit selection mode: what is checked, plus the
+    /// three commands that need no per-row target.
+    pub(super) fn render_session_manager_selection_bar(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let (selected, selectable) = {
+            let manager = self.session_manager.read(cx);
+            (
+                manager.selected_items.len(),
+                manager.visible_selection_targets.len(),
+            )
+        };
+        div()
+            .w_full()
+            .h(px(32.0))
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap(px(4.0))
+            .px(px(self.tokens.spacing.three))
+            .border_b_1()
+            .border_color(self.workspace_chrome_divider())
+            .bg(theme_bg(theme.bg, self.environment.has_background))
+            .child(
+                div()
+                    .min_w(px(0.0))
+                    .flex_1()
+                    .truncate()
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .text_color(rgb(theme.text_muted))
+                    .child(selection_counter_label(&self.i18n, selected, selectable)),
+            )
+            .child(self.render_selection_bar_button(
+                "sessionManager.selection.select_all",
+                selectable == 0,
+                cx.listener(|this, _event, _window, cx| {
+                    this.session_manager.update(cx, |manager, cx| {
+                        manager.select_all_visible_session_items(cx);
+                    });
+                    cx.stop_propagation();
+                }),
+            ))
+            .child(self.render_selection_bar_button(
+                "sessionManager.selection.delete",
+                selected == 0,
+                cx.listener(|this, _event, _window, cx| {
+                    this.action(CatalogAction::DeleteSelected, None, cx);
+                    cx.stop_propagation();
+                }),
+            ))
+            .child(self.render_selection_bar_button(
+                "sessionManager.selection.exit",
+                false,
+                cx.listener(|this, _event, _window, cx| {
+                    this.session_manager.update(cx, |manager, cx| {
+                        manager.exit_session_selection_mode(cx);
+                    });
+                    cx.stop_propagation();
+                }),
+            ))
+            .into_any_element()
+    }
+
+    fn render_selection_bar_button(
+        &self,
+        key: &'static str,
+        disabled: bool,
+        listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+    ) -> Div {
+        self.workspace_toolbar_action_button(
+            self.i18n.t(key),
+            None,
+            ToolbarButtonOptions {
+                button: ButtonOptions {
+                    variant: ButtonVariant::Ghost,
+                    size: ButtonSize::Sm,
+                    radius: ButtonRadius::Sm,
+                    disabled,
+                },
+                ..ToolbarButtonOptions::default()
+            },
+            listener,
+        )
     }
 
     pub(super) fn render_session_manager_button(

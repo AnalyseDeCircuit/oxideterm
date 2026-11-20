@@ -442,13 +442,34 @@ impl WorkspaceApp {
         };
         // An approved MCP attempt participates in the normal recent-connection ordering.
         let _ = self.connection_store.mark_used(&connection_id);
+        let mut chain = None;
         let node_id = if config
             .proxy_chain
             .as_ref()
             .is_some_and(|chain| !chain.is_empty())
         {
             match self.expand_saved_connection_tree(&connection_id, config, title) {
-                Ok(expansion) => expansion.target_node_id,
+                Ok(expansion) => {
+                    let (tx, rx) = tokio::sync::watch::channel(
+                        oxideterm_ssh::ConnectionChainProgress::queued(1),
+                    );
+                    let started = self.connect_node_with_ancestors(
+                        &expansion.target_node_id,
+                        oxideterm_ssh::ConnectionTraceMode::Connect,
+                        Some(tx),
+                        cx,
+                    );
+                    let step = *rx.borrow();
+                    if !started && step.status == oxideterm_ssh::ConnectionTraceStatus::Running {
+                        request.finish(ToolEnvelope::failed(format!(
+                            "SSH hop {} could not start during {:?}",
+                            step.hop, step.stage
+                        )));
+                        return;
+                    }
+                    chain = Some(rx);
+                    expansion.target_node_id
+                }
                 Err(_) => {
                     request.finish(ToolEnvelope::failed(
                         "The saved SSH route could not be prepared",
@@ -459,7 +480,7 @@ impl WorkspaceApp {
         } else {
             self.materialize_ssh_root_node(config, title, Some(connection_id.clone()))
         };
-        if !self.ensure_node_connection_started(&node_id, cx) {
+        if chain.is_none() && !self.ensure_node_connection_started(&node_id, cx) {
             request.finish(ToolEnvelope::failed(
                 "The SSH node could not start connecting",
             ));
@@ -468,7 +489,7 @@ impl WorkspaceApp {
 
         self.public_mcp
             .background()
-            .acquire_node_lease(request, node_id, connection_id);
+            .acquire_node_lease(request, node_id, connection_id, chain);
     }
 
     fn handle_public_mcp_disconnect_node(

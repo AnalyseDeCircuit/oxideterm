@@ -247,6 +247,7 @@ pub(in crate::workspace) enum ConnectionChainAdvance {
 struct ConnectionChainRun {
     next_index: usize,
     trace_plan: Arc<ConnectionTracePlan>,
+    progress: Option<tokio::sync::watch::Sender<oxideterm_ssh::ConnectionChainProgress>>,
 }
 
 /// Owns runtime worker endpoints and reliable delivery independently from tabs.
@@ -1847,6 +1848,7 @@ impl WorkspaceRuntimeEntity {
     pub(in crate::workspace) fn try_begin_connection_chain(
         &mut self,
         trace_plan: ConnectionTracePlan,
+        progress: Option<tokio::sync::watch::Sender<oxideterm_ssh::ConnectionChainProgress>>,
     ) -> bool {
         if trace_plan.node_ids.is_empty()
             || self.active_connection_chain.is_some()
@@ -1860,6 +1862,7 @@ impl WorkspaceRuntimeEntity {
         self.active_connection_chain = Some(ConnectionChainRun {
             next_index: 0,
             trace_plan: Arc::new(trace_plan),
+            progress,
         });
         true
     }
@@ -1885,7 +1888,16 @@ impl WorkspaceRuntimeEntity {
         }
         run.next_index += 1;
         if run.next_index < run.trace_plan.node_ids.len() {
+            if let Some(tx) = &run.progress {
+                tx.send_modify(|p| *p = oxideterm_ssh::ConnectionChainProgress::queued(p.hop + 1));
+            }
             return ConnectionChainAdvance::Continue;
+        }
+        if let Some(tx) = &run.progress {
+            tx.send_modify(|p| {
+                p.stage = ConnectionTraceStage::Ready;
+                p.status = ConnectionTraceStatus::Ready;
+            });
         }
         self.release_connection_chain();
         ConnectionChainAdvance::Complete
@@ -2089,6 +2101,20 @@ impl WorkspaceRuntimeEntity {
             return;
         };
         // Trace details cross the runtime-to-UI boundary and must never preserve credentials.
+        if let Some(run) = &self.active_connection_chain
+            && run.trace_plan.node_ids.get(run.next_index) == Some(node_id)
+            && let Some(tx) = &run.progress
+            && status != ConnectionTraceStatus::Ready
+        {
+            tx.send_modify(|p| {
+                // A failed trace can infer a stage from free-form error text.
+                // Report the last observed transport stage to external waiters instead.
+                if status == ConnectionTraceStatus::Running {
+                    p.stage = stage;
+                }
+                p.status = status;
+            });
+        }
         event.detail = event.detail.as_deref().map(oxideterm_ai::sanitize_for_ai);
         self.push_runtime_effect(WorkspaceRuntimeEffect::ConnectionTrace(event), cx);
     }
@@ -3589,7 +3615,9 @@ mod tests {
                 mode: ConnectionTraceMode::Connect,
                 node_ids: vec![parent_node_id.clone(), child_node_id.clone()],
             };
-            assert!(entity.try_begin_connection_chain(trace_plan));
+            let (tx, rx) =
+                tokio::sync::watch::channel(oxideterm_ssh::ConnectionChainProgress::queued(1));
+            assert!(entity.try_begin_connection_chain(trace_plan, Some(tx)));
             assert!(entity.has_active_connection_chain());
             assert!(entity.connection_chain_contains(&parent_node_id));
             assert_eq!(
@@ -3615,6 +3643,8 @@ mod tests {
                 ConnectionChainAdvance::Continue
             );
             assert!(entity.connection_chain_waits_after_node(&parent_node_id));
+            assert_eq!(rx.borrow().hop, 2);
+            assert_eq!(rx.borrow().status, ConnectionTraceStatus::Running);
             assert_eq!(
                 entity.connection_chain_next_step().unwrap().node_id,
                 child_node_id
@@ -3623,6 +3653,7 @@ mod tests {
                 entity.advance_connection_chain(&child_node_id),
                 ConnectionChainAdvance::Complete
             );
+            assert_eq!(rx.borrow().status, ConnectionTraceStatus::Ready);
             assert!(!entity.has_active_connection_chain());
 
             // Completing the chain releases every lock for future user or reconnect actions.
@@ -3641,11 +3672,14 @@ mod tests {
 
         entity.update(cx, |entity, _cx| {
             assert!(entity.try_lock_connecting_node(&unrelated_node_id));
-            assert!(entity.try_begin_connection_chain(ConnectionTracePlan {
-                attempt_id: "attempt-a".to_string(),
-                mode: ConnectionTraceMode::Reconnect,
-                node_ids: vec![chain_node_id.clone()],
-            }));
+            assert!(entity.try_begin_connection_chain(
+                ConnectionTracePlan {
+                    attempt_id: "attempt-a".to_string(),
+                    mode: ConnectionTraceMode::Reconnect,
+                    node_ids: vec![chain_node_id.clone()],
+                },
+                None
+            ));
             assert!(!entity.abort_connection_chain_for_node(&unrelated_node_id));
             assert!(entity.connection_chain_contains(&chain_node_id));
             assert!(entity.abort_connection_chain_for_node(&chain_node_id));

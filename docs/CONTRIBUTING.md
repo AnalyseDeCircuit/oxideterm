@@ -64,6 +64,8 @@ AI-assisted contributions are welcome, including from contributors still learnin
 
 Use the [issue templates](https://github.com/AnalyseDeCircuit/oxideterm/issues/new/choose) for bug reports and feature requests. Include the application version, platform, reproduction steps, and expected behavior. Remove credentials and private connection details from logs and screenshots.
 
+If you file an issue via `gh`, the GitHub API, or an AI agent (bypassing the web form), read the matching template in `.github/ISSUE_TEMPLATE/` and preserve every required `###` heading (English before Chinese) and `- [x]` checklist item verbatim without reordering or paraphrasing. Issues that alter required headings or checklist wording are automatically closed by the `issue-quality` check until edited to match.
+
 Ask usage questions in [Discussions](https://github.com/AnalyseDeCircuit/oxideterm/discussions/categories/q-a). Report security vulnerabilities through [private vulnerability reporting](https://github.com/AnalyseDeCircuit/OxideTerm/security/advisories/new), rather than a public issue or PR.
 
 > **Note on Ideas:** The maintainer may independently implement suggestions submitted via issues. Submitting an idea or proposal does not create joint authorship, shared copyright, or intellectual property rights over any subsequent implementation.

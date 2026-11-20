@@ -159,13 +159,8 @@ impl ConnectionFormView {
         let endpoint_count = if remote_to_remote { 2.0 } else { 1.0 };
         let fields_width = STANDALONE_SFTP_COMMON_COLUMN_WIDTH
             + endpoint_count * (STANDALONE_SFTP_ENDPOINT_COLUMN_WIDTH + gap);
-        let desired_width = fields_width
-            + 2.0 * self.tokens.metrics.modal_body_padding
-            + if shows_transport_selector {
-                NEW_CONNECTION_TYPE_SIDEBAR_WIDTH + gap
-            } else {
-                0.0
-            };
+        let desired_width = (fields_width + 2.0 * self.tokens.metrics.modal_body_padding)
+            .max(composer::CONNECTION_STUDIO_WIDTH);
         let modal_width = desired_width
             .min(f32::from(window.viewport_size().width) - STANDALONE_SFTP_VIEWPORT_MARGIN);
         let modal_max_height = f32::from(window.viewport_size().height)
@@ -243,43 +238,41 @@ impl ConnectionFormView {
             )
             .child(oxideterm_gpui_ui::modal::staged_overlay_scrim(
                 &self.tokens,
-                "standalone-sftp-form-scrim",
+                "new-connection-form-scrim",
                 oxideterm_gpui_ui::modal::TauriBackdropRole::Dialog,
                 true,
             ))
             .child(oxideterm_gpui_ui::motion::form_transition(
                 &self.tokens,
-                "standalone-sftp-form-enter",
+                "new-connection-form-enter",
                 modal_container(&self.tokens)
                     .bg(rgb(self.tokens.ui.bg_elevated))
                     .w(px(modal_width))
                     .h(px(modal_max_height))
                     .flex()
                     .flex_col()
+                    .overflow_hidden()
                     .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
                         cx.stop_propagation();
                     })
-                    .child(modal_header(
-                        &self.tokens,
+                    .child(self.render_studio_top_chrome(
                         title,
-                        self.i18n.t("sftp.standalone.form_description"),
+                        Some(self.i18n.t("sftp.standalone.form_description")),
+                        shows_transport_selector,
+                        true,
+                        cx,
                     ))
                     .child(
-                        modal_body(&self.tokens).flex_1().min_h(px(0.0)).child(
-                            div()
-                                .size_full()
-                                .min_h_0()
-                                .flex()
-                                .gap(px(gap))
-                                .when(shows_transport_selector, |content| {
-                                    content.child(self.render_transport_selector(cx))
-                                })
-                                .child(scrollable_fields),
-                        ),
+                        modal_body(&self.tokens)
+                            .flex_1()
+                            .min_w_0()
+                            .min_h(px(0.0))
+                            .child(scrollable_fields),
                     )
                     .child(
                         modal_footer(&self.tokens)
                             .flex_none()
+                            .bg(rgb(self.tokens.ui.bg_panel))
                             .child(self.render_connection_button(
                                 self.i18n.t("ssh.form.cancel"),
                                 false,

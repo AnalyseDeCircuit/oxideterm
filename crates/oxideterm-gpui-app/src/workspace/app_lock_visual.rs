@@ -208,7 +208,11 @@ fn hsla_with_alpha(hex: u32, alpha: f32) -> Hsla {
     color
 }
 
-fn circle_path(center: Point<Pixels>, radius: f32, stroke_width: f32) -> Option<gpui::Path<Pixels>> {
+fn circle_path(
+    center: Point<Pixels>,
+    radius: f32,
+    stroke_width: f32,
+) -> Option<gpui::Path<Pixels>> {
     if radius <= 0.5 {
         return None;
     }
@@ -293,10 +297,7 @@ pub(super) fn render_padlock_mechanism(
                     dial_r_outer - 2.6 * unit
                 };
                 let p0 = point(px(cx + cos_a * inner_r), px(cy + sin_a * inner_r));
-                let p1 = point(
-                    px(cx + cos_a * dial_r_outer),
-                    px(cy + sin_a * dial_r_outer),
-                );
+                let p1 = point(px(cx + cos_a * dial_r_outer), px(cy + sin_a * dial_r_outer));
                 if is_cardinal {
                     major_ticks.move_to(p0);
                     major_ticks.line_to(p1);
@@ -440,10 +441,8 @@ pub(super) fn render_padlock_mechanism(
             );
 
             // Main lock body plate.
-            let body_bounds = Bounds::new(
-                point(px(body_x), px(body_y)),
-                size(px(body_w), px(body_h)),
-            );
+            let body_bounds =
+                Bounds::new(point(px(body_x), px(body_y)), size(px(body_w), px(body_h)));
             let body_fill = if light {
                 theme.bg_panel
             } else {
@@ -514,9 +513,10 @@ pub(super) fn render_padlock_mechanism(
             }
 
             // Keyhole cylinder (circle + tapered vertical ward slot).
-            if let Some(cylinder) =
-                filled_circle_path(point(px(keyhole_cx), px(keyhole_cy - 0.5 * unit)), 4.0 * unit)
-            {
+            if let Some(cylinder) = filled_circle_path(
+                point(px(keyhole_cx), px(keyhole_cy - 0.5 * unit)),
+                4.0 * unit,
+            ) {
                 window.paint_path(cylinder, hsla_with_alpha(tone_hex, 0.96));
             }
             let slot_w = 2.9 * unit;

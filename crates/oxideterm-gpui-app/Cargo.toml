@@ -27,18 +27,15 @@ chrono.workspace = true
 fs2.workspace = true
 gpui.workspace = true
 image.workspace = true
-oxideterm-backend-classification = { path = "../oxideterm-backend-classification" }
 oxideterm-ai = { path = "../oxideterm-ai" }
 oxideterm-gpui-ai = { path = "../oxideterm-gpui-ai" }
 oxideterm-ai-tasks = { path = "../oxideterm-ai-tasks" }
-oxideterm-acp-host-tools = { path = "../oxideterm-acp-host-tools" }
 oxideterm-atomic-file = { path = "../oxideterm-atomic-file" }
 oxideterm-ble = { path = "../oxideterm-ble" }
 oxideterm-app-lock = { path = "../oxideterm-app-lock" }
 oxideterm-cloud-sync = { path = "../oxideterm-cloud-sync" }
 oxideterm-connection-monitor = { path = "../oxideterm-connection-monitor" }
 oxideterm-connections = { path = "../oxideterm-connections" }
-oxideterm-secret-store = { path = "../oxideterm-secret-store" }
 oxideterm-desktop-presence = { path = "../oxideterm-desktop-presence" }
 oxideterm-editor-core = { path = "../oxideterm-editor-core" }
 oxideterm-forwarding = { path = "../oxideterm-forwarding" }
@@ -87,7 +84,6 @@ oxideterm-sftp = { path = "../oxideterm-sftp" }
 oxideterm-ssh-launch = { path = "../oxideterm-ssh-launch" }
 oxideterm-ssh = { path = "../oxideterm-ssh" }
 oxideterm-terminal = { path = "../oxideterm-terminal" }
-oxideterm-terminal-semantic = { path = "../oxideterm-terminal-semantic", default-features = false }
 oxideterm-terminal-triggers = { path = "../oxideterm-terminal-triggers" }
 oxideterm-terminal-recording = { path = "../oxideterm-terminal-recording" }
 oxideterm-theme = { path = "../oxideterm-theme" }
@@ -96,8 +92,6 @@ oxideterm-update = { path = "../oxideterm-update" }
 oxideterm-workspace = { path = "../oxideterm-workspace" }
 oxideterm-wsl-graphics = { path = "../oxideterm-wsl-graphics" }
 parking_lot.workspace = true
-regex.workspace = true
-redb = "2.1"
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
@@ -109,7 +103,6 @@ tracing-appender.workspace = true
 tracing-subscriber.workspace = true
 uuid.workspace = true
 url.workspace = true
-walkdir = "2"
 whoami.workspace = true
 zeroize.workspace = true
 zstd = "0.13"

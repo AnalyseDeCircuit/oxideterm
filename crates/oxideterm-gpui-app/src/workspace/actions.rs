@@ -1793,6 +1793,34 @@ impl WorkspaceApp {
         let key = event.keystroke.key.as_str();
         let modifiers = event.keystroke.modifiers;
 
+        // The session search input owns Escape earlier in this function, so this
+        // only fires once the user closes search (or never opened it).
+        if self.session_node_selection.is_active()
+            && key == "escape"
+            && !modifiers.platform
+            && !modifiers.control
+            && !modifiers.alt
+        {
+            self.exit_session_node_selection(cx);
+            cx.stop_propagation();
+            return;
+        }
+
+        // The session manager's checkbox mode owns Escape the same way, whether
+        // it runs in the sidebar panel or in its own tab.
+        if self.connections.session_manager.read(cx).selection_mode
+            && key == "escape"
+            && !modifiers.platform
+            && !modifiers.control
+            && !modifiers.alt
+        {
+            self.connections.session_manager.update(cx, |manager, cx| {
+                manager.exit_session_selection_mode(cx);
+            });
+            cx.stop_propagation();
+            return;
+        }
+
         if self.terminal.read(cx).broadcast_group_editor().is_some()
             && !modifiers.platform
             && !modifiers.control
@@ -2553,12 +2581,12 @@ impl WorkspaceApp {
         let Some(snapshot) = self.overlay.read(cx).confirm_snapshot() else {
             return false;
         };
-        if !matches!(
-            snapshot.kind,
-            WorkspaceOverlayConfirmKind::NodeDisconnect { .. }
-        ) {
-            return false;
-        }
+        // Node disconnect and batch node removal share one key/focus owner.
+        let removes_nodes = match &snapshot.kind {
+            WorkspaceOverlayConfirmKind::NodeDisconnect { .. } => false,
+            WorkspaceOverlayConfirmKind::RemoveSessionNodes { .. } => true,
+            _ => return false,
+        };
         if snapshot.phase == oxideterm_gpui_ui::motion::ExitPhase::Exiting {
             return true;
         }
@@ -2576,7 +2604,11 @@ impl WorkspaceApp {
                 true
             }
             Some(WorkspaceOverlayConfirmKeyAction::Confirm) => {
-                self.confirm_node_disconnect_confirm(window, cx);
+                if removes_nodes {
+                    self.confirm_remove_session_nodes_confirm(window, cx);
+                } else {
+                    self.confirm_node_disconnect_confirm(window, cx);
+                }
                 true
             }
             Some(WorkspaceOverlayConfirmKeyAction::Handled) => true,

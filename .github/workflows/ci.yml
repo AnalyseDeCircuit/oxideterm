@@ -50,6 +50,10 @@ jobs:
           toolchain: 1.97.0
           components: rustfmt
 
+      - name: cargo fmt
+        if: steps.scope.outputs.rust == 'true'
+        run: cargo fmt --check
+
       - name: Rust cache
         if: steps.scope.outputs.rust == 'true'
         uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
@@ -63,10 +67,6 @@ jobs:
       - name: cargo check
         if: steps.scope.outputs.rust == 'true'
         run: cargo check --workspace --all-targets
-
-      - name: cargo fmt
-        if: steps.scope.outputs.rust == 'true'
-        run: cargo fmt --check
 
       - name: cargo test
         if: steps.scope.outputs.rust == 'true'

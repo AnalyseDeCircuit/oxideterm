@@ -11,6 +11,7 @@ use gpui::InteractiveElement;
 impl ConnectionFormView {
     pub(super) fn render_ble_form_branch(
         &self,
+        active_drawer: Option<crate::form_state::ConnectionFormDrawer>,
         window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -621,59 +622,56 @@ impl ConnectionFormView {
             .flex_col()
             .gap(px(self.tokens.metrics.modal_section_gap))
             .child(
-                self.render_connection_field(
-                    self.i18n.t("modals.new_connection.ble_profile_name"),
-                    &ble_profile_name,
-                    self.i18n
-                        .t("modals.new_connection.ble_profile_name_placeholder"),
-                    NewConnectionField::BleProfileName,
-                    false,
-                    cx,
-                ),
+                div()
+                    .flex()
+                    .flex_row()
+                    .gap(px(12.0))
+                    .child(div().flex_1().min_w_0().child(self.render_connection_field(
+                        self.i18n.t("modals.new_connection.ble_profile_name"),
+                        &ble_profile_name,
+                        self.i18n
+                            .t("modals.new_connection.ble_profile_name_placeholder"),
+                        NewConnectionField::BleProfileName,
+                        false,
+                        cx,
+                    )))
+                    .child(div().w(px(196.0)).flex_none().child(
+                        self.render_connection_group_select(
+                            self.i18n.t("ssh.form.group"),
+                            &group,
+                            cx,
+                        ),
+                    )),
             )
-            .child(self.render_connection_notes_fields(&notes, cx))
-            .child(self.render_connection_group_select(self.i18n.t("ssh.form.group"), &group, cx))
             .into_any_element();
 
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(self.tokens.metrics.modal_section_gap))
-            .child(self.render_connection_form_section(ConnectionFormSection::Basic, basic, cx))
-            .child(self.render_connection_form_section(
-                ConnectionFormSection::BleDiscovery,
-                discovery_body,
-                cx,
-            ))
-            // Byte-stream transport options mirror the serial control bar so the
-            // initial session state matches what the control bar would toggle.
-            .child(self.render_connection_form_section(
-                ConnectionFormSection::BleTransportOptions,
-                self.render_ble_transport_options(cx),
-                cx,
-            ))
-            // Terminal behavior is shared with the telnet form: both call the
-            // same renderer so encoding, key sequences, highlighting, and
-            // session logging stay in sync instead of diverging.
-            .child(
-                self.render_connection_form_section(
-                    ConnectionFormSection::Terminal,
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap(px(self.tokens.metrics.modal_section_gap))
-                        .child(self.render_connection_terminal_options(cx))
-                        .child(self.render_connection_pre_connect_command(cx))
-                        .into_any_element(),
-                    cx,
-                ),
-            )
-            .child(self.render_connection_form_section(
-                ConnectionFormSection::Appearance,
-                self.render_connection_appearance_options(cx),
-                cx,
-            ))
-            .into_any_element()
+        use crate::form_state::ConnectionFormDrawer;
+        match active_drawer {
+            Some(ConnectionFormDrawer::BleTransportOptions) => self.render_ble_transport_options(cx),
+            Some(ConnectionFormDrawer::Terminal) => div()
+                .flex()
+                .flex_col()
+                .gap(px(self.tokens.metrics.modal_section_gap))
+                .child(self.render_connection_terminal_options(cx))
+                .child(self.render_connection_pre_connect_command(cx))
+                .into_any_element(),
+            Some(ConnectionFormDrawer::Notes) => div()
+                .flex()
+                .flex_col()
+                .gap(px(self.tokens.metrics.modal_section_gap))
+                .child(self.render_connection_appearance_options(cx))
+                .child(div().h(px(1.0)).bg(rgb(theme.border)))
+                .child(self.render_connection_notes_fields(&notes, cx))
+                .into_any_element(),
+            _ => div()
+                .flex()
+                .flex_col()
+                .gap(px(self.tokens.metrics.modal_section_gap))
+                .child(basic)
+                .child(div().h(px(1.0)).bg(rgb(theme.border)))
+                .child(discovery_body)
+                .into_any_element(),
+        }
     }
 
     /// Renders the BLE transport options: the ATT MTU cap and the write

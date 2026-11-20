@@ -324,6 +324,12 @@
       "preset_aws_name": "Preset template - AWS",
       "apply_blocked_issues": "Fix the listed issues before adding",
       "templates_load_failed": "Saved templates could not be read"
+    },
+    "selection": {
+      "count": "Selected {{count}} / {{total}}",
+      "select_all": "Select all",
+      "delete": "Delete",
+      "exit": "Exit"
     }
   }
 }

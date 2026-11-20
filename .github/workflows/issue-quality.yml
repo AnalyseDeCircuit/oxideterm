@@ -180,7 +180,14 @@ jobs:
             if (report.blockingFindings.length > 0) {
               await addMissingLabels([gate.CORRECTION_NEEDED_LABEL]);
               const gateComment = await findGateComment();
-              await saveGateComment(gateComment, gate.buildCorrectionNotice(report.blockingFindings));
+              await saveGateComment(
+                gateComment,
+                gate.buildCorrectionNotice(report.blockingFindings, {
+                  title: issue.title || '',
+                  body: issue.body || '',
+                  labels: [...activeLabels],
+                })
+              );
               const stateChange = gate.decideStateChange({
                 currentState: issue.state,
                 hasBlockingFindings: true,

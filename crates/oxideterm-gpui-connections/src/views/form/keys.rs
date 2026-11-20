@@ -46,6 +46,14 @@ impl ConnectionFlowEntity {
         };
         if !form.field_focused {
             return match key {
+                "escape"
+                    if form.transport_picker_open || form.appearance_popover_open =>
+                {
+                    form.transport_picker_open = false;
+                    form.appearance_popover_open = false;
+                    cx.notify();
+                    (FormKeyAction::Handled, false)
+                }
                 "escape" if form.jump_server_form.is_some() => {
                     (FormKeyAction::CloseJumpForm, false)
                 }
@@ -138,6 +146,12 @@ impl ConnectionFlowEntity {
         }
 
         match key {
+            "escape" if form.transport_picker_open || form.appearance_popover_open => {
+                form.transport_picker_open = false;
+                form.appearance_popover_open = false;
+                cx.notify();
+                (FormKeyAction::Handled, false)
+            }
             "escape" if form.jump_server_form.is_some() => (FormKeyAction::CloseJumpForm, false),
             "escape" => (FormKeyAction::CloseForm, false),
             "enter" if form.jump_server_form.is_some() => (FormKeyAction::AddJumpServer, false),

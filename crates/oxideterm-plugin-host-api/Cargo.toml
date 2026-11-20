@@ -12,7 +12,6 @@ default = []
 wasm-runtime = ["dep:oxideterm-plugin-wasm-runtime"]
 
 [dependencies]
-anyhow.workspace = true
 base64.workspace = true
 chrono.workspace = true
 oxideterm-ai = { path = "../oxideterm-ai" }

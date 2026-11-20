@@ -43,9 +43,9 @@ pub use connection_registry::{
     WS_BRIDGE_HEARTBEAT_INTERVAL, WS_BRIDGE_HEARTBEAT_TIMEOUT,
 };
 pub use connection_trace::{
-    ConnectionProgressReporter, ConnectionTraceEvent, ConnectionTraceMode, ConnectionTracePlan,
-    ConnectionTraceStage, ConnectionTraceState, ConnectionTraceStatus, SshAlgorithmDiagnosticKind,
-    SshAlgorithmNegotiationDiagnostic, connection_trace_failure_stage,
+    ConnectionChainProgress, ConnectionProgressReporter, ConnectionTraceEvent, ConnectionTraceMode,
+    ConnectionTracePlan, ConnectionTraceStage, ConnectionTraceState, ConnectionTraceStatus,
+    SshAlgorithmDiagnosticKind, SshAlgorithmNegotiationDiagnostic, connection_trace_failure_stage,
     parse_algorithm_negotiation_error, server_offers_legacy_cipher, server_only_offers_ssh_rsa,
 };
 pub use host_key::{
