@@ -220,7 +220,12 @@ fn structured_output_variants_preserve_column_identity() {
             "/dev/sda1 ext4 100G 90G 10G 90% /media/my disk",
             vec![
                 ("ext4", SemanticClass::Keyword),
+                // 80% turns yellow and 90% turns red, so 90% is already an error.
                 ("90%", SemanticClass::Error),
+                // 90G of 100G is 90%: past the 80% line, so Used and Avail both
+                // turn yellow.
+                ("90G", SemanticClass::Warning),
+                ("10G", SemanticClass::Warning),
                 ("/media/my disk", SemanticClass::Path),
             ],
         ),
@@ -237,7 +242,9 @@ fn structured_output_variants_preserve_column_identity() {
             "df -h",
             "/dev/disk1s1 100Gi 10Gi 90Gi 10% 459k 4.3G 1% /Volumes/My Disk",
             vec![
-                ("100Gi", SemanticClass::Number),
+                // The Size column stays uncolored; the capacity columns (Used/Avail)
+                // are green.
+                ("10Gi", SemanticClass::Success),
                 ("/Volumes/My Disk", SemanticClass::Path),
             ],
         ),
@@ -458,11 +465,15 @@ fn structured_output_fields_keep_their_command_specific_meaning() {
         ),
         (
             DiskUsageOutput,
-            "/dev/nvme0n1p2 100G 91G 9G 91% /",
+            "/dev/nvme0n1p2 100G 91G 9G 96% /",
             &[
                 ("/dev/nvme0n1p2", Path),
-                ("100G", Number),
-                ("91%", Error),
+                // Size stays uncolored; 91/100 crosses the 80% line, so Used/Avail
+                // turn yellow;
+                // 96% crosses the 90% threshold and escalates to error.
+                ("91G", Warning),
+                ("9G", Warning),
+                ("96%", Error),
                 ("/", Path),
             ],
         ),

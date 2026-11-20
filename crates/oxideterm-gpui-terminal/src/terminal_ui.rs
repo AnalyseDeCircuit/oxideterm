@@ -982,6 +982,9 @@ pub(crate) fn terminal_semantic_color_from_palette(
         SemanticClass::PermissionExecute => terminal.bright_green,
         SemanticClass::PermissionSpecial => terminal.bright_magenta,
         SemanticClass::Number => terminal.magenta,
+        // Explicitly uncolored: fall back to the terminal's default foreground so
+        // columns that should stay plain are not tinted.
+        SemanticClass::Plain => terminal.foreground,
         SemanticClass::Comment => terminal.bright_black,
         SemanticClass::Error => terminal.bright_red,
         SemanticClass::Warning => terminal.bright_yellow,

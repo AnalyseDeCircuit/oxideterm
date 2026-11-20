@@ -586,6 +586,7 @@
         "semantic_class_permission_execute": "Quyền thực thi",
         "semantic_class_permission_special": "Quyền đặc biệt",
         "semantic_class_number": "Số",
+        "semantic_class_plain": "Văn bản thường",
         "semantic_class_error": "Lỗi",
         "semantic_class_warning": "Cảnh báo",
         "semantic_class_success": "Thành công",

@@ -26,6 +26,13 @@ pub enum SemanticClass {
     PermissionExecute,
     PermissionSpecial,
     Number,
+    /// Explicitly uncolored: pin a span back to the terminal's default foreground.
+    ///
+    /// Used where a column should not be tinted by any rule, such as df's Size
+    /// column: it is only a reference value, and the generic "number + unit" rule
+    /// would tint 248G magenta. Tagging the span as Plain with a higher priority
+    /// keeps those rules from winning.
+    Plain,
     Error,
     Warning,
     Success,
@@ -55,6 +62,10 @@ pub const SEMANTIC_CLASSES: &[SemanticClass] = &[
     SemanticClass::Warning,
     SemanticClass::Success,
     SemanticClass::Info,
+    // Append at the end: the index into this array is the custom-color index in
+    // the settings page, so inserting in the middle would shift every color the
+    // user already saved.
+    SemanticClass::Plain,
 ];
 
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]

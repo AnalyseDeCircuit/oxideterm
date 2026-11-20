@@ -586,6 +586,7 @@
         "semantic_class_permission_execute": "실행 권한",
         "semantic_class_permission_special": "특수 권한",
         "semantic_class_number": "숫자",
+        "semantic_class_plain": "일반 텍스트",
         "semantic_class_error": "오류",
         "semantic_class_warning": "경고",
         "semantic_class_success": "성공",

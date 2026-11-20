@@ -588,6 +588,7 @@
         "semantic_class_permission_execute": "Execute permission",
         "semantic_class_permission_special": "Special permission",
         "semantic_class_number": "Number",
+        "semantic_class_plain": "Plain text",
         "semantic_class_error": "Error",
         "semantic_class_warning": "Warning",
         "semantic_class_success": "Success",

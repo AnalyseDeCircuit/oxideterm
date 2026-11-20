@@ -8410,6 +8410,7 @@ dependencies = [
  "regex",
  "russh",
  "serde",
+ "serde_json",
  "serialport",
  "tempfile",
  "tokio",
