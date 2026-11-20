@@ -1,20 +1,92 @@
 use std::{
+    backtrace::Backtrace,
+    cell::Cell,
     fs::{File, OpenOptions},
     io::{self, Read, Seek, SeekFrom, Write},
+    panic::PanicHookInfo,
     path::{Path, PathBuf},
+    sync::{Mutex, OnceLock},
 };
 
 use anyhow::{Context as _, Result};
 use oxideterm_settings::PersistedSettings;
 use tracing_appender::non_blocking::WorkerGuard;
-use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::{
+    EnvFilter, Registry, fmt, layer::SubscriberExt, reload, util::SubscriberInitExt,
+};
 
 const LOG_FILE_NAME: &str = "oxideterm-native.log";
+const CRASH_LOG_FILE_NAME: &str = "oxideterm-native-crash.log";
 const LEGACY_LOG_FILE_PREFIX: &str = "oxideterm-native.";
 const MAX_LOG_FILE_BYTES: u64 = 10 * 1024 * 1024;
+const MAX_CRASH_LOG_BYTES: u64 = 2 * 1024 * 1024;
 const OVERSIZED_LOG_ENTRY_MARKER: &[u8] = b"[oversized log entry omitted]\n";
-const DEFAULT_LOG_FILTER: &str = "warn,oxideterm_gpui_app=info,oxideterm_ssh=info";
-const DEBUG_LOG_FILTER: &str = "warn,oxideterm_gpui_app=debug,oxideterm_ssh=debug,gpui=info";
+const DEFAULT_LOG_FILTER: &str = "warn,\
+oxideterm_gpui_app=info,\
+oxideterm_ssh=info,\
+oxideterm_terminal=info,\
+oxideterm_gpui_connections=info,\
+oxideterm_update=info";
+const DEBUG_LOG_FILTER: &str = "warn,\
+oxideterm_gpui_app=debug,\
+oxideterm_gpui_platform=debug,\
+oxideterm_gpui_terminal=debug,\
+oxideterm_gpui_connections=debug,\
+oxideterm_gpui_sftp=debug,\
+oxideterm_gpui_remote_desktop=debug,\
+oxideterm_gpui_file_manager=debug,\
+oxideterm_gpui_forwards=debug,\
+oxideterm_gpui_editor=debug,\
+oxideterm_gpui_ide=debug,\
+oxideterm_gpui_ai=debug,\
+oxideterm_gpui_cloud_sync=debug,\
+oxideterm_gpui_background=debug,\
+oxideterm_gpui_settings_view=debug,\
+oxideterm_gpui_ui=debug,\
+oxideterm_ssh=debug,\
+oxideterm_ssh_launch=debug,\
+oxideterm_terminal=debug,\
+oxideterm_forwarding=debug,\
+oxideterm_wsl_graphics=debug,\
+oxideterm_sftp=debug,\
+oxideterm_ftp=debug,\
+oxideterm_mosh=debug,\
+oxideterm_ble=debug,\
+oxideterm_remote_desktop=debug,\
+oxideterm_connections=debug,\
+oxideterm_network_proxy=debug,\
+oxideterm_ai=debug,\
+oxideterm_public_mcp=debug,\
+oxideterm_public_mcp_host=debug,\
+oxideterm_plugin_registry=debug,\
+oxideterm_plugin_host_api=debug,\
+oxideterm_cloud_sync=debug,\
+oxideterm_update=debug,\
+gpui_pre=info,\
+gpui_pre_apple=info,\
+gpui_pre_macos=info,\
+gpui_pre_windows=info,\
+gpui_pre_linux=info,\
+gpui_pre_wgpu=info,\
+zed_xim=info";
+
+static CRASH_LOG_DIR: OnceLock<PathBuf> = OnceLock::new();
+static CRASH_LOG_WRITE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+static PANIC_HOOK_INSTALLED: OnceLock<()> = OnceLock::new();
+static FILTER_RELOAD_HANDLE: OnceLock<reload::Handle<EnvFilter, Registry>> = OnceLock::new();
+static ENV_FILTER_OVERRIDDEN: OnceLock<bool> = OnceLock::new();
+
+thread_local! {
+    static IN_PANIC_HOOK: Cell<bool> = const { Cell::new(false) };
+}
+
+struct PanicHookReentrancyGuard;
+
+impl Drop for PanicHookReentrancyGuard {
+    fn drop(&mut self) {
+        IN_PANIC_HOOK.with(|flag| flag.set(false));
+    }
+}
 
 struct SizeLimitedLogWriter {
     file: File,
@@ -120,15 +192,12 @@ pub(crate) fn init_file_logging(
     let file_writer = SizeLimitedLogWriter::open(&log_path, MAX_LOG_FILE_BYTES)
         .with_context(|| format!("failed to open log file at {}", log_path.display()))?;
     let (writer, guard) = tracing_appender::non_blocking(file_writer);
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-        if settings.diagnostics.debug_logging {
-            EnvFilter::new(DEBUG_LOG_FILTER)
-        } else {
-            EnvFilter::new(DEFAULT_LOG_FILTER)
-        }
-    });
+    let env_filter = EnvFilter::try_from_default_env().ok();
+    let _ = ENV_FILTER_OVERRIDDEN.set(env_filter.is_some());
+    let filter = env_filter.unwrap_or_else(|| build_log_filter(settings.diagnostics.debug_logging));
+    let (filter_layer, reload_handle) = reload::Layer::new(filter);
 
-    let subscriber = tracing_subscriber::registry().with(
+    let subscriber = tracing_subscriber::registry().with(filter_layer).with(
         fmt::layer()
             .with_writer(writer)
             .with_ansi(false)
@@ -137,9 +206,10 @@ pub(crate) fn init_file_logging(
 
     // Tests or embedding hosts may already have installed a global subscriber.
     // In that case OxideTerm should keep running and simply skip its file sink.
-    if subscriber.with(filter).try_init().is_err() {
+    if subscriber.try_init().is_err() {
         return Ok(None);
     }
+    let _ = FILTER_RELOAD_HANDLE.set(reload_handle);
 
     tracing::info!(
         log_path = %log_path.display(),
@@ -150,11 +220,129 @@ pub(crate) fn init_file_logging(
     Ok(Some(guard))
 }
 
+fn build_log_filter(debug_logging: bool) -> EnvFilter {
+    EnvFilter::new(if debug_logging {
+        DEBUG_LOG_FILTER
+    } else {
+        DEFAULT_LOG_FILTER
+    })
+}
+
+pub(crate) fn set_debug_logging_enabled(debug_logging: bool) {
+    // Explicit RUST_LOG takes precedence over settings-driven filter toggles.
+    if ENV_FILTER_OVERRIDDEN.get().copied().unwrap_or(false) {
+        return;
+    }
+    let Some(handle) = FILTER_RELOAD_HANDLE.get() else {
+        return;
+    };
+    let next_filter = build_log_filter(debug_logging);
+    if handle.reload(next_filter).is_ok() {
+        tracing::info!(debug_logging, "Updated OxideTerm native log filter");
+    }
+}
+
 fn log_directory_from_settings_path(settings_path: Option<&Path>) -> PathBuf {
     settings_path
         .and_then(Path::parent)
         .map(|parent| parent.join("logs"))
         .unwrap_or_else(|| PathBuf::from("logs"))
+}
+
+pub(crate) fn install_panic_hook(settings_path: Option<&Path>) {
+    let log_dir = log_directory_from_settings_path(settings_path);
+    let _ = CRASH_LOG_DIR.set(log_dir.clone());
+    let _ = std::fs::create_dir_all(&log_dir);
+    let _ = CRASH_LOG_WRITE_LOCK.get_or_init(|| Mutex::new(()));
+
+    PANIC_HOOK_INSTALLED.get_or_init(|| {
+        let previous_hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            let already_active = IN_PANIC_HOOK.with(|flag| flag.replace(true));
+            if !already_active {
+                let _guard = PanicHookReentrancyGuard;
+                record_panic_to_logs(info);
+            }
+            previous_hook(info);
+        }));
+    });
+}
+
+fn panic_payload_message(info: &PanicHookInfo<'_>) -> String {
+    if let Some(text) = info.payload().downcast_ref::<&str>() {
+        (*text).to_owned()
+    } else if let Some(text) = info.payload().downcast_ref::<String>() {
+        text.clone()
+    } else {
+        "<non-string panic payload>".to_owned()
+    }
+}
+
+fn format_panic_report(
+    timestamp: &str,
+    thread_name: &str,
+    location: &str,
+    raw_payload: &str,
+    raw_backtrace: &str,
+) -> String {
+    let redacted_payload = oxideterm_audit::redact(raw_payload);
+    let redacted_backtrace = oxideterm_audit::redact(raw_backtrace);
+    format!(
+        "=== OxideTerm Panic Report ===\n\
+         timestamp: {timestamp}\n\
+         version: {}\n\
+         target: {}/{}\n\
+         thread: {thread_name}\n\
+         location: {location}\n\
+         message: {}\n\
+         backtrace:\n{}\n",
+        env!("CARGO_PKG_VERSION"),
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+        redacted_payload.as_str(),
+        redacted_backtrace.as_str().trim_end(),
+    )
+}
+
+fn write_panic_report_to_dir(log_dir: &Path, report: &str, max_len: u64) -> io::Result<()> {
+    std::fs::create_dir_all(log_dir)?;
+    let crash_log_path = log_dir.join(CRASH_LOG_FILE_NAME);
+    let lock = CRASH_LOG_WRITE_LOCK.get_or_init(|| Mutex::new(()));
+    let _guard = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut writer = SizeLimitedLogWriter::open(&crash_log_path, max_len)?;
+    writer.write_all(report.as_bytes())?;
+    writer.flush()
+}
+
+fn record_panic_to_logs(info: &PanicHookInfo<'_>) {
+    let timestamp = chrono::Local::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, false);
+    let current_thread = std::thread::current();
+    let thread_name = current_thread.name().unwrap_or("<unnamed>");
+    let location = info.location().map_or_else(
+        || "<unknown>".to_owned(),
+        |loc| format!("{}:{}:{}", loc.file(), loc.line(), loc.column()),
+    );
+    let raw_payload = panic_payload_message(info);
+    let redacted_payload = oxideterm_audit::redact(&raw_payload);
+    let raw_backtrace = Backtrace::force_capture().to_string();
+    let report = format_panic_report(
+        &timestamp,
+        thread_name,
+        &location,
+        &raw_payload,
+        &raw_backtrace,
+    );
+
+    if let Some(log_dir) = CRASH_LOG_DIR.get() {
+        let _ = write_panic_report_to_dir(log_dir, &report, MAX_CRASH_LOG_BYTES);
+    }
+
+    tracing::error!(
+        thread = thread_name,
+        location = %location,
+        message = %redacted_payload.as_str(),
+        "Unhandled Rust panic recorded"
+    );
 }
 
 fn remove_legacy_daily_logs(log_dir: &Path) -> io::Result<()> {
@@ -251,5 +439,45 @@ mod tests {
         assert!(!legacy_log.exists());
         assert!(current_log.exists());
         assert!(unrelated_log.exists());
+    }
+
+    #[test]
+    fn panic_report_redacts_secrets_and_writes_bounded_crash_log() {
+        let directory = TestDirectory::new("panic-report");
+        let report = format_panic_report(
+            "2026-11-20T21:20:00.000+08:00",
+            "tokio-worker",
+            "crates/example/src/lib.rs:42:9",
+            "dial failed for ssh://alice:super-secret@host.example:22 with password=topsecret",
+            "   0: std::panicking::begin_panic",
+        );
+
+        assert!(report.contains("thread: tokio-worker"));
+        assert!(report.contains("location: crates/example/src/lib.rs:42:9"));
+        assert!(!report.contains("super-secret"));
+        assert!(!report.contains("topsecret"));
+        assert!(report.contains("ssh://alice:[REDACTED]@host.example:22"));
+
+        write_panic_report_to_dir(&directory.0, &report, MAX_CRASH_LOG_BYTES)
+            .expect("write crash report");
+        let crash_path = directory.0.join(CRASH_LOG_FILE_NAME);
+        let written = std::fs::read_to_string(&crash_path).expect("read crash report");
+        assert_eq!(written, report);
+        assert!(written.len() as u64 <= MAX_CRASH_LOG_BYTES);
+    }
+
+    #[test]
+    fn default_and_debug_filters_parse_cleanly_with_platform_and_runtime_targets() {
+        let default_directives = build_log_filter(false).to_string();
+        assert!(default_directives.contains("oxideterm_ssh=info"));
+        assert!(default_directives.contains("oxideterm_terminal=info"));
+
+        let debug_directives = build_log_filter(true).to_string();
+        assert!(debug_directives.contains("oxideterm_gpui_app=debug"));
+        assert!(debug_directives.contains("oxideterm_forwarding=debug"));
+        assert!(debug_directives.contains("gpui_pre=info"));
+        assert!(debug_directives.contains("gpui_pre_wgpu=info"));
+        assert!(debug_directives.contains("gpui_pre_windows=info"));
+        assert!(!debug_directives.contains(",gpui="));
     }
 }

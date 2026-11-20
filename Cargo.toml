@@ -375,7 +375,8 @@ nonminimal_bool = "allow"
 lto = "thin"
 codegen-units = 1
 strip = true
-panic = "abort"
+# Preserve unwinding so catch_unwind isolation in SSH/BLE/plugin workers and Tokio tasks remains active.
+panic = "unwind"
 opt-level = 3
 
 [profile.dev]

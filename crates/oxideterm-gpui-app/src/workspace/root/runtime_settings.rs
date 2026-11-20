@@ -10,6 +10,9 @@ impl WorkspaceApp {
         settings: &PersistedSettings,
         cx: &mut Context<Self>,
     ) {
+        if previous_settings.diagnostics.debug_logging != settings.diagnostics.debug_logging {
+            crate::logging::set_debug_logging_enabled(settings.diagnostics.debug_logging);
+        }
         if previous_settings.sidebar_ui.zen_mode != settings.sidebar_ui.zen_mode
             || previous_settings.appearance.zen_mode_keep_tabbar
                 != settings.appearance.zen_mode_keep_tabbar

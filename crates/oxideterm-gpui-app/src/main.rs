@@ -175,13 +175,12 @@ fn main() {
             })
             .map(Into::into)
     });
-    let _log_guard = match logging::init_file_logging(
-        &startup_settings,
-        startup_settings_store
-            .as_ref()
-            .ok()
-            .map(SettingsStore::path),
-    ) {
+    let settings_path = startup_settings_store
+        .as_ref()
+        .ok()
+        .map(SettingsStore::path);
+    logging::install_panic_hook(settings_path);
+    let _log_guard = match logging::init_file_logging(&startup_settings, settings_path) {
         Ok(guard) => guard,
         Err(error) => {
             eprintln!("failed to initialize OxideTerm file logging: {error:#}");
