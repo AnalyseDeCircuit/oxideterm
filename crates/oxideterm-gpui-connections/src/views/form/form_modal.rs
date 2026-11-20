@@ -678,14 +678,9 @@ impl ConnectionFormView {
                     },
                 ]
             } else {
-                let security_summary = if form.gssapi_enabled {
-                    Some("KRB".to_string())
-                } else if form.agent_forwarding || form.legacy_ssh_compatibility || form.x11_enabled
-                {
-                    Some("•".to_string())
-                } else {
-                    None
-                };
+                let security_summary =
+                    (form.agent_forwarding || form.legacy_ssh_compatibility || form.x11_enabled)
+                        .then(|| "•".to_string());
                 let algorithms_summary = (form.ssh_algorithms_custom_count > 0)
                     .then(|| form.ssh_algorithms_custom_count.to_string());
                 vec![
@@ -1483,6 +1478,65 @@ impl ConnectionFormView {
                                             ))
                                     },
                                 )
+                                .when(
+                                    !prompt_mode && !drill_down_mode && !standalone_sftp_mode,
+                                    |content| {
+                                        content.child(
+                                            div()
+                                                .flex()
+                                                .flex_col()
+                                                .gap(px(12.0))
+                                                .pt(px(12.0))
+                                                .border_t_1()
+                                                .border_color(rgb(theme.border))
+                                                .child(self.render_connection_checkbox(
+                                                    "ssh-kerberos",
+                                                    self.i18n.t("ssh.form.kerberos_preferred"),
+                                                    form.gssapi_enabled,
+                                                    |form| {
+                                                        form.gssapi_enabled = !form.gssapi_enabled;
+                                                    },
+                                                    cx,
+                                                ))
+                                                .when(form.gssapi_enabled, |sec| {
+                                                    sec.child(self.render_connection_hint(
+                                                        self.i18n.t("ssh.form.gssapi_desc"),
+                                                    ))
+                                                    .child(self.render_connection_field(
+                                                        self.i18n.t(
+                                                            "ssh.form.gssapi_server_identity",
+                                                        ),
+                                                        &form.gssapi_server_identity,
+                                                        self.i18n.t(
+                                                            "ssh.form.gssapi_server_identity_placeholder",
+                                                        ),
+                                                        NewConnectionField::GssapiServerIdentity,
+                                                        false,
+                                                        cx,
+                                                    ))
+                                                    .child(
+                                                        self.render_kerberos_credentials_status(
+                                                            form.gssapi_credentials_available,
+                                                        ),
+                                                    )
+                                                    .child(
+                                                        self.render_connection_checkbox_with_warning(
+                                                            "kerberos-delegation-help",
+                                                            "kerberos-delegation-tooltip",
+                                                            "ssh.form.gssapi_delegate_credentials",
+                                                            "ssh.form.gssapi_delegation_warning",
+                                                            form.gssapi_delegate_credentials,
+                                                            |form| {
+                                                                form.gssapi_delegate_credentials =
+                                                                    !form.gssapi_delegate_credentials;
+                                                            },
+                                                            cx,
+                                                        ),
+                                                    )
+                                                }),
+                                        )
+                                    },
+                                )
                                 .into_any_element();
                                     authentication
                                 }))
@@ -1515,56 +1569,11 @@ impl ConnectionFormView {
                                                     .into_any_element(),
                                             ),
                                             Some(ConnectionFormDrawer::SshSecurity) => Some(
-                                                div()
-                                                    .flex()
-                                                    .flex_col()
-                                                    .gap(px(12.0))
-                                                    .child(self.render_connection_checkbox(
-                                                        "ssh-kerberos",
-                                                        self.i18n.t("ssh.form.kerberos_preferred"),
-                                                        form.gssapi_enabled,
-                                                        |form| form.gssapi_enabled = !form.gssapi_enabled,
-                                                        cx,
-                                                    ))
-                                                    .when(form.gssapi_enabled, |sec| {
-                                                        sec.child(self.render_connection_hint(
-                                                            self.i18n.t("ssh.form.gssapi_desc"),
-                                                        ))
-                                                        .child(self.render_connection_field(
-                                                            self.i18n.t("ssh.form.gssapi_server_identity"),
-                                                            &form.gssapi_server_identity,
-                                                            self.i18n.t(
-                                                                "ssh.form.gssapi_server_identity_placeholder",
-                                                            ),
-                                                            NewConnectionField::GssapiServerIdentity,
-                                                            false,
-                                                            cx,
-                                                        ))
-                                                        .child(self.render_kerberos_credentials_status(
-                                                            form.gssapi_credentials_available,
-                                                        ))
-                                                        .child(
-                                                            self.render_connection_checkbox_with_warning(
-                                                                "kerberos-delegation-help",
-                                                                "kerberos-delegation-tooltip",
-                                                                "ssh.form.gssapi_delegate_credentials",
-                                                                "ssh.form.gssapi_delegation_warning",
-                                                                form.gssapi_delegate_credentials,
-                                                                |form| {
-                                                                    form.gssapi_delegate_credentials =
-                                                                        !form.gssapi_delegate_credentials;
-                                                                },
-                                                                cx,
-                                                            ),
-                                                        )
-                                                    })
-                                                    .child(div().h(px(1.0)).bg(rgb(theme.border)))
-                                                    .child(self.render_connection_ssh_options(
-                                                        form.agent_forwarding,
-                                                        form.legacy_ssh_compatibility,
-                                                        cx,
-                                                    ))
-                                                    .into_any_element(),
+                                                self.render_connection_ssh_options(
+                                                    form.agent_forwarding,
+                                                    form.legacy_ssh_compatibility,
+                                                    cx,
+                                                ),
                                             ),
                                             Some(ConnectionFormDrawer::SshAlgorithms) => {
                                                 Some(self.render_ssh_algorithms_page(cx))

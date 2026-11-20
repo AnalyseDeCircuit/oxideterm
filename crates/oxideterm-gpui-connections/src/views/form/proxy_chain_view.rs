@@ -2,6 +2,8 @@ use super::*;
 use oxideterm_connections::{ConnectionTerminalBellPolicy, ConnectionTerminalSessionLogPolicy};
 
 struct JumpServerRenderSnapshot {
+    totp_credential_id: Option<String>,
+    totp_picker_expanded: bool,
     saved_connection_id: String,
     host: String,
     port: String,
@@ -23,6 +25,8 @@ struct JumpServerRenderSnapshot {
 impl JumpServerRenderSnapshot {
     fn from_hop(hop: &NewConnectionProxyHop) -> Self {
         Self {
+            totp_credential_id: hop.totp_credential_id.clone(),
+            totp_picker_expanded: hop.totp_picker_expanded,
             saved_connection_id: hop.saved_connection_id.clone(),
             host: hop.host.clone(),
             port: hop.port.clone(),
@@ -49,6 +53,7 @@ struct ProxyHopSummarySnapshot {
     port: String,
     username: String,
     auth_tab: SshAuthTab,
+    gssapi_enabled: bool,
 }
 
 impl ConnectionFormView {
@@ -1263,36 +1268,115 @@ impl ConnectionFormView {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let Some(jump_form) = self
-            .connection_form_state(cx)
-            .form
-            .as_ref()
-            .and_then(|form| form.jump_server_form.as_ref())
-            .map(JumpServerRenderSnapshot::from_hop)
+        let Some((jump_form, gssapi_credentials_available, is_editing, footer_error)) =
+            self.connection_form_state(cx).form.as_ref().and_then(|form| {
+                form.jump_server_form.as_ref().map(|hop| {
+                    (
+                        JumpServerRenderSnapshot::from_hop(hop),
+                        form.gssapi_credentials_available,
+                        form.jump_server_edit_index.is_some(),
+                        form.error.clone(),
+                    )
+                })
+            })
         else {
             return div().into_any_element();
         };
-        let gssapi_credentials_available = self
-            .connection_form_state(cx)
-            .form
-            .as_ref()
-            .and_then(|form| form.gssapi_credentials_available);
         if jump_form.gssapi_enabled && gssapi_credentials_available.is_none() {
             self.ensure_kerberos_credentials_availability(cx);
         }
+        let theme = self.tokens.ui;
+        let light = theme.is_light();
+        let top_radius = oxideterm_gpui_ui::modal::rounded_shell_child_radius(self.tokens.radii.lg);
+        let modal_shadows = vec![
+            gpui::BoxShadow {
+                color: rgba(if light { 0x00000018 } else { 0x00000066 }).into(),
+                offset: point(px(0.0), px(20.0)),
+                blur_radius: px(44.0),
+                spread_radius: px(-8.0),
+                inset: false,
+            },
+            gpui::BoxShadow {
+                color: rgba(if light { 0x0000000c } else { 0x00000038 }).into(),
+                offset: point(px(0.0), px(4.0)),
+                blur_radius: px(12.0),
+                spread_radius: px(-2.0),
+                inset: false,
+            },
+        ];
         let add_disabled = !jump_form.complete
             || (jump_form.auth_tab == SshAuthTab::ManagedKey
                 && jump_form.managed_key_id.trim().is_empty());
-        let modal_max_height = f32::from(window.viewport_size().height)
-            * self.tokens.metrics.modal_max_viewport_height_ratio;
+        let viewport = window.viewport_size();
+        let modal_width = JUMP_STUDIO_MODAL_WIDTH.min((f32::from(viewport.width) - 32.0).max(0.0));
+        let modal_max_height = (f32::from(viewport.height)
+            * self.tokens.metrics.modal_max_viewport_height_ratio)
+            .min(JUMP_STUDIO_MAX_HEIGHT);
         let form_visible = self.connection_form_state(cx).jump_server_presence.phase()
             == oxideterm_gpui_ui::motion::ExitPhase::Visible;
+        let show_totp_select =
+            jump_form.totp_picker_expanded || jump_form.totp_credential_id.is_some();
+        let totp_active = jump_form.totp_credential_id.is_some();
+        let totp_toggle_chip = div()
+            .id("jump-totp-toggle")
+            .h(px(self.tokens.metrics.ui_tabs_list_height))
+            .px(px(10.0))
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(if totp_active || show_totp_select {
+                rgb(theme.accent)
+            } else {
+                rgb(theme.border)
+            })
+            .bg(if totp_active || show_totp_select {
+                rgba((theme.accent << 8) | 0x18)
+            } else {
+                rgb(theme.bg_panel)
+            })
+            .cursor_pointer()
+            .hover(|el| el.bg(rgb(theme.bg_hover)))
+            .flex()
+            .items_center()
+            .gap(px(5.0))
+            .text_size(px(self.tokens.metrics.ui_text_xs))
+            .font_weight(gpui::FontWeight::MEDIUM)
+            .text_color(rgb(if totp_active || show_totp_select {
+                theme.accent
+            } else {
+                theme.text_muted
+            }))
+            .child(Self::render_lucide_icon(
+                LucideIcon::KeyRound,
+                12.0,
+                rgb(if totp_active || show_totp_select {
+                    theme.accent
+                } else {
+                    theme.text_muted
+                }),
+            ))
+            .child("TOTP")
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _, _, cx| {
+                    this.update_connection_form_state(cx, |state| {
+                        if let Some(jump) = state
+                            .form
+                            .as_mut()
+                            .and_then(|form| form.jump_server_form.as_mut())
+                        {
+                            jump.totp_picker_expanded = !jump.totp_picker_expanded;
+                        }
+                    });
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            );
+
         dismissible_dialog_backdrop()
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event, _window, cx| {
-                    // Tauri jump-server form is a Dialog child of the new
-                    // connection flow; overlay clicks cancel just this subform.
+                    // Overlay clicks dismiss only the jump-server sub-dialog.
                     this.begin_jump_server_form_exit(cx);
                     cx.stop_propagation();
                     cx.notify();
@@ -1302,30 +1386,89 @@ impl ConnectionFormView {
                 &self.tokens,
                 "jump-server-form-enter",
                 modal_container(&self.tokens)
-                    .w(px(TAURI_JUMP_MODAL_WIDTH))
+                    .bg(rgb(theme.bg_elevated))
+                    .shadow(modal_shadows)
+                    .overflow_hidden()
+                    .w(px(modal_width))
                     .max_h(px(modal_max_height))
                     .flex()
                     .flex_col()
                     .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
                         cx.stop_propagation();
                     })
-                    .child(modal_header(
-                        &self.tokens,
-                        self.i18n.t("ssh.form.proxy_jump_title"),
-                        String::new(),
-                    ))
                     .child(
-                        modal_body(&self.tokens)
+                        div()
+                            .flex_none()
+                            .w_full()
+                            .rounded_t(px(top_radius))
+                            .bg(rgb(theme.bg_panel))
+                            .border_b_1()
+                            .border_color(rgb(theme.border))
+                            .px(px(20.0))
+                            .py(px(13.0))
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .gap(px(12.0))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(10.0))
+                                    .child(
+                                        div()
+                                            .flex_none()
+                                            .size(px(28.0))
+                                            .rounded(px(self.tokens.radii.md))
+                                            .bg(rgba((theme.accent << 8) | 0x18))
+                                            .border_1()
+                                            .border_color(rgba((theme.accent << 8) | 0x38))
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
+                                            .child(Self::render_lucide_icon(
+                                                LucideIcon::Network,
+                                                14.0,
+                                                rgb(theme.accent),
+                                            )),
+                                    )
+                                    .child(
+                                        div()
+                                            .truncate()
+                                            .text_size(px(15.0))
+                                            .line_height(px(20.0))
+                                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                                            .text_color(rgb(theme.text_heading))
+                                            .child(self.i18n.t("ssh.form.proxy_jump_title")),
+                                    ),
+                            )
+                            .child(self.workspace_icon_action_button(
+                                LucideIcon::X,
+                                14.0,
+                                rgb(theme.text_muted),
+                                IconButtonOptions::compact(24.0),
+                                |this, _event, _window, cx| {
+                                    this.begin_jump_server_form_exit(cx);
+                                    cx.stop_propagation();
+                                },
+                                cx,
+                            )),
+                    )
+                    .child(
+                        div()
                             .id("new-connection-jump-server-body-scroll")
                             .flex_1()
                             .min_h(px(0.0))
+                            .px(px(22.0))
+                            .py(px(18.0))
                             .overflow_y_scroll()
                             .track_scroll(&self.selectable_text_scroll_handle(
                                 "new-connection-jump-server-body-scroll",
                             ))
                             .on_scroll(cx.listener(|this, _event, _window, cx| {
-                                // Keep native anchored selects aligned with Tauri/Radix:
-                                // scrolling the modal body closes popup content tied to a moved trigger.
+                                // Closing anchored popups on body scroll prevents detached dropdowns.
                                 if this.connection_form_state(cx).open_select.is_some() {
                                     this.close_new_connection_select(cx);
                                     this.clear_new_connection_select_anchor(cx);
@@ -1334,31 +1477,27 @@ impl ConnectionFormView {
                             }))
                             .flex()
                             .flex_col()
-                            .gap_4()
+                            .gap(px(14.0))
                             .child(self.render_jump_saved_connection_select(
                                 &jump_form.saved_connection_id,
                                 cx,
                             ))
-                            .child(self.render_connection_hint(
-                                if self.environment.connections.clone().is_empty() {
-                                    self.i18n.t("ssh.form.proxy_jump_saved_connection_empty")
-                                } else {
-                                    self.i18n.t("ssh.form.proxy_jump_saved_connection_hint")
-                                },
-                            ))
                             .child(
                                 div()
                                     .flex()
-                                    .gap_4()
-                                    .child(div().flex_1().child(self.render_connection_field(
-                                        self.i18n.t("ssh.form.proxy_jump_host"),
-                                        &jump_form.host,
-                                        self.i18n.t("ssh.form.proxy_jump_host_placeholder"),
-                                        NewConnectionField::JumpHost,
-                                        false,
-                                        cx,
-                                    )))
-                                    .child(div().w(px(self.tokens.metrics.form_port_width)).child(
+                                    .flex_row()
+                                    .gap(px(12.0))
+                                    .child(div().flex_1().min_w_0().child(
+                                        self.render_connection_field(
+                                            self.i18n.t("ssh.form.proxy_jump_host"),
+                                            &jump_form.host,
+                                            self.i18n.t("ssh.form.proxy_jump_host_placeholder"),
+                                            NewConnectionField::JumpHost,
+                                            false,
+                                            cx,
+                                        ),
+                                    ))
+                                    .child(div().w(px(88.0)).flex_none().child(
                                         self.render_connection_field(
                                             self.i18n.t("ssh.form.proxy_jump_port"),
                                             &jump_form.port,
@@ -1367,78 +1506,37 @@ impl ConnectionFormView {
                                             false,
                                             cx,
                                         ),
+                                    ))
+                                    .child(div().w(px(156.0)).flex_none().child(
+                                        self.render_connection_field(
+                                            self.i18n.t("ssh.form.proxy_jump_username"),
+                                            &jump_form.username,
+                                            self.i18n.t("ssh.form.proxy_jump_username_placeholder"),
+                                            NewConnectionField::JumpUsername,
+                                            false,
+                                            cx,
+                                        ),
                                     )),
                             )
-                            .child(self.render_connection_field(
-                                self.i18n.t("ssh.form.proxy_jump_username"),
-                                &jump_form.username,
-                                self.i18n.t("ssh.form.proxy_jump_username_placeholder"),
-                                NewConnectionField::JumpUsername,
-                                false,
-                                cx,
-                            ))
-                            .child(self.render_connection_hint(
-                                self.i18n.t("ssh.form.proxy_jump_kbi_hint"),
-                            ))
-                            .child(self.render_connection_checkbox(
-                                "jump-kerberos",
-                                self.i18n.t("ssh.form.kerberos_preferred"),
-                                jump_form.gssapi_enabled,
-                                |form| {
-                                    if let Some(jump) = form.jump_server_form.as_mut() {
-                                        jump.gssapi_enabled = !jump.gssapi_enabled;
-                                    }
-                                },
-                                cx,
-                            ))
-                            .when(jump_form.gssapi_enabled, |content| {
-                                content
-                                    .child(self.render_connection_hint(
-                                        self.i18n.t("ssh.form.gssapi_desc"),
-                                    ))
-                                    .child(self.render_connection_field(
-                                        self.i18n.t("ssh.form.gssapi_server_identity"),
-                                        &jump_form.gssapi_server_identity,
-                                        self.i18n.t("ssh.form.gssapi_server_identity_placeholder"),
-                                        NewConnectionField::JumpGssapiServerIdentity,
-                                        false,
-                                        cx,
-                                    ))
-                                    .child(self.render_connection_hint(
-                                        self.i18n.t("ssh.form.gssapi_server_identity_hint"),
-                                    ))
-                                    .child(self.render_kerberos_credentials_status(
-                                        gssapi_credentials_available,
-                                    ))
-                                    .child(self.render_connection_checkbox_with_warning(
-                                        "jump-kerberos-delegation-help",
-                                        "jump-kerberos-delegation-tooltip",
-                                        "ssh.form.gssapi_delegate_credentials",
-                                        "ssh.form.gssapi_delegation_warning",
-                                        jump_form.gssapi_delegate_credentials,
-                                        |form| {
-                                            if let Some(jump) = form.jump_server_form.as_mut() {
-                                                jump.gssapi_delegate_credentials =
-                                                    !jump.gssapi_delegate_credentials;
-                                            }
-                                        },
-                                        cx,
-                                    ))
-                            })
+                            .child(div().w_full().h(px(1.0)).bg(rgb(theme.border)))
                             .child(
                                 div()
-                                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                                    .font_weight(gpui::FontWeight::MEDIUM)
-                                    .text_color(rgb(self.tokens.ui.text))
-                                    .child(self.i18n.t("ssh.form.fallback_authentication")),
+                                    .flex()
+                                    .items_end()
+                                    .gap(px(10.0))
+                                    .child(div().flex_1().min_w_0().child(
+                                        self.render_auth_selector(
+                                            jump_form.auth_tab,
+                                            AuthSelectorContext::Jump,
+                                            true,
+                                            cx,
+                                        ),
+                                    ))
+                                    .child(totp_toggle_chip),
                             )
-                            .child(self.render_auth_selector(
-                                jump_form.auth_tab,
-                                AuthSelectorContext::Jump,
-                                true,
-                                cx,
-                            ))
-                            .child(self.render_connection_totp_select(true, cx))
+                            .when(show_totp_select, |content| {
+                                content.child(self.render_connection_totp_select(true, cx))
+                            })
                             .when(jump_form.auth_tab == SshAuthTab::DefaultKey, |content| {
                                 content.child(self.render_connection_hint(
                                     self.i18n.t("ssh.form.default_key_desc"),
@@ -1542,34 +1640,136 @@ impl ConnectionFormView {
                                         self.i18n.t("ssh.form.agent_endpoint_hint"),
                                     ))
                             })
-                            .child(self.render_connection_checkbox(
-                                "jump-agent-forwarding",
-                                self.i18n.t("ssh.form.agent_forwarding"),
-                                jump_form.agent_forwarding,
-                                |form| {
-                                    if let Some(jump_form) = form.jump_server_form.as_mut() {
-                                        jump_form.agent_forwarding = !jump_form.agent_forwarding;
-                                    }
-                                },
-                                cx,
-                            ))
-                            .child(self.render_connection_checkbox(
-                                "jump-legacy-ssh",
-                                self.i18n.t("ssh.form.legacy_ssh_compatibility"),
-                                jump_form.legacy_ssh_compatibility,
-                                |form| {
-                                    if let Some(jump_form) = form.jump_server_form.as_mut() {
-                                        jump_form.legacy_ssh_compatibility =
-                                            !jump_form.legacy_ssh_compatibility;
-                                    }
-                                },
-                                cx,
-                            )),
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .gap(px(12.0))
+                                    .pt(px(12.0))
+                                    .border_t_1()
+                                    .border_color(rgb(theme.border))
+                                    .child(self.render_connection_checkbox(
+                                        "jump-kerberos",
+                                        self.i18n.t("ssh.form.kerberos_preferred"),
+                                        jump_form.gssapi_enabled,
+                                        |form| {
+                                            if let Some(jump) = form.jump_server_form.as_mut() {
+                                                jump.gssapi_enabled = !jump.gssapi_enabled;
+                                            }
+                                        },
+                                        cx,
+                                    ))
+                                    .when(jump_form.gssapi_enabled, |content| {
+                                        content
+                                            .child(self.render_connection_hint(
+                                                self.i18n.t("ssh.form.gssapi_desc"),
+                                            ))
+                                            .child(self.render_connection_field(
+                                                self.i18n.t("ssh.form.gssapi_server_identity"),
+                                                &jump_form.gssapi_server_identity,
+                                                self.i18n.t(
+                                                    "ssh.form.gssapi_server_identity_placeholder",
+                                                ),
+                                                NewConnectionField::JumpGssapiServerIdentity,
+                                                false,
+                                                cx,
+                                            ))
+                                            .child(self.render_kerberos_credentials_status(
+                                                gssapi_credentials_available,
+                                            ))
+                                            .child(self.render_connection_checkbox_with_warning(
+                                                "jump-kerberos-delegation-help",
+                                                "jump-kerberos-delegation-tooltip",
+                                                "ssh.form.gssapi_delegate_credentials",
+                                                "ssh.form.gssapi_delegation_warning",
+                                                jump_form.gssapi_delegate_credentials,
+                                                |form| {
+                                                    if let Some(jump) =
+                                                        form.jump_server_form.as_mut()
+                                                    {
+                                                        jump.gssapi_delegate_credentials =
+                                                            !jump.gssapi_delegate_credentials;
+                                                    }
+                                                },
+                                                cx,
+                                            ))
+                                    }),
+                            )
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_row()
+                                    .flex_wrap()
+                                    .items_center()
+                                    .gap(px(20.0))
+                                    .pt(px(12.0))
+                                    .border_t_1()
+                                    .border_color(rgb(theme.border))
+                                    .child(self.render_connection_checkbox(
+                                        "jump-agent-forwarding",
+                                        self.i18n.t("ssh.form.agent_forwarding"),
+                                        jump_form.agent_forwarding,
+                                        |form| {
+                                            if let Some(jump_form) = form.jump_server_form.as_mut()
+                                            {
+                                                jump_form.agent_forwarding =
+                                                    !jump_form.agent_forwarding;
+                                            }
+                                        },
+                                        cx,
+                                    ))
+                                    .child(self.render_connection_checkbox(
+                                        "jump-legacy-ssh",
+                                        self.i18n.t("ssh.form.legacy_ssh_compatibility"),
+                                        jump_form.legacy_ssh_compatibility,
+                                        |form| {
+                                            if let Some(jump_form) = form.jump_server_form.as_mut()
+                                            {
+                                                jump_form.legacy_ssh_compatibility =
+                                                    !jump_form.legacy_ssh_compatibility;
+                                            }
+                                        },
+                                        cx,
+                                    )),
+                            ),
                     )
                     .child(
                         modal_footer(&self.tokens)
-                            .child(self.render_jump_cancel_button(cx))
-                            .child(self.render_jump_add_button(add_disabled, cx)),
+                            .flex_none()
+                            .bg(rgb(theme.bg_panel))
+                            .px(px(22.0))
+                            .py(px(13.0))
+                            .justify_between()
+                            .gap(px(12.0))
+                            .child(div().flex_1().min_w_0().when_some(
+                                footer_error,
+                                |left, error| {
+                                    left.flex()
+                                        .items_center()
+                                        .gap(px(5.0))
+                                        .text_size(px(self.tokens.metrics.ui_text_xs))
+                                        .text_color(rgb(theme.error))
+                                        .child(Self::render_lucide_icon(
+                                            LucideIcon::AlertCircle,
+                                            13.0,
+                                            rgb(theme.error),
+                                        ))
+                                        .child(div().min_w_0().truncate().child(error))
+                                },
+                            ))
+                            .child(
+                                div()
+                                    .flex_none()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(8.0))
+                                    .child(self.render_jump_cancel_button(cx))
+                                    .child(self.render_jump_add_button(
+                                        add_disabled,
+                                        is_editing,
+                                        cx,
+                                    )),
+                            ),
                     ),
                 form_visible,
             ))
@@ -1620,126 +1820,206 @@ impl ConnectionFormView {
         secondary: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let (hop_count, expanded) = self
+        let theme = self.tokens.ui;
+        let (hop_count, expanded, summaries) = self
             .connection_form_state(cx)
             .form
             .as_ref()
             .map(|form| {
-                if secondary {
+                let (proxy_hops, expanded) = if secondary {
                     (
-                        form.standalone_sftp_secondary.proxy_hops.len(),
+                        &form.standalone_sftp_secondary.proxy_hops,
                         form.standalone_sftp_secondary.proxy_chain_expanded,
                     )
                 } else {
-                    (form.proxy_hops.len(), form.proxy_chain_expanded)
-                }
+                    (&form.proxy_hops, form.proxy_chain_expanded)
+                };
+                let summaries = proxy_hops
+                    .iter()
+                    .map(|hop| ProxyHopSummarySnapshot {
+                        saved_connection_name: self
+                            .environment
+                            .connections
+                            .iter()
+                            .find(|connection| connection.id == hop.saved_connection_id)
+                            .map(|connection| connection.name.clone()),
+                        host: hop.host.clone(),
+                        port: hop.port.clone(),
+                        username: hop.username.clone(),
+                        auth_tab: hop.auth_tab,
+                        gssapi_enabled: hop.gssapi_enabled,
+                    })
+                    .collect::<Vec<_>>();
+                (summaries.len(), expanded, summaries)
             })
             .unwrap_or_default();
-        let mut list = div()
-            .id(if secondary {
-                "new-connection-secondary-proxy-chain-scroll"
-            } else {
-                "new-connection-proxy-chain-scroll"
-            })
-            .flex()
-            .flex_col()
-            .gap_2()
-            .max_h(px(TAURI_PROXY_CHAIN_MAX_HEIGHT))
-            .overflow_y_scroll()
-            .track_scroll(&self.selectable_text_scroll_handle(if secondary {
-                "new-connection-secondary-proxy-chain-scroll"
-            } else {
-                "new-connection-proxy-chain-scroll"
-            }));
-        if hop_count == 0 {
-            list = list.child(
-                div()
-                    .py(px(24.0))
-                    .text_align(gpui::TextAlign::Center)
-                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(self.i18n.t("ssh.form.proxy_chain_empty")),
-            );
-        } else {
-            let summaries = self
-                .connection_form_state(cx)
-                .form
-                .as_ref()
-                .map(|form| {
-                    let proxy_hops = if secondary {
-                        &form.standalone_sftp_secondary.proxy_hops
-                    } else {
-                        &form.proxy_hops
-                    };
-                    proxy_hops
-                        .iter()
-                        .map(|hop| ProxyHopSummarySnapshot {
-                            saved_connection_name: self
-                                .environment
-                                .connections
-                                .iter()
-                                .find(|connection| connection.id == hop.saved_connection_id)
-                                .map(|connection| connection.name.clone()),
-                            host: hop.host.clone(),
-                            port: hop.port.clone(),
-                            username: hop.username.clone(),
-                            auth_tab: hop.auth_tab,
-                        })
-                        .collect::<Vec<_>>()
+
+        let body = if hop_count == 0 {
+            div()
+                .rounded(px(self.tokens.radii.md))
+                .border_1()
+                .border_color(rgba((theme.border << 8) | 0x99))
+                .bg(rgba((theme.bg_card << 8) | 0x66))
+                .px(px(14.0))
+                .py(px(16.0))
+                .flex()
+                .items_center()
+                .justify_center()
+                .gap(px(8.0))
+                .text_size(px(self.tokens.metrics.ui_text_xs))
+                .text_color(rgb(theme.text_muted))
+                .child(Self::render_lucide_icon(
+                    LucideIcon::Network,
+                    14.0,
+                    rgb(theme.text_muted),
+                ))
+                .child(self.i18n.t("ssh.form.proxy_chain_empty"))
+                .into_any_element()
+        } else if !expanded {
+            let preview = summaries
+                .iter()
+                .map(|hop| {
+                    hop.saved_connection_name
+                        .as_deref()
+                        .filter(|name| !name.trim().is_empty())
+                        .unwrap_or(hop.host.as_str())
                 })
-                .unwrap_or_default();
+                .collect::<Vec<_>>()
+                .join(" → ");
+            div()
+                .id(if secondary {
+                    "secondary-proxy-chain-collapsed"
+                } else {
+                    "proxy-chain-collapsed"
+                })
+                .rounded(px(self.tokens.radii.md))
+                .border_1()
+                .border_color(rgb(theme.border))
+                .bg(rgb(theme.bg_card))
+                .px(px(12.0))
+                .py(px(10.0))
+                .cursor_pointer()
+                .hover(|el| el.bg(rgb(theme.bg_hover)))
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap(px(10.0))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .text_size(px(self.tokens.metrics.ui_text_xs))
+                        .text_color(rgb(theme.text))
+                        .child(preview),
+                )
+                .child(
+                    div()
+                        .flex_none()
+                        .text_size(px(self.tokens.metrics.ui_text_xs))
+                        .text_color(rgb(theme.text_muted))
+                        .child(
+                            self.i18n
+                                .t("ssh.form.proxy_chain_count")
+                                .replace("{{count}}", &hop_count.to_string()),
+                        ),
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _event, _window, cx| {
+                        this.update_connection_form_state(cx, |state| {
+                            if let Some(form) = state.form.as_mut() {
+                                if secondary {
+                                    form.standalone_sftp_secondary.proxy_chain_expanded = true;
+                                } else {
+                                    form.proxy_chain_expanded = true;
+                                }
+                            }
+                        });
+                        cx.stop_propagation();
+                        cx.notify();
+                    }),
+                )
+                .into_any_element()
+        } else {
+            let mut list = div()
+                .id(if secondary {
+                    "new-connection-secondary-proxy-chain-scroll"
+                } else {
+                    "new-connection-proxy-chain-scroll"
+                })
+                .flex()
+                .flex_col()
+                .max_h(px(PROXY_CHAIN_LIST_MAX_HEIGHT))
+                .overflow_y_scroll()
+                .track_scroll(&self.selectable_text_scroll_handle(if secondary {
+                    "new-connection-secondary-proxy-chain-scroll"
+                } else {
+                    "new-connection-proxy-chain-scroll"
+                }));
             for (index, hop) in summaries.iter().enumerate() {
-                list = list.child(self.render_proxy_hop_summary(index, hop, secondary, cx));
+                list = list.child(self.render_proxy_hop_summary(
+                    index,
+                    index + 1 == hop_count,
+                    hop,
+                    secondary,
+                    cx,
+                ));
             }
-        }
+            list.into_any_element()
+        };
 
         div()
             .flex()
             .flex_col()
-            .rounded(px(self.tokens.radii.lg))
+            .gap(px(10.0))
             .border_t_1()
-            .border_color(rgb(self.tokens.ui.border))
-            .p(px(TAURI_PROXY_CHAIN_SECTION_PADDING))
+            .border_color(rgb(theme.border))
+            .pt(px(16.0))
             .child(
                 div()
                     .flex()
                     .items_center()
                     .justify_between()
-                    .mb(px(TAURI_PROXY_CHAIN_HEADER_MARGIN))
+                    .gap(px(10.0))
                     .child(
                         div()
-                            .text_size(px(18.0))
-                            .font_weight(gpui::FontWeight::SEMIBOLD)
-                            .child(self.i18n.t("ssh.form.proxy_chain_title")),
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
+                            .child(
+                                div()
+                                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                                    .text_color(rgb(theme.text_heading))
+                                    .child(self.i18n.t("ssh.form.proxy_chain_title")),
+                            )
+                            .when(hop_count > 0, |row| {
+                                row.child(
+                                    div()
+                                        .px(px(6.0))
+                                        .py(px(1.0))
+                                        .rounded(px(self.tokens.radii.xs))
+                                        .bg(rgba((theme.accent << 8) | 0x1e))
+                                        .text_size(px(11.0))
+                                        .font_weight(gpui::FontWeight::MEDIUM)
+                                        .text_color(rgb(theme.accent))
+                                        .child(hop_count.to_string()),
+                                )
+                            }),
                     )
                     .child(
                         div()
                             .flex()
                             .items_center()
-                            .gap_2()
+                            .gap(px(6.0))
                             .when(hop_count > 0, |row| {
                                 row.child(self.render_proxy_chain_toggle(expanded, secondary, cx))
                             })
                             .child(self.render_add_jump_button(secondary, cx)),
                     ),
             )
-            .child(if expanded {
-                list.into_any_element()
-            } else {
-                div()
-                    .py(px(24.0))
-                    .text_align(gpui::TextAlign::Center)
-                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(if hop_count == 0 {
-                        self.i18n.t("ssh.form.proxy_chain_empty")
-                    } else {
-                        self.i18n
-                            .t("ssh.form.proxy_chain_count")
-                            .replace("{{count}}", &hop_count.to_string())
-                    })
-                    .into_any_element()
-            })
+            .child(body)
             .into_any_element()
     }
 
@@ -1824,6 +2104,7 @@ impl ConnectionFormView {
                     if let Some(form) = state.form.as_mut() {
                         form.jump_server_form = Some(NewConnectionProxyHop::new());
                         form.jump_server_edit_index = None;
+                        form.error = None;
                         form.jump_server_target = if secondary {
                             ConnectionRouteTarget::StandaloneSftpSecondary
                         } else {
@@ -1845,12 +2126,19 @@ impl ConnectionFormView {
         .into_any_element()
     }
 
-    fn render_jump_add_button(&self, disabled: bool, cx: &mut Context<Self>) -> AnyElement {
-        // Jump-server editor actions mirror Tauri Button chrome. Keep add and
-        // cancel on the shared toolbar primitive instead of local button_with
-        // calls so disabled/focus handling can converge later.
+    fn render_jump_add_button(
+        &self,
+        disabled: bool,
+        is_editing: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let label = if is_editing {
+            self.i18n.t("sessionManager.edit_properties.save")
+        } else {
+            self.i18n.t("ssh.form.proxy_jump_add")
+        };
         self.workspace_toolbar_action_button(
-            self.i18n.t("ssh.form.proxy_jump_add"),
+            label,
             None,
             ToolbarButtonOptions {
                 button: ButtonOptions {
@@ -1892,13 +2180,16 @@ impl ConnectionFormView {
     fn render_proxy_hop_summary(
         &self,
         index: usize,
+        is_last: bool,
         hop: &ProxyHopSummarySnapshot,
         secondary: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let theme = self.tokens.ui;
         let hop_title = hop
             .saved_connection_name
             .clone()
+            .filter(|name| !name.trim().is_empty())
             .unwrap_or_else(|| self.i18n.t("ssh.form.proxy_chain_jump_server"));
         let auth_label = match hop.auth_tab {
             SshAuthTab::DefaultKey => self.i18n.t("ssh.auth.default_key"),
@@ -1909,140 +2200,143 @@ impl ConnectionFormView {
             SshAuthTab::Agent => self.i18n.t("ssh.auth.agent"),
             SshAuthTab::TwoFactor => self.i18n.t("ssh.auth.two_factor"),
         };
-        let auth_icon = if matches!(
-            hop.auth_tab,
-            SshAuthTab::SshKey | SshAuthTab::DefaultKey | SshAuthTab::ManagedKey
-        ) {
-            LucideIcon::Key
+        let endpoint = if hop.username.trim().is_empty() {
+            format!("{}:{}", hop.host.trim(), hop.port.trim())
         } else {
-            LucideIcon::Lock
+            format!(
+                "{}@{}:{}",
+                hop.username.trim(),
+                hop.host.trim(),
+                hop.port.trim()
+            )
         };
+
         div()
-            .relative()
+            .flex()
+            .items_stretch()
+            .gap(px(10.0))
             .child(
                 div()
-                    .absolute()
-                    .left(px(TAURI_PROXY_CHAIN_NODE_SIZE / 2.0))
-                    .top_0()
-                    .bottom_0()
-                    .w(px(TAURI_PROXY_CHAIN_CONNECTOR_THICKNESS))
-                    .when(index > 0, |line| {
-                        line.child(
-                            div()
-                                .absolute()
-                                .top(px(TAURI_PROXY_CHAIN_NODE_SIZE / 2.0))
-                                .w(px(TAURI_PROXY_CHAIN_LINE_WIDTH))
-                                .h(px(TAURI_PROXY_CHAIN_CONNECTOR_THICKNESS))
-                                .bg(rgb(self.tokens.ui.text_muted)),
-                        )
-                    })
+                    .w(px(22.0))
+                    .flex_none()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .pt(px(10.0))
                     .child(
                         div()
-                            .absolute()
-                            .top(px(0.0))
-                            .size(px(TAURI_PROXY_CHAIN_NODE_SIZE))
+                            .flex_none()
+                            .size(px(22.0))
                             .rounded_full()
-                            .border_2()
-                            .border_color(rgb(self.tokens.ui.border_strong))
-                            .bg(rgb(self.tokens.ui.bg))
+                            .border_1()
+                            .border_color(rgb(theme.border_strong))
+                            .bg(rgb(theme.bg_panel))
                             .flex()
                             .items_center()
                             .justify_center()
-                            .child(Self::render_lucide_icon(
-                                auth_icon,
-                                16.0,
-                                rgb(self.tokens.ui.text_muted),
-                            )),
-                    ),
+                            .text_size(px(11.0))
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .text_color(rgb(theme.text))
+                            .child((index + 1).to_string()),
+                    )
+                    .when(!is_last, |rail| {
+                        rail.child(
+                            div()
+                                .flex_1()
+                                .w(px(1.5))
+                                .min_h(px(12.0))
+                                .mt(px(4.0))
+                                .bg(rgb(theme.border)),
+                        )
+                    }),
             )
             .child(
-                div().flex().items_start().gap(px(24.0)).pl(px(48.0)).child(
-                    div()
-                        .flex_1()
-                        .border_1()
-                        .border_color(rgb(self.tokens.ui.border))
-                        .rounded(px(self.tokens.radii.lg))
-                        .p(px(TAURI_PROXY_CHAIN_CARD_PADDING))
-                        .flex()
-                        .flex_col()
-                        .gap_2()
-                        .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .justify_between()
-                                .child(
-                                    div()
-                                        .text_size(px(self.tokens.metrics.ui_text_sm))
-                                        .font_weight(gpui::FontWeight::MEDIUM)
-                                        .text_color(rgb(self.tokens.ui.text_muted))
-                                        .child(format!("{}. {}", index + 1, hop_title)),
-                                )
-                                .child(
-                                    div()
-                                        .flex()
-                                        .items_center()
-                                        .gap_1()
-                                        .child(self.render_edit_jump_button(index, secondary, cx))
-                                        .child(
-                                            self.render_remove_jump_button(index, secondary, cx),
-                                        ),
-                                ),
-                        )
-                        .child(self.render_proxy_hop_line(
-                            self.i18n.t("ssh.form.proxy_chain_host"),
-                            hop.host.clone(),
-                            cx,
-                        ))
-                        .child(self.render_proxy_hop_line(
-                            self.i18n.t("ssh.form.proxy_chain_port"),
-                            hop.port.clone(),
-                            cx,
-                        ))
-                        .child(self.render_proxy_hop_line(
-                            self.i18n.t("ssh.form.proxy_chain_username"),
-                            hop.username.clone(),
-                            cx,
-                        ))
-                        .child(self.render_proxy_hop_line(
-                            self.i18n.t("ssh.form.proxy_chain_auth"),
-                            auth_label,
-                            cx,
-                        )),
-                ),
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .when(!is_last, |card| card.mb(px(8.0)))
+                    .border_1()
+                    .border_color(rgb(theme.border))
+                    .bg(rgb(theme.bg_card))
+                    .rounded(px(self.tokens.radii.md))
+                    .px(px(12.0))
+                    .py(px(9.0))
+                    .flex()
+                    .flex_col()
+                    .gap(px(4.0))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .gap(px(8.0))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(6.0))
+                                    .child(
+                                        div()
+                                            .truncate()
+                                            .text_size(px(self.tokens.metrics.ui_text_sm))
+                                            .font_weight(gpui::FontWeight::MEDIUM)
+                                            .text_color(rgb(theme.text_heading))
+                                            .child(hop_title),
+                                    )
+                                    .child(
+                                        div()
+                                            .flex_none()
+                                            .px(px(6.0))
+                                            .py(px(1.0))
+                                            .rounded(px(self.tokens.radii.xs))
+                                            .bg(rgb(theme.bg_panel))
+                                            .border_1()
+                                            .border_color(rgb(theme.border))
+                                            .text_size(px(10.5))
+                                            .text_color(rgb(theme.text_muted))
+                                            .child(auth_label),
+                                    )
+                                    .when(hop.gssapi_enabled, |row| {
+                                        row.child(
+                                            div()
+                                                .flex_none()
+                                                .px(px(5.0))
+                                                .py(px(1.0))
+                                                .rounded(px(self.tokens.radii.xs))
+                                                .bg(rgba((theme.accent << 8) | 0x1e))
+                                                .text_size(px(10.0))
+                                                .font_weight(gpui::FontWeight::MEDIUM)
+                                                .text_color(rgb(theme.accent))
+                                                .child("KRB"),
+                                        )
+                                    }),
+                            )
+                            .child(
+                                div()
+                                    .flex_none()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(2.0))
+                                    .child(self.render_edit_jump_button(index, secondary, cx))
+                                    .child(self.render_remove_jump_button(index, secondary, cx)),
+                            ),
+                    )
+                    .child({
+                        let hop_index = index.to_string();
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_color(rgb(theme.text_muted))
+                            .child(self.render_selectable_text_scoped(
+                                "proxy-hop-endpoint",
+                                (&hop_index, &endpoint),
+                                endpoint.clone(),
+                                theme.text_muted,
+                                cx,
+                            ))
+                    }),
             )
-            .into_any_element()
-    }
-
-    fn render_proxy_hop_line(
-        &self,
-        label: String,
-        value: String,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        div()
-            .flex()
-            .items_center()
-            .gap_2()
-            .text_size(px(self.tokens.metrics.ui_text_sm))
-            .child(div().text_color(rgb(self.tokens.ui.text_muted)).child(
-                self.render_selectable_text_scoped(
-                    "proxy-hop-label",
-                    (&label, &value),
-                    format!("{label}:"),
-                    self.tokens.ui.text_muted,
-                    cx,
-                ),
-            ))
-            .child(div().font_weight(gpui::FontWeight::MEDIUM).child(
-                self.render_selectable_text_scoped(
-                    "proxy-hop-value",
-                    (&label, &value),
-                    value.clone(),
-                    self.tokens.ui.text,
-                    cx,
-                ),
-            ))
             .into_any_element()
     }
 
@@ -2114,6 +2408,7 @@ impl ConnectionFormView {
                     // Move instead of clone so temporary secret drafts have one owner.
                     form.jump_server_form = Some(jump_server);
                     form.jump_server_edit_index = Some(index);
+                    form.error = None;
                     form.jump_server_target = if secondary {
                         ConnectionRouteTarget::StandaloneSftpSecondary
                     } else {

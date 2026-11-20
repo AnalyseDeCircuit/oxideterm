@@ -1,6 +1,6 @@
 use super::*;
-use oxideterm_connections::{BatchDuplicateNamePolicy, BatchExistingConnection};
-use oxideterm_gpui_connections::session_manager::{BatchAddAuthKind, BatchAddEditorKind};
+use oxideterm_connections::BatchExistingConnection;
+use oxideterm_gpui_connections::session_manager::BatchAddEditorKind;
 
 impl WorkspaceApp {
     pub(in crate::workspace) fn apply_batch_window_action(
@@ -17,17 +17,12 @@ impl WorkspaceApp {
                     self.focus_batch_add_editor(kind, window, cx);
                 }
             }
-            BatchWindowAction::AuthKind(kind) => self.set_batch_add_auth_kind(kind, cx),
-            BatchWindowAction::DuplicatePolicy(policy) => {
-                self.set_batch_add_duplicate_policy(policy, cx)
-            }
             BatchWindowAction::ChooseTemplate(id) => self.select_batch_add_template(&id, cx),
             BatchWindowAction::NameTemplate => self.begin_batch_template_naming(cx),
             BatchWindowAction::RenameTemplate(id) => self.begin_batch_template_rename(&id, cx),
             BatchWindowAction::CommitTemplateName => self.commit_batch_template_name(cx),
             BatchWindowAction::DeleteTemplate(id) => self.delete_batch_template(&id, cx),
             BatchWindowAction::SaveTemplate => self.save_batch_template_into_selected(cx),
-            BatchWindowAction::ChooseKey(path) => self.select_batch_add_key(&path, cx),
         }
     }
 
@@ -107,38 +102,8 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn refresh_batch_add_preview(&mut self, cx: &mut Context<Self>) {
-        self.connections
-            .session_manager
-            .update(cx, SessionManagerState::refresh_batch_preview);
-    }
-
-    pub(in crate::workspace) fn set_batch_add_auth_kind(
-        &mut self,
-        kind: BatchAddAuthKind,
-        cx: &mut Context<Self>,
-    ) {
-        self.connections
-            .session_manager
-            .update(cx, |state, cx| state.set_batch_auth_kind(kind, cx));
-    }
-
-    pub(in crate::workspace) fn set_batch_add_duplicate_policy(
-        &mut self,
-        policy: BatchDuplicateNamePolicy,
-        cx: &mut Context<Self>,
-    ) {
-        self.connections
-            .session_manager
-            .update(cx, |state, cx| state.set_batch_duplicate_policy(policy, cx));
-    }
-
-    pub(in crate::workspace) fn select_batch_add_key(
-        &mut self,
-        path: &str,
-        cx: &mut Context<Self>,
-    ) {
-        self.connections
-            .session_manager
-            .update(cx, |state, cx| state.select_batch_key(path, cx));
+        // The preview reads the live connection store after this IME update releases WorkspaceApp.
+        let manager = self.connections.session_manager.clone();
+        cx.defer(move |cx| manager.update(cx, SessionManagerState::refresh_batch_preview));
     }
 }

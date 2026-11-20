@@ -384,6 +384,7 @@ pub fn toggle_remote_desktop_feature(
 
 pub struct NewConnectionProxyHop {
     pub totp_credential_id: Option<String>,
+    pub totp_picker_expanded: bool,
     pub saved_connection_id: String,
     pub persisted_proxy_hop_index: Option<usize>,
     pub host: String,
@@ -448,6 +449,7 @@ impl NewConnectionProxyHop {
     pub fn new() -> Self {
         Self {
             totp_credential_id: None,
+            totp_picker_expanded: false,
             saved_connection_id: String::new(),
             persisted_proxy_hop_index: None,
             host: String::new(),
@@ -475,6 +477,7 @@ impl NewConnectionProxyHop {
         // Reopen only route metadata; protected credentials stay in their current owner.
         Self {
             totp_credential_id: hop.totp_credential_id.clone(),
+            totp_picker_expanded: false,
             saved_connection_id: String::new(),
             persisted_proxy_hop_index: Some(persisted_proxy_hop_index),
             host: hop.host.clone(),

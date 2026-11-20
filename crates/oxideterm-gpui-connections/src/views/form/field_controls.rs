@@ -1525,61 +1525,6 @@ impl ConnectionFormView {
             .flex()
             .flex_col()
             .gap(px(self.tokens.metrics.modal_section_gap))
-            .child(self.render_connection_checkbox(
-                format!("sftp-kerberos-{secondary}"),
-                self.i18n.t("ssh.form.kerberos_preferred"),
-                gssapi_enabled,
-                if secondary {
-                    toggle_secondary_sftp_gssapi
-                } else {
-                    toggle_primary_sftp_gssapi
-                },
-                cx,
-            ))
-            .when(gssapi_enabled, |content| {
-                content
-                    .child(self.render_connection_hint(self.i18n.t("ssh.form.gssapi_desc")))
-                    .child(self.render_connection_field(
-                        self.i18n.t("ssh.form.gssapi_server_identity"),
-                        gssapi_server_identity,
-                        self.i18n.t("ssh.form.gssapi_server_identity_placeholder"),
-                        gssapi_server_identity_field,
-                        false,
-                        cx,
-                    ))
-                    .child(self.render_connection_hint(
-                        self.i18n.t("ssh.form.gssapi_server_identity_hint"),
-                    ))
-                    .child(self.render_kerberos_credentials_status(gssapi_credentials_available))
-                    .child(self.render_connection_checkbox_with_warning(
-                        if secondary {
-                            "secondary-sftp-kerberos-delegation-help"
-                        } else {
-                            "primary-sftp-kerberos-delegation-help"
-                        },
-                        if secondary {
-                            "secondary-sftp-kerberos-delegation-tooltip"
-                        } else {
-                            "primary-sftp-kerberos-delegation-tooltip"
-                        },
-                        "ssh.form.gssapi_delegate_credentials",
-                        "ssh.form.gssapi_delegation_warning",
-                        gssapi_delegate_credentials,
-                        if secondary {
-                            toggle_secondary_sftp_gssapi_delegation
-                        } else {
-                            toggle_primary_sftp_gssapi_delegation
-                        },
-                        cx,
-                    ))
-            })
-            .child(
-                div()
-                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                    .font_weight(gpui::FontWeight::MEDIUM)
-                    .text_color(rgb(self.tokens.ui.text))
-                    .child(self.i18n.t("ssh.form.fallback_authentication")),
-            )
             .child(self.render_auth_selector(active_tab, context, false, cx))
             .when(active_tab == SshAuthTab::Password, |content| {
                 content
@@ -1717,6 +1662,64 @@ impl ConnectionFormView {
                         self.tokens.ui.warning,
                     ))
             })
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(12.0))
+                    .pt(px(12.0))
+                    .border_t_1()
+                    .border_color(rgb(self.tokens.ui.border))
+                    .child(self.render_connection_checkbox(
+                        format!("sftp-kerberos-{secondary}"),
+                        self.i18n.t("ssh.form.kerberos_preferred"),
+                        gssapi_enabled,
+                        if secondary {
+                            toggle_secondary_sftp_gssapi
+                        } else {
+                            toggle_primary_sftp_gssapi
+                        },
+                        cx,
+                    ))
+                    .when(gssapi_enabled, |content| {
+                        content
+                            .child(self.render_connection_hint(self.i18n.t("ssh.form.gssapi_desc")))
+                            .child(self.render_connection_field(
+                                self.i18n.t("ssh.form.gssapi_server_identity"),
+                                gssapi_server_identity,
+                                self.i18n.t("ssh.form.gssapi_server_identity_placeholder"),
+                                gssapi_server_identity_field,
+                                false,
+                                cx,
+                            ))
+                            .child(
+                                self.render_kerberos_credentials_status(
+                                    gssapi_credentials_available,
+                                ),
+                            )
+                            .child(self.render_connection_checkbox_with_warning(
+                                if secondary {
+                                    "secondary-sftp-kerberos-delegation-help"
+                                } else {
+                                    "primary-sftp-kerberos-delegation-help"
+                                },
+                                if secondary {
+                                    "secondary-sftp-kerberos-delegation-tooltip"
+                                } else {
+                                    "primary-sftp-kerberos-delegation-tooltip"
+                                },
+                                "ssh.form.gssapi_delegate_credentials",
+                                "ssh.form.gssapi_delegation_warning",
+                                gssapi_delegate_credentials,
+                                if secondary {
+                                    toggle_secondary_sftp_gssapi_delegation
+                                } else {
+                                    toggle_primary_sftp_gssapi_delegation
+                                },
+                                cx,
+                            ))
+                    }),
+            )
             .into_any_element()
     }
 

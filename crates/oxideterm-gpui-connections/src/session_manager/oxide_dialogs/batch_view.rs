@@ -1031,12 +1031,14 @@ impl OxideDialogs {
         );
         for (policy, key) in options {
             let selected = snapshot.duplicate == policy;
+            let id = match policy {
+                BatchDuplicateNamePolicy::Skip => "batch-add-duplicate-skip",
+                BatchDuplicateNamePolicy::Rename => "batch-add-duplicate-rename",
+            };
             row = row.child(
                 div()
-                    .id(match policy {
-                        BatchDuplicateNamePolicy::Skip => "batch-add-duplicate-skip",
-                        BatchDuplicateNamePolicy::Rename => "batch-add-duplicate-rename",
-                    })
+                    .id(id)
+                    .debug_selector(move || id.to_owned())
                     .text_size(px(self.tokens.metrics.ui_text_sm))
                     .text_color(rgb(if selected {
                         self.tokens.ui.accent
@@ -1049,7 +1051,9 @@ impl OxideDialogs {
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _event, _window, cx| {
-                            this.batch_action(BatchWindowAction::DuplicatePolicy(policy), None, cx);
+                            this.session_manager.update(cx, |manager, cx| {
+                                manager.set_batch_duplicate_policy(policy, cx)
+                            });
                             cx.stop_propagation();
                         }),
                     ),
@@ -1096,7 +1100,8 @@ impl OxideDialogs {
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _event, _window, cx| {
-                            this.batch_action(BatchWindowAction::AuthKind(kind), None, cx);
+                            this.session_manager
+                                .update(cx, |manager, cx| manager.set_batch_auth_kind(kind, cx));
                             cx.stop_propagation();
                         }),
                     ),
@@ -1273,11 +1278,9 @@ impl OxideDialogs {
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, _event, _window, cx| {
-                        this.batch_action(
-                            BatchWindowAction::ChooseKey(key_path_owned.clone()),
-                            None,
-                            cx,
-                        );
+                        this.session_manager.update(cx, |manager, cx| {
+                            manager.select_batch_key(&key_path_owned, cx)
+                        });
                         this.close_batch_add_key_menu(cx);
                         cx.stop_propagation();
                         cx.notify();
@@ -1405,4 +1408,76 @@ struct BatchAddDialogSnapshot {
     needs_fallback_auth: bool,
     auth_kind: BatchAddAuthKind,
     duplicate: BatchDuplicateNamePolicy,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::views::ConnectionsEnvironment;
+
+    #[gpui::test]
+    fn batch_dialog_rename_click_updates_the_conflicting_row(cx: &mut gpui::TestAppContext) {
+        let manager = cx.new(|_| SessionManagerState::default());
+        let tokens = oxideterm_theme::default_tokens();
+        let i18n = I18n::new(oxideterm_i18n::Locale::En);
+        manager.update(cx, |state, cx| {
+            state.open_batch_add(tokens, "monospace".into(), &i18n, Rc::new(|_| vec![]), cx);
+            let dialog = state.batch_add.as_ref().unwrap();
+            dialog
+                .template_editor
+                .as_ref()
+                .unwrap()
+                .update(cx, |e, cx| {
+                    e.replace_text_external("Host *\n  User demo\n  IdentityFile ~/.ssh/demo", cx)
+                });
+            dialog.data_editor.as_ref().unwrap().update(cx, |e, cx| {
+                e.replace_text_external("one.test?name=lab\ntwo.test?name=lab", cx)
+            });
+        });
+        let (_, cx) = cx.add_window_view(|_, cx| {
+            OxideDialogs::new(
+                ManagerOverlay::Batch,
+                manager.clone(),
+                Rc::new(move |_| {
+                    Some(ConnectionsEnvironment {
+                        tokens,
+                        i18n: i18n.clone(),
+                    })
+                }),
+                SessionManagerViewBindings {
+                    catalog: Rc::new(|_, _| None),
+                    oxide_environment: Rc::new(|_| Some(Default::default())),
+                    ime: Rc::new(|_, _| None),
+                    text: Rc::new(|_, _, _, text, _, _, _| div().child(text).into_any_element()),
+                },
+                Rc::new(|_, _, _| {}),
+                cx,
+                Default::default(),
+            )
+        });
+        cx.simulate_resize(gpui::size(px(1100.), px(1050.)));
+        for (button, name, status) in [
+            (
+                "batch-add-duplicate-rename",
+                "lab-2",
+                BatchRowStatus::Renamed,
+            ),
+            (
+                "batch-add-duplicate-skip",
+                "lab",
+                BatchRowStatus::SkippedExistingName,
+            ),
+        ] {
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            let bounds = cx.debug_bounds(button).expect("duplicate policy button");
+            cx.simulate_click(bounds.center(), gpui::Modifiers::default());
+            manager.read_with(cx, |state, _| {
+                let row = &state.batch_add.as_ref().unwrap().preview.rows[1];
+                assert_eq!(
+                    (row.host.as_str(), row.name.as_str(), row.status),
+                    ("two.test", name, status)
+                );
+            });
+        }
+    }
 }

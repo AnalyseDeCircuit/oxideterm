@@ -107,15 +107,12 @@ pub enum BatchWindowAction {
     Apply,
     PickDataFile,
     FocusEditor(BatchAddEditorKind),
-    AuthKind(BatchAddAuthKind),
-    DuplicatePolicy(BatchDuplicateNamePolicy),
     ChooseTemplate(String),
     NameTemplate,
     RenameTemplate(String),
     CommitTemplateName,
     DeleteTemplate(String),
     SaveTemplate,
-    ChooseKey(String),
 }
 
 #[derive(Clone, Copy)]

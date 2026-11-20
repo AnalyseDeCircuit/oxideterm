@@ -558,6 +558,7 @@ pub fn proxy_hop_form_from_runtime_config(config: ProxyHopConfig) -> NewConnecti
     let auth_fields = runtime_auth_form_fields(config.auth);
     NewConnectionProxyHop {
         totp_credential_id: config.totp.map(|binding| binding.credential_id),
+        totp_picker_expanded: false,
         empty_password: auth_fields.empty_password,
         saved_connection_id: String::new(),
         persisted_proxy_hop_index: None,

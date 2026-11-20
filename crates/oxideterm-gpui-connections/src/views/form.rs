@@ -59,7 +59,7 @@ use oxideterm_gpui_ui::{
     },
     checkbox, checkbox_with, form_field,
     modal::{dismissible_dialog_backdrop, popover_backdrop},
-    modal_body, modal_container, modal_footer, modal_header, segmented_tab, segmented_tabs,
+    modal_body, modal_container, modal_footer, segmented_tab, segmented_tabs,
     select::{
         SelectAnchorId, select_option, select_option_action, select_overlay_popup_with_max_height,
     },
@@ -93,14 +93,9 @@ const TAURI_PROMPT_FEEDBACK_BORDER_ALPHA: u32 = 0x80;
 const SECRET_VISIBILITY_BUTTON_SIZE: f32 = 28.0;
 const SECRET_VISIBILITY_BUTTON_OFFSET: f32 = 4.0;
 const SECRET_VISIBILITY_ICON_SIZE: f32 = 16.0;
-const TAURI_JUMP_MODAL_WIDTH: f32 = 425.0; // Tauri sm:max-w-[425px]
-const TAURI_PROXY_CHAIN_MAX_HEIGHT: f32 = 250.0; // Tauri max-h-[250px]
-const TAURI_PROXY_CHAIN_SECTION_PADDING: f32 = 16.0; // Tauri p-4
-const TAURI_PROXY_CHAIN_HEADER_MARGIN: f32 = 16.0; // Tauri mb-4
-const TAURI_PROXY_CHAIN_NODE_SIZE: f32 = 32.0; // Tauri w-8 h-8
-const TAURI_PROXY_CHAIN_LINE_WIDTH: f32 = 32.0; // Tauri w-8
-const TAURI_PROXY_CHAIN_CONNECTOR_THICKNESS: f32 = 2.0; // Tauri w-0.5 h-0.5
-const TAURI_PROXY_CHAIN_CARD_PADDING: f32 = 12.0; // Tauri p-3
+const JUMP_STUDIO_MODAL_WIDTH: f32 = 560.0;
+const JUMP_STUDIO_MAX_HEIGHT: f32 = 620.0;
+const PROXY_CHAIN_LIST_MAX_HEIGHT: f32 = 260.0;
 const TAURI_SERIAL_GRID_GAP: f32 = 16.0; // Tauri serial grid gap-4
 pub const NEW_CONNECTION_TYPE_SIDEBAR_WIDTH: f32 = 160.0;
 const CONNECTION_TERMINAL_CONTROL_MIN_WIDTH: f32 = 220.0;

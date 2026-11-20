@@ -44,6 +44,7 @@ pub(super) fn studio_modal_size(
 const STUDIO_PROTOCOL_SELECTOR_ID: &str = "studio-protocol-selector";
 const STUDIO_CATEGORY_SELECTOR_ID: &str = "studio-category-selector";
 const STUDIO_PROTOCOL_TILE_WIDTH: f32 = 72.0;
+const STUDIO_PROTOCOL_TILE_MIN_WIDTH: f32 = 64.0;
 const STUDIO_PROTOCOL_TILE_GAP: f32 = 3.0;
 const STUDIO_CATEGORY_ROW_HEIGHT: f32 = 34.0;
 const STUDIO_CATEGORY_ROW_GAP: f32 = 3.0;
@@ -280,11 +281,13 @@ impl ConnectionFormView {
                 .position(|(transport, _)| *transport == active_transport)
                 .unwrap_or(0)
         };
-        let protocol_stride = STUDIO_PROTOCOL_TILE_WIDTH + STUDIO_PROTOCOL_TILE_GAP;
         let render_active_protocol_surface = |tile_index: usize| -> AnyElement {
             let surface = div()
                 .absolute()
-                .inset_0()
+                .left_0()
+                .top_0()
+                .bottom_0()
+                .w_full()
                 .rounded(px(self.tokens.radii.md))
                 .border_1()
                 .border_color(rgba((theme.accent << 8) | 0x66))
@@ -305,7 +308,7 @@ impl ConnectionFormView {
             let Some(motion) = oxideterm_gpui_ui::segmented_control_motion(&self.tokens) else {
                 return surface.into_any_element();
             };
-            let start_dx = (previous_index as f32 - tile_index as f32) * protocol_stride;
+            let start_tiles = previous_index as f32 - tile_index as f32;
             surface
                 .with_animation(
                     (STUDIO_PROTOCOL_SELECTOR_ID, generation),
@@ -313,7 +316,9 @@ impl ConnectionFormView {
                     move |el, delta| {
                         let eased = oxideterm_gpui_ui::motion::ease_out_cubic(delta);
                         if motion.spatial {
-                            el.left(px(oxideterm_gpui_ui::motion::lerp(start_dx, 0.0, eased)))
+                            let offset = start_tiles * (1.0 - eased);
+                            el.left(gpui::relative(offset))
+                                .ml(px(offset * STUDIO_PROTOCOL_TILE_GAP))
                         } else {
                             el.opacity(eased)
                         }
@@ -322,7 +327,13 @@ impl ConnectionFormView {
                 .into_any_element()
         };
 
+        let scroll = self.selectable_text_scroll_handle("new-connection-transport-scroll");
+        // Track the tiles directly so the scroll range includes the last tile and end padding.
         let mut strip = div()
+            .id("new-connection-transport-scroll")
+            .w_full()
+            .overflow_x_scroll()
+            .track_scroll(&scroll)
             .flex()
             .flex_row()
             .items_center()
@@ -330,19 +341,24 @@ impl ConnectionFormView {
             .px(px(16.0))
             .pb(px(10.0));
 
+        let protocol_tile = || {
+            div()
+                .flex_initial()
+                .w(px(STUDIO_PROTOCOL_TILE_WIDTH))
+                .min_w(px(STUDIO_PROTOCOL_TILE_MIN_WIDTH))
+                .px(px(6.0))
+                .py(px(6.0))
+        };
+
         for (tile_index, (transport, focus_field)) in built_in_transports.into_iter().enumerate() {
             let (icon, label) = self.transport_display_meta(transport);
             let active = tile_index == active_index;
-            let tile = div()
+            let tile = protocol_tile()
                 .id(SharedString::from(format!(
                     "studio-transport-{transport:?}"
                 )))
                 .debug_selector(|| format!("new-connection-transport-{transport:?}"))
                 .relative()
-                .flex_none()
-                .w(px(STUDIO_PROTOCOL_TILE_WIDTH))
-                .px(px(6.0))
-                .py(px(6.0))
                 .rounded(px(self.tokens.radii.md))
                 .cursor_pointer()
                 .when(!active, |el| {
@@ -402,13 +418,9 @@ impl ConnectionFormView {
         }
 
         strip = strip.child(
-            div()
+            protocol_tile()
                 .id("studio-transport-tunnel")
                 .relative()
-                .flex_none()
-                .w(px(STUDIO_PROTOCOL_TILE_WIDTH))
-                .px(px(6.0))
-                .py(px(6.0))
                 .rounded(px(self.tokens.radii.md))
                 .cursor_pointer()
                 .when(!tunnel_active, |el| {
@@ -470,11 +482,7 @@ impl ConnectionFormView {
 
         for (plugin, definition) in plugin_types {
             strip = strip.child(
-                div()
-                    .flex_none()
-                    .w(px(STUDIO_PROTOCOL_TILE_WIDTH))
-                    .px(px(6.0))
-                    .py(px(6.0))
+                protocol_tile()
                     .rounded(px(self.tokens.radii.md))
                     .cursor_pointer()
                     .hover(|el| el.bg(rgba((theme.bg_hover << 8) | 0x99)))
@@ -515,30 +523,28 @@ impl ConnectionFormView {
             );
         }
 
-        let scroll = self.selectable_text_scroll_handle("new-connection-transport-scroll");
-        let max_x = f32::from(scroll.max_offset().x);
-        let cur_x = f32::from(scroll.offset().x);
-        let can_scroll_left = max_x > 1.0 && cur_x < -1.0;
-        let can_scroll_right = max_x > 1.0 && cur_x > -max_x + 1.0;
+        let scroll_directions = |scroll: &ScrollHandle| {
+            let max_x = f32::from(scroll.max_offset().x);
+            let cur_x = f32::from(scroll.offset().x);
+            (cur_x < -1.0, cur_x > -max_x + 1.0)
+        };
+        let (can_scroll_left, can_scroll_right) = scroll_directions(&scroll);
         let scroll_left_handle = scroll.clone();
         let scroll_right_handle = scroll.clone();
 
         div()
             .w_full()
             .relative()
-            .child(
-                div()
-                    .id("new-connection-transport-scroll")
-                    .w_full()
-                    .overflow_x_scroll()
-                    .track_scroll(&scroll)
-                    .on_scroll(cx.listener(|_, _, _, cx| {
-                        // Refresh overflow chevrons as the user scrolls horizontally.
-                        cx.notify();
-                    }))
-                    .child(strip),
-            )
+            .child(strip)
             .child(Scrollbar::new(&scroll).axis(ScrollbarAxis::Horizontal))
+            .on_children_prepainted({
+                let view = cx.entity_id();
+                move |_, _, cx| {
+                    if scroll_directions(&scroll) != (can_scroll_left, can_scroll_right) {
+                        cx.notify(view);
+                    }
+                }
+            })
             .when(can_scroll_left, |bar| {
                 bar.child(
                     div()
