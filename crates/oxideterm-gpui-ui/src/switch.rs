@@ -80,8 +80,8 @@ pub fn switch_with(
 
     let thumb = crate::surface::opaque_control_surface(
         div()
-            .absolute()
-            .top(px(SWITCH_THUMB_INSET))
+            .relative()
+            .flex_none()
             .size(px(SWITCH_THUMB_SIZE))
             .rounded_full()
             .bg(rgb(SWITCH_THUMB_COLOR))
@@ -120,7 +120,8 @@ pub fn switch_with(
     );
 
     let mut track = div()
-        .relative()
+        .flex()
+        .items_center()
         .flex_none()
         .w(px(SWITCH_TRACK_WIDTH))
         .h(px(SWITCH_TRACK_HEIGHT))

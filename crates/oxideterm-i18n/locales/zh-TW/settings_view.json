@@ -151,7 +151,7 @@
       "external_connection_uris_hint": "接收 ssh://、telnet://、mosh://、rdp:// 和 vnc:// 連結。預設應用程式關聯由作業系統管理。",
       "launch_at_login": "登入時啟動",
       "launch_at_login_hint": "登入此裝置後自動啟動 OxideTerm。",
-      "launch_at_login_macos_hint": "此 macOS 版本使用 ad-hoc 簽署，請在系統的登入項目設定中加入或移除 OxideTerm。",
+      "launch_at_login_macos_hint": "在系統設定的「登入項目」中加入或移除 OxideTerm。",
       "manage_login_items": "開啟登入項目設定",
       "launch_at_login_updating": "正在更新系統啟動項目...",
       "launch_at_login_approval_required": "請在系統設定的登入項目中加入或允許 OxideTerm，然後返回此處重新整理狀態。",

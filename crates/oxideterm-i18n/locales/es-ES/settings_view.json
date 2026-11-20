@@ -151,7 +151,7 @@
       "external_connection_uris_hint": "Acepta enlaces ssh://, telnet://, mosh://, rdp:// y vnc://. El sistema operativo administra las asociaciones de aplicaciones predeterminadas.",
       "launch_at_login": "Iniciar al acceder",
       "launch_at_login_hint": "Inicia OxideTerm automáticamente después de acceder a este dispositivo.",
-      "launch_at_login_macos_hint": "Esta compilación de macOS usa firma ad hoc. Añade o elimina OxideTerm en los Ítems de inicio del sistema.",
+      "launch_at_login_macos_hint": "Añade o elimina OxideTerm en el apartado Ítems de inicio de los Ajustes del Sistema.",
       "manage_login_items": "Abrir Ítems de inicio",
       "launch_at_login_updating": "Actualizando el ajuste de inicio del sistema...",
       "launch_at_login_approval_required": "Añade o permite OxideTerm en Ítems de inicio en Ajustes del Sistema y vuelve aquí para actualizar el estado.",

@@ -336,8 +336,20 @@ impl WorkspaceApp {
         } else {
             0.0
         };
-        let right_min_width = right_controls_width + action_button_width * 3.0 + background_width;
-        let side_min_width = left_controls_width.max(right_min_width);
+        // On split Linux layouts keep workspace actions away from the close button.
+        let actions_on_left = cfg!(target_os = "windows")
+            || (cfg!(target_os = "linux")
+                && (button_layout
+                    .right
+                    .contains(&Some(gpui::WindowButton::Close))
+                    || button_layout.left.iter().all(Option::is_none)));
+        let actions_width = action_button_width * 3.0;
+        let left_min_width =
+            left_controls_width + if actions_on_left { actions_width } else { 0.0 };
+        let right_min_width = right_controls_width
+            + background_width
+            + if actions_on_left { 0.0 } else { actions_width };
+        let side_min_width = left_min_width.max(right_min_width);
         let scope_available_width = f32::from(window.viewport_size().width)
             - side_min_width * 2.0
             - self.tokens.spacing.two * 2.0;
@@ -350,7 +362,7 @@ impl WorkspaceApp {
         let left_side_min_width = if tab_scope_trigger.is_some() {
             side_min_width
         } else {
-            left_controls_width
+            left_min_width
         };
         let right_side_min_width = if tab_scope_trigger.is_some() {
             side_min_width
@@ -396,6 +408,120 @@ impl WorkspaceApp {
         let theme_toggle_workspace = cx.entity().downgrade();
         let disclaimer_locked = self.onboarding_disclaimer_locked();
 
+        let actions = div()
+            .flex_none()
+            .flex()
+            .items_center()
+            .child(
+                div()
+                    .id("titlebar-command-palette-button")
+                    .flex_none()
+                    .px(px(action_button_padding))
+                    .role(gpui::Role::Button)
+                    .aria_label(palette_label)
+                    .on_a11y_action(gpui::AccessibleAction::Click, move |_, window, cx| {
+                        let _ = palette_workspace.update(cx, |this, cx| {
+                            this.open_command_palette(window, cx);
+                        });
+                    })
+                    .child(self.workspace_tooltip_icon_button(
+                        LucideIcon::Search,
+                        self.tokens.metrics.sidebar_action_icon_size,
+                        rgb(text_color),
+                        IconButtonOptions {
+                            disabled: disclaimer_locked,
+                            ..IconButtonOptions::opaque_toolbar(
+                                action_button_size,
+                                ButtonRadius::Md,
+                            )
+                        },
+                        palette_tooltip.clone(),
+                        "titlebar-command-palette",
+                        true,
+                        cx.listener(move |this, _, window, cx| {
+                            this.clear_workspace_tooltip(&palette_tooltip, cx);
+                            this.open_command_palette(window, cx);
+                            cx.stop_propagation();
+                        }),
+                        cx.entity(),
+                    )),
+            )
+            .child(
+                div()
+                    .id("titlebar-zen-button")
+                    .flex_none()
+                    .px(px(action_button_padding))
+                    .role(gpui::Role::Button)
+                    .aria_label(zen_label)
+                    .on_a11y_action(gpui::AccessibleAction::Click, move |_, _, cx| {
+                        let _ = zen_workspace.update(cx, |this, cx| this.toggle_zen_mode(cx));
+                    })
+                    .child(self.workspace_tooltip_icon_button(
+                        LucideIcon::EyeOff,
+                        self.tokens.metrics.sidebar_action_icon_size,
+                        rgb(text_color),
+                        IconButtonOptions {
+                            disabled: disclaimer_locked,
+                            ..IconButtonOptions::opaque_toolbar(
+                                action_button_size,
+                                ButtonRadius::Md,
+                            )
+                        },
+                        zen_tooltip.clone(),
+                        "titlebar-zen",
+                        true,
+                        cx.listener(move |this, _, _, cx| {
+                            this.clear_workspace_tooltip(&zen_tooltip, cx);
+                            this.toggle_zen_mode(cx);
+                            cx.stop_propagation();
+                        }),
+                        cx.entity(),
+                    )),
+            )
+            .child(
+                div()
+                    .id("titlebar-theme-button")
+                    .flex_none()
+                    .px(px(action_button_padding))
+                    .role(gpui::Role::Button)
+                    .aria_label(theme_label.clone())
+                    .on_a11y_action(gpui::AccessibleAction::Click, move |_, _, cx| {
+                        let _ = theme_toggle_workspace.update(cx, |this, cx| {
+                            this.toggle_titlebar_theme(cx);
+                        });
+                    })
+                    .child(self.workspace_tooltip_icon_button(
+                        if dark {
+                            LucideIcon::Moon
+                        } else {
+                            LucideIcon::Sun
+                        },
+                        self.tokens.metrics.sidebar_action_icon_size,
+                        rgb(text_color),
+                        IconButtonOptions {
+                            disabled: disclaimer_locked || self.theme_transition.is_some(),
+                            ..IconButtonOptions::opaque_toolbar(
+                                action_button_size,
+                                ButtonRadius::Md,
+                            )
+                        },
+                        theme_label.clone(),
+                        "titlebar-theme-toggle",
+                        true,
+                        cx.listener(move |this, _, _, cx| {
+                            this.clear_workspace_tooltip(&theme_label, cx);
+                            this.toggle_titlebar_theme(cx);
+                            cx.stop_propagation();
+                        }),
+                        cx.entity(),
+                    )),
+            );
+        let (left_actions, right_actions) = if actions_on_left {
+            (Some(actions), None)
+        } else {
+            (None, Some(actions))
+        };
+
         div()
             .w_full()
             .h(px(self.tokens.metrics.titlebar_height))
@@ -428,6 +554,7 @@ impl WorkspaceApp {
                             cx,
                         ))
                     })
+                    .children(left_actions)
                     .child(self.render_window_drag_region("workspace-titlebar-drag-left", cx)),
             )
             .when_some(tab_scope_trigger, |bar, trigger| bar.child(trigger))
@@ -490,111 +617,7 @@ impl WorkspaceApp {
                                 .child(background_count_label),
                         )
                     })
-                    .child(
-                        div()
-                            .id("titlebar-command-palette-button")
-                            .flex_none()
-                            .px(px(action_button_padding))
-                            .role(gpui::Role::Button)
-                            .aria_label(palette_label)
-                            .on_a11y_action(gpui::AccessibleAction::Click, move |_, window, cx| {
-                                let _ = palette_workspace.update(cx, |this, cx| {
-                                    this.open_command_palette(window, cx);
-                                });
-                            })
-                            .child(self.workspace_tooltip_icon_button(
-                                LucideIcon::Search,
-                                self.tokens.metrics.sidebar_action_icon_size,
-                                rgb(text_color),
-                                IconButtonOptions {
-                                    disabled: disclaimer_locked,
-                                    ..IconButtonOptions::opaque_toolbar(
-                                        action_button_size,
-                                        ButtonRadius::Md,
-                                    )
-                                },
-                                palette_tooltip.clone(),
-                                "titlebar-command-palette",
-                                true,
-                                cx.listener(move |this, _, window, cx| {
-                                    this.clear_workspace_tooltip(&palette_tooltip, cx);
-                                    this.open_command_palette(window, cx);
-                                    cx.stop_propagation();
-                                }),
-                                cx.entity(),
-                            )),
-                    )
-                    .child(
-                        div()
-                            .id("titlebar-zen-button")
-                            .flex_none()
-                            .px(px(action_button_padding))
-                            .role(gpui::Role::Button)
-                            .aria_label(zen_label)
-                            .on_a11y_action(gpui::AccessibleAction::Click, move |_, _, cx| {
-                                let _ =
-                                    zen_workspace.update(cx, |this, cx| this.toggle_zen_mode(cx));
-                            })
-                            .child(self.workspace_tooltip_icon_button(
-                                LucideIcon::EyeOff,
-                                self.tokens.metrics.sidebar_action_icon_size,
-                                rgb(text_color),
-                                IconButtonOptions {
-                                    disabled: disclaimer_locked,
-                                    ..IconButtonOptions::opaque_toolbar(
-                                        action_button_size,
-                                        ButtonRadius::Md,
-                                    )
-                                },
-                                zen_tooltip.clone(),
-                                "titlebar-zen",
-                                true,
-                                cx.listener(move |this, _, _, cx| {
-                                    this.clear_workspace_tooltip(&zen_tooltip, cx);
-                                    this.toggle_zen_mode(cx);
-                                    cx.stop_propagation();
-                                }),
-                                cx.entity(),
-                            )),
-                    )
-                    .child(
-                        div()
-                            .id("titlebar-theme-button")
-                            .flex_none()
-                            .px(px(action_button_padding))
-                            .role(gpui::Role::Button)
-                            .aria_label(theme_label.clone())
-                            .on_a11y_action(gpui::AccessibleAction::Click, move |_, _, cx| {
-                                let _ = theme_toggle_workspace.update(cx, |this, cx| {
-                                    this.toggle_titlebar_theme(cx);
-                                });
-                            })
-                            .child(self.workspace_tooltip_icon_button(
-                                if dark {
-                                    LucideIcon::Moon
-                                } else {
-                                    LucideIcon::Sun
-                                },
-                                self.tokens.metrics.sidebar_action_icon_size,
-                                rgb(text_color),
-                                IconButtonOptions {
-                                    disabled: disclaimer_locked || self.theme_transition.is_some(),
-                                    ..IconButtonOptions::opaque_toolbar(
-                                        action_button_size,
-                                        ButtonRadius::Md,
-                                    )
-                                },
-                                theme_label.clone(),
-                                "titlebar-theme-toggle",
-                                true,
-                                cx.listener(move |this, _, _, cx| {
-                                    this.clear_workspace_tooltip(&theme_label, cx);
-                                    this.toggle_titlebar_theme(cx);
-                                    cx.stop_propagation();
-                                }),
-                                cx.entity(),
-                            )),
-                    )
+                    .children(right_actions)
                     .when(show_client_controls, |side| {
                         side.child(self.render_client_titlebar_controls(
                             button_layout.right,

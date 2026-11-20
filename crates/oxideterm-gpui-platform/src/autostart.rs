@@ -15,7 +15,7 @@ pub fn is_enabled() -> io::Result<bool> {
 
 /// Adds or removes the current user's startup registration where supported.
 ///
-/// Ad-hoc signed macOS builds must use the system Login Items settings instead.
+/// On macOS, OxideTerm delegates registration to Login Items in System Settings.
 pub fn set_enabled(enabled: bool) -> io::Result<()> {
     platform::set_enabled(enabled)
 }
@@ -150,8 +150,6 @@ mod platform {
     use super::*;
 
     pub(super) fn open_login_items_settings() -> io::Result<()> {
-        // OxideTerm's macOS artifacts are ad-hoc signed, so the system Login
-        // Items panel remains the authoritative management surface.
         unsafe { SMAppService::openSystemSettingsLoginItems() };
         Ok(())
     }
@@ -164,7 +162,7 @@ mod platform {
     pub(super) fn set_enabled(_enabled: bool) -> io::Result<()> {
         Err(io::Error::new(
             io::ErrorKind::Unsupported,
-            "ad-hoc signed macOS builds must be managed in System Settings",
+            "manage macOS login items in System Settings",
         ))
     }
 }

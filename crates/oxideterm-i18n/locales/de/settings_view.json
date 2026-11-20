@@ -151,7 +151,7 @@
       "external_connection_uris_hint": "Akzeptiert ssh://-, telnet://-, mosh://-, rdp://- und vnc://-Links. Die Standard-App-Zuordnung wird vom Betriebssystem verwaltet.",
       "launch_at_login": "Bei Anmeldung starten",
       "launch_at_login_hint": "OxideTerm nach der Anmeldung auf diesem Gerät automatisch starten.",
-      "launch_at_login_macos_hint": "Dieser macOS-Build ist ad hoc signiert. Füge OxideTerm in den systemeigenen Anmeldeobjekten hinzu oder entferne es dort.",
+      "launch_at_login_macos_hint": "Füge OxideTerm in den Systemeinstellungen unter „Anmeldeobjekte“ hinzu oder entferne es dort.",
       "manage_login_items": "Anmeldeobjekte öffnen",
       "launch_at_login_updating": "Systemeinstellung für den Autostart wird aktualisiert...",
       "launch_at_login_approval_required": "Füge OxideTerm unter Anmeldeobjekte in den Systemeinstellungen hinzu oder erlaube es und kehre dann hierher zurück, um den Status zu aktualisieren.",

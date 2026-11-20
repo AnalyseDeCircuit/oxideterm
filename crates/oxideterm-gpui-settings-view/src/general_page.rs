@@ -529,9 +529,6 @@ impl GeneralPage<'_> {
     #[cfg(target_os = "macos")]
     pub fn launch_at_login_settings_card(&self, cx: &App) -> AnyElement {
         let launch_at_login = self.state.read(cx).launch_at_login_snapshot();
-        // TODO(signing): Once every macOS artifact is Developer ID signed and
-        // notarized, replace this system-settings handoff with an in-app
-        // SMAppService register/unregister toggle and remove the manual copy.
         let mut description = div().min_w(px(0.0)).flex().flex_col().gap(px(4.0)).child(
             div()
                 .text_size(px(self.tokens.metrics.ui_text_xs))

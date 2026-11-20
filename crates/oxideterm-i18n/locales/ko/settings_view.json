@@ -151,7 +151,7 @@
       "external_connection_uris_hint": "ssh://, telnet://, mosh://, rdp:// 및 vnc:// 링크를 받습니다. 기본 앱 연결은 운영 체제에서 관리합니다.",
       "launch_at_login": "로그인 시 실행",
       "launch_at_login_hint": "이 장치에 로그인한 후 OxideTerm을 자동으로 실행합니다.",
-      "launch_at_login_macos_hint": "이 macOS 빌드는 임시 서명을 사용합니다. 시스템 로그인 항목 설정에서 OxideTerm을 추가하거나 제거하세요.",
+      "launch_at_login_macos_hint": "시스템 설정의 로그인 항목에서 OxideTerm을 추가하거나 제거할 수 있습니다.",
       "manage_login_items": "로그인 항목 열기",
       "launch_at_login_updating": "시스템 시작 설정을 업데이트하는 중...",
       "launch_at_login_approval_required": "시스템 설정의 로그인 항목에서 OxideTerm을 추가하거나 허용한 다음 여기로 돌아와 상태를 새로 고치세요.",
