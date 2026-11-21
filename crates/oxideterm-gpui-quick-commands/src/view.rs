@@ -98,22 +98,28 @@ fn quick_command_editor_frame(
 ) -> gpui::Stateful<gpui::Div> {
     div()
         .id("quick-command-editor")
+        .w_full()
         .h_full()
         .min_h_0()
         .min_w_0()
+        .overflow_hidden()
         .flex()
         .flex_col()
         .bg(rgba((tokens.ui.bg << 8) | 0x59))
         .child(
             div()
                 .relative()
+                .w_full()
                 .flex_1()
                 .min_h_0()
                 .min_w_0()
+                .overflow_hidden()
                 .child(
                     div()
                         .id("quick-command-editor-scroll")
                         .size_full()
+                        .min_w_0()
+                        .overflow_x_hidden()
                         .overflow_y_scroll()
                         .track_scroll(scroll)
                         .child(form),

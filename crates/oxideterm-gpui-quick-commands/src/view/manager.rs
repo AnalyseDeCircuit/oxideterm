@@ -367,7 +367,7 @@ impl QuickCommandsView {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let sidebar = div()
-            .w(px(if snapshot.managing { 220.0 } else { 160.0 }))
+            .w(px(if snapshot.managing { 220.0 } else { 192.0 }))
             .h_full()
             .flex_none()
             .overflow_hidden()
@@ -385,12 +385,18 @@ impl QuickCommandsView {
             .gap(px(6.0))
             .child(
                 div()
+                    .w_full()
+                    .min_w_0()
                     .mb(px(2.0))
                     .flex()
                     .items_center()
                     .justify_between()
+                    .gap(px(4.0))
                     .child(
                         div()
+                            .min_w_0()
+                            .flex_1()
+                            .truncate()
                             .text_size(px(self.tokens.metrics.ui_text_xs))
                             .font_weight(gpui::FontWeight::MEDIUM)
                             .text_color(rgb(theme.text_muted))
@@ -413,6 +419,7 @@ impl QuickCommandsView {
                     )
                     .child(
                         div()
+                            .flex_none()
                             .flex()
                             .items_center()
                             .gap(px(4.0))

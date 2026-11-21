@@ -373,6 +373,7 @@ impl QuickCommandsView {
             })
             .child(
                 div()
+                    .w_full()
                     .flex()
                     .flex_col()
                     .min_w_0()
@@ -393,6 +394,8 @@ impl QuickCommandsView {
                     ))
                     .child(
                         div()
+                            .w_full()
+                            .min_w_0()
                             .text_size(px(self.tokens.metrics.ui_text_xs))
                             .text_color(rgb(theme.text_muted))
                             .child(self.i18n.t("terminal.quick_commands.template_hint")),
@@ -409,11 +412,15 @@ impl QuickCommandsView {
                     )
                     .child(
                         div()
+                            .w_full()
+                            .min_w_0()
                             .flex()
                             .flex_col()
                             .gap(px(5.0))
                             .child(
                                 div()
+                                    .w_full()
+                                    .min_w_0()
                                     .text_size(px(self.tokens.metrics.ui_text_xs))
                                     .text_color(rgb(theme.text_muted))
                                     .child(self.i18n.t("terminal.quick_commands.match_field")),
@@ -431,6 +438,8 @@ impl QuickCommandsView {
                             )
                             .child(
                                 div()
+                                    .w_full()
+                                    .min_w_0()
                                     .text_size(px(self.tokens.metrics.ui_text_xs))
                                     .text_color(rgb(theme.text_muted))
                                     .child(self.i18n.t("terminal.quick_commands.match_hint")),
@@ -439,17 +448,22 @@ impl QuickCommandsView {
                     .child(
                         div()
                             .w_full()
+                            .min_w_0()
                             .max_h(px(QUICK_COMMAND_CATEGORY_PICKER_MAX_HEIGHT))
                             .overflow_y_scrollbar()
                             .child(categories),
                     )
                     .child(
                         div()
+                            .w_full()
+                            .min_w_0()
                             .flex()
                             .flex_col()
                             .gap(px(5.0))
                             .child(
                                 div()
+                                    .w_full()
+                                    .min_w_0()
                                     .text_size(px(self.tokens.metrics.ui_text_xs))
                                     .text_color(rgb(theme.text_muted))
                                     .child(self.i18n.t("terminal.quick_commands.protocols")),
