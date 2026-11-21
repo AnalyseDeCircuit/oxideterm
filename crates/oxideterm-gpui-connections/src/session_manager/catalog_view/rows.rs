@@ -11,8 +11,8 @@ const MANAGER_SIDEBAR_ROW_ICON_SIZE: f32 = 24.0;
 const MANAGER_SIDEBAR_ROW_ICON_GLYPH_SIZE: f32 = 14.0;
 const MANAGER_DRAG_ROOT_BG_ALPHA: u32 = 0x0d;
 const MANAGER_DRAG_GROUP_BG_ALPHA: u32 = 0x16;
-const MANAGER_LIST_LAST_USED_WIDTH: f32 = 96.0;
-const MANAGER_ROW_ACTIONS_WIDTH: f32 = 76.0; // Three compact actions and their two gaps.
+const MANAGER_LIST_LAST_USED_WIDTH: f32 = 136.0;
+const MANAGER_ROW_ACTIONS_WIDTH: f32 = 84.0; // Three compact actions and their two gaps.
 const MANAGER_RECENT_ITEM_MIN_WIDTH: f32 = 180.0;
 const MANAGER_RECENT_ITEM_BASIS: f32 = 240.0;
 const MANAGER_RECENT_ICON_SIZE: f32 = 28.0;
@@ -2422,9 +2422,52 @@ impl CatalogView {
             SessionManagerRowActionTarget::GroupRoot => MANAGER_ROW_ACTION_MENU_PROFILE_HEIGHT,
             SessionManagerRowActionTarget::Group(_) => MANAGER_ROW_ACTION_MENU_GROUP_HEIGHT,
         };
+        let menu_width = {
+            let mut labels: Vec<String> = Vec::new();
+            match &menu.target {
+                SessionManagerRowActionTarget::GroupRoot => {
+                    labels.push(self.i18n.t("sessionManager.folder_tree.new_group"));
+                }
+                SessionManagerRowActionTarget::Group(_) => {
+                    labels.push(self.i18n.t("sessionManager.toolbar.new_connection"));
+                    labels.push(self.i18n.t("sessionManager.folder_tree.new_subgroup"));
+                    labels.push(self.i18n.t("sessionManager.folder_tree.rename_group"));
+                    labels.push(self.i18n.t("sessionManager.actions.delete"));
+                }
+                SessionManagerRowActionTarget::SshConfig(_) => {
+                    labels.push(self.i18n.t("sessionManager.actions.connect"));
+                    labels.push(self.i18n.t("settings_view.connections.ssh_config.import"));
+                }
+                SessionManagerRowActionTarget::Tunnel(_) => {
+                    labels.push(self.i18n.t("sessionManager.actions.start_tunnel"));
+                    labels.push(self.i18n.t("sessionManager.actions.stop_tunnel"));
+                    labels.push(self.i18n.t("sessionManager.actions.edit"));
+                    labels.push(self.i18n.t("sessionManager.actions.delete"));
+                }
+                SessionManagerRowActionTarget::Connection(_) => {
+                    labels.push(self.i18n.t("sessionManager.actions.connect"));
+                    labels.push(self.i18n.t("sessionManager.actions.edit"));
+                    labels.push(self.i18n.t("sessionManager.actions.test_connection"));
+                    labels.push(self.i18n.t("sessionManager.actions.duplicate"));
+                    labels.push(self.i18n.t("sessionManager.actions.delete"));
+                }
+                _ => {
+                    labels.push(self.i18n.t("sessionManager.actions.connect"));
+                    labels.push(self.i18n.t("sessionManager.actions.edit"));
+                    labels.push(self.i18n.t("sessionManager.actions.delete"));
+                }
+            }
+            oxideterm_gpui_ui::estimate_menu_width(
+                &self.tokens,
+                MANAGER_ROW_ACTION_MENU_WIDTH,
+                280.0,
+                true,
+                labels.iter().map(String::as_str),
+            )
+        };
         let (requested_x, requested_y) = match menu.origin {
             SessionManagerRowActionMenuOrigin::ActionButton => (
-                menu.x - MANAGER_ROW_ACTION_MENU_WIDTH + MANAGER_ROW_ACTION_BUTTON / 2.0,
+                menu.x - menu_width + MANAGER_ROW_ACTION_BUTTON / 2.0,
                 menu.y + MANAGER_ROW_ACTION_BUTTON / 2.0,
             ),
             SessionManagerRowActionMenuOrigin::Pointer => (menu.x, menu.y),
@@ -2434,13 +2477,12 @@ impl CatalogView {
             requested_y,
             f32::from(viewport.width),
             f32::from(viewport.height),
-            MANAGER_ROW_ACTION_MENU_WIDTH,
+            menu_width,
             menu_height,
             self.tokens.spacing.two,
         );
-        let mut popup = context_menu_event_boundary(
-            dropdown_menu_content(&self.tokens).w(px(MANAGER_ROW_ACTION_MENU_WIDTH)),
-        );
+        let mut popup =
+            context_menu_event_boundary(dropdown_menu_content(&self.tokens).w(px(menu_width)));
 
         // Opening is the primary row action now that the sidebar hides inline buttons.
         if let Some(open_target) = menu.target.open_target() {

@@ -1,17 +1,21 @@
 use super::*;
 use gpui::{AnchoredPositionMode, Corner, anchored, deferred, point};
-use oxideterm_connections::{AuthType, BatchIssue, BatchPreviewRow, BatchRowStatus};
+use oxideterm_connections::{AuthType, BatchIssue, BatchPreviewRow, BatchRowStatus, BatchTemplate};
 use oxideterm_gpui_ui::{
+    badge::{StatusPillOptions, StatusTone, status_pill},
     modal::{TAURI_SELECT_LAYER_PRIORITY, popover_backdrop},
     select::{
         OverlayAnchor, SelectAnchorId, select_anchor_probe, select_overlay_popup_with_max_height,
     },
+    tabs::{segmented_tab, segmented_tabs},
 };
 
-const BATCH_ADD_DIALOG_WIDTH: f32 = 880.0;
-const BATCH_ADD_TRIGGER_MIN_WIDTH: f32 = 240.0;
+const BATCH_ADD_DIALOG_WIDTH: f32 = 960.0;
+const BATCH_ADD_DIALOG_HEIGHT: f32 = 640.0;
+const BATCH_ADD_TRIGGER_MIN_WIDTH: f32 = 160.0;
 const BATCH_ADD_TEXTAREA_VERTICAL_PADDING: f32 = 8.0;
-const BATCH_ADD_EDITOR_BOX_HEIGHT: f32 = 148.0;
+const BATCH_ADD_TEMPLATE_EDITOR_HEIGHT: f32 = 124.0;
+const BATCH_ADD_DATA_EDITOR_MIN_HEIGHT: f32 = 176.0;
 const BATCH_ADD_PREVIEW_MAX_ROWS: usize = 120;
 const BATCH_ADD_ISSUE_MAX_ROWS: usize = 10;
 
@@ -98,6 +102,10 @@ impl OxideDialogs {
                         BatchAddDialogSnapshot {
                             error: dialog.error.clone(),
                             template_issue: dialog.template_issue.clone(),
+                            template_summary: batch_template_summary(dialog.template.as_ref()),
+                            template_expanded: dialog.template_expanded
+                                || dialog.template_issue.is_some(),
+                            syntax_help_open: dialog.syntax_help_open,
                             preview_rows: dialog
                                 .preview
                                 .rows
@@ -128,30 +136,44 @@ impl OxideDialogs {
             }),
         );
 
-        let mut body = div()
+        let left_column = div()
+            .w(relative(0.46))
+            .min_w(px(320.0))
+            .min_h(px(0.0))
+            .border_r_1()
+            .border_color(rgb(theme.border))
+            .p(px(20.0))
             .flex()
             .flex_col()
-            .gap(px(OXIDE_MODAL_SECTION_GAP))
-            .child(self.render_batch_add_template_section(cx))
-            .child(self.render_batch_add_data_section(cx));
-        if let Some(issue) = dialog_snapshot.template_issue.as_ref() {
-            body =
-                body.child(self.render_oxide_status_line(self.batch_issue_text(issue), true, cx));
-        }
-        body = body
-            .child(self.render_batch_add_summary(&dialog_snapshot, cx))
-            .when_some(
-                self.render_batch_add_issues(&dialog_snapshot),
-                |body, issues| body.child(issues),
-            )
-            .child(self.render_batch_add_preview_table(&dialog_snapshot))
-            .child(self.render_batch_add_duplicate_policy(&dialog_snapshot, cx))
-            .when(dialog_snapshot.needs_fallback_auth, |body| {
-                body.child(self.render_batch_add_auth_section(&dialog_snapshot, cx))
-            })
-            .when_some(dialog_snapshot.error.clone(), |body, error| {
-                body.child(self.render_oxide_error_banner(error, cx))
+            .gap(px(16.0))
+            .child(self.render_batch_add_template_section(&dialog_snapshot, cx))
+            .child(self.render_batch_add_data_section(&dialog_snapshot, cx))
+            .when(dialog_snapshot.needs_fallback_auth, |col| {
+                col.child(self.render_batch_add_auth_section(&dialog_snapshot, cx))
             });
+
+        let right_column = div()
+            .flex_1()
+            .min_w(px(0.0))
+            .min_h(px(0.0))
+            .flex()
+            .flex_col()
+            .child(self.render_batch_add_preview_panel(&dialog_snapshot, cx))
+            .when_some(dialog_snapshot.error.clone(), |col, error| {
+                col.child(
+                    div()
+                        .px(px(16.0))
+                        .pb(px(12.0))
+                        .child(self.render_oxide_error_banner(error, cx)),
+                )
+            });
+
+        let body = div()
+            .flex_1()
+            .min_h(px(0.0))
+            .flex()
+            .child(left_column)
+            .child(right_column);
 
         let add_label = self.i18n_with(
             "sessionManager.batchAdd.add_button",
@@ -175,12 +197,39 @@ impl OxideDialogs {
             cx,
         );
 
+        let close_button = self.workspace_icon_action_button(
+            LucideIcon::X,
+            16.0,
+            rgb(theme.text_muted),
+            IconButtonOptions {
+                size: 24.0,
+                radius: ButtonRadius::Sm,
+                disabled: false,
+                loading: false,
+                has_background: false,
+                background: None,
+                border: None,
+                hover_background: Some(rgba(0x00000000)),
+                hover_opacity: Some(1.0),
+                focus_visible: false,
+                idle_opacity: 0.7,
+                disabled_opacity: 0.35,
+            },
+            |this, _event, _window, cx| {
+                this.begin_batch_add_dialog_exit(cx);
+                cx.notify();
+                cx.stop_propagation();
+            },
+            cx,
+        );
+
         backdrop
             .child(oxideterm_gpui_ui::motion::form_transition(
                 &self.tokens,
                 "batch-add-dialog-transition",
                 material_surface(&self.tokens, div(), MaterialRole::Dialog)
                     .w(px(BATCH_ADD_DIALOG_WIDTH))
+                    .h(px(BATCH_ADD_DIALOG_HEIGHT))
                     .max_w(relative(0.92))
                     .max_h(relative(OXIDE_MODAL_MAX_HEIGHT_RATIO))
                     .flex()
@@ -215,24 +264,14 @@ impl OxideDialogs {
                                         cx,
                                     )),
                             )
-                            .child(self.render_oxide_close_button(true, cx)),
+                            .child(close_button),
                     )
-                    .child(
-                        div()
-                            .id("batch-add-dialog-scroll")
-                            .flex_1()
-                            .min_h(px(0.0))
-                            .overflow_y_scroll()
-                            .track_scroll(
-                                &self.selectable_text_scroll_handle("batch-add-dialog-scroll"),
-                            )
-                            .p(px(OXIDE_MODAL_BODY_P))
-                            .child(body),
-                    )
+                    .child(body)
                     .child(
                         div()
                             .px(px(OXIDE_MODAL_BODY_P))
-                            .py(px(OXIDE_MODAL_HEADER_PY))
+                            .pt(px(8.0))
+                            .pb(px(OXIDE_MODAL_HEADER_PY))
                             .border_t_1()
                             .border_color(rgb(theme.border))
                             .child(footer),
@@ -242,68 +281,52 @@ impl OxideDialogs {
             .into_any_element()
     }
 
-    /// Small icon action used by the template and hosts section headers; it
-    /// follows the compact outline action chrome of the other dialog toolbars.
-    /// Disabled actions keep their label visible but lose the pointer affordance.
-    fn render_batch_add_icon_action(
+    fn render_batch_add_toolbar_button(
         &self,
         id: &'static str,
         icon: LucideIcon,
         label_key: &str,
+        variant: ButtonVariant,
         disabled: bool,
         cx: &mut Context<Self>,
         listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
     ) -> AnyElement {
-        let accent = rgb(if disabled {
+        let icon_color = rgb(if disabled {
             self.tokens.ui.text_muted
         } else {
-            self.tokens.ui.accent_secondary
+            self.tokens.ui.text
         });
-        div()
-            .id(id)
-            .flex()
-            .items_center()
-            .gap(px(4.0))
-            .text_size(px(self.tokens.metrics.ui_text_xs))
-            .text_color(accent)
-            .opacity(if disabled { 0.55 } else { 1.0 })
-            .when(!disabled, |action| {
-                action
-                    .cursor_pointer()
-                    .hover(|style| style.text_color(rgb(self.tokens.ui.accent_hover)))
-                    .on_mouse_down(MouseButton::Left, cx.listener(listener))
-            })
-            .child(Self::render_lucide_icon(icon, 14.0, accent))
-            .child(self.i18n.t(label_key))
-            .into_any_element()
+        let button = self.workspace_toolbar_action_button(
+            self.i18n.t(label_key),
+            Some(Self::render_lucide_icon(icon, 13.0, icon_color).into_any_element()),
+            ToolbarButtonOptions {
+                button: ButtonOptions {
+                    variant,
+                    size: ButtonSize::Sm,
+                    radius: ButtonRadius::Sm,
+                    disabled,
+                    ..ButtonOptions::default()
+                },
+                height: Some(26.0),
+                padding_x: Some(8.0),
+                ..ToolbarButtonOptions::default()
+            },
+            cx.listener(move |this, event, window, cx| {
+                listener(this, event, window, cx);
+                cx.stop_propagation();
+            }),
+        );
+        button.id(id).into_any_element()
     }
 
-    fn render_batch_add_section_header(
+    /// Template card: collapsed by default with a single-line parsed summary so
+    /// the hosts input owns the primary space; clicking the header expands the
+    /// SSH config editor and template management buttons.
+    fn render_batch_add_template_section(
         &self,
-        label_key: &str,
-        actions: Vec<AnyElement>,
+        snapshot: &BatchAddDialogSnapshot,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
-        let mut header = div()
-            .flex()
-            .items_center()
-            .justify_between()
-            .gap(px(12.0))
-            .child(
-                div()
-                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                    .text_color(rgb(self.tokens.ui.text))
-                    .child(self.i18n.t(label_key)),
-            );
-        for action in actions {
-            header = header.child(action);
-        }
-        header.into_any_element()
-    }
-
-    /// Template section: the label and the template dropdown share one line so
-    /// the editor keeps a stable height; the dropdown owns load, rename, and
-    /// delete actions while "save as template" captures the editor content.
-    fn render_batch_add_template_section(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
         let (templates, selected_id) = {
             let session_manager = self.session_manager.read(cx);
@@ -327,8 +350,6 @@ impl OxideDialogs {
             .find(|template| Some(&template.id) == selected_id.as_ref())
             .map(|template| template.name.clone())
             .unwrap_or_else(|| self.i18n.t("sessionManager.batchAdd.preset_name"));
-        // Overwriting only targets user templates; the factory preset stays
-        // immutable, so "save" disables while the preset is selected.
         let selected_is_user_template = selected_id
             .as_deref()
             .is_some_and(|id| !is_factory_batch_template_id(id));
@@ -337,15 +358,17 @@ impl OxideDialogs {
             .id("batch-add-template-trigger")
             .flex()
             .items_center()
-            .gap(px(6.0))
-            .w(relative(0.5))
+            .justify_between()
+            .gap(px(8.0))
+            .flex_1()
             .min_w(px(BATCH_ADD_TRIGGER_MIN_WIDTH))
+            .max_w(px(210.0))
             .h(px(28.0))
-            .px(px(8.0))
+            .px(px(10.0))
             .rounded(px(self.tokens.radii.sm))
             .border_1()
             .border_color(rgb(theme.border))
-            .bg(rgb(theme.bg_panel))
+            .bg(rgb(theme.bg))
             .cursor_pointer()
             .hover(|style| style.border_color(rgb(theme.accent)))
             .on_mouse_down(
@@ -358,6 +381,7 @@ impl OxideDialogs {
             .child(
                 div()
                     .min_w(px(0.0))
+                    .flex_1()
                     .truncate()
                     .text_size(px(self.tokens.metrics.ui_text_xs))
                     .text_color(rgb(theme.text))
@@ -365,7 +389,7 @@ impl OxideDialogs {
             )
             .child(Self::render_lucide_icon(
                 LucideIcon::ChevronDown,
-                12.0,
+                13.0,
                 rgb(theme.text_muted),
             ));
         let trigger = select_anchor_probe(
@@ -378,50 +402,141 @@ impl OxideDialogs {
             },
         );
 
-        div()
+        let toggle_icon = if snapshot.template_expanded {
+            LucideIcon::ChevronDown
+        } else {
+            LucideIcon::ChevronRight
+        };
+
+        let mut card = div()
             .flex()
             .flex_col()
             .gap(px(8.0))
+            .pb(px(14.0))
+            .border_b_1()
+            .border_color(rgba((theme.border << 8) | 0x80))
             .child(
                 div()
                     .flex()
                     .items_center()
                     .justify_between()
-                    .gap(px(12.0))
+                    .gap(px(10.0))
                     .child(
                         div()
-                            .flex_none()
-                            .text_size(px(self.tokens.metrics.ui_text_sm))
-                            .text_color(rgb(theme.text))
-                            .child(self.i18n.t("sessionManager.batchAdd.template_label")),
+                            .id("batch-add-template-toggle")
+                            .flex()
+                            .items_center()
+                            .gap(px(6.0))
+                            .cursor_pointer()
+                            .hover(|style| style.text_color(rgb(theme.accent)))
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _event, _window, cx| {
+                                    this.session_manager.update(cx, |manager, cx| {
+                                        manager.toggle_batch_template_expanded(cx);
+                                    });
+                                    cx.stop_propagation();
+                                }),
+                            )
+                            .child(Self::render_lucide_icon(
+                                toggle_icon,
+                                14.0,
+                                rgb(theme.text_muted),
+                            ))
+                            .child(
+                                div()
+                                    .flex_none()
+                                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                                    .font_weight(gpui::FontWeight::MEDIUM)
+                                    .text_color(rgb(theme.text))
+                                    .child(self.i18n.t("sessionManager.batchAdd.template_label")),
+                            ),
                     )
-                    .child(trigger)
-                    .child(self.render_batch_add_icon_action(
-                        "batch-add-save-template",
-                        LucideIcon::Save,
-                        "sessionManager.batchAdd.save",
-                        // Overwriting only applies to user templates; the factory
-                        // presets are re-seeded on every load.
-                        !selected_is_user_template,
+                    .child(trigger),
+            );
+
+        if snapshot.template_expanded {
+            card = card
+                .child(self.render_batch_add_editor_box(
+                    BatchAddEditorKind::Template,
+                    Some(BATCH_ADD_TEMPLATE_EDITOR_HEIGHT),
+                    cx,
+                ))
+                .when_some(snapshot.template_issue.as_ref(), |card, issue| {
+                    card.child(self.render_oxide_status_line(
+                        self.batch_issue_text(issue),
+                        true,
                         cx,
-                        |this, _event, _window, cx| {
-                            this.batch_action(BatchWindowAction::SaveTemplate, None, cx);
-                        },
                     ))
-                    .child(self.render_batch_add_icon_action(
-                        "batch-add-save-new-template",
-                        LucideIcon::FilePlus,
-                        "sessionManager.batchAdd.save_as_new",
-                        false,
-                        cx,
-                        |this, _event, _window, cx| {
-                            this.batch_action(BatchWindowAction::NameTemplate, None, cx);
-                        },
-                    )),
-            )
-            .child(self.render_batch_add_editor_box(BatchAddEditorKind::Template, cx))
-            .child(self.render_batch_add_section_hint("sessionManager.batchAdd.template_hint"))
-            .into_any_element()
+                })
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap(px(8.0))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w(px(0.0))
+                                .text_size(px(self.tokens.metrics.ui_text_xs))
+                                .text_color(rgb(theme.text_muted))
+                                .child(self.i18n.t("sessionManager.batchAdd.template_hint")),
+                        )
+                        .child(
+                            div()
+                                .flex_none()
+                                .flex()
+                                .items_center()
+                                .gap(px(6.0))
+                                .child(self.render_batch_add_toolbar_button(
+                                    "batch-add-save-template",
+                                    LucideIcon::Save,
+                                    "sessionManager.batchAdd.save",
+                                    ButtonVariant::Outline,
+                                    !selected_is_user_template,
+                                    cx,
+                                    |this, _event, _window, cx| {
+                                        this.batch_action(
+                                            BatchWindowAction::SaveTemplate,
+                                            None,
+                                            cx,
+                                        );
+                                    },
+                                ))
+                                .child(self.render_batch_add_toolbar_button(
+                                    "batch-add-save-new-template",
+                                    LucideIcon::FilePlus,
+                                    "sessionManager.batchAdd.save_as_new",
+                                    ButtonVariant::Outline,
+                                    false,
+                                    cx,
+                                    |this, _event, _window, cx| {
+                                        this.batch_action(
+                                            BatchWindowAction::NameTemplate,
+                                            None,
+                                            cx,
+                                        );
+                                    },
+                                )),
+                        ),
+                );
+        } else {
+            let summary = snapshot.template_summary.clone().unwrap_or_else(|| {
+                self.i18n
+                    .t("sessionManager.batchAdd.template_summary_empty")
+            });
+            card = card.child(
+                div()
+                    .pl(px(20.0))
+                    .truncate()
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .text_color(rgb(theme.text_muted))
+                    .child(summary),
+            );
+        }
+
+        card.into_any_element()
     }
 
     /// The template dropdown popup: click a row to load it, pencil renames
@@ -742,42 +857,92 @@ impl OxideDialogs {
         )
     }
 
-    /// Hosts section: header with file import, the data editor, and the format
-    /// hint. Importing replaces the editor content, which stays editable.
-    fn render_batch_add_data_section(&self, cx: &mut Context<Self>) -> AnyElement {
-        div()
+    /// Hosts section: primary editor surface with file import and a toggleable
+    /// syntax card so the form stays calm until reference is needed.
+    fn render_batch_add_data_section(
+        &self,
+        snapshot: &BatchAddDialogSnapshot,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let mut section = div()
+            .flex_1()
+            .min_h(px(0.0))
             .flex()
             .flex_col()
             .gap(px(8.0))
-            .child(self.render_batch_add_section_header(
-                "sessionManager.batchAdd.data_label",
-                vec![self.render_batch_add_icon_action(
-                    "batch-add-import-hosts",
-                    LucideIcon::Upload,
-                    "sessionManager.batchAdd.import_from_file",
-                    false,
-                    cx,
-                    |this, _event, _window, cx| {
-                        this.batch_action(BatchWindowAction::PickDataFile, None, cx);
-                    },
-                )],
-            ))
-            .child(self.render_batch_add_editor_box(BatchAddEditorKind::Data, cx))
-            .child(self.render_batch_add_section_hint("sessionManager.batchAdd.data_hint"))
-            .into_any_element()
-    }
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap(px(8.0))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
+                            .child(
+                                div()
+                                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                                    .font_weight(gpui::FontWeight::MEDIUM)
+                                    .text_color(rgb(theme.text))
+                                    .child(self.i18n.t("sessionManager.batchAdd.data_label")),
+                            )
+                            .child(self.render_batch_add_toolbar_button(
+                                "batch-add-syntax-help",
+                                LucideIcon::HelpCircle,
+                                "sessionManager.batchAdd.syntax_help",
+                                if snapshot.syntax_help_open {
+                                    ButtonVariant::Secondary
+                                } else {
+                                    ButtonVariant::Ghost
+                                },
+                                false,
+                                cx,
+                                |this, _event, _window, cx| {
+                                    this.session_manager.update(cx, |manager, cx| {
+                                        manager.toggle_batch_syntax_help(cx);
+                                    });
+                                },
+                            )),
+                    )
+                    .child(self.render_batch_add_toolbar_button(
+                        "batch-add-import-hosts",
+                        LucideIcon::Upload,
+                        "sessionManager.batchAdd.import_from_file",
+                        ButtonVariant::Outline,
+                        false,
+                        cx,
+                        |this, _event, _window, cx| {
+                            this.batch_action(BatchWindowAction::PickDataFile, None, cx);
+                        },
+                    )),
+            );
 
-    fn render_batch_add_section_hint(&self, hint_key: &str) -> AnyElement {
-        div()
-            .text_size(px(self.tokens.metrics.ui_text_xs))
-            .text_color(rgb(self.tokens.ui.text_muted))
-            .child(self.i18n.t(hint_key))
+        if snapshot.syntax_help_open {
+            section = section.child(
+                div()
+                    .rounded(px(self.tokens.radii.sm))
+                    .bg(rgba((theme.bg << 8) | 0x99))
+                    .px(px(10.0))
+                    .py(px(8.0))
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .line_height(px(16.0))
+                    .text_color(rgb(theme.text_muted))
+                    .child(self.i18n.t("sessionManager.batchAdd.data_hint")),
+            );
+        }
+
+        section
+            .child(self.render_batch_add_editor_box(BatchAddEditorKind::Data, None, cx))
             .into_any_element()
     }
 
     fn render_batch_add_editor_box(
         &self,
         kind: BatchAddEditorKind,
+        fixed_height: Option<f32>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let focused = self
@@ -796,24 +961,27 @@ impl OxideDialogs {
                     BatchAddEditorKind::Template => dialog.template_editor.clone(),
                     BatchAddEditorKind::Data => dialog.data_editor.clone(),
                 });
-        div()
+        let box_div = div()
             .id(match kind {
                 BatchAddEditorKind::Template => "batch-add-template-editor",
                 BatchAddEditorKind::Data => "batch-add-data-editor",
             })
             .w_full()
-            .min_w_0()
-            .h(px(BATCH_ADD_EDITOR_BOX_HEIGHT))
-            .flex_none()
+            .min_w_0();
+        let box_div = match fixed_height {
+            Some(height) => box_div.h(px(height)).flex_none(),
+            None => box_div.flex_1().min_h(px(BATCH_ADD_DATA_EDITOR_MIN_HEIGHT)),
+        };
+        box_div
             .p(px(BATCH_ADD_TEXTAREA_VERTICAL_PADDING))
-            .rounded(px(self.tokens.radii.md))
+            .rounded(px(self.tokens.radii.sm))
             .border_1()
             .border_color(rgb(if focused {
                 self.tokens.ui.accent
             } else {
                 self.tokens.ui.border
             }))
-            .bg(rgba((self.tokens.ui.bg << 8) | 0x80))
+            .bg(rgb(self.tokens.ui.bg))
             .overflow_hidden()
             .capture_any_mouse_down(cx.listener(move |this, _event, window, cx| {
                 // Focus without consuming the event: the editor underneath must
@@ -824,46 +992,109 @@ impl OxideDialogs {
             .into_any_element()
     }
 
-    fn render_batch_add_summary(
+    fn render_batch_add_preview_panel(
         &self,
         snapshot: &BatchAddDialogSnapshot,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let text = self.i18n_with(
-            "sessionManager.batchAdd.summary",
-            &[
-                ("added", snapshot.addable.to_string()),
-                ("skipped", snapshot.skipped.to_string()),
-                ("invalid", snapshot.invalid.to_string()),
-            ],
+        let theme = self.tokens.ui;
+        let mut panel = div().flex_1().min_h(px(0.0)).flex().flex_col().child(
+            div()
+                .px(px(20.0))
+                .py(px(12.0))
+                .border_b_1()
+                .border_color(rgba((theme.border << 8) | 0x80))
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap(px(10.0))
+                .flex_wrap()
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(8.0))
+                        .child(
+                            div()
+                                .text_size(px(self.tokens.metrics.ui_text_sm))
+                                .font_weight(gpui::FontWeight::MEDIUM)
+                                .text_color(rgb(theme.text))
+                                .child(self.i18n.t("sessionManager.batchAdd.preview_title")),
+                        )
+                        .child(self.render_batch_add_summary(snapshot)),
+                )
+                .child(self.render_batch_add_duplicate_policy(snapshot, cx)),
         );
-        div()
-            .text_size(px(self.tokens.metrics.ui_text_sm))
-            .text_color(rgb(if snapshot.invalid > 0 {
-                self.tokens.ui.error
-            } else {
-                self.tokens.ui.text_muted
-            }))
-            .child(self.render_selectable_display_text(
-                "batch-add-summary",
-                &text,
-                text.clone(),
-                self.tokens.ui.text_muted,
-                cx,
-            ))
+
+        if let Some(issues) = self.render_batch_add_issues(snapshot) {
+            panel = panel.child(div().px(px(20.0)).pt(px(12.0)).child(issues));
+        }
+
+        panel
+            .child(self.render_batch_add_preview_table(snapshot))
             .into_any_element()
+    }
+
+    fn render_batch_add_summary(&self, snapshot: &BatchAddDialogSnapshot) -> AnyElement {
+        if snapshot.preview_count == 0 && snapshot.invalid == 0 {
+            return div().into_any_element();
+        }
+        let added_label = self.i18n_with(
+            "sessionManager.batchAdd.summary_added",
+            &[("count", snapshot.addable.to_string())],
+        );
+        let mut row = div().flex().items_center().gap(px(6.0)).child(status_pill(
+            &self.tokens,
+            added_label,
+            StatusPillOptions::new(if snapshot.addable > 0 {
+                StatusTone::Success
+            } else {
+                StatusTone::Neutral
+            })
+            .compact(),
+        ));
+        if snapshot.skipped > 0 {
+            row = row.child(status_pill(
+                &self.tokens,
+                self.i18n_with(
+                    "sessionManager.batchAdd.summary_skipped",
+                    &[("count", snapshot.skipped.to_string())],
+                ),
+                StatusPillOptions::new(StatusTone::Warning).compact(),
+            ));
+        }
+        if snapshot.invalid > 0 {
+            row = row.child(status_pill(
+                &self.tokens,
+                self.i18n_with(
+                    "sessionManager.batchAdd.summary_invalid",
+                    &[("count", snapshot.invalid.to_string())],
+                ),
+                StatusPillOptions::new(StatusTone::Error).compact(),
+            ));
+        }
+        row.into_any_element()
     }
 
     fn render_batch_add_issues(&self, snapshot: &BatchAddDialogSnapshot) -> Option<AnyElement> {
         if snapshot.issues.is_empty() {
             return None;
         }
-        let mut list = div().flex().flex_col().gap(px(2.0));
+        let mut list = div()
+            .flex()
+            .flex_col()
+            .gap(px(4.0))
+            .rounded(px(self.tokens.radii.sm))
+            .border_1()
+            .border_color(rgba((OXIDE_RED_500 << 8) | OXIDE_TONE_BORDER_ALPHA))
+            .bg(rgba((OXIDE_RED_500 << 8) | OXIDE_TONE_BG_ALPHA))
+            .px(px(10.0))
+            .py(px(8.0));
         for issue in snapshot.issues.iter().take(BATCH_ADD_ISSUE_MAX_ROWS) {
             list = list.child(
                 div()
                     .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .text_color(rgb(self.tokens.ui.error))
+                    .text_color(rgb(OXIDE_RED_500))
                     .child(self.batch_issue_text(issue)),
             );
         }
@@ -887,80 +1118,176 @@ impl OxideDialogs {
 
     fn render_batch_add_preview_table(&self, snapshot: &BatchAddDialogSnapshot) -> AnyElement {
         let theme = self.tokens.ui;
+        if snapshot.preview_rows.is_empty() {
+            return div()
+                .flex_1()
+                .min_h(px(0.0))
+                .p(px(24.0))
+                .flex()
+                .flex_col()
+                .items_center()
+                .justify_center()
+                .gap(px(8.0))
+                .child(Self::render_lucide_icon(
+                    LucideIcon::Server,
+                    24.0,
+                    rgb(theme.text_muted),
+                ))
+                .child(
+                    div()
+                        .text_size(px(self.tokens.metrics.ui_text_sm))
+                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .text_color(rgb(theme.text))
+                        .child(self.i18n.t("sessionManager.batchAdd.preview_empty_title")),
+                )
+                .child(
+                    div()
+                        .max_w(px(300.0))
+                        .text_center()
+                        .text_size(px(self.tokens.metrics.ui_text_xs))
+                        .line_height(px(16.0))
+                        .text_color(rgb(theme.text_muted))
+                        .child(self.i18n.t("sessionManager.batchAdd.preview_empty_hint")),
+                )
+                .into_any_element();
+        }
+
         let header = div()
             .flex()
-            .gap(px(8.0))
+            .items_center()
+            .gap(px(10.0))
+            .px(px(20.0))
+            .py(px(8.0))
+            .border_b_1()
+            .border_color(rgba((theme.border << 8) | 0x80))
+            .bg(rgba((theme.bg_panel << 8) | 0x66))
             .text_size(px(self.tokens.metrics.ui_text_xs))
             .font_weight(gpui::FontWeight::SEMIBOLD)
             .text_color(rgb(theme.text_muted))
-            .child(self.table_cell("sessionManager.batchAdd.column.name", 0.0, 120.0))
-            .child(self.table_cell("sessionManager.batchAdd.column.host", 140.0, 140.0))
-            .child(self.table_cell("sessionManager.batchAdd.column.port", 50.0, 50.0))
-            .child(self.table_cell("sessionManager.batchAdd.column.user", 100.0, 100.0))
-            .child(self.table_cell("sessionManager.batchAdd.column.group", 90.0, 90.0))
-            .child(self.table_cell("sessionManager.batchAdd.column.tags", 110.0, 110.0))
-            .child(self.table_cell("sessionManager.batchAdd.column.auth", 60.0, 60.0))
-            .child(self.table_cell("sessionManager.batchAdd.column.proxy", 50.0, 50.0))
-            .child(self.table_cell("sessionManager.batchAdd.column.status", 150.0, 150.0));
-        let mut table = div()
+            .child(self.table_cell("sessionManager.batchAdd.column.name", 96.0))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(120.0))
+                    .truncate()
+                    .child(self.i18n.t("sessionManager.batchAdd.column.target")),
+            )
+            .child(self.table_cell("sessionManager.batchAdd.column.user", 68.0))
+            .child(self.table_cell("sessionManager.batchAdd.column.auth", 56.0))
+            .child(self.table_cell("sessionManager.batchAdd.column.status", 88.0));
+
+        let mut rows = div()
+            .id("batch-add-preview-scroll")
+            .flex_1()
+            .min_h(px(0.0))
+            .overflow_y_scroll()
             .flex()
-            .flex_col()
-            .gap(px(2.0))
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(rgb(theme.border))
-            .p(px(8.0))
-            .child(header);
+            .flex_col();
+
         for row in snapshot
             .preview_rows
             .iter()
             .take(BATCH_ADD_PREVIEW_MAX_ROWS)
         {
-            let proxy_label = if row.has_proxy_command {
-                self.i18n.t("sessionManager.batchAdd.proxy_yes")
-            } else {
-                String::new()
-            };
             let dimmed = matches!(
                 row.status,
                 BatchRowStatus::Unchanged
                     | BatchRowStatus::SkippedDuplicateTarget
                     | BatchRowStatus::SkippedExistingName
             );
-            table = table.child(
+            let mut meta_parts = Vec::new();
+            if let Some(group) = row.group.as_deref().filter(|g| !g.is_empty()) {
+                meta_parts.push(group.to_string());
+            }
+            if !row.tags.is_empty() {
+                meta_parts.push(row.tags.join(", "));
+            }
+            let meta_line = (!meta_parts.is_empty()).then(|| meta_parts.join(" · "));
+
+            let auth_text = if row.has_proxy_command {
+                format!(
+                    "{} · {}",
+                    self.i18n.t(if row.auth_type == AuthType::Password {
+                        "sessionManager.batchAdd.auth_password"
+                    } else {
+                        "sessionManager.batchAdd.auth_key"
+                    }),
+                    self.i18n.t("sessionManager.batchAdd.proxy_yes")
+                )
+            } else {
+                self.i18n.t(if row.auth_type == AuthType::Password {
+                    "sessionManager.batchAdd.auth_password"
+                } else {
+                    "sessionManager.batchAdd.auth_key"
+                })
+            };
+
+            let status_tone = match row.status {
+                BatchRowStatus::Add => StatusTone::Success,
+                BatchRowStatus::Renamed => StatusTone::Accent,
+                BatchRowStatus::Update => StatusTone::Info,
+                BatchRowStatus::Unchanged
+                | BatchRowStatus::SkippedDuplicateTarget
+                | BatchRowStatus::SkippedExistingName => StatusTone::Neutral,
+            };
+            let status_label = self.i18n.t(&format!(
+                "sessionManager.batchAdd.status.{}",
+                row.status.label_key()
+            ));
+
+            rows = rows.child(
                 div()
                     .flex()
-                    .gap(px(8.0))
+                    .items_center()
+                    .gap(px(10.0))
+                    .px(px(20.0))
+                    .py(px(8.0))
+                    .border_b_1()
+                    .border_color(rgba((theme.border << 8) | 0x44))
                     .text_size(px(self.tokens.metrics.ui_text_xs))
                     .text_color(rgb(theme.text))
                     .opacity(if dimmed { 0.55 } else { 1.0 })
-                    .child(self.table_text(&row.name, 120.0))
-                    .child(self.table_text(&row.host, 140.0))
-                    .child(self.table_text(&row.port.to_string(), 50.0))
-                    .child(self.table_text(&row.username, 100.0))
-                    .child(self.table_text(row.group.as_deref().unwrap_or_default(), 90.0))
-                    .child(self.table_text(&row.tags.join(", "), 110.0))
-                    .child(self.table_text(
-                        &self.i18n.t(if row.auth_type == AuthType::Password {
-                            "sessionManager.batchAdd.auth_password"
-                        } else {
-                            "sessionManager.batchAdd.auth_key"
-                        }),
-                        60.0,
-                    ))
-                    .child(self.table_text(&proxy_label, 50.0))
-                    .child(self.table_wrapped_text(
-                        &self.i18n.t(&format!(
-                            "sessionManager.batchAdd.status.{}",
-                            row.status.label_key()
-                        )),
-                        150.0,
+                    .child(
+                        div()
+                            .w(px(96.0))
+                            .flex_none()
+                            .flex()
+                            .flex_col()
+                            .gap(px(1.0))
+                            .child(div().truncate().child(row.name.clone()))
+                            .when_some(meta_line, |cell, meta| {
+                                cell.child(
+                                    div()
+                                        .truncate()
+                                        .text_color(rgb(theme.text_muted))
+                                        .child(meta),
+                                )
+                            }),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(120.0))
+                            .truncate()
+                            .child(format!("{}:{}", row.host, row.port)),
+                    )
+                    .child(self.table_text(&row.username, 68.0))
+                    .child(self.table_text(&auth_text, 56.0))
+                    .child(div().w(px(88.0)).flex_none().flex().justify_start().child(
+                        status_pill(
+                            &self.tokens,
+                            status_label,
+                            StatusPillOptions::new(status_tone).compact(),
+                        ),
                     )),
             );
         }
+
         if snapshot.preview_count > BATCH_ADD_PREVIEW_MAX_ROWS {
-            table = table.child(
+            rows = rows.child(
                 div()
+                    .px(px(20.0))
+                    .py(px(8.0))
                     .text_size(px(self.tokens.metrics.ui_text_xs))
                     .text_color(rgb(theme.text_muted))
                     .child(self.i18n_with(
@@ -969,22 +1296,23 @@ impl OxideDialogs {
                     )),
             );
         }
-        // The columns have fixed widths, so a narrow window scrolls the table
-        // instead of clipping the trailing status column.
+
         div()
-            .id("batch-add-preview-scroll")
-            .w_full()
-            .min_w(px(0.0))
-            .overflow_x_scroll()
-            .child(table)
+            .flex_1()
+            .min_h(px(0.0))
+            .overflow_hidden()
+            .flex()
+            .flex_col()
+            .child(header)
+            .child(rows)
             .into_any_element()
     }
 
-    fn table_cell(&self, key: &str, min_width: f32, width: f32) -> AnyElement {
+    fn table_cell(&self, key: &str, width: f32) -> AnyElement {
         div()
-            .when(min_width > 0.0, |cell| cell.min_w(px(min_width)))
             .w(px(width))
             .flex_none()
+            .truncate()
             .child(self.i18n.t(key))
             .into_any_element()
     }
@@ -998,16 +1326,6 @@ impl OxideDialogs {
             .into_any_element()
     }
 
-    /// Status labels are localized sentences, so they wrap instead of being
-    /// clipped at the column edge.
-    fn table_wrapped_text(&self, text: &str, width: f32) -> AnyElement {
-        div()
-            .w(px(width))
-            .flex_none()
-            .child(text.to_owned())
-            .into_any_element()
-    }
-
     fn render_batch_add_duplicate_policy(
         &self,
         snapshot: &BatchAddDialogSnapshot,
@@ -1017,37 +1335,23 @@ impl OxideDialogs {
             (
                 BatchDuplicateNamePolicy::Skip,
                 "sessionManager.batchAdd.duplicate_skip",
+                "batch-add-duplicate-skip",
             ),
             (
                 BatchDuplicateNamePolicy::Rename,
                 "sessionManager.batchAdd.duplicate_rename",
+                "batch-add-duplicate-rename",
             ),
         ];
-        let mut row = div().flex().items_center().gap(px(12.0)).child(
-            div()
-                .text_size(px(self.tokens.metrics.ui_text_sm))
-                .text_color(rgb(self.tokens.ui.text))
-                .child(self.i18n.t("sessionManager.batchAdd.duplicate_label")),
-        );
-        for (policy, key) in options {
+        let mut group = segmented_tabs(&self.tokens)
+            .border_1()
+            .border_color(rgb(self.tokens.ui.border));
+        for (policy, key, id) in options {
             let selected = snapshot.duplicate == policy;
-            let id = match policy {
-                BatchDuplicateNamePolicy::Skip => "batch-add-duplicate-skip",
-                BatchDuplicateNamePolicy::Rename => "batch-add-duplicate-rename",
-            };
-            row = row.child(
-                div()
+            group = group.child(
+                segmented_tab(&self.tokens, self.i18n.t(key), selected)
                     .id(id)
                     .debug_selector(move || id.to_owned())
-                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                    .text_color(rgb(if selected {
-                        self.tokens.ui.accent
-                    } else {
-                        self.tokens.ui.text_muted
-                    }))
-                    .cursor_pointer()
-                    .hover(|style| style.text_color(rgb(self.tokens.ui.accent_hover)))
-                    .child(self.i18n.t(key))
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _event, _window, cx| {
@@ -1059,7 +1363,18 @@ impl OxideDialogs {
                     ),
             );
         }
-        row.into_any_element()
+        div()
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .child(
+                div()
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .child(self.i18n.t("sessionManager.batchAdd.duplicate_label")),
+            )
+            .child(group)
+            .into_any_element()
     }
 
     fn render_batch_add_auth_section(
@@ -1071,32 +1386,22 @@ impl OxideDialogs {
             (
                 BatchAddAuthKind::Password,
                 "sessionManager.batchAdd.auth_password",
+                "batch-add-auth-password",
             ),
-            (BatchAddAuthKind::Key, "sessionManager.batchAdd.auth_key"),
+            (
+                BatchAddAuthKind::Key,
+                "sessionManager.batchAdd.auth_key",
+                "batch-add-auth-key",
+            ),
         ];
-        let mut row = div().flex().items_center().gap(px(12.0)).child(
-            div()
-                .text_size(px(self.tokens.metrics.ui_text_sm))
-                .text_color(rgb(self.tokens.ui.text))
-                .child(self.i18n.t("sessionManager.batchAdd.auth_label")),
-        );
-        for (kind, key) in kinds {
+        let mut group = segmented_tabs(&self.tokens)
+            .border_1()
+            .border_color(rgb(self.tokens.ui.border));
+        for (kind, key, id) in kinds {
             let selected = snapshot.auth_kind == kind;
-            row = row.child(
-                div()
-                    .id(match kind {
-                        BatchAddAuthKind::Password => "batch-add-auth-password",
-                        BatchAddAuthKind::Key => "batch-add-auth-key",
-                    })
-                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                    .text_color(rgb(if selected {
-                        self.tokens.ui.accent
-                    } else {
-                        self.tokens.ui.text_muted
-                    }))
-                    .cursor_pointer()
-                    .hover(|style| style.text_color(rgb(self.tokens.ui.accent_hover)))
-                    .child(self.i18n.t(key))
+            group = group.child(
+                segmented_tab(&self.tokens, self.i18n.t(key), selected)
+                    .id(id)
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _event, _window, cx| {
@@ -1107,7 +1412,29 @@ impl OxideDialogs {
                     ),
             );
         }
-        let mut column = div().flex().flex_col().gap(px(8.0)).child(row);
+        let row = div()
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap(px(10.0))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .truncate()
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .child(self.i18n.t("sessionManager.batchAdd.auth_label")),
+            )
+            .child(group);
+        let mut column = div()
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .pt(px(14.0))
+            .border_t_1()
+            .border_color(rgba((self.tokens.ui.border << 8) | 0x80))
+            .child(row);
         match snapshot.auth_kind {
             BatchAddAuthKind::Password => {
                 column = column.child(self.render_session_password_input(
@@ -1399,6 +1726,9 @@ impl OxideDialogs {
 struct BatchAddDialogSnapshot {
     error: Option<String>,
     template_issue: Option<BatchIssue>,
+    template_summary: Option<String>,
+    template_expanded: bool,
+    syntax_help_open: bool,
     preview_rows: Vec<BatchPreviewRowLabel>,
     preview_count: usize,
     issues: Vec<BatchIssue>,
@@ -1408,6 +1738,31 @@ struct BatchAddDialogSnapshot {
     needs_fallback_auth: bool,
     auth_kind: BatchAddAuthKind,
     duplicate: BatchDuplicateNamePolicy,
+}
+
+fn batch_template_summary(template: Option<&BatchTemplate>) -> Option<String> {
+    let template = template?;
+    let mut parts = Vec::new();
+    if let Some(user) = template.username.as_deref().filter(|v| !v.is_empty()) {
+        parts.push(format!("User {user}"));
+    }
+    if let Some(port) = template.port {
+        parts.push(format!("Port {port}"));
+    }
+    if let Some(identity) = template.identity_file.as_deref().filter(|v| !v.is_empty()) {
+        parts.push(format!("IdentityFile {identity}"));
+    }
+    if let Some(cert) = template
+        .certificate_file
+        .as_deref()
+        .filter(|v| !v.is_empty())
+    {
+        parts.push(format!("CertificateFile {cert}"));
+    }
+    if template.proxy_command.is_some() {
+        parts.push("ProxyCommand".to_string());
+    }
+    (!parts.is_empty()).then(|| parts.join(" · "))
 }
 
 #[cfg(test)]

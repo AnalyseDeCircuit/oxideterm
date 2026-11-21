@@ -37,7 +37,7 @@ impl SessionManagerState {
             paste: i18n.t("menu.paste"),
             select_all: i18n.t("fileManager.selectAll"),
         };
-        let make_editor = |cx: &mut Context<Self>| {
+        let make_editor = |placeholder: Option<String>, cx: &mut Context<Self>| {
             let editor = cx.new(|cx| {
                 let mut editor = TextEditorView::new(String::new(), &tokens, cx);
                 editor.set_presentation(EditorPresentation::Inline, cx);
@@ -47,6 +47,7 @@ impl SessionManagerState {
                         indentation_markers: false,
                         highlight_special_chars: false,
                         highlight_current_line: false,
+                        placeholder,
                         ..Default::default()
                     },
                     cx,
@@ -74,8 +75,9 @@ impl SessionManagerState {
             });
             (editor, subscription)
         };
-        let (template, template_subscription) = make_editor(cx);
-        let (data, data_subscription) = make_editor(cx);
+        let (template, template_subscription) = make_editor(None, cx);
+        let (data, data_subscription) =
+            make_editor(Some(i18n.t("sessionManager.batchAdd.data_placeholder")), cx);
         dialog.template_editor = Some(template);
         dialog.template_editor_subscription = Some(template_subscription);
         dialog.data_editor = Some(data);

@@ -400,30 +400,40 @@ impl CatalogView {
         let Some(anchor) = self.select_anchor(SelectAnchorId::SessionManagerViewMode) else {
             return div().into_any_element();
         };
-        let viewport = window.viewport_size();
-        let placement = catalog_menu_position(
-            f32::from(anchor.bounds.right()) - MANAGER_VIEW_MODE_MENU_WIDTH,
-            f32::from(anchor.bounds.bottom()) + 4.0,
-            f32::from(viewport.width),
-            f32::from(viewport.height),
-            MANAGER_VIEW_MODE_MENU_WIDTH,
-            MANAGER_VIEW_MODE_MENU_HEIGHT,
-            8.0,
-        );
         let modes = [
             SessionManagerViewMode::Tree,
             SessionManagerViewMode::Grid,
             SessionManagerViewMode::List,
         ];
-        let mut menu = context_menu_event_boundary(
-            dropdown_menu_content(&self.tokens).w(px(MANAGER_VIEW_MODE_MENU_WIDTH)),
+        let mode_labels = modes
+            .iter()
+            .map(|mode| self.i18n.t(mode.label_key()))
+            .collect::<Vec<_>>();
+        let menu_width = oxideterm_gpui_ui::estimate_menu_width(
+            &self.tokens,
+            MANAGER_VIEW_MODE_MENU_WIDTH,
+            260.0,
+            true,
+            mode_labels.iter().map(String::as_str),
         );
+        let viewport = window.viewport_size();
+        let placement = catalog_menu_position(
+            f32::from(anchor.bounds.right()) - menu_width,
+            f32::from(anchor.bounds.bottom()) + 4.0,
+            f32::from(viewport.width),
+            f32::from(viewport.height),
+            menu_width,
+            MANAGER_VIEW_MODE_MENU_HEIGHT,
+            8.0,
+        );
+        let mut menu =
+            context_menu_event_boundary(dropdown_menu_content(&self.tokens).w(px(menu_width)));
         let current_mode = self.session_manager.read(cx).view_mode;
-        for mode in modes {
+        for (mode, label) in modes.into_iter().zip(mode_labels) {
             let active = current_mode == mode;
             let item = dropdown_menu_item(
                 &self.tokens,
-                self.i18n.t(mode.label_key()),
+                label,
                 DropdownMenuItemKind::Radio(active),
                 false,
                 false,
@@ -474,16 +484,6 @@ impl CatalogView {
         let Some(anchor) = self.select_anchor(anchor_id) else {
             return div().into_any_element();
         };
-        let viewport = window.viewport_size();
-        let placement = catalog_menu_position(
-            f32::from(anchor.bounds.right()) - MANAGER_SORT_MENU_WIDTH,
-            f32::from(anchor.bounds.bottom()) + 4.0,
-            f32::from(viewport.width),
-            f32::from(viewport.height),
-            MANAGER_SORT_MENU_WIDTH,
-            MANAGER_SORT_MENU_HEIGHT,
-            8.0,
-        );
         let fields = [
             SessionSortField::Name,
             SessionSortField::Host,
@@ -493,22 +493,44 @@ impl CatalogView {
             SessionSortField::Group,
             SessionSortField::LastUsed,
         ];
-        let mut menu = context_menu_event_boundary(
-            dropdown_menu_content(&self.tokens).w(px(MANAGER_SORT_MENU_WIDTH)),
-        );
         let (current_field, current_direction) = {
             let manager = self.session_manager.read(cx);
             (manager.sort_field, manager.sort_direction)
         };
-        for field in fields {
+        let field_labels = fields
+            .iter()
+            .map(|&field| {
+                let mut label = self.i18n.t(field.label_key());
+                if current_field == field {
+                    label.push_str(match current_direction {
+                        SortDirection::Asc => " ↑",
+                        SortDirection::Desc => " ↓",
+                    });
+                }
+                label
+            })
+            .collect::<Vec<_>>();
+        let menu_width = oxideterm_gpui_ui::estimate_menu_width(
+            &self.tokens,
+            MANAGER_SORT_MENU_WIDTH,
+            280.0,
+            true,
+            field_labels.iter().map(String::as_str),
+        );
+        let viewport = window.viewport_size();
+        let placement = catalog_menu_position(
+            f32::from(anchor.bounds.right()) - menu_width,
+            f32::from(anchor.bounds.bottom()) + 4.0,
+            f32::from(viewport.width),
+            f32::from(viewport.height),
+            menu_width,
+            MANAGER_SORT_MENU_HEIGHT,
+            8.0,
+        );
+        let mut menu =
+            context_menu_event_boundary(dropdown_menu_content(&self.tokens).w(px(menu_width)));
+        for (field, label) in fields.into_iter().zip(field_labels) {
             let active = current_field == field;
-            let mut label = self.i18n.t(field.label_key());
-            if active {
-                label.push_str(match current_direction {
-                    SortDirection::Asc => " ↑",
-                    SortDirection::Desc => " ↓",
-                });
-            }
             let item = dropdown_menu_item(
                 &self.tokens,
                 label,

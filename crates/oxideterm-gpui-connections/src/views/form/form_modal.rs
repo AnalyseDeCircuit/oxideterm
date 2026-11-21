@@ -422,7 +422,14 @@ impl ConnectionFormView {
             form.pending || !(has_required_fields || (ble_mode && form.ble_profile_id.is_some()));
         let form_visible = self.connection_form_state(cx).presence.phase()
             == oxideterm_gpui_ui::motion::ExitPhase::Visible;
-        let (modal_width, studio_fixed_height) = if drill_down_mode || prompt_mode {
+        let (modal_width, studio_fixed_height) = if drill_down_mode {
+            let max_w = (f32::from(window.viewport_size().width)
+                - composer::CONNECTION_STUDIO_VIEWPORT_MARGIN * 2.0)
+                .max(0.0);
+            // Drill-down renders 4 footer actions (Cancel, Save, Connect,
+            // Save & Connect); 640px fits verbose European labels on one row.
+            (640.0_f32.min(max_w), None)
+        } else if prompt_mode {
             let max_w = (f32::from(window.viewport_size().width)
                 - composer::CONNECTION_STUDIO_VIEWPORT_MARGIN * 2.0)
                 .max(0.0);
@@ -960,7 +967,7 @@ impl ConnectionFormView {
                                                             cx,
                                                         ),
                                                     ))
-                                                    .child(div().w(px(88.0)).flex_none().child(
+                                                    .child(div().w(px(104.0)).flex_none().child(
                                                         self.render_connection_field(
                                                             if standalone_sftp_mode {
                                                                 self.i18n.t("sftp.standalone.port")
@@ -974,7 +981,7 @@ impl ConnectionFormView {
                                                             cx,
                                                         ),
                                                     ))
-                                                    .child(div().w(px(156.0)).flex_none().child(
+                                                    .child(div().w(px(196.0)).flex_none().child(
                                                         self.render_connection_field(
                                                             self.i18n.t("ssh.form.username"),
                                                             &form.username,
@@ -1681,49 +1688,60 @@ impl ConnectionFormView {
                     } else {
                         form.error.clone()
                     };
-                    let left_cluster = div()
-                        .flex_1()
+                    let has_left_cluster = show_test_button || footer_feedback.is_some();
+                    let left_cluster = has_left_cluster.then(|| {
+                        div()
+                            .when(footer_feedback.is_some(), |left| {
+                                left.flex_1().min_w(px(140.0))
+                            })
+                            .when(footer_feedback.is_none(), |left| left.flex_none())
+                            .flex()
+                            .items_center()
+                            .gap(px(10.0))
+                            .when(show_test_button, |left| {
+                                left.child(self.render_connection_button(
+                                    self.i18n.t("ssh.form.test"),
+                                    false,
+                                    ConnectionButtonAction::Test,
+                                    primary_disabled,
+                                    cx,
+                                ))
+                            })
+                            .when_some(footer_feedback, |left, error| {
+                                let feedback_color = if form.feedback_success {
+                                    theme.success
+                                } else {
+                                    theme.error
+                                };
+                                let icon = if form.feedback_success {
+                                    LucideIcon::CheckCircle
+                                } else {
+                                    LucideIcon::AlertCircle
+                                };
+                                left.child(
+                                    div()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .flex()
+                                        .items_center()
+                                        .gap(px(5.0))
+                                        .text_size(px(self.tokens.metrics.ui_text_xs))
+                                        .text_color(rgb(feedback_color))
+                                        .child(Self::render_lucide_icon(
+                                            icon,
+                                            13.0,
+                                            rgb(feedback_color),
+                                        ))
+                                        .child(div().min_w_0().truncate().child(error)),
+                                )
+                            })
+                    });
+                    let right_cluster = div()
                         .min_w_0()
                         .flex()
+                        .flex_wrap()
                         .items_center()
-                        .gap(px(10.0))
-                        .when(show_test_button, |left| {
-                            left.child(self.render_connection_button(
-                                self.i18n.t("ssh.form.test"),
-                                false,
-                                ConnectionButtonAction::Test,
-                                primary_disabled,
-                                cx,
-                            ))
-                        })
-                        .when_some(footer_feedback, |left, error| {
-                            let feedback_color = if form.feedback_success {
-                                theme.success
-                            } else {
-                                theme.error
-                            };
-                            let icon = if form.feedback_success {
-                                LucideIcon::CheckCircle
-                            } else {
-                                LucideIcon::AlertCircle
-                            };
-                            left.child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(5.0))
-                                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                                    .text_color(rgb(feedback_color))
-                                    .child(Self::render_lucide_icon(icon, 13.0, rgb(feedback_color)))
-                                    .child(div().min_w_0().truncate().child(error)),
-                            )
-                        });
-                    let right_cluster = div()
-                        .flex_none()
-                        .flex()
-                        .items_center()
+                        .justify_end()
                         .gap(px(8.0))
                         .child(self.render_connection_button(
                             self.i18n.t("ssh.form.cancel"),
@@ -1877,12 +1895,18 @@ impl ConnectionFormView {
 
                     modal_footer(&self.tokens)
                         .flex_none()
+                        // Allow the footer to grow if narrow viewports or long
+                        // localized labels wrap buttons onto a second row.
+                        .h_auto()
+                        .min_h(px(self.tokens.metrics.modal_footer_height))
+                        .flex_wrap()
                         .bg(rgb(theme.bg_panel))
                         .px(px(22.0))
                         .py(px(13.0))
-                        .justify_between()
+                        .when(has_left_cluster, |footer| footer.justify_between())
+                        .when(!has_left_cluster, |footer| footer.justify_end())
                         .gap(px(12.0))
-                        .child(left_cluster)
+                        .when_some(left_cluster, |footer, left| footer.child(left))
                         .child(right_cluster)
                 }),
                     form_visible,

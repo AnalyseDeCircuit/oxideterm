@@ -341,10 +341,20 @@ impl ConnectionFormView {
             .px(px(16.0))
             .pb(px(10.0));
 
-        let protocol_tile = || {
+        let tunnel_label = self.i18n.t("ssh_tunnel.title");
+        // Size every protocol tile uniformly to the widest localized label so
+        // the active-pill slide animation stays exact while European labels fit.
+        let tile_width = built_in_transports
+            .iter()
+            .map(|(transport, _)| self.transport_display_meta(*transport).1)
+            .chain(std::iter::once(tunnel_label.clone()))
+            .map(|label| (oxideterm_gpui_ui::estimate_text_width(&label, 11.0) + 18.0).ceil())
+            .fold(STUDIO_PROTOCOL_TILE_WIDTH, f32::max)
+            .clamp(STUDIO_PROTOCOL_TILE_WIDTH, 132.0);
+        let protocol_tile = move || {
             div()
-                .flex_initial()
-                .w(px(STUDIO_PROTOCOL_TILE_WIDTH))
+                .flex_none()
+                .w(px(tile_width))
                 .min_w(px(STUDIO_PROTOCOL_TILE_MIN_WIDTH))
                 .px(px(6.0))
                 .py(px(6.0))
@@ -459,7 +469,7 @@ impl ConnectionFormView {
                         } else {
                             theme.text_secondary
                         }))
-                        .child(self.i18n.t("ssh_tunnel.title")),
+                        .child(tunnel_label),
                 )
                 .on_mouse_down(
                     MouseButton::Left,

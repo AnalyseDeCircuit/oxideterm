@@ -246,6 +246,15 @@
       "template_hint": "OpenSSH 지시문과 {host}, {profile}, {user}, {port}, {name}, {group} 자리 표시자를 지원합니다. IdentityFile과 ProxyCommand는 모든 행에 적용됩니다.",
       "data_label": "호스트",
       "data_hint": "한 줄에 연결 하나: [user[:password|key]@]host[:port][?name=\"…\"&group=…&profile=…&tags=a,b]  ·  / 또는 ~ 가 있으면 키 경로로 처리하며 key= 또는 pass= 로 명시할 수 있습니다  ·  # 는 주석",
+      "data_placeholder": "root@192.168.1.10:22?name=web-01&group=prod",
+      "syntax_help": "형식 안내",
+      "template_summary_empty": "빈 템플릿",
+      "preview_title": "미리보기",
+      "preview_empty_title": "아직 입력된 호스트가 없습니다",
+      "preview_empty_hint": "왼쪽에 한 줄씩 연결을 입력하면 구문 분석 결과가 여기에 표시됩니다.",
+      "summary_added": "추가 {{count}}",
+      "summary_skipped": "건너뜀 {{count}}",
+      "summary_invalid": "오류 {{count}}",
       "summary": "{{added}}개 기록 · {{skipped}}개 건너뜀 · {{invalid}}개 오류",
       "more_issues": "추가 문제 {{count}}건",
       "preview_overflow": "처음 {{count}}행만 표시",
@@ -272,7 +281,8 @@
         "proxy": "프록시",
         "status": "상태",
         "auth": "인증",
-        "tags": "태그"
+        "tags": "태그",
+        "target": "대상"
       },
       "status": {
         "add": "추가",

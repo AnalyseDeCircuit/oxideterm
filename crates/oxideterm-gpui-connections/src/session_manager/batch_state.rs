@@ -97,6 +97,8 @@ pub struct BatchAddDialogState {
     pub new_template_naming: bool,
     pub template_menu_open: bool,
     pub key_menu_open: bool,
+    pub template_expanded: bool,
+    pub syntax_help_open: bool,
     pub data_file_picker_task: Option<Task<()>>,
 }
 
@@ -126,6 +128,8 @@ impl Default for BatchAddDialogState {
             new_template_naming: false,
             template_menu_open: false,
             key_menu_open: false,
+            template_expanded: false,
+            syntax_help_open: false,
             data_file_picker_task: None,
         }
     }
@@ -202,6 +206,22 @@ impl SessionManagerState {
         if open {
             dialog.template_menu_open = false;
         }
+        cx.notify();
+    }
+
+    pub fn toggle_batch_template_expanded(&mut self, cx: &mut Context<Self>) {
+        let Some(dialog) = self.batch_add.as_mut() else {
+            return;
+        };
+        dialog.template_expanded = !dialog.template_expanded;
+        cx.notify();
+    }
+
+    pub fn toggle_batch_syntax_help(&mut self, cx: &mut Context<Self>) {
+        let Some(dialog) = self.batch_add.as_mut() else {
+            return;
+        };
+        dialog.syntax_help_open = !dialog.syntax_help_open;
         cx.notify();
     }
 

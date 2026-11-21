@@ -92,7 +92,7 @@ impl ConnectionFormView {
                                 false,
                                 cx,
                             )))
-                            .child(div().w(px(88.0)).flex_none().child(
+                            .child(div().w(px(104.0)).flex_none().child(
                                 self.render_connection_field(
                                     self.i18n.t("ssh.form.port"),
                                     &port,
@@ -102,7 +102,7 @@ impl ConnectionFormView {
                                     cx,
                                 ),
                             ))
-                            .child(div().w(px(156.0)).flex_none().child(
+                            .child(div().w(px(196.0)).flex_none().child(
                                 self.render_connection_field(
                                     self.i18n.t("ssh.form.username"),
                                     &username,

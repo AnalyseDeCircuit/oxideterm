@@ -1500,7 +1500,7 @@ impl ConnectionFormView {
                                             cx,
                                         ),
                                     ))
-                                    .child(div().w(px(88.0)).flex_none().child(
+                                    .child(div().w(px(104.0)).flex_none().child(
                                         self.render_connection_field(
                                             self.i18n.t("ssh.form.proxy_jump_port"),
                                             &jump_form.port,
@@ -1510,7 +1510,7 @@ impl ConnectionFormView {
                                             cx,
                                         ),
                                     ))
-                                    .child(div().w(px(156.0)).flex_none().child(
+                                    .child(div().w(px(180.0)).flex_none().child(
                                         self.render_connection_field(
                                             self.i18n.t("ssh.form.proxy_jump_username"),
                                             &jump_form.username,

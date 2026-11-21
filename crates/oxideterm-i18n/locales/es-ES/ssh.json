@@ -198,7 +198,7 @@
       "ssh_algorithms_category_compression": "Compresión",
       "ssh_algorithms_enabled": "Activados en orden de negociación",
       "ssh_algorithms_available": "Algoritmos disponibles",
-      "ssh_algorithms_reset": "Usar predeterminados",
+      "ssh_algorithms_reset": "Por defecto",
       "ssh_algorithms_legacy": "Antiguo",
       "ssh_algorithms_inherited_hint": "Esta categoría sigue el perfil de compatibilidad seleccionado.",
       "ssh_algorithms_custom_hint": "Esta categoría usa un orden de negociación personalizado.",

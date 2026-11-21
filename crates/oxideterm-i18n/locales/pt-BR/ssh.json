@@ -47,7 +47,7 @@
       "host": "Host de destino *",
       "host_placeholder": "192.168.1.100",
       "port": "Porta",
-      "username": "Nome de usuário de destino *",
+      "username": "Usuário de destino *",
       "password": "Senha",
       "use_empty_password": "Usar senha vazia",
       "save_password": "Salvar senha no chaveiro",

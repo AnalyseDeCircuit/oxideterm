@@ -710,7 +710,7 @@ impl ConnectionFormView {
                     )))
                     .child(
                         div()
-                            .w(px(96.0))
+                            .w(px(108.0))
                             .flex_none()
                             .child(self.render_connection_field(
                                 self.i18n.t("sftp.standalone.port"),
@@ -723,7 +723,7 @@ impl ConnectionFormView {
                     )
                     .child(
                         div()
-                            .w(px(168.0))
+                            .w(px(196.0))
                             .flex_none()
                             .child(self.render_connection_field(
                                 self.i18n.t("ssh.form.username"),

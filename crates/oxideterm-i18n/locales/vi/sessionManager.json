@@ -246,6 +246,15 @@
       "template_hint": "Chỉ thị OpenSSH với các phần thay thế {host}, {profile}, {user}, {port}, {name}, {group}. IdentityFile và ProxyCommand áp dụng cho mọi dòng.",
       "data_label": "Máy chủ",
       "data_hint": "Mỗi dòng một kết nối: [user[:mật khẩu|key]@]host[:port][?name=\"…\"&group=…&profile=…&tags=a,b]  ·  giá trị có / hoặc ~ được coi là đường dẫn khóa; key= hoặc pass= để chỉ định rõ  ·  # bắt đầu chú thích",
+      "data_placeholder": "root@192.168.1.10:22?name=web-01&group=prod",
+      "syntax_help": "Cú pháp",
+      "template_summary_empty": "Mẫu trống",
+      "preview_title": "Xem trước",
+      "preview_empty_title": "Chưa có máy chủ nào được phân tích",
+      "preview_empty_hint": "Nhập mỗi dòng một kết nối ở bên trái để xem trước kết quả tại đây.",
+      "summary_added": "Thêm {{count}}",
+      "summary_skipped": "Bỏ qua {{count}}",
+      "summary_invalid": "Lỗi {{count}}",
       "summary": "{{added}} dòng sẽ ghi · {{skipped}} bỏ qua · {{invalid}} lỗi",
       "more_issues": "+{{count}} vấn đề khác",
       "preview_overflow": "Hiển thị {{count}} dòng đầu",
@@ -272,7 +281,8 @@
         "proxy": "Proxy",
         "status": "Trạng thái",
         "auth": "Xác thực",
-        "tags": "Nhãn"
+        "tags": "Nhãn",
+        "target": "Đích"
       },
       "status": {
         "add": "Thêm",

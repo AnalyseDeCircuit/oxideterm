@@ -246,6 +246,15 @@
       "template_hint": "支持 OpenSSH 指令与占位符 {host}、{profile}、{user}、{port}、{name}、{group}；IdentityFile 与 ProxyCommand 会应用到每一行。",
       "data_label": "主机",
       "data_hint": "每行一个连接：[user[:password|key]@]host[:port][?name=\"…\"&group=…&profile=…&tags=a,b]  ·  含 / 或 ~ 的值视为密钥路径，key= 或 pass= 可强制指定  ·  # 开头为注释",
+      "data_placeholder": "root@192.168.1.10:22?name=web-01&group=prod",
+      "syntax_help": "格式说明",
+      "template_summary_empty": "空模板",
+      "preview_title": "解析预览",
+      "preview_empty_title": "等待输入主机",
+      "preview_empty_hint": "在左侧每行输入一个连接，解析结果会实时显示在这里。",
+      "summary_added": "写入 {{count}}",
+      "summary_skipped": "跳过 {{count}}",
+      "summary_invalid": "问题 {{count}}",
       "summary": "写入 {{added}} 条 · 跳过 {{skipped}} 条 · 有问题 {{invalid}} 条",
       "more_issues": "还有 {{count}} 条问题",
       "preview_overflow": "仅显示前 {{count}} 行",
@@ -272,7 +281,8 @@
         "proxy": "代理",
         "status": "状态",
         "auth": "认证",
-        "tags": "标签"
+        "tags": "标签",
+        "target": "目标"
       },
       "status": {
         "add": "添加",

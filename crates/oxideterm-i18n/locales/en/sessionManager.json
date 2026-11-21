@@ -246,6 +246,15 @@
       "template_hint": "OpenSSH directives with the {host}, {profile}, {user}, {port}, {name}, {group} placeholders. IdentityFile and ProxyCommand apply to every row.",
       "data_label": "Hosts",
       "data_hint": "One connection per line: [user[:password|key]@]host[:port][?name=\"…\"&group=…&profile=…&tags=a,b]  ·  a value with / or ~ is a key path; key= or pass= forces it  ·  # starts a comment",
+      "data_placeholder": "root@192.168.1.10:22?name=web-01&group=prod",
+      "syntax_help": "Syntax",
+      "template_summary_empty": "Empty template",
+      "preview_title": "Preview",
+      "preview_empty_title": "No hosts parsed yet",
+      "preview_empty_hint": "Enter one connection per line on the left to preview parsed targets and status here.",
+      "summary_added": "{{count}} to add",
+      "summary_skipped": "{{count}} skipped",
+      "summary_invalid": "{{count}} invalid",
       "summary": "{{added}} to write · {{skipped}} skipped · {{invalid}} invalid",
       "more_issues": "+{{count}} more issues",
       "preview_overflow": "Showing the first {{count}} rows",
@@ -272,7 +281,8 @@
         "proxy": "Proxy",
         "status": "Status",
         "auth": "Auth",
-        "tags": "Tags"
+        "tags": "Tags",
+        "target": "Target"
       },
       "status": {
         "add": "Add",

@@ -246,6 +246,15 @@
       "template_hint": "OpenSSH ディレクティブと {host}・{profile}・{user}・{port}・{name}・{group} のプレースホルダーに対応。IdentityFile と ProxyCommand は全行に適用されます。",
       "data_label": "ホスト",
       "data_hint": "1 行に 1 接続：[user[:password|key]@]host[:port][?name=\"…\"&group=…&profile=…&tags=a,b]  ·  / または ~ を含む値は鍵パスとして扱われ、key= または pass= で明示できます  ·  # はコメント",
+      "data_placeholder": "root@192.168.1.10:22?name=web-01&group=prod",
+      "syntax_help": "書式",
+      "template_summary_empty": "空のテンプレート",
+      "preview_title": "プレビュー",
+      "preview_empty_title": "ホストがまだ入力されていません",
+      "preview_empty_hint": "左側に 1 行ずつ接続を入力すると、解析結果がここに表示されます。",
+      "summary_added": "追加 {{count}}",
+      "summary_skipped": "スキップ {{count}}",
+      "summary_invalid": "エラー {{count}}",
       "summary": "{{added}} 件を書き込み · {{skipped}} 件スキップ · {{invalid}} 件エラー",
       "more_issues": "他 {{count}} 件の問題",
       "preview_overflow": "先頭 {{count}} 行のみ表示",
@@ -272,7 +281,8 @@
         "proxy": "プロキシ",
         "status": "状態",
         "auth": "認証",
-        "tags": "タグ"
+        "tags": "タグ",
+        "target": "接続先"
       },
       "status": {
         "add": "追加",

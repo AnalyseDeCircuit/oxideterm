@@ -246,6 +246,15 @@
       "template_hint": "支援 OpenSSH 指令與佔位符 {host}、{profile}、{user}、{port}、{name}、{group}；IdentityFile 與 ProxyCommand 會套用到每一列。",
       "data_label": "主機",
       "data_hint": "每行一個連線：[user[:password|key]@]host[:port][?name=\"…\"&group=…&profile=…&tags=a,b]  ·  含 / 或 ~ 的值視為金鑰路徑，key= 或 pass= 可強制指定  ·  # 開頭為註解",
+      "data_placeholder": "root@192.168.1.10:22?name=web-01&group=prod",
+      "syntax_help": "格式說明",
+      "template_summary_empty": "空範本",
+      "preview_title": "解析預覽",
+      "preview_empty_title": "等待輸入主機",
+      "preview_empty_hint": "在左側每行輸入一個連線，解析結果會即時顯示在這裡。",
+      "summary_added": "寫入 {{count}}",
+      "summary_skipped": "略過 {{count}}",
+      "summary_invalid": "錯誤 {{count}}",
       "summary": "寫入 {{added}} 條 · 略過 {{skipped}} 條 · 有問題 {{invalid}} 條",
       "more_issues": "還有 {{count}} 個問題",
       "preview_overflow": "僅顯示前 {{count}} 列",
@@ -272,7 +281,8 @@
         "proxy": "代理",
         "status": "狀態",
         "auth": "認證",
-        "tags": "標籤"
+        "tags": "標籤",
+        "target": "目標"
       },
       "status": {
         "add": "新增",
