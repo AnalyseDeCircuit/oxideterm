@@ -50,6 +50,7 @@ path = "src/gpui_apple.rs"
 doctest = false
 
 [dependencies.gpui]
+path = "../gpui"
 version = "=0.3.12"
 default-features = false
 package = "gpui-pre"
@@ -291,11 +292,6 @@ version = "2.0.12"
 [target.'cfg(any(target_os = "macos", target_os = "ios"))'.build-dependencies.cbindgen]
 version = "0.28.0"
 default-features = false
-
-[target.'cfg(target_os = "macos")'.build-dependencies.gpui]
-version = "=0.3.12"
-default-features = false
-package = "gpui-pre"
 
 [lints.clippy]
 dbg_macro = "deny"

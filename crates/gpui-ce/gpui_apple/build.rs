@@ -29,8 +29,6 @@ mod apple_build {
     fn generate_shader_bindings() -> PathBuf {
         let output_path = PathBuf::from(env::var("OUT_DIR").unwrap()).join("scene.h");
 
-        let gpui_dir = find_gpui_crate_dir();
-
         let mut config = Config {
             include_guard: Some("SCENE_H".into()),
             language: cbindgen::Language::C,
@@ -76,6 +74,9 @@ mod apple_build {
         let mut builder = cbindgen::Builder::new();
 
         let crate_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+        // Resolve sources in this checkout, not from a compiled dependency that
+        // Cargo may have reused from a different worktree.
+        let gpui_dir = crate_dir.with_file_name("gpui");
 
         // Source files from gpui that define types used in shaders
         let gpui_src_paths = [
@@ -101,11 +102,6 @@ mod apple_build {
             .write_to_file(&output_path);
 
         output_path
-    }
-
-    /// Follow Cargo's patched core dependency so shader and Rust layouts agree.
-    fn find_gpui_crate_dir() -> PathBuf {
-        gpui::GPUI_MANIFEST_DIR.into()
     }
 
     /// To enable runtime compilation, we need to "stitch" the shaders file with the generated header

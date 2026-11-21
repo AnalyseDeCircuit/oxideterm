@@ -21,10 +21,6 @@ pub extern crate subsecond;
 
 extern crate self as gpui;
 
-/// The source directory used by the patched Metal shader binding generator.
-#[doc(hidden)]
-pub const GPUI_MANIFEST_DIR: &str = env!("CARGO_MANIFEST_DIR");
-
 pub mod colors;
 pub mod prelude;
 pub mod profiler;
