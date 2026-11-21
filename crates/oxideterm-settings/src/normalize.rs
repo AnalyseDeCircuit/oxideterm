@@ -837,12 +837,6 @@ pub fn sanitize_settings_value(raw: Value) -> Result<SanitizedSettings> {
         ("reconnect.baseDelayMs", 1000, 500, 10_000),
         ("reconnect.maxDelayMs", 15_000, 5_000, 60_000),
         (
-            "connectionPool.idleTimeoutSecs",
-            1800,
-            NO_TIMEOUT_SECS,
-            86_400,
-        ),
-        (
             "ai.toolUse.maxRounds",
             DEFAULT_AI_TOOL_MAX_ROUNDS,
             MIN_AI_TOOL_MAX_ROUNDS,
@@ -874,6 +868,20 @@ pub fn sanitize_settings_value(raw: Value) -> Result<SanitizedSettings> {
         if let Some(value) = get_path_mut(&mut settings, &segments) {
             clamp_i64(value, fallback, min, max, path, &mut validation_warnings);
         }
+    }
+
+    if let Some(value) = settings.pointer_mut("/connectionPool/idleTimeoutSecs")
+        && value.as_i64() != Some(ConnectionPoolSettings::DISCONNECT_IMMEDIATELY_SECS)
+    {
+        // Invalid values must not be rounded or clamped into immediate disconnect.
+        clamp_i64(
+            value,
+            ConnectionPoolSettings::default().idle_timeout_secs,
+            0,
+            86_400,
+            "connectionPool.idleTimeoutSecs",
+            &mut validation_warnings,
+        );
     }
 
     for (path, fallback, validator) in [

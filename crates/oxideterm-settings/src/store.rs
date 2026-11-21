@@ -754,30 +754,37 @@ mod tests {
 
     #[test]
     fn immediate_timeout_requires_an_explicit_persisted_value() {
+        use std::time::Duration;
+
         let defaults = sanitize_settings_value(json!({})).unwrap().settings;
         assert_eq!(defaults.sidebar_ui.closed_session_retention_secs, -1);
         assert_eq!(defaults.connection_pool.idle_timeout_secs, 1800);
 
-        for (stored, expected) in [
-            (0, Some(std::time::Duration::ZERO)),
-            (-1, None),
-            (-2, None),
-            (60, Some(std::time::Duration::from_secs(60))),
+        for (stored, retained_for, disconnect_after) in [
+            (json!(0), Some(Duration::ZERO), None),
+            (json!(-1), None, Some(Duration::ZERO)),
+            (json!(-2), None, None),
+            (json!(-1.2), None, None),
+            (
+                json!(60),
+                Some(Duration::from_secs(60)),
+                Some(Duration::from_secs(60)),
+            ),
         ] {
             let settings = sanitize_settings_value(json!({
-                "sidebarUI": { "closedSessionRetentionSecs": stored },
-                "connectionPool": { "idleTimeoutSecs": stored },
+                "sidebarUI": { "closedSessionRetentionSecs": &stored },
+                "connectionPool": { "idleTimeoutSecs": &stored },
             }))
             .unwrap()
             .settings;
             assert_eq!(
                 crate::configured_timeout(settings.sidebar_ui.closed_session_retention_secs),
-                expected,
+                retained_for,
                 "sidebar retention {stored}"
             );
             assert_eq!(
-                crate::configured_timeout(settings.connection_pool.idle_timeout_secs),
-                expected,
+                settings.connection_pool.idle_timeout(),
+                disconnect_after,
                 "SSH idle timeout {stored}"
             );
         }

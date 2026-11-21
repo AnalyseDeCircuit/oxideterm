@@ -191,6 +191,19 @@ pub struct ConnectionPoolSettings {
     pub extra: ExtraFields,
 }
 
+impl ConnectionPoolSettings {
+    pub const DISCONNECT_IMMEDIATELY_SECS: i64 = -1;
+
+    pub fn idle_timeout(&self) -> Option<std::time::Duration> {
+        match self.idle_timeout_secs {
+            Self::DISCONNECT_IMMEDIATELY_SECS => Some(std::time::Duration::ZERO),
+            seconds if seconds > 0 => configured_timeout(seconds),
+            // Released settings use zero for "never", including exported snapshots.
+            _ => None,
+        }
+    }
+}
+
 impl Default for ConnectionPoolSettings {
     fn default() -> Self {
         Self {

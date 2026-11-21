@@ -130,9 +130,7 @@ impl WorkspaceApp {
             != settings.connection_pool.idle_timeout_secs
         {
             self.ssh_registry
-                .set_idle_timeout(oxideterm_settings::configured_timeout(
-                    settings.connection_pool.idle_timeout_secs,
-                ));
+                .set_idle_timeout(settings.connection_pool.idle_timeout());
         }
         self.workspace_runtime.update(cx, |runtime, cx| {
             runtime.configure_ssh_latency(

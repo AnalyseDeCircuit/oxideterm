@@ -20,10 +20,10 @@ use oxideterm_gpui_ui::{
 };
 use oxideterm_i18n::I18n;
 use oxideterm_settings::{
-    BackgroundStyle, FrostedGlassMode, HighlightRule, Language, NO_TIMEOUT_SECS, PersistedSettings,
-    RemoteShellIntegrationMode, SettingsApplicationProxyMode, SettingsUpstreamProxyAuth,
-    SettingsUpstreamProxyProtocol, SftpPresentationPreference, TerminalSemanticScheme,
-    UpdateChannel, UpdateProxyMode, UpdateProxyProtocol,
+    BackgroundStyle, ConnectionPoolSettings, FrostedGlassMode, HighlightRule, Language,
+    NO_TIMEOUT_SECS, PersistedSettings, RemoteShellIntegrationMode, SettingsApplicationProxyMode,
+    SettingsUpstreamProxyAuth, SettingsUpstreamProxyProtocol, SftpPresentationPreference,
+    TerminalSemanticScheme, UpdateChannel, UpdateProxyMode, UpdateProxyProtocol,
 };
 use oxideterm_settings_model::{
     SEMANTIC_CLASSES, SemanticRuleContext, edit_custom_semantic_scheme,
@@ -1934,8 +1934,13 @@ impl SettingsSelectMenu<'_> {
                 } else {
                     settings.connection_pool.idle_timeout_secs
                 };
+                let (immediate, never) = if retention {
+                    (0, NO_TIMEOUT_SECS)
+                } else {
+                    (ConnectionPoolSettings::DISCONNECT_IMMEDIATELY_SECS, 0)
+                };
                 let mut popup = select_overlay_popup(&self.tokens, width);
-                for seconds in [0, 300, 900, 1800, 3600, NO_TIMEOUT_SECS] {
+                for seconds in [immediate, 300, 900, 1800, 3600, never] {
                     popup = popup.child(select_option_action(
                         select_option(
                             &self.tokens,
@@ -2217,11 +2222,16 @@ pub fn connection_duration_label(select: SettingsSelect, seconds: i64, i18n: &I1
         (SettingsSelect::ClosedSessionRetention, NO_TIMEOUT_SECS) => {
             "settings_view.connections.retention.never"
         }
-        (_, NO_TIMEOUT_SECS) => "settings_view.connections.idle_timeout.never",
         (SettingsSelect::ClosedSessionRetention, 0) => {
             "settings_view.connections.retention.immediate"
         }
-        (_, 0) => "settings_view.connections.idle_timeout.immediate",
+        (
+            SettingsSelect::ConnectionIdleTimeout,
+            ConnectionPoolSettings::DISCONNECT_IMMEDIATELY_SECS,
+        ) => "settings_view.connections.idle_timeout.immediate",
+        (SettingsSelect::ConnectionIdleTimeout, 0) => {
+            "settings_view.connections.idle_timeout.never"
+        }
         (_, 300) => "settings_view.connections.idle_timeout.5min",
         (_, 900) => "settings_view.connections.idle_timeout.15min",
         (_, 1800) => "settings_view.connections.idle_timeout.30min",

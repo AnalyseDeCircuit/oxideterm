@@ -485,12 +485,14 @@ mod tests {
         assert_eq!(imported.window_ui.knowledge_editor.source_ratio, 0.65);
     }
     use super::*;
-    use crate::{Language, PersistedSettings};
+    use crate::{ConnectionPoolSettings, Language, PersistedSettings};
 
     #[test]
-    fn connections_snapshot_transfers_retention_only_when_present() {
+    fn connections_snapshot_preserves_legacy_idle_timeout_and_optional_retention() {
         let mut settings = PersistedSettings::default();
         settings.sidebar_ui.closed_session_retention_secs = 60;
+        settings.connection_pool.idle_timeout_secs =
+            ConnectionPoolSettings::DISCONNECT_IMMEDIATELY_SECS;
         let sections = HashSet::from(["connections".to_owned()]);
         let exported =
             export_oxide_settings_snapshot_json(&settings, Some(&sections), false).unwrap();
@@ -499,16 +501,16 @@ mod tests {
             doc.pointer("/settings/sidebarUI/closedSessionRetentionSecs"),
             Some(&json!(60))
         );
+        let restored =
+            merge_oxide_settings_snapshot(&PersistedSettings::default(), &exported, None).unwrap();
+        assert_eq!(restored.sidebar_ui.closed_session_retention_secs, 60);
         assert_eq!(
-            merge_oxide_settings_snapshot(&PersistedSettings::default(), &exported, None)
-                .unwrap()
-                .sidebar_ui
-                .closed_session_retention_secs,
-            60
+            restored.connection_pool.idle_timeout(),
+            Some(std::time::Duration::ZERO)
         );
-        let old = r#"{"connectionPool":{"idleTimeoutSecs":300}}"#;
+        let old = r#"{"connectionPool":{"idleTimeoutSecs":0}}"#;
         let imported = merge_oxide_settings_snapshot(&settings, old, Some(&sections)).unwrap();
-        assert_eq!(imported.connection_pool.idle_timeout_secs, 300);
+        assert_eq!(imported.connection_pool.idle_timeout(), None);
         assert_eq!(imported.sidebar_ui.closed_session_retention_secs, 60);
     }
 

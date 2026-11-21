@@ -225,6 +225,7 @@ mod tests {
     use super::*;
     use crate::workspace::session_manager::tests::isolated_workspace_fixture;
     use gpui::TestAppContext;
+    use oxideterm_settings::ConnectionPoolSettings;
 
     fn config(host: &str) -> SshConfig {
         SshConfig {
@@ -565,7 +566,8 @@ mod tests {
                 ws.edit_settings(
                     |s| {
                         s.sidebar_ui.closed_session_retention_secs = 5;
-                        s.connection_pool.idle_timeout_secs = 0;
+                        s.connection_pool.idle_timeout_secs =
+                            ConnectionPoolSettings::DISCONNECT_IMMEDIATELY_SECS;
                     },
                     cx,
                 );
@@ -702,7 +704,8 @@ mod tests {
         let ids = ws.update(cx, |ws, cx| {
             ws.edit_settings(|settings| {
                 settings.sidebar_ui.closed_session_retention_secs = 5;
-                settings.connection_pool.idle_timeout_secs = 0;
+                settings.connection_pool.idle_timeout_secs =
+                    ConnectionPoolSettings::DISCONNECT_IMMEDIATELY_SECS;
             }, cx);
             let (sender, events) = std::sync::mpsc::channel();
             ws.node_router.emitter().subscribe(sender);

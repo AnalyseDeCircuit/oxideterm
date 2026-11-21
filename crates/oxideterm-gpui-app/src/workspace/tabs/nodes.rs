@@ -2032,6 +2032,7 @@ mod session_retention_tests {
     use crate::workspace::session_manager::tests::isolated_workspace_fixture;
     use gpui::TestAppContext;
     use oxideterm_connections::SshChannelStrategy;
+    use oxideterm_settings::ConnectionPoolSettings;
 
     #[gpui::test]
     async fn deleting_the_only_tunnel_during_connect_retires_the_unused_session(
@@ -2054,7 +2055,8 @@ mod session_retention_tests {
             ws.update(cx, |ws, cx| {
                 ws.edit_settings(
                     |settings| {
-                        settings.connection_pool.idle_timeout_secs = 0;
+                        settings.connection_pool.idle_timeout_secs =
+                            ConnectionPoolSettings::DISCONNECT_IMMEDIATELY_SECS;
                         settings.sidebar_ui.closed_session_retention_secs = 5;
                     },
                     cx,
@@ -2193,7 +2195,8 @@ mod session_retention_tests {
             ws.update(cx, |ws, cx| {
                 ws.edit_settings(
                     |settings| {
-                        settings.connection_pool.idle_timeout_secs = 0;
+                        settings.connection_pool.idle_timeout_secs =
+                            ConnectionPoolSettings::DISCONNECT_IMMEDIATELY_SECS;
                         settings.sidebar_ui.closed_session_retention_secs = 0;
                     },
                     cx,

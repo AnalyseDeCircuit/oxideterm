@@ -168,9 +168,7 @@ impl WorkspaceApp {
         // the GPUI shared backdrop layer tied to the same render-policy switch.
         set_tauri_backdrop_blur_allowed(render_policy.allow_background_blur);
         let ssh_registry = SshConnectionRegistry::new(ConnectionPoolConfig {
-            idle_timeout: oxideterm_settings::configured_timeout(
-                settings.connection_pool.idle_timeout_secs,
-            ),
+            idle_timeout: settings.connection_pool.idle_timeout(),
             ..ConnectionPoolConfig::default()
         });
         let forwarding_runtime = Arc::new(
