@@ -59,10 +59,12 @@ impl HostToolsEntity {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn render_host_docker_panel(
         &self,
         search_ime: HostToolsPlainTextImeFrame,
         terminal_available: bool,
+        sidebar_width: f32,
         tokens: &ThemeTokens,
         i18n: &I18n,
         mono_font_family: SharedString,
@@ -87,6 +89,7 @@ impl HostToolsEntity {
             std::mem::take(&mut snapshot.status),
             selected_connection_id.clone(),
             terminal_available,
+            sidebar_width,
             tokens,
             i18n,
             mono_font_family.clone(),
@@ -206,13 +209,19 @@ impl HostToolsEntity {
             .min_w_0()
             .text_size(px(11.0))
             .text_color(rgb(theme.text_muted))
-            .child(div().flex_none().when_some(visible_count, |this, count| {
-                this.child(format!(
-                    "{} {}",
-                    count,
-                    i18n.t("sidebar.host_docker.count_suffix")
-                ))
-            }))
+            .child(
+                div()
+                    .min_w_0()
+                    .flex_1()
+                    .truncate()
+                    .when_some(visible_count, |this, count| {
+                        this.child(format!(
+                            "{} {}",
+                            count,
+                            i18n.t("sidebar.host_docker.count_suffix")
+                        ))
+                    }),
+            )
             .child(host_tools_tooltip_icon_button(
                 tokens,
                 "lucide/refresh-cw.svg",
@@ -245,6 +254,7 @@ impl HostToolsEntity {
         status: ResourceDockerStatus,
         selected_connection_id: String,
         terminal_available: bool,
+        sidebar_width: f32,
         tokens: &ThemeTokens,
         i18n: &I18n,
         mono_font_family: SharedString,
@@ -329,6 +339,7 @@ impl HostToolsEntity {
         let list_state = self.ui.host_docker_list_state.clone();
         let list_spec = TauriVirtualListSpec::new(px(HOST_DOCKER_LIST_ESTIMATED_ROW_HEIGHT), 8);
         let host_tools = cx.entity();
+        let show_context_columns = sidebar_width >= HOST_DOCKER_CONTEXT_COLUMNS_MIN_WIDTH;
         let row_tokens = *tokens;
         let row_i18n = i18n.clone();
         let row_mono_font_family = mono_font_family;
@@ -340,7 +351,7 @@ impl HostToolsEntity {
             .flex()
             .flex_col()
             .overflow_hidden()
-            .child(self.render_host_docker_table_header(tokens, i18n))
+            .child(self.render_host_docker_table_header(show_context_columns, tokens, i18n))
             .child(
                 div()
                     .flex_1()
@@ -358,6 +369,7 @@ impl HostToolsEntity {
                                     selected_connection_id.as_str(),
                                     rows.get(index).cloned(),
                                     terminal_available,
+                                    show_context_columns,
                                     &row_tokens,
                                     &row_i18n,
                                     mono_font_family,
@@ -370,7 +382,12 @@ impl HostToolsEntity {
             .into_any_element()
     }
 
-    fn render_host_docker_table_header(&self, tokens: &ThemeTokens, i18n: &I18n) -> AnyElement {
+    fn render_host_docker_table_header(
+        &self,
+        show_context_columns: bool,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
+    ) -> AnyElement {
         let theme = tokens.ui;
         div()
             .flex_none()
@@ -396,24 +413,31 @@ impl HostToolsEntity {
             .child(
                 div()
                     .flex_none()
-                    .w(px(HOST_DOCKER_STATE_COLUMN_WIDTH))
+                    .when(show_context_columns, |col| {
+                        col.w(px(HOST_DOCKER_STATE_COLUMN_WIDTH))
+                    })
+                    .when(!show_context_columns, |col| col.flex().justify_end())
                     .child(i18n.t("sidebar.host_docker.columns.state")),
             )
-            .child(
-                div()
-                    .min_w(px(HOST_DOCKER_PORTS_COLUMN_MIN_WIDTH))
-                    .flex_1()
-                    .truncate()
-                    .child(i18n.t("sidebar.host_docker.columns.ports")),
-            )
+            .when(show_context_columns, |header| {
+                header.child(
+                    div()
+                        .min_w(px(HOST_DOCKER_PORTS_COLUMN_MIN_WIDTH))
+                        .flex_1()
+                        .truncate()
+                        .child(i18n.t("sidebar.host_docker.columns.ports")),
+                )
+            })
             .into_any_element()
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn render_host_docker_row(
         &self,
         connection_id: &str,
         container: Option<ResourceDockerContainer>,
         terminal_available: bool,
+        show_context_columns: bool,
         tokens: &ThemeTokens,
         i18n: &I18n,
         mono_font_family: SharedString,
@@ -468,24 +492,29 @@ impl HostToolsEntity {
                     .child(
                         div()
                             .flex_none()
-                            .w(px(HOST_DOCKER_STATE_COLUMN_WIDTH))
+                            .when(show_context_columns, |col| {
+                                col.w(px(HOST_DOCKER_STATE_COLUMN_WIDTH))
+                            })
+                            .when(!show_context_columns, |col| col.max_w(px(110.0)))
                             .truncate()
                             .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
                             .text_color(rgb(docker_state_color(&container.state, theme.text_muted)))
                             .font_family(mono_font_family.clone())
                             .child(state_label),
                     )
-                    .child(
-                        div()
-                            .min_w(px(HOST_DOCKER_PORTS_COLUMN_MIN_WIDTH))
-                            .flex_1()
-                            .truncate()
-                            .whitespace_nowrap()
-                            .text_size(px(HOST_PROCESS_TABLE_META_TEXT_SIZE))
-                            .text_color(rgb(theme.text_muted))
-                            .font_family(mono_font_family.clone())
-                            .child(ports),
-                    ),
+                    .when(show_context_columns, |row| {
+                        row.child(
+                            div()
+                                .min_w(px(HOST_DOCKER_PORTS_COLUMN_MIN_WIDTH))
+                                .flex_1()
+                                .truncate()
+                                .whitespace_nowrap()
+                                .text_size(px(HOST_PROCESS_TABLE_META_TEXT_SIZE))
+                                .text_color(rgb(theme.text_muted))
+                                .font_family(mono_font_family.clone())
+                                .child(ports.clone()),
+                        )
+                    }),
             )
             .child(
                 div()
@@ -504,7 +533,11 @@ impl HostToolsEntity {
                             .text_size(px(HOST_PROCESS_TABLE_META_TEXT_SIZE))
                             .text_color(rgb(theme.text_muted))
                             .font_family(mono_font_family.clone())
-                            .child(image_status),
+                            .child(if !show_context_columns && ports != "—" {
+                                format!("{ports} · {image_status}")
+                            } else {
+                                image_status
+                            }),
                     )
                     .child(self.render_host_docker_inline_actions(
                         connection_id,

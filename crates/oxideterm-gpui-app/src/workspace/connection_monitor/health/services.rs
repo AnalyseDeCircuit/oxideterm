@@ -18,10 +18,12 @@ impl WorkspaceApp {
         });
         let follow_terminal_available = selected_connection_id
             .is_some_and(|connection_id| self.host_tools_terminal_available(connection_id));
+        let sidebar_width = self.ai.state.read(cx).chat_ui().sidebar_width;
         self.host_tools.update(cx, |host_tools, cx| {
             host_tools.render_host_services_panel(
                 search_ime,
                 follow_terminal_available,
+                sidebar_width,
                 &tokens,
                 i18n,
                 mono_font_family,

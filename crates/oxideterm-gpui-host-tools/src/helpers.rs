@@ -90,24 +90,9 @@ pub fn monitor_connection_can_switch(connections: &[MonitorConnectionOption]) ->
 
 pub(crate) fn host_process_table_uses_separate_user_column(sidebar_width: f32) -> bool {
     // The default Host Tools sidebar is too narrow for Program/User/PID/CPU/Mem
-    // plus action affordances. Merge Program and User until the user drags the
-    // sidebar wide enough for a btop-like separate User column.
+    // plus action affordances. Keep User and PID on the metadata line until the
+    // sidebar is wide enough for a full multi-column table.
     sidebar_width >= HOST_PROCESS_SEPARATE_USER_COLUMN_MIN_WIDTH
-}
-
-pub(crate) fn host_process_identity_header_label(
-    i18n: &I18n,
-    separate_user_column: bool,
-) -> String {
-    if separate_user_column {
-        return i18n.t("sidebar.host_processes.sort.command");
-    }
-
-    format!(
-        "{} / {}",
-        i18n.t("sidebar.host_processes.sort.command"),
-        i18n.t("sidebar.host_processes.sort.user")
-    )
 }
 
 pub fn monitor_connection_selected_index(

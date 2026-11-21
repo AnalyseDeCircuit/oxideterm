@@ -497,33 +497,37 @@ impl HostToolsEntity {
             .child(
                 div()
                     .flex_none()
-                    .w(px(HOST_TMUX_ATTACHED_COLUMN_WIDTH))
+                    .when(show_context_columns, |col| {
+                        col.w(px(HOST_TMUX_ATTACHED_COLUMN_WIDTH))
+                    })
+                    .when(!show_context_columns, |col| col.flex().justify_end())
                     .child(i18n.t("sidebar.host_tmux.columns.attached")),
             )
-            .child(
-                div()
-                    .flex_none()
-                    .w(px(HOST_TMUX_WINDOWS_COLUMN_WIDTH))
-                    .flex()
-                    .justify_end()
-                    .child(i18n.t("sidebar.host_tmux.columns.windows")),
-            )
-            .child(
-                div()
-                    .flex_none()
-                    .w(px(HOST_TMUX_PANES_COLUMN_WIDTH))
-                    .flex()
-                    .justify_end()
-                    .child(i18n.t("sidebar.host_tmux.columns.panes")),
-            )
             .when(show_context_columns, |header| {
-                header.child(
-                    div()
-                        .flex_none()
-                        .w(px(HOST_TMUX_ACTIVITY_COLUMN_WIDTH))
-                        .truncate()
-                        .child(i18n.t("sidebar.host_tmux.columns.activity")),
-                )
+                header
+                    .child(
+                        div()
+                            .flex_none()
+                            .w(px(HOST_TMUX_WINDOWS_COLUMN_WIDTH))
+                            .flex()
+                            .justify_end()
+                            .child(i18n.t("sidebar.host_tmux.columns.windows")),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .w(px(HOST_TMUX_PANES_COLUMN_WIDTH))
+                            .flex()
+                            .justify_end()
+                            .child(i18n.t("sidebar.host_tmux.columns.panes")),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .w(px(HOST_TMUX_ACTIVITY_COLUMN_WIDTH))
+                            .truncate()
+                            .child(i18n.t("sidebar.host_tmux.columns.activity")),
+                    )
             })
             .into_any_element()
     }
@@ -590,7 +594,9 @@ impl HostToolsEntity {
                     .child(
                         div()
                             .flex_none()
-                            .w(px(HOST_TMUX_ATTACHED_COLUMN_WIDTH))
+                            .when(show_context_columns, |col| {
+                                col.w(px(HOST_TMUX_ATTACHED_COLUMN_WIDTH))
+                            })
                             .truncate()
                             .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
                             .text_color(rgb(tmux_attached_color(
@@ -600,32 +606,32 @@ impl HostToolsEntity {
                             .font_family(mono_font.clone())
                             .child(attached_label),
                     )
-                    .child(
-                        div()
-                            .flex_none()
-                            .w(px(HOST_TMUX_WINDOWS_COLUMN_WIDTH))
-                            .flex()
-                            .justify_end()
-                            .truncate()
-                            .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
-                            .text_color(rgb(theme.text_muted))
-                            .font_family(mono_font.clone())
-                            .child(session.windows.to_string()),
-                    )
-                    .child(
-                        div()
-                            .flex_none()
-                            .w(px(HOST_TMUX_PANES_COLUMN_WIDTH))
-                            .flex()
-                            .justify_end()
-                            .truncate()
-                            .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
-                            .text_color(rgb(theme.text_muted))
-                            .font_family(mono_font.clone())
-                            .child(pane_count.to_string()),
-                    )
                     .when(show_context_columns, |row| {
                         row.child(
+                            div()
+                                .flex_none()
+                                .w(px(HOST_TMUX_WINDOWS_COLUMN_WIDTH))
+                                .flex()
+                                .justify_end()
+                                .truncate()
+                                .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
+                                .text_color(rgb(theme.text_muted))
+                                .font_family(mono_font.clone())
+                                .child(session.windows.to_string()),
+                        )
+                        .child(
+                            div()
+                                .flex_none()
+                                .w(px(HOST_TMUX_PANES_COLUMN_WIDTH))
+                                .flex()
+                                .justify_end()
+                                .truncate()
+                                .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
+                                .text_color(rgb(theme.text_muted))
+                                .font_family(mono_font.clone())
+                                .child(pane_count.to_string()),
+                        )
+                        .child(
                             div()
                                 .flex_none()
                                 .w(px(HOST_TMUX_ACTIVITY_COLUMN_WIDTH))
@@ -654,11 +660,20 @@ impl HostToolsEntity {
                             .text_size(px(HOST_PROCESS_TABLE_META_TEXT_SIZE))
                             .text_color(rgb(theme.text_muted))
                             .font_family(mono_font.clone())
-                            .child(format!(
-                                "{} · {}",
-                                session.id,
-                                Self::active_tmux_window_label(snapshot, &session.id, i18n)
-                            )),
+                            .child(if show_context_columns {
+                                format!(
+                                    "{} · {}",
+                                    session.id,
+                                    Self::active_tmux_window_label(snapshot, &session.id, i18n)
+                                )
+                            } else {
+                                format!(
+                                    "{}w/{}p · {}",
+                                    session.windows,
+                                    pane_count,
+                                    Self::active_tmux_window_label(snapshot, &session.id, i18n)
+                                )
+                            }),
                     )
                     .child(self.render_host_tmux_inline_actions(
                         connection_id,

@@ -265,9 +265,10 @@ impl HostToolsEntity {
         let mut row = div()
             .id("host-port-filter-scroll")
             .flex()
+            .flex_wrap()
             .items_center()
             .gap_1()
-            .overflow_x_scroll();
+            .min_w_0();
         for filter in [
             PortFilter::All,
             PortFilter::Listening,
@@ -436,28 +437,33 @@ impl HostToolsEntity {
                     .truncate()
                     .child(i18n.t("sidebar.host_ports.columns.local")),
             )
+            .when(show_context_columns, |header| {
+                header.child(
+                    div()
+                        .flex_none()
+                        .w(px(HOST_PORT_PROTOCOL_COLUMN_WIDTH))
+                        .child(i18n.t("sidebar.host_ports.columns.protocol")),
+                )
+            })
             .child(
                 div()
                     .flex_none()
-                    .w(px(HOST_PORT_PROTOCOL_COLUMN_WIDTH))
-                    .child(i18n.t("sidebar.host_ports.columns.protocol")),
-            )
-            .child(
-                div()
-                    .flex_none()
-                    .w(px(HOST_PORT_STATE_COLUMN_WIDTH))
+                    .when(show_context_columns, |col| {
+                        col.w(px(HOST_PORT_STATE_COLUMN_WIDTH))
+                    })
+                    .when(!show_context_columns, |col| col.flex().justify_end())
                     .child(i18n.t("sidebar.host_ports.columns.state")),
-            )
-            .child(
-                div()
-                    .flex_none()
-                    .w(px(HOST_PORT_PID_COLUMN_WIDTH))
-                    .flex()
-                    .justify_end()
-                    .child(i18n.t("sidebar.host_ports.columns.pid")),
             )
             .when(show_context_columns, |header| {
                 header
+                    .child(
+                        div()
+                            .flex_none()
+                            .w(px(HOST_PORT_PID_COLUMN_WIDTH))
+                            .flex()
+                            .justify_end()
+                            .child(i18n.t("sidebar.host_ports.columns.pid")),
+                    )
                     .child(
                         div()
                             .flex_none()
@@ -537,40 +543,70 @@ impl HostToolsEntity {
                             .font_family(mono_font_family.clone())
                             .child(local),
                     )
-                    .child(
-                        div()
-                            .flex_none()
-                            .w(px(HOST_PORT_PROTOCOL_COLUMN_WIDTH))
-                            .truncate()
-                            .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
-                            .text_color(rgb(theme.text_muted))
-                            .font_family(mono_font_family.clone())
-                            .child(entry.protocol.to_uppercase()),
-                    )
-                    .child(
-                        div()
-                            .flex_none()
-                            .w(px(HOST_PORT_STATE_COLUMN_WIDTH))
-                            .truncate()
-                            .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
-                            .text_color(rgb(host_port_state_color(&entry.state, theme.text_muted)))
-                            .font_family(mono_font_family.clone())
-                            .child(state),
-                    )
-                    .child(
-                        div()
-                            .flex_none()
-                            .w(px(HOST_PORT_PID_COLUMN_WIDTH))
-                            .flex()
-                            .justify_end()
-                            .truncate()
-                            .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
-                            .text_color(rgb(theme.text_muted))
-                            .font_family(mono_font_family.clone())
-                            .child(pid),
-                    )
+                    .when(!show_context_columns, |row| {
+                        row.child(
+                            div()
+                                .flex_none()
+                                .flex()
+                                .items_center()
+                                .gap_1()
+                                .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
+                                .font_family(mono_font_family.clone())
+                                .child(
+                                    div()
+                                        .text_color(rgb(theme.text_muted))
+                                        .child(entry.protocol.to_uppercase()),
+                                )
+                                .child(div().text_color(rgb(theme.text_muted)).child("·"))
+                                .child(
+                                    div()
+                                        .max_w(px(96.0))
+                                        .truncate()
+                                        .text_color(rgb(host_port_state_color(
+                                            &entry.state,
+                                            theme.text_muted,
+                                        )))
+                                        .child(state.clone()),
+                                ),
+                        )
+                    })
                     .when(show_context_columns, |row| {
                         row.child(
+                            div()
+                                .flex_none()
+                                .w(px(HOST_PORT_PROTOCOL_COLUMN_WIDTH))
+                                .truncate()
+                                .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
+                                .text_color(rgb(theme.text_muted))
+                                .font_family(mono_font_family.clone())
+                                .child(entry.protocol.to_uppercase()),
+                        )
+                        .child(
+                            div()
+                                .flex_none()
+                                .w(px(HOST_PORT_STATE_COLUMN_WIDTH))
+                                .truncate()
+                                .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
+                                .text_color(rgb(host_port_state_color(
+                                    &entry.state,
+                                    theme.text_muted,
+                                )))
+                                .font_family(mono_font_family.clone())
+                                .child(state),
+                        )
+                        .child(
+                            div()
+                                .flex_none()
+                                .w(px(HOST_PORT_PID_COLUMN_WIDTH))
+                                .flex()
+                                .justify_end()
+                                .truncate()
+                                .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
+                                .text_color(rgb(theme.text_muted))
+                                .font_family(mono_font_family.clone())
+                                .child(pid.clone()),
+                        )
+                        .child(
                             div()
                                 .flex_none()
                                 .w(px(HOST_PORT_PROCESS_COLUMN_WIDTH))
@@ -616,7 +652,21 @@ impl HostToolsEntity {
                                     host_port_blank_dash(&entry.source)
                                 )
                             } else {
-                                format!("{} · {}", process, remote)
+                                let mut parts = Vec::new();
+                                if process != "—" {
+                                    parts.push(process);
+                                }
+                                if pid != "—" {
+                                    parts.push(format!("#{pid}"));
+                                }
+                                if remote != "—" {
+                                    parts.push(remote);
+                                }
+                                if parts.is_empty() {
+                                    "—".to_string()
+                                } else {
+                                    parts.join(" · ")
+                                }
                             }),
                     )
                     .child(self.render_host_port_inline_actions(

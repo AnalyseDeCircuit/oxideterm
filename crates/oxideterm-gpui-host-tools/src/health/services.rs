@@ -279,10 +279,12 @@ impl HostToolsEntity {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn render_host_services_panel(
         &self,
         search_ime: HostToolsPlainTextImeFrame,
         follow_terminal_available: bool,
+        sidebar_width: f32,
         tokens: &ThemeTokens,
         i18n: &I18n,
         mono_font_family: SharedString,
@@ -365,6 +367,7 @@ impl HostToolsEntity {
                 service_status,
                 selected_id,
                 follow_terminal_available,
+                sidebar_width,
                 tokens,
                 i18n,
                 mono_font_family,
@@ -453,7 +456,7 @@ impl HostToolsEntity {
             .min_w_0()
             .text_size(px(11.0))
             .text_color(rgb(theme.text_muted))
-            .child(div().flex_none().child(format!(
+            .child(div().min_w_0().flex_1().truncate().child(format!(
                 "{} {} · {}",
                 visible_count,
                 i18n.t("sidebar.host_services.count_suffix"),
@@ -492,6 +495,7 @@ impl HostToolsEntity {
         status: ResourceServiceStatus,
         selected_id: &str,
         follow_terminal_available: bool,
+        sidebar_width: f32,
         tokens: &ThemeTokens,
         i18n: &I18n,
         mono_font_family: SharedString,
@@ -544,6 +548,7 @@ impl HostToolsEntity {
         let state = self.ui.host_service_list_state.clone();
         let spec = TauriVirtualListSpec::new(px(HOST_SERVICE_LIST_ESTIMATED_ROW_HEIGHT), 8);
         let host_tools = cx.entity();
+        let show_context_columns = sidebar_width >= HOST_SERVICE_CONTEXT_COLUMNS_MIN_WIDTH;
         let row_tokens = *tokens;
         // I18n clones only the Arc-backed catalog handle for the 'static row factory.
         let row_i18n = i18n.clone();
@@ -555,7 +560,11 @@ impl HostToolsEntity {
             .flex()
             .flex_col()
             .overflow_hidden()
-            .child(Self::render_host_service_table_header(tokens, i18n))
+            .child(Self::render_host_service_table_header(
+                show_context_columns,
+                tokens,
+                i18n,
+            ))
             .child(
                 div()
                     .flex_1()
@@ -570,6 +579,7 @@ impl HostToolsEntity {
                                     selected_id.as_str(),
                                     rows.get(index).cloned(),
                                     follow_terminal_available,
+                                    show_context_columns,
                                     &row_tokens,
                                     &row_i18n,
                                     mono_font_family.clone(),
@@ -582,7 +592,11 @@ impl HostToolsEntity {
             .into_any_element()
     }
 
-    fn render_host_service_table_header(tokens: &ThemeTokens, i18n: &I18n) -> AnyElement {
+    fn render_host_service_table_header(
+        show_context_columns: bool,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
+    ) -> AnyElement {
         let theme = tokens.ui;
         div()
             .flex_none()
@@ -608,23 +622,29 @@ impl HostToolsEntity {
             .child(
                 div()
                     .flex_none()
-                    .w(px(HOST_SERVICE_STATE_COLUMN_WIDTH))
+                    .when(show_context_columns, |col| {
+                        col.w(px(HOST_SERVICE_STATE_COLUMN_WIDTH))
+                    })
+                    .when(!show_context_columns, |col| col.flex().justify_end())
                     .child(i18n.t("sidebar.host_services.columns.state")),
             )
-            .child(
-                div()
-                    .flex_none()
-                    .w(px(HOST_SERVICE_ENABLED_COLUMN_WIDTH))
-                    .child(i18n.t("sidebar.host_services.columns.enabled")),
-            )
-            .child(
-                div()
-                    .flex_none()
-                    .w(px(HOST_SERVICE_PID_COLUMN_WIDTH))
-                    .flex()
-                    .justify_end()
-                    .child(i18n.t("sidebar.host_services.columns.pid")),
-            )
+            .when(show_context_columns, |header| {
+                header
+                    .child(
+                        div()
+                            .flex_none()
+                            .w(px(HOST_SERVICE_ENABLED_COLUMN_WIDTH))
+                            .child(i18n.t("sidebar.host_services.columns.enabled")),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .w(px(HOST_SERVICE_PID_COLUMN_WIDTH))
+                            .flex()
+                            .justify_end()
+                            .child(i18n.t("sidebar.host_services.columns.pid")),
+                    )
+            })
             .into_any_element()
     }
 
@@ -634,6 +654,7 @@ impl HostToolsEntity {
         connection_id: &str,
         service: Option<ResourceService>,
         follow_terminal_available: bool,
+        show_context_columns: bool,
         tokens: &ThemeTokens,
         i18n: &I18n,
         mono_font_family: SharedString,
@@ -686,35 +707,40 @@ impl HostToolsEntity {
                     .child(
                         div()
                             .flex_none()
-                            .w(px(HOST_SERVICE_STATE_COLUMN_WIDTH))
+                            .when(show_context_columns, |col| {
+                                col.w(px(HOST_SERVICE_STATE_COLUMN_WIDTH))
+                            })
+                            .when(!show_context_columns, |col| col.max_w(px(110.0)))
                             .truncate()
                             .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
                             .text_color(rgb(state_color))
                             .font_family(mono_font_family.clone())
                             .child(state_label),
                     )
-                    .child(
-                        div()
-                            .flex_none()
-                            .w(px(HOST_SERVICE_ENABLED_COLUMN_WIDTH))
-                            .truncate()
-                            .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
-                            .text_color(rgb(theme.text_muted))
-                            .font_family(mono_font_family.clone())
-                            .child(enabled_label),
-                    )
-                    .child(
-                        div()
-                            .flex_none()
-                            .w(px(HOST_SERVICE_PID_COLUMN_WIDTH))
-                            .flex()
-                            .justify_end()
-                            .truncate()
-                            .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
-                            .text_color(rgb(theme.text_muted))
-                            .font_family(mono_font_family.clone())
-                            .child(main_pid),
-                    ),
+                    .when(show_context_columns, |row| {
+                        row.child(
+                            div()
+                                .flex_none()
+                                .w(px(HOST_SERVICE_ENABLED_COLUMN_WIDTH))
+                                .truncate()
+                                .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
+                                .text_color(rgb(theme.text_muted))
+                                .font_family(mono_font_family.clone())
+                                .child(enabled_label.clone()),
+                        )
+                        .child(
+                            div()
+                                .flex_none()
+                                .w(px(HOST_SERVICE_PID_COLUMN_WIDTH))
+                                .flex()
+                                .justify_end()
+                                .truncate()
+                                .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
+                                .text_color(rgb(theme.text_muted))
+                                .font_family(mono_font_family.clone())
+                                .child(main_pid.clone()),
+                        )
+                    }),
             )
             .child(
                 div()
@@ -733,7 +759,24 @@ impl HostToolsEntity {
                             .text_size(px(HOST_PROCESS_TABLE_META_TEXT_SIZE))
                             .text_color(rgb(theme.text_muted))
                             .font_family(mono_font_family.clone())
-                            .child(format!("{} · {}", service.sub_state, service.description)),
+                            .child(if show_context_columns {
+                                format!("{} · {}", service.sub_state, service.description)
+                            } else {
+                                let mut parts = vec![enabled_label];
+                                if main_pid != "—" {
+                                    parts.push(format!("#{main_pid}"));
+                                }
+                                if !service.sub_state.trim().is_empty() && service.sub_state != "-"
+                                {
+                                    parts.push(service.sub_state.clone());
+                                }
+                                if !service.description.trim().is_empty()
+                                    && service.description != "-"
+                                {
+                                    parts.push(service.description.clone());
+                                }
+                                parts.join(" · ")
+                            }),
                     )
                     .child(self.render_host_service_inline_actions(
                         connection_id,

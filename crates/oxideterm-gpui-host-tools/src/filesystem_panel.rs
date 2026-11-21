@@ -32,7 +32,7 @@ const FILESYSTEM_DETAIL_TEXT_SIZE: f32 = 11.0;
 const HOST_FILESYSTEM_TABLE_HEADER_HEIGHT: f32 = 28.0;
 const HOST_FILESYSTEM_TABLE_MAIN_ROW_HEIGHT: f32 = 36.0;
 const HOST_FILESYSTEM_KIND_COLUMN_WIDTH: f32 = 74.0;
-const HOST_FILESYSTEM_USAGE_COLUMN_WIDTH: f32 = 70.0;
+const HOST_FILESYSTEM_USAGE_COLUMN_WIDTH: f32 = 80.0;
 const HOST_FILESYSTEM_INODE_COLUMN_WIDTH: f32 = 64.0;
 const HOST_FILESYSTEM_FS_COLUMN_WIDTH: f32 = 74.0;
 const HOST_FILESYSTEM_RO_COLUMN_WIDTH: f32 = 48.0;
@@ -203,9 +203,10 @@ impl FilesystemPanelView<'_> {
         let mut row = div()
             .id("host-filesystem-filter-scroll")
             .flex()
+            .flex_wrap()
             .items_center()
             .gap_1()
-            .overflow_x_scroll();
+            .min_w_0();
         for filter in [
             FilesystemFilter::All,
             FilesystemFilter::Attention,
@@ -445,31 +446,35 @@ impl FilesystemPanelView<'_> {
                     .truncate()
                     .child(i18n.t("sidebar.host_filesystems.columns.path")),
             )
+            .when(show_context_columns, |header| {
+                header.child(
+                    div()
+                        .flex_none()
+                        .w(px(HOST_FILESYSTEM_KIND_COLUMN_WIDTH))
+                        .truncate()
+                        .child(i18n.t("sidebar.host_filesystems.columns.kind")),
+                )
+            })
             .child(
                 div()
                     .flex_none()
-                    .w(px(HOST_FILESYSTEM_KIND_COLUMN_WIDTH))
-                    .truncate()
-                    .child(i18n.t("sidebar.host_filesystems.columns.kind")),
-            )
-            .child(
-                div()
-                    .flex_none()
-                    .w(px(HOST_FILESYSTEM_USAGE_COLUMN_WIDTH))
+                    .when(show_context_columns, |col| {
+                        col.w(px(HOST_FILESYSTEM_USAGE_COLUMN_WIDTH))
+                    })
                     .flex()
                     .justify_end()
                     .child(i18n.t("sidebar.host_filesystems.columns.usage")),
             )
-            .child(
-                div()
-                    .flex_none()
-                    .w(px(HOST_FILESYSTEM_INODE_COLUMN_WIDTH))
-                    .flex()
-                    .justify_end()
-                    .child(i18n.t("sidebar.host_filesystems.columns.inode")),
-            )
             .when(show_context_columns, |header| {
                 header
+                    .child(
+                        div()
+                            .flex_none()
+                            .w(px(HOST_FILESYSTEM_INODE_COLUMN_WIDTH))
+                            .flex()
+                            .justify_end()
+                            .child(i18n.t("sidebar.host_filesystems.columns.inode")),
+                    )
                     .child(
                         div()
                             .flex_none()
@@ -553,20 +558,24 @@ impl FilesystemPanelView<'_> {
                             .font_family(mono_font_family.clone())
                             .child(host_filesystem_blank_dash(&entry.path)),
                     )
+                    .when(show_context_columns, |row| {
+                        row.child(
+                            div()
+                                .flex_none()
+                                .w(px(HOST_FILESYSTEM_KIND_COLUMN_WIDTH))
+                                .truncate()
+                                .text_size(px(FILESYSTEM_TABLE_VALUE_TEXT_SIZE))
+                                .text_color(rgb(theme.text_muted))
+                                .font_family(mono_font_family.clone())
+                                .child(kind),
+                        )
+                    })
                     .child(
                         div()
                             .flex_none()
-                            .w(px(HOST_FILESYSTEM_KIND_COLUMN_WIDTH))
-                            .truncate()
-                            .text_size(px(FILESYSTEM_TABLE_VALUE_TEXT_SIZE))
-                            .text_color(rgb(theme.text_muted))
-                            .font_family(mono_font_family.clone())
-                            .child(kind),
-                    )
-                    .child(
-                        div()
-                            .flex_none()
-                            .w(px(HOST_FILESYSTEM_USAGE_COLUMN_WIDTH))
+                            .when(show_context_columns, |col| {
+                                col.w(px(HOST_FILESYSTEM_USAGE_COLUMN_WIDTH))
+                            })
                             .flex()
                             .justify_end()
                             .truncate()
@@ -578,23 +587,23 @@ impl FilesystemPanelView<'_> {
                             .font_family(mono_font_family.clone())
                             .child(usage),
                     )
-                    .child(
-                        div()
-                            .flex_none()
-                            .w(px(HOST_FILESYSTEM_INODE_COLUMN_WIDTH))
-                            .flex()
-                            .justify_end()
-                            .truncate()
-                            .text_size(px(FILESYSTEM_TABLE_VALUE_TEXT_SIZE))
-                            .text_color(rgb(host_filesystem_percent_color(
-                                &entry.inode_percent,
-                                theme.text_muted,
-                            )))
-                            .font_family(mono_font_family.clone())
-                            .child(inode),
-                    )
                     .when(show_context_columns, |row| {
                         row.child(
+                            div()
+                                .flex_none()
+                                .w(px(HOST_FILESYSTEM_INODE_COLUMN_WIDTH))
+                                .flex()
+                                .justify_end()
+                                .truncate()
+                                .text_size(px(FILESYSTEM_TABLE_VALUE_TEXT_SIZE))
+                                .text_color(rgb(host_filesystem_percent_color(
+                                    &entry.inode_percent,
+                                    theme.text_muted,
+                                )))
+                                .font_family(mono_font_family.clone())
+                                .child(inode),
+                        )
+                        .child(
                             div()
                                 .flex_none()
                                 .w(px(HOST_FILESYSTEM_FS_COLUMN_WIDTH))
@@ -1012,18 +1021,33 @@ fn host_filesystem_meta_label(
             host_filesystem_blank_dash(&entry.source)
         );
     }
+    let mut parts = vec![host_filesystem_kind_display(i18n, &entry.kind)];
+    let fs_type = entry.fs_type.trim();
+    if !fs_type.is_empty() && fs_type != "-" {
+        parts.push(fs_type.to_string());
+    }
+    let size = host_filesystem_size_label(&entry.size_bytes);
+    if size != "—" {
+        parts.push(size);
+    }
+    let inode = host_filesystem_percent_dash(&entry.inode_percent);
+    if inode != "—" {
+        parts.push(format!(
+            "{} {inode}",
+            i18n.t("sidebar.host_filesystems.columns.inode")
+        ));
+    }
     let device_or_detail = if !entry.device.trim().is_empty() {
-        entry.device.as_str()
+        entry.device.trim()
     } else if !entry.detail.trim().is_empty() {
-        entry.detail.as_str()
+        entry.detail.trim()
     } else {
-        entry.source.as_str()
+        ""
     };
-    format!(
-        "{} · {}",
-        host_filesystem_blank_dash(device_or_detail),
-        host_filesystem_blank_dash(&entry.options)
-    )
+    if !device_or_detail.is_empty() && device_or_detail != "-" {
+        parts.push(device_or_detail.to_string());
+    }
+    parts.join(" · ")
 }
 
 fn host_filesystem_attention_summary(i18n: &I18n, entry: &ResourceFilesystemEntry) -> String {

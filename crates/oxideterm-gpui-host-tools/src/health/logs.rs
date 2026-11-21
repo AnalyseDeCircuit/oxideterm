@@ -159,9 +159,10 @@ impl HostToolsEntity {
         let mut row = div()
             .id("host-log-preset-scroll")
             .flex()
+            .flex_wrap()
             .items_center()
             .gap_1()
-            .overflow_x_scroll();
+            .min_w_0();
         for preset in [
             LogPreset::All,
             LogPreset::Errors,

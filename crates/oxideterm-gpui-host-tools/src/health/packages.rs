@@ -166,9 +166,10 @@ impl HostToolsEntity {
         let mut row = div()
             .id("host-package-filter-scroll")
             .flex()
+            .flex_wrap()
             .items_center()
             .gap_1()
-            .overflow_x_scroll();
+            .min_w_0();
         // Manager chips follow what the selected host reports, so the rail
         // shows winget on Windows and apt/dnf/pacman/brew elsewhere.
         let managers = snapshot
@@ -439,26 +440,29 @@ impl HostToolsEntity {
             .child(
                 div()
                     .flex_none()
-                    .w(px(HOST_PACKAGE_STATUS_COLUMN_WIDTH))
+                    .when(show_context_columns, |col| {
+                        col.w(px(HOST_PACKAGE_STATUS_COLUMN_WIDTH))
+                    })
+                    .when(!show_context_columns, |col| col.flex().justify_end())
                     .truncate()
                     .child(i18n.t("sidebar.host_packages.columns.status")),
             )
-            .child(
-                div()
-                    .flex_none()
-                    .w(px(HOST_PACKAGE_VERSION_COLUMN_WIDTH))
-                    .truncate()
-                    .child(i18n.t("sidebar.host_packages.columns.installed")),
-            )
-            .child(
-                div()
-                    .flex_none()
-                    .w(px(HOST_PACKAGE_MANAGER_COLUMN_WIDTH))
-                    .truncate()
-                    .child(i18n.t("sidebar.host_packages.columns.manager")),
-            )
             .when(show_context_columns, |header| {
                 header
+                    .child(
+                        div()
+                            .flex_none()
+                            .w(px(HOST_PACKAGE_VERSION_COLUMN_WIDTH))
+                            .truncate()
+                            .child(i18n.t("sidebar.host_packages.columns.installed")),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .w(px(HOST_PACKAGE_MANAGER_COLUMN_WIDTH))
+                            .truncate()
+                            .child(i18n.t("sidebar.host_packages.columns.manager")),
+                    )
                     .child(
                         div()
                             .flex_none()
@@ -547,7 +551,10 @@ impl HostToolsEntity {
                     .child(
                         div()
                             .flex_none()
-                            .w(px(HOST_PACKAGE_STATUS_COLUMN_WIDTH))
+                            .when(show_context_columns, |col| {
+                                col.w(px(HOST_PACKAGE_STATUS_COLUMN_WIDTH))
+                            })
+                            .when(!show_context_columns, |col| col.max_w(px(120.0)))
                             .truncate()
                             .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
                             .text_color(rgb(host_package_status_color(
@@ -557,28 +564,28 @@ impl HostToolsEntity {
                             .font_family(mono_font_family.clone())
                             .child(status),
                     )
-                    .child(
-                        div()
-                            .flex_none()
-                            .w(px(HOST_PACKAGE_VERSION_COLUMN_WIDTH))
-                            .truncate()
-                            .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
-                            .text_color(rgb(theme.text_muted))
-                            .font_family(mono_font_family.clone())
-                            .child(installed),
-                    )
-                    .child(
-                        div()
-                            .flex_none()
-                            .w(px(HOST_PACKAGE_MANAGER_COLUMN_WIDTH))
-                            .truncate()
-                            .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
-                            .text_color(rgb(theme.text_muted))
-                            .font_family(mono_font_family.clone())
-                            .child(manager),
-                    )
                     .when(show_context_columns, |row| {
                         row.child(
+                            div()
+                                .flex_none()
+                                .w(px(HOST_PACKAGE_VERSION_COLUMN_WIDTH))
+                                .truncate()
+                                .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
+                                .text_color(rgb(theme.text_muted))
+                                .font_family(mono_font_family.clone())
+                                .child(installed),
+                        )
+                        .child(
+                            div()
+                                .flex_none()
+                                .w(px(HOST_PACKAGE_MANAGER_COLUMN_WIDTH))
+                                .truncate()
+                                .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
+                                .text_color(rgb(theme.text_muted))
+                                .font_family(mono_font_family.clone())
+                                .child(manager),
+                        )
+                        .child(
                             div()
                                 .flex_none()
                                 .w(px(HOST_PACKAGE_VERSION_COLUMN_WIDTH))
@@ -1286,19 +1293,37 @@ fn host_package_meta_label(
             host_package_blank_dash(&entry.source)
         );
     }
-    if !entry.summary.trim().is_empty() {
-        return entry.summary.clone();
+    // In compact sidebar mode, manager and version move onto the secondary line
+    // so the package name and status keep the full primary row.
+    let mut parts = Vec::new();
+    let manager = entry.manager.trim();
+    if !manager.is_empty() && manager != "-" {
+        parts.push(manager.to_string());
     }
-    let repo_or_arch = if !entry.repository.trim().is_empty() {
-        entry.repository.as_str()
+    let installed = entry.installed_version.trim();
+    let candidate = entry.candidate_version.trim();
+    if entry.status == "upgradable" && !candidate.is_empty() {
+        let from = if installed.is_empty() || installed == "-" {
+            "—"
+        } else {
+            installed
+        };
+        parts.push(format!("{from} → {candidate}"));
+    } else if !installed.is_empty() && installed != "-" {
+        parts.push(installed.to_string());
+    }
+    if !entry.repository.trim().is_empty() && entry.repository.trim() != "-" {
+        parts.push(entry.repository.trim().to_string());
+    } else if !entry.summary.trim().is_empty() {
+        parts.push(entry.summary.trim().to_string());
+    } else if !entry.arch.trim().is_empty() && entry.arch.trim() != "-" {
+        parts.push(entry.arch.trim().to_string());
+    }
+    if parts.is_empty() {
+        "—".to_string()
     } else {
-        entry.arch.as_str()
-    };
-    format!(
-        "{} · {}",
-        host_package_blank_dash(repo_or_arch),
-        host_package_service_label(entry)
-    )
+        parts.join(" · ")
+    }
 }
 
 #[cfg(test)]

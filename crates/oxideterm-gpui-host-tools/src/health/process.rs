@@ -101,6 +101,7 @@ impl HostToolsEntity {
     ) -> AnyElement {
         div()
             .flex()
+            .flex_wrap()
             .items_center()
             .gap_1()
             .min_w_0()
@@ -200,9 +201,11 @@ impl HostToolsEntity {
     ) -> AnyElement {
         div()
             .flex()
+            .flex_wrap()
             .items_center()
             .justify_between()
-            .gap_2()
+            .gap_x_2()
+            .gap_y_1()
             .min_w_0()
             .text_size(px(11.0))
             .text_color(rgb(tokens.ui.text_muted))
@@ -215,8 +218,8 @@ impl HostToolsEntity {
                 div()
                     .min_w_0()
                     .flex()
+                    .flex_wrap()
                     .items_center()
-                    .justify_end()
                     .gap_1()
                     .child(self.render_host_process_sort_button(
                         ProcessSort::Cpu,
@@ -456,26 +459,24 @@ impl HostToolsEntity {
                     .min_w_0()
                     .flex_1()
                     .truncate()
-                    .child(host_process_identity_header_label(
-                        i18n,
-                        separate_user_column,
-                    )),
+                    .child(i18n.t("sidebar.host_processes.sort.command")),
             )
             .when(separate_user_column, |header| {
-                header.child(
-                    div()
-                        .flex_none()
-                        .w(px(HOST_PROCESS_USER_COLUMN_WIDTH))
-                        .truncate()
-                        .child(i18n.t("sidebar.host_processes.sort.user")),
-                )
+                header
+                    .child(
+                        div()
+                            .flex_none()
+                            .w(px(HOST_PROCESS_USER_COLUMN_WIDTH))
+                            .truncate()
+                            .child(i18n.t("sidebar.host_processes.sort.user")),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .w(px(HOST_PROCESS_PID_COLUMN_WIDTH))
+                            .child(i18n.t("sidebar.host_processes.sort.pid")),
+                    )
             })
-            .child(
-                div()
-                    .flex_none()
-                    .w(px(HOST_PROCESS_PID_COLUMN_WIDTH))
-                    .child(i18n.t("sidebar.host_processes.sort.pid")),
-            )
             .child(
                 div()
                     .flex_none()
@@ -575,20 +576,8 @@ impl HostToolsEntity {
                             .text_size(px(HOST_PROCESS_TABLE_COMMAND_TEXT_SIZE))
                             .text_color(rgb(theme.text))
                             .font_family(mono_font_family.clone())
-                            .child(process_display_name(&process)),
+                            .child(host_process_short_name(&process)),
                     )
-                    .when(!separate_user_column, |main| {
-                        main.child(
-                            div()
-                                .min_w(px(0.0))
-                                .flex_1()
-                                .truncate()
-                                .text_size(px(HOST_PROCESS_TABLE_META_TEXT_SIZE))
-                                .text_color(rgb(theme.text_muted))
-                                .font_family(mono_font_family.clone())
-                                .child(user.clone()),
-                        )
-                    })
                     .when(separate_user_column, |main| {
                         main.child(
                             div()
@@ -600,17 +589,17 @@ impl HostToolsEntity {
                                 .font_family(mono_font_family.clone())
                                 .child(user.clone()),
                         )
+                        .child(
+                            div()
+                                .flex_none()
+                                .w(px(HOST_PROCESS_PID_COLUMN_WIDTH))
+                                .truncate()
+                                .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
+                                .text_color(rgb(theme.text_muted))
+                                .font_family(mono_font_family.clone())
+                                .child(process.pid.clone()),
+                        )
                     })
-                    .child(
-                        div()
-                            .flex_none()
-                            .w(px(HOST_PROCESS_PID_COLUMN_WIDTH))
-                            .truncate()
-                            .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
-                            .text_color(rgb(theme.text_muted))
-                            .font_family(mono_font_family.clone())
-                            .child(process.pid.clone()),
-                    )
                     .child(
                         div()
                             .flex_none()
@@ -653,7 +642,15 @@ impl HostToolsEntity {
                             .text_size(px(HOST_PROCESS_TABLE_META_TEXT_SIZE))
                             .text_color(rgb(theme.text_muted))
                             .font_family(mono_font_family)
-                            .child(format!("{status} · {}", process_display_command(&process))),
+                            .child(if separate_user_column {
+                                format!("{status} · {}", process_display_command(&process))
+                            } else {
+                                format!(
+                                    "#{} · {user} · {status} · {}",
+                                    process.pid,
+                                    process_display_command(&process)
+                                )
+                            }),
                     )
                     .child(inline_actions),
             )
@@ -1326,4 +1323,17 @@ fn host_process_confirm_label_key(action: &ProcessActionKind) -> &'static str {
         ProcessActionKind::Cont => "sidebar.host_processes.actions.cont",
         ProcessActionKind::Renice { .. } => "sidebar.host_processes.actions.apply",
     }
+}
+
+/// Extracts the executable basename for path-like commands (e.g. macOS `.app`
+/// binaries) while preserving kernel thread labels like `[kworker/0:1]`.
+fn host_process_short_name(process: &ResourceTopProcess) -> String {
+    let raw = process_display_name(process);
+    if raw.starts_with('[') && raw.ends_with(']') {
+        return raw;
+    }
+    raw.rsplit(['/', '\\'])
+        .find(|segment| !segment.is_empty())
+        .map(ToOwned::to_owned)
+        .unwrap_or(raw)
 }

@@ -387,9 +387,10 @@ impl HostToolsEntity {
         let mut row = div()
             .id("host-schedule-filter-scroll")
             .flex()
+            .flex_wrap()
             .items_center()
             .gap_1()
-            .overflow_x_scroll();
+            .min_w_0();
         for filter in self.schedule_filter_options() {
             row = row.child(self.render_host_schedule_filter_chip(filter, tokens, i18n, cx));
         }
@@ -464,29 +465,34 @@ impl HostToolsEntity {
                     .truncate()
                     .child(i18n.t("sidebar.host_schedules.columns.task")),
             )
+            .when(show_context_columns, |header| {
+                header.child(
+                    div()
+                        .flex_none()
+                        .w(px(HOST_SCHEDULE_SOURCE_COLUMN_WIDTH))
+                        .truncate()
+                        .child(i18n.t("sidebar.host_schedules.columns.source")),
+                )
+            })
             .child(
                 div()
                     .flex_none()
-                    .w(px(HOST_SCHEDULE_SOURCE_COLUMN_WIDTH))
-                    .truncate()
-                    .child(i18n.t("sidebar.host_schedules.columns.source")),
-            )
-            .child(
-                div()
-                    .flex_none()
-                    .w(px(HOST_SCHEDULE_STATE_COLUMN_WIDTH))
+                    .when(show_context_columns, |col| {
+                        col.w(px(HOST_SCHEDULE_STATE_COLUMN_WIDTH))
+                    })
+                    .when(!show_context_columns, |col| col.flex().justify_end())
                     .truncate()
                     .child(i18n.t("sidebar.host_schedules.columns.state")),
             )
-            .child(
-                div()
-                    .flex_none()
-                    .w(px(HOST_SCHEDULE_ENABLED_COLUMN_WIDTH))
-                    .truncate()
-                    .child(i18n.t("sidebar.host_schedules.columns.enabled")),
-            )
             .when(show_context_columns, |header| {
                 header
+                    .child(
+                        div()
+                            .flex_none()
+                            .w(px(HOST_SCHEDULE_ENABLED_COLUMN_WIDTH))
+                            .truncate()
+                            .child(i18n.t("sidebar.host_schedules.columns.enabled")),
+                    )
                     .child(
                         div()
                             .flex_none()
@@ -562,20 +568,25 @@ impl HostToolsEntity {
                             .font_family(mono_font.clone())
                             .child(host_schedule_blank_dash(&entry.name)),
                     )
+                    .when(show_context_columns, |row| {
+                        row.child(
+                            div()
+                                .flex_none()
+                                .w(px(HOST_SCHEDULE_SOURCE_COLUMN_WIDTH))
+                                .truncate()
+                                .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
+                                .text_color(rgb(theme.text_muted))
+                                .font_family(mono_font.clone())
+                                .child(source.clone()),
+                        )
+                    })
                     .child(
                         div()
                             .flex_none()
-                            .w(px(HOST_SCHEDULE_SOURCE_COLUMN_WIDTH))
-                            .truncate()
-                            .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
-                            .text_color(rgb(theme.text_muted))
-                            .font_family(mono_font.clone())
-                            .child(source.clone()),
-                    )
-                    .child(
-                        div()
-                            .flex_none()
-                            .w(px(HOST_SCHEDULE_STATE_COLUMN_WIDTH))
+                            .when(show_context_columns, |col| {
+                                col.w(px(HOST_SCHEDULE_STATE_COLUMN_WIDTH))
+                            })
+                            .when(!show_context_columns, |col| col.max_w(px(110.0)))
                             .truncate()
                             .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
                             .text_color(rgb(host_schedule_active_color(
@@ -585,21 +596,21 @@ impl HostToolsEntity {
                             .font_family(mono_font.clone())
                             .child(active),
                     )
-                    .child(
-                        div()
-                            .flex_none()
-                            .w(px(HOST_SCHEDULE_ENABLED_COLUMN_WIDTH))
-                            .truncate()
-                            .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
-                            .text_color(rgb(host_schedule_enabled_color(
-                                &entry.enabled,
-                                theme.text_muted,
-                            )))
-                            .font_family(mono_font.clone())
-                            .child(enabled),
-                    )
                     .when(show_context_columns, |row| {
                         row.child(
+                            div()
+                                .flex_none()
+                                .w(px(HOST_SCHEDULE_ENABLED_COLUMN_WIDTH))
+                                .truncate()
+                                .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
+                                .text_color(rgb(host_schedule_enabled_color(
+                                    &entry.enabled,
+                                    theme.text_muted,
+                                )))
+                                .font_family(mono_font.clone())
+                                .child(enabled.clone()),
+                        )
+                        .child(
                             div()
                                 .flex_none()
                                 .w(px(HOST_SCHEDULE_NEXT_COLUMN_WIDTH))
@@ -645,12 +656,15 @@ impl HostToolsEntity {
                                     host_schedule_blank_dash(&entry.schedule)
                                 )
                             } else {
-                                format!(
-                                    "{} · {} · {}",
-                                    source,
-                                    next,
-                                    host_schedule_blank_dash(&entry.command)
-                                )
+                                let mut parts = vec![source, enabled];
+                                if next != "—" {
+                                    parts.push(next);
+                                }
+                                let command = host_schedule_blank_dash(&entry.command);
+                                if command != "—" {
+                                    parts.push(command);
+                                }
+                                parts.join(" · ")
                             }),
                     )
                     .child(self.render_host_schedule_inline_actions(
