@@ -1002,6 +1002,7 @@ impl WorkspaceApp {
             self.clear_terminal_trigger_session_overrides(session_id);
             self.unregister_ssh_terminal_session(session_id, cx);
         }
+        self.sync_session_retention(cx);
 
         if let Some(pane) = self.remove_terminal_pane(&active_pane_id, cx) {
             let _ = pane.update(cx, |pane, _cx| pane.shutdown());

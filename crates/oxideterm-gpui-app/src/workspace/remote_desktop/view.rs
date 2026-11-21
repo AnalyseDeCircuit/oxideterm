@@ -254,8 +254,8 @@ impl WorkspaceApp {
                 .as_ref()
                 .is_some_and(|chain| !chain.is_empty())
             {
-                match self.expand_saved_connection_tree(
-                    &ssh_gateway_connection_id,
+                match self.expand_ssh_connection_tree(
+                    Some(&ssh_gateway_connection_id),
                     config,
                     gateway.name,
                 ) {

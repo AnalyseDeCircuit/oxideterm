@@ -3,7 +3,7 @@ use crate::{
     components::{SettingsCalloutTone, SettingsControls, settings_mono_font_family},
     dialog::settings_dialog_transition,
     entity::{ManagedKeyDialogSnapshot, SettingsWorkspaceEntity},
-    select_menu::connection_idle_timeout_label,
+    select_menu::connection_duration_label,
     surface::nav::render_icon,
 };
 use gpui::{
@@ -111,6 +111,28 @@ impl ConnectionPage<'_> {
                 "settings_view.connections.idle_timeout.description",
                 vec![self.connection_idle_timeout_control(self.settings, cx)],
             ),
+            ConnectionsRetention => {
+                let seconds = self.settings.sidebar_ui.closed_session_retention_secs;
+                let select_id = SettingsSelect::ClosedSessionRetention;
+                let value = connection_duration_label(select_id, seconds, &self.i18n);
+                let control = self.settings_select_control(
+                    select_id,
+                    value,
+                    false,
+                    Some(self.tokens.metrics.settings_select_width),
+                    cx,
+                );
+                self.settings_card(
+                    "sidebar.active_sessions",
+                    "",
+                    vec![self.setting_row(
+                        "settings_view.connections.retention.label",
+                        "settings_view.connections.retention.hint",
+                        control,
+                        cx,
+                    )],
+                )
+            }
             ConnectionsSshKeys => self.settings_ssh_section(0, cx),
             ConnectionsSshConfigImport => self.ssh_config_import_section(cx),
             ConnectionsImporters => self.connection_importers_section(cx),
@@ -330,8 +352,11 @@ impl ConnectionPage<'_> {
         cx: &App,
     ) -> AnyElement {
         let select_id = SettingsSelect::ConnectionIdleTimeout;
-        let value =
-            connection_idle_timeout_label(settings.connection_pool.idle_timeout_secs, &self.i18n);
+        let value = connection_duration_label(
+            select_id,
+            settings.connection_pool.idle_timeout_secs,
+            &self.i18n,
+        );
         let control = self.settings_select_control(
             select_id,
             value,

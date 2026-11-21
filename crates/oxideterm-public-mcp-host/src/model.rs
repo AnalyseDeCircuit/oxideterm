@@ -52,7 +52,7 @@ pub struct PublicMcpHost {
 
 #[derive(Default)]
 pub(crate) struct PublicMcpRuntimeHandles {
-    pub(crate) nodes: HashMap<NodeRef, PublicMcpNodeLease>,
+    pub(crate) nodes: HashMap<NodeRef, PublicMcpNodeRegistration>,
     pub(crate) commands: HashMap<CommandRef, PublicMcpCommandRecord>,
     pub(crate) operations: HashMap<OperationRef, PublicMcpOperationRecord>,
     pub(crate) forwards: HashMap<ForwardRef, PublicMcpForwardRecord>,
@@ -93,6 +93,35 @@ pub struct PublicMcpNodeLease {
     pub consumer: ConnectionConsumer,
 }
 
+pub(crate) struct PublicMcpNodeRegistration {
+    pub(crate) client_ref: ClientRef,
+    pub(crate) node_id: NodeId,
+    pub(crate) saved_connection_id: Option<String>,
+    pub(crate) connection: Option<oxideterm_ssh::ConnectionConsumerLease>,
+}
+
+impl PublicMcpNodeRegistration {
+    pub(crate) fn bind_ready_connection(
+        &mut self,
+        router: &NodeRouter,
+        node_ref: &NodeRef,
+    ) -> Result<(), oxideterm_ssh::RouteError> {
+        let ready = router.resolve_connection_now(&self.node_id)?;
+        if self
+            .connection
+            .as_ref()
+            .is_none_or(|current| current.connection_id() != ready.connection_id)
+        {
+            // Claim the replacement before releasing the old transport, also while a client awaits its first response.
+            self.connection = Some(router.lease_connection_now(
+                &self.node_id,
+                ConnectionConsumer::PublicMcp(node_ref.to_string()),
+            )?);
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct PublicMcpForwardRecord {
     pub(crate) client_ref: ClientRef,
@@ -110,9 +139,8 @@ pub(crate) struct PublicMcpFileSessionRecord {
     pub(crate) client_ref: ClientRef,
     pub(crate) node_id: NodeId,
     pub(crate) root: Option<String>,
-    pub(crate) session: Option<Arc<tokio::sync::Mutex<oxideterm_sftp::SftpSession>>>,
-    pub(crate) physical_connection_id: Option<String>,
-    pub(crate) consumer: ConnectionConsumer,
+    pub(crate) session: Option<oxideterm_ssh::RoutedSftpSession>,
+    pub(crate) route: Option<Arc<oxideterm_ssh::ConnectionConsumerLease>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -319,7 +347,7 @@ impl PublicMcpHost {
         }
     }
 
-    pub fn revoke_client_runtime(&self, client_ref: &ClientRef, node_router: &NodeRouter) {
+    pub fn revoke_client_runtime(&self, client_ref: &ClientRef) {
         self.state.approvals.revoke_client(client_ref);
         self.state.artifacts.revoke_client(client_ref);
         let (leases, cancellations) = {
@@ -356,11 +384,7 @@ impl PublicMcpHost {
         for cancellation in cancellations {
             cancellation.cancel();
         }
-        for lease in leases {
-            if let Some(connection_id) = lease.physical_connection_id {
-                node_router.release_consumer(&connection_id, &lease.consumer);
-            }
-        }
+        drop(leases);
     }
 }
 
@@ -375,7 +399,7 @@ impl PublicMcpRuntimeHandles {
                 < PUBLIC_MCP_NODE_CAPACITY_PER_CLIENT
     }
 
-    pub(crate) fn reserve_node(&mut self, node: NodeRef, lease: PublicMcpNodeLease) -> bool {
+    pub(crate) fn reserve_node(&mut self, node: NodeRef, lease: PublicMcpNodeRegistration) -> bool {
         if !self.node_capacity_available(&lease.client_ref) {
             return false;
         }

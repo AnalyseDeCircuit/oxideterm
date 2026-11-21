@@ -7,7 +7,7 @@ use oxideterm_ssh::{ConnectionConsumer, KeyboardInteractivePromptRequest, SshCon
 
 use super::ConnectionsWindowRequest as Request;
 use crate::{
-    entity::{ConnectionFlowEntity, ProxyConnectPreflightContext},
+    entity::ConnectionFlowEntity,
     launch::SshConnectionWorkerResult,
     preflight::{PreflightOutcome, TreePreflightOutcome},
 };
@@ -66,21 +66,8 @@ impl ConnectionFlowEntity {
                     },
                 )
             }
-            Result::SessionTreePreflight {
-                generation,
-                step_index,
-                upstream_proxy,
-                status,
-            } => {
-                match self.resolve_tree_preflight(
-                    ProxyConnectPreflightContext {
-                        generation,
-                        step_index,
-                        upstream_proxy,
-                    },
-                    status,
-                    cx,
-                ) {
+            Result::SessionTreePreflight { context, status } => {
+                match self.resolve_tree_preflight(context, status, cx) {
                     TreePreflightOutcome::Stale => None,
                     TreePreflightOutcome::Advance => Some(Request::AdvanceProxyChain),
                     TreePreflightOutcome::ConfirmHostKey => Some(Request::FocusHostKey),

@@ -1187,13 +1187,20 @@
         "remove_failed": "Integration files could not be removed. Check remote permissions.",
         "installation_incomplete": "Shell integration installation did not complete. Check its status in Settings."
       },
+      "retention": {
+        "immediate": "Remove immediately after closing",
+        "label": "Keep closed sessions for",
+        "hint": "How long a closed session stays in Active Sessions.",
+        "never": "Never remove automatically"
+      },
       "idle_timeout": {
         "title": "Background SSH Connections",
         "description": "Configure how unused background SSH connections are reclaimed.",
         "label": "Idle Reclaim",
+        "immediate": "Disconnect as soon as idle",
         "5min": "5 minutes",
         "15min": "15 minutes",
-        "30min": "30 minutes (default)",
+        "30min": "30 minutes",
         "1hr": "1 hour",
         "never": "Never (keep alive)",
         "hint": "Background SSH connections with no open terminals, SFTP sessions, or port forwards are reclaimed after this period. Set to 'Never' to keep them alive indefinitely.",

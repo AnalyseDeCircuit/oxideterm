@@ -20,7 +20,7 @@ use oxideterm_gpui_ui::{
 };
 use oxideterm_i18n::I18n;
 use oxideterm_settings::{
-    BackgroundStyle, FrostedGlassMode, HighlightRule, Language, PersistedSettings,
+    BackgroundStyle, FrostedGlassMode, HighlightRule, Language, NO_TIMEOUT_SECS, PersistedSettings,
     RemoteShellIntegrationMode, SettingsApplicationProxyMode, SettingsUpstreamProxyAuth,
     SettingsUpstreamProxyProtocol, SftpPresentationPreference, TerminalSemanticScheme,
     UpdateChannel, UpdateProxyMode, UpdateProxyProtocol,
@@ -1924,14 +1924,23 @@ impl SettingsSelectMenu<'_> {
                 }
                 Some(popup)
             }
-            (SettingsTab::Connections, SettingsSelect::ConnectionIdleTimeout) => {
+            (
+                SettingsTab::Connections,
+                SettingsSelect::ConnectionIdleTimeout | SettingsSelect::ClosedSessionRetention,
+            ) => {
+                let retention = open_select == SettingsSelect::ClosedSessionRetention;
+                let selected = if retention {
+                    settings.sidebar_ui.closed_session_retention_secs
+                } else {
+                    settings.connection_pool.idle_timeout_secs
+                };
                 let mut popup = select_overlay_popup(&self.tokens, width);
-                for (seconds, label) in connection_idle_timeout_options(&self.i18n) {
+                for seconds in [0, 300, 900, 1800, 3600, NO_TIMEOUT_SECS] {
                     popup = popup.child(select_option_action(
                         select_option(
                             &self.tokens,
-                            label,
-                            seconds == settings.connection_pool.idle_timeout_secs,
+                            connection_duration_label(open_select, seconds, &self.i18n),
+                            seconds == selected,
                         ),
                         false,
                         false,
@@ -1939,7 +1948,11 @@ impl SettingsSelectMenu<'_> {
                             this.send(SelectMenuRequest::Close, _window, cx);
                             this.send(
                                 SelectMenuRequest::Edit(Box::new(move |settings| {
-                                    settings.connection_pool.idle_timeout_secs = seconds
+                                    if retention {
+                                        settings.sidebar_ui.closed_session_retention_secs = seconds;
+                                    } else {
+                                        settings.connection_pool.idle_timeout_secs = seconds;
+                                    }
                                 })),
                                 _window,
                                 cx,
@@ -2199,21 +2212,23 @@ pub fn language_label(language: Language) -> String {
     }
     .to_string()
 }
-pub fn connection_idle_timeout_options(i18n: &I18n) -> Vec<(i64, String)> {
-    vec![
-        (300, i18n.t("settings_view.connections.idle_timeout.5min")),
-        (900, i18n.t("settings_view.connections.idle_timeout.15min")),
-        (1800, i18n.t("settings_view.connections.idle_timeout.30min")),
-        (3600, i18n.t("settings_view.connections.idle_timeout.1hr")),
-        (0, i18n.t("settings_view.connections.idle_timeout.never")),
-    ]
-}
-
-pub fn connection_idle_timeout_label(seconds: i64, i18n: &I18n) -> String {
-    connection_idle_timeout_options(i18n)
-        .into_iter()
-        .find_map(|(value, label)| (value == seconds).then_some(label))
-        .unwrap_or_else(|| seconds.to_string())
+pub fn connection_duration_label(select: SettingsSelect, seconds: i64, i18n: &I18n) -> String {
+    let key = match (select, seconds) {
+        (SettingsSelect::ClosedSessionRetention, NO_TIMEOUT_SECS) => {
+            "settings_view.connections.retention.never"
+        }
+        (_, NO_TIMEOUT_SECS) => "settings_view.connections.idle_timeout.never",
+        (SettingsSelect::ClosedSessionRetention, 0) => {
+            "settings_view.connections.retention.immediate"
+        }
+        (_, 0) => "settings_view.connections.idle_timeout.immediate",
+        (_, 300) => "settings_view.connections.idle_timeout.5min",
+        (_, 900) => "settings_view.connections.idle_timeout.15min",
+        (_, 1800) => "settings_view.connections.idle_timeout.30min",
+        (_, 3600) => "settings_view.connections.idle_timeout.1hr",
+        _ => return seconds.to_string(),
+    };
+    i18n.t(key)
 }
 
 pub fn network_proxy_protocol_label(

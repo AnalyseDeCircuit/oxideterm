@@ -72,7 +72,7 @@ impl SshOutputBatcher {
 
 #[derive(Clone)]
 struct SshSftpChannelOpener {
-    _connection: SshConnectionHandle,
+    // A cached session belongs to the registry entry and must not retain that entry in turn.
     transport: Arc<PooledSshConnection>,
 }
 
@@ -80,7 +80,7 @@ impl SshConnectionHandle {
     pub(crate) async fn create_sftp_session(&self) -> Result<oxideterm_sftp::SftpSession, SftpError> {
         let transport = self.physical::<PooledSshConnection>().ok_or_else(||
             SftpError::ChannelError("no active SSH connection is available for SFTP".into()))?;
-        let opener = SshSftpChannelOpener { _connection: self.clone(), transport };
+        let opener = SshSftpChannelOpener { transport };
         oxideterm_sftp::SftpSession::new(opener, self.connection_id().to_string()).await
     }
 }

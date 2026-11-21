@@ -15,9 +15,7 @@ use oxideterm_gpui_forwards::{
     PortDetectionViewState,
 };
 use oxideterm_gpui_terminal::{TerminalNotice, TerminalNoticeVariant};
-use oxideterm_ssh::{
-    ConnectionConsumer, ConnectionState, NodeId, NodeReadiness, NodeRouter, PhaseResult,
-};
+use oxideterm_ssh::{ConnectionState, NodeId, NodeReadiness, NodeRouter, PhaseResult};
 use oxideterm_workspace::{Tab, TabId, TabKind, TabTitleSource};
 
 use super::{ActiveSurface, WorkspaceApp};
@@ -40,10 +38,10 @@ pub(in crate::workspace) use reconnect::{
     forward_restore_key_for_rule, forward_restore_key_for_snapshot_rule,
     forward_restore_phase_result, forward_restore_result_detail,
     forward_rule_from_reconnect_snapshot, reconnect_forward_rule_from_rule,
-    release_reconnect_forward_bindings,
 };
 pub(in crate::workspace) use runtime_service::{
-    ForwardingRuntimeService, ReconnectForwardRestoreRequest,
+    ForwardRestoreReader, ForwardStopRequest, ForwardingRuntimeService,
+    ReconnectForwardRestoreRequest,
 };
 
 pub(super) const FORWARDS_NODE_SESSION_PREFIX: &str = "node:";
@@ -53,16 +51,11 @@ pub(super) enum ForwardingWorkerResult {
         tab_id: TabId,
         message_key: &'static str,
         sync_saved_forwards_on_success: bool,
-        binding: Option<(String, String, ConnectionConsumer)>,
         result: Result<(), String>,
-    },
-    Binding {
-        binding: Option<(String, String, ConnectionConsumer)>,
     },
     PortScan {
         node_id: NodeId,
         connection_id: Option<String>,
-        binding: Option<(String, String, ConnectionConsumer)>,
         result: Result<PortDetectionSnapshot, String>,
     },
     ReconnectRestore {
@@ -72,6 +65,5 @@ pub(super) enum ForwardingWorkerResult {
         detail: String,
         job_id: String,
         created_forwards: Vec<(Arc<ForwardingManager>, String)>,
-        bindings: Vec<(String, String, ConnectionConsumer)>,
     },
 }

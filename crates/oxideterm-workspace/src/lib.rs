@@ -2,6 +2,7 @@ use std::fmt;
 
 mod command_palette;
 pub mod delivery;
+pub mod session_retention;
 
 pub use command_palette::{
     CommandPaletteMatch, CommandPaletteMode, command_palette_match, parse_command_palette_query,

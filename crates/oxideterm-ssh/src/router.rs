@@ -70,6 +70,9 @@ pub enum NodeOrigin {
     ManualPreset {
         saved_connection_id: String,
         hop_index: u32,
+        /// Older disk snapshots derive the role from the saved route during restore.
+        #[serde(default)]
+        is_target: bool,
     },
     // Keep this legacy variant readable so snapshots created before auto-route
     // retirement can still be restored and disconnected normally.
@@ -96,6 +99,20 @@ impl NodeOrigin {
             Self::DrillDown { .. } => "drill_down",
             Self::Direct => "direct",
             Self::Restored { .. } => "restored",
+        }
+    }
+
+    pub fn saved_target_id(&self) -> Option<&str> {
+        match self {
+            Self::Restored {
+                saved_connection_id,
+            }
+            | Self::ManualPreset {
+                saved_connection_id,
+                is_target: true,
+                ..
+            } => Some(saved_connection_id),
+            _ => None,
         }
     }
 
@@ -169,6 +186,21 @@ pub struct ResolvedConnection {
     pub sftp_session_id: Option<String>,
 }
 
+/// An active borrower keeps the route alive independently of the cached channel.
+#[derive(Clone)]
+pub struct RoutedSftpSession {
+    session: Arc<Mutex<SftpSession>>,
+    _lease: Arc<crate::ConnectionConsumerLease>,
+}
+
+impl std::ops::Deref for RoutedSftpSession {
+    type Target = Mutex<SftpSession>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.session
+    }
+}
+
 #[derive(Debug)]
 pub struct AcquiredTransferSftp {
     pub connection_id: String,
@@ -192,6 +224,9 @@ pub enum NodeStateEvent {
         timestamp: u64,
     },
     ConnectionStateChanged {
+        // Native retirement must not clear a replacement transport bound to the same logical node.
+        #[serde(skip)]
+        retired_connection_id: Option<String>,
         node_id: String,
         generation: u64,
         state: NodeReadiness,
@@ -237,6 +272,7 @@ impl fmt::Debug for NodeStateEvent {
                 generation,
                 state,
                 reason,
+                ..
             } => formatter
                 .debug_struct("ConnectionStateChanged")
                 .field("node_id", node_id)

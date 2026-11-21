@@ -332,6 +332,7 @@ mod tests {
             &NodeOrigin::ManualPreset {
                 saved_connection_id: connection.id.clone(),
                 hop_index: 0,
+                is_target: false,
             },
             SshPasswordPrompt {
                 host: "jump.test".into(),
@@ -380,6 +381,7 @@ mod tests {
             let origin = NodeOrigin::ManualPreset {
                 saved_connection_id: "saved-a".into(),
                 hop_index,
+                is_target: hop_index == 1,
             };
             let prompt = SshPasswordPrompt {
                 host: host.into(),

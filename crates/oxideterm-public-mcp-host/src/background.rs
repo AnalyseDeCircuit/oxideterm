@@ -6,12 +6,12 @@ async fn acquire_ready_target(
     target: &NodeId,
     consumer: ConnectionConsumer,
     chain: Option<tokio::sync::watch::Receiver<oxideterm_ssh::ConnectionChainProgress>>,
-) -> Result<oxideterm_ssh::ResolvedConnection, String> {
+) -> Result<oxideterm_ssh::ConnectionConsumerLease, String> {
     use oxideterm_ssh::ConnectionTraceStatus;
     let budget = Duration::from_secs(30);
     let Some(mut progress) = chain else {
         return router
-            .acquire_connection_wait(target, consumer, budget)
+            .lease_connection_wait(target, consumer, budget)
             .await
             .map_err(|_| "The SSH node did not become ready".to_owned());
     };
@@ -24,7 +24,7 @@ async fn acquire_ready_target(
             ConnectionTraceStatus::Ready => {
                 return tokio::time::timeout_at(
                     deadline,
-                    router.acquire_connection_wait(
+                    router.lease_connection_wait(
                         target,
                         consumer,
                         deadline.saturating_duration_since(tokio::time::Instant::now()),
@@ -347,13 +347,11 @@ impl PublicMcpBackground {
         chain: Option<tokio::sync::watch::Receiver<oxideterm_ssh::ConnectionChainProgress>>,
     ) {
         let node_ref = NodeRef::new();
-        let consumer = ConnectionConsumer::PublicMcp(node_ref.to_string());
-        let lease = PublicMcpNodeLease {
+        let lease = PublicMcpNodeRegistration {
             client_ref: request.client_ref.clone(),
             node_id: node_id.clone(),
             saved_connection_id: Some(connection_id),
-            physical_connection_id: None,
-            consumer: consumer.clone(),
+            connection: None,
         };
         if !self
             .runtime_handles
@@ -364,6 +362,9 @@ impl PublicMcpBackground {
                 "The retained SSH node lease limit has been reached",
             ));
             return;
+        }
+        if let Ok(ready) = self.node_router.resolve_connection_now(&node_id) {
+            self.rebind_node_leases(&node_id, &ready.connection_id);
         }
         let router = self.node_router.clone();
         let handles = self.runtime_handles.clone();
@@ -378,31 +379,29 @@ impl PublicMcpBackground {
                             handles.lock().nodes.remove(&node_ref);
                             return;
                         }
-                        result = acquire_ready_target(&router, &node_id, consumer.clone(), chain) => result,
+                        result = acquire_ready_target(&router, &node_id, ConnectionConsumer::PublicMcp(format!("connecting:{node_ref}")), chain) => result,
                     };
                     match acquired {
-                        Ok(resolved) => {
-                            let connection_id = resolved.connection_id;
+                        Ok(handoff) => {
                             if request_cancellation.is_cancelled() {
                                 handles.lock().nodes.remove(&node_ref);
-                                router.release_consumer(&connection_id, &consumer);
                                 return;
                             }
-                            let retained =
-                                if let Some(lease) = handles.lock().nodes.get_mut(&node_ref) {
-                                    lease.physical_connection_id = Some(connection_id.clone());
-                                    true
-                                } else {
-                                    false
-                                };
-                            if !retained {
-                                // Revocation may race an in-flight connection attempt.
-                                router.release_consumer(&connection_id, &consumer);
+                            let mut handles = handles.lock();
+                            let Some(registration) = handles.nodes.get_mut(&node_ref) else {
                                 request.finish(ToolEnvelope::failed(
                                     "The MCP client was revoked while connecting",
                                 ));
                                 return;
+                            };
+                            // A reconnect may have completed while this worker was waiting for the chain.
+                            if registration.bind_ready_connection(&router, &node_ref).is_err() {
+                                handles.nodes.remove(&node_ref);
+                                request.finish(ToolEnvelope::failed("The SSH node did not become ready"));
+                                return;
                             }
+                            drop(handles);
+                            drop(handoff);
                             finish_serialized(
                                 request,
                                 json!({ "node_ref": node_ref, "state": "ready" }),
@@ -417,7 +416,40 @@ impl PublicMcpBackground {
             ));
     }
 
-    pub fn finish_node_disconnect(&self, request: DomainRequest, disconnected: Vec<NodeId>) {
+    pub fn rebind_node_leases(&self, node: &NodeId, connection_id: &str) {
+        let mut handles = self.runtime_handles.lock();
+        if self.node_router.connection_id_for_node(node).as_deref() != Some(connection_id) {
+            return;
+        }
+        for (node_ref, registration) in &mut handles.nodes {
+            if &registration.node_id == node {
+                let _ = registration.bind_ready_connection(&self.node_router, node_ref);
+            }
+        }
+        for record in handles
+            .file_sessions
+            .values_mut()
+            .filter(|record| &record.node_id == node && record.root.is_some())
+        {
+            if record
+                .route
+                .as_ref()
+                .is_some_and(|lease| lease.connection_id() == connection_id)
+            {
+                continue;
+            }
+            if let Ok(lease) = self.node_router.lease_connection_now(
+                node,
+                ConnectionConsumer::Sftp(FileSessionRef::new().to_string()),
+            ) {
+                // The public file handle survives its node_ref and reopens its channel on demand.
+                record.route = Some(Arc::new(lease));
+                record.session = None;
+            }
+        }
+    }
+
+    pub fn invalidate_disconnected_nodes(&self, disconnected: &[NodeId]) -> usize {
         let mut handles = self.runtime_handles.lock();
         let disconnected_node_refs = handles
             .nodes
@@ -447,12 +479,13 @@ impl PublicMcpBackground {
             .map(|record| record.cancellation)
             .collect::<Vec<_>>();
         let interrupted_transfers =
-            transfers::invalidate_for_disconnected_nodes(&mut handles, &disconnected);
-        forwards::invalidate_for_disconnected_nodes(&mut handles, &disconnected);
-        files::invalidate_for_disconnected_nodes(&mut handles, &disconnected);
+            transfers::invalidate_for_disconnected_nodes(&mut handles, disconnected);
+        forwards::invalidate_for_disconnected_nodes(&mut handles, disconnected);
+        let file_sessions = files::take_disconnected_file_sessions(&mut handles, disconnected);
         let disconnected_workspaces =
-            workspaces::take_disconnected_workspaces(&mut handles, &disconnected);
+            workspaces::take_disconnected_workspaces(&mut handles, disconnected);
         drop(handles);
+        drop(file_sessions);
         for cancellation in cancellations {
             cancellation.cancel();
         }
@@ -462,13 +495,7 @@ impl PublicMcpBackground {
         for record in disconnected_workspaces {
             record.revoke();
         }
-        finish_serialized(
-            request,
-            json!({
-                "disconnected": !disconnected.is_empty(),
-                "invalidated_node_handles": disconnected_node_refs.len(),
-            }),
-        );
+        disconnected_node_refs.len()
     }
 
     fn handle_public_mcp_operation(&self, request: DomainRequest) {
@@ -709,10 +736,7 @@ impl PublicMcpBackground {
         for cancellation in cancellations {
             cancellation.cancel();
         }
-        if let Some(connection_id) = lease.physical_connection_id {
-            self.node_router
-                .release_consumer(&connection_id, &lease.consumer);
-        }
+        drop(lease);
         finish_serialized(
             request,
             json!({ "released": true, "physical_node_disconnected": false }),
@@ -740,16 +764,20 @@ impl PublicMcpBackground {
         command: Zeroizing<String>,
         owner_group: ToolGroup,
     ) {
-        let Some(lease) =
-            node_lease_for_client(&self.runtime_handles, &request.client_ref, &node_ref)
+        let mut handles = self.runtime_handles.lock();
+        let Some(node_id) = handles
+            .nodes
+            .get(&node_ref)
+            .filter(|node| node.client_ref == request.client_ref)
+            .map(|node| node.node_id.clone())
         else {
+            drop(handles);
             request.finish(ToolEnvelope::failed("The node handle is unavailable"));
             return;
         };
         let command_ref = CommandRef::new();
         let operation_ref = OperationRef::new();
         let cancellation = CancellationToken::new();
-        let mut handles = self.runtime_handles.lock();
         let client_command_count = handles
             .commands
             .values()
@@ -799,7 +827,7 @@ impl PublicMcpBackground {
                 async move {
                     let resolved = tokio::select! {
                         _ = cancellation.cancelled() => return,
-                        result = router.resolve_connection(&lease.node_id) => result,
+                        result = router.resolve_connection(&node_id) => result,
                     };
                     let result = match resolved {
                         Ok(resolved) => {
@@ -1028,12 +1056,10 @@ impl PublicMcpBackground {
     pub fn revoke_public_mcp_client_file_sessions(&self, client_ref: &ClientRef) {
         self.revoke_public_mcp_client_workspaces(client_ref);
         self.revoke_public_mcp_client_transfers(client_ref);
-        for record in files::take_client_file_sessions(&self.runtime_handles, client_ref) {
-            if let Some(connection_id) = record.physical_connection_id {
-                self.node_router
-                    .release_consumer(&connection_id, &record.consumer);
-            }
-        }
+        drop(files::take_client_file_sessions(
+            &self.runtime_handles,
+            client_ref,
+        ));
     }
 
     pub fn revoke_public_mcp_client_workspaces(&self, client_ref: &ClientRef) {
@@ -1122,7 +1148,16 @@ pub(crate) fn node_lease_for_client(
         .nodes
         .get(node_ref)
         .filter(|lease| &lease.client_ref == client_ref)
-        .cloned()
+        .map(|lease| PublicMcpNodeLease {
+            client_ref: lease.client_ref.clone(),
+            node_id: lease.node_id.clone(),
+            saved_connection_id: lease.saved_connection_id.clone(),
+            physical_connection_id: lease
+                .connection
+                .as_ref()
+                .map(|owner| owner.connection_id().to_owned()),
+            consumer: ConnectionConsumer::PublicMcp(node_ref.to_string()),
+        })
 }
 
 pub(crate) fn connection_directory_matches_query(connection: &ConnectionInfo, query: &str) -> bool {

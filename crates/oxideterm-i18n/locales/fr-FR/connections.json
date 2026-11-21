@@ -42,6 +42,7 @@
       "title": "Pool de connexions",
       "loading": "Chargement des statistiques...",
       "idle_timeout": "Inactif : {{min}} min",
+      "idle_timeout_immediate": "Inactif : déconnexion immédiate",
       "idle_timeout_never": "Inactif : jamais",
       "active": "Actif",
       "idle": "Inactif",

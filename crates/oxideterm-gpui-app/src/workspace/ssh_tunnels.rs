@@ -27,8 +27,18 @@ pub(in crate::workspace) struct SshTunnels {
     pending_starts: HashMap<NodeId, VecDeque<String>>,
     waiting_connections: VecDeque<NodeId>,
     active_start_nodes: HashSet<NodeId>,
-    pending_stops: HashMap<String, bool>,
+    pending_stops: HashMap<String, super::forwards::ForwardStopRequest>,
     jobs: HashMap<String, Task<()>>,
+}
+
+impl SshTunnels {
+    pub(super) fn has_pending_start(&self, node: &NodeId) -> bool {
+        self.active_start_nodes.contains(node)
+            || self
+                .pending_starts
+                .get(node)
+                .is_some_and(|queue| !queue.is_empty())
+    }
 }
 
 pub(in crate::workspace) struct TunnelForm {
@@ -334,7 +344,7 @@ impl WorkspaceApp {
             .as_ref()
             .is_some_and(|hops| !hops.is_empty())
         {
-            match self.expand_saved_connection_tree(&host_id, config, title) {
+            match self.expand_ssh_connection_tree(Some(&host_id), config, title) {
                 Ok(expansion) => expansion.target_node_id,
                 Err(error) => {
                     self.push_command_palette_toast(
@@ -361,8 +371,7 @@ impl WorkspaceApp {
             .or_default();
         for id in ids {
             if !queue.contains(&id) && !self.ssh_tunnels.jobs.contains_key(&id) {
-                self.forwarding_service
-                    .set_tunnel_start_requested(&id, true);
+                self.forwarding_service.request_forward_start(&id);
                 queue.push_back(id);
             }
         }
@@ -455,11 +464,7 @@ impl WorkspaceApp {
         else {
             return;
         };
-        let Some(owner) = self
-            .ssh_nodes
-            .get(node)
-            .and_then(|node| node.saved_connection_id.clone())
-        else {
+        let Some(owner) = self.forward_owner_for_node(node) else {
             return;
         };
         let service = self.forwarding_service.clone();
@@ -467,9 +472,14 @@ impl WorkspaceApp {
         let worker_node = node.clone();
         let worker_id = id.clone();
         let tunnel_name = self.tunnel_names(std::slice::from_ref(&id));
+        let handoff = self
+            .node_router
+            .connection_id_for_node(&node)
+            .and_then(|id| self.node_router.lease_connection_handoff(&id));
         // The workspace owns pending starts; closing the forwarding page cannot cancel them.
         let worker =
             tokio_util::task::AbortOnDropHandle::new(self.forwarding_runtime.spawn(async move {
+                let _handoff = handoff;
                 service
                     .start_saved_tunnel(worker_node, owner, worker_id)
                     .await
@@ -500,6 +510,7 @@ impl WorkspaceApp {
                 if this.node_is_ready_for_forwarding(&node) {
                     this.resume_ssh_tunnel_starts(&node, &NodeReadiness::Ready, cx);
                 }
+                this.sync_session_retention(cx);
                 cx.notify();
             });
         });
@@ -555,8 +566,16 @@ impl WorkspaceApp {
         delete: bool,
         cx: &mut Context<Self>,
     ) {
-        self.forwarding_service
-            .set_tunnel_start_requested(id, false);
+        let stop = self.forwarding_service.request_forward_stop(id, delete);
+        self.run_ssh_tunnel_stop(id, stop, cx);
+    }
+
+    fn run_ssh_tunnel_stop(
+        &mut self,
+        id: &str,
+        stop: super::forwards::ForwardStopRequest,
+        cx: &mut Context<Self>,
+    ) {
         for queue in self.ssh_tunnels.pending_starts.values_mut() {
             queue.retain(|queued| queued != id);
         }
@@ -569,11 +588,7 @@ impl WorkspaceApp {
             .and_then(|node| self.forwarding.read(cx).tab_for_node(node))
             .is_some_and(|tab| self.forwarding.read(cx).operation_pending(tab, cx));
         if busy || self.ssh_tunnels.jobs.contains_key(id) {
-            self.ssh_tunnels
-                .pending_stops
-                .entry(id.to_string())
-                .and_modify(|remove| *remove |= delete)
-                .or_insert(delete);
+            self.ssh_tunnels.pending_stops.insert(id.to_string(), stop);
             return;
         }
         let service = self.forwarding_service.clone();
@@ -581,7 +596,7 @@ impl WorkspaceApp {
         let worker_id = id.clone();
         let worker = tokio_util::task::AbortOnDropHandle::new(
             self.forwarding_runtime
-                .spawn(async move { service.stop_saved_tunnel(&worker_id, delete).await }),
+                .spawn(async move { service.stop_saved_tunnel(&worker_id, stop).await }),
         );
         let task_id = id.clone();
         let task = cx.spawn(async move |weak, cx| {
@@ -606,8 +621,8 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn flush_ssh_tunnel_stops(&mut self, cx: &mut Context<Self>) {
-        for (id, delete) in std::mem::take(&mut self.ssh_tunnels.pending_stops) {
-            self.stop_ssh_tunnel(&id, delete, cx);
+        for (id, stop) in std::mem::take(&mut self.ssh_tunnels.pending_stops) {
+            self.run_ssh_tunnel_stop(&id, stop, cx);
         }
     }
 }

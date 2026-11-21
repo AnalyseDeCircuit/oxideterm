@@ -1,9 +1,8 @@
-
 #[derive(Clone, Debug, Default)]
 pub struct NodeRuntimeStore {
     nodes: Arc<DashMap<NodeId, NodeRuntimeEntry>>,
     root_ids: Arc<parking_lot::RwLock<Vec<NodeId>>>,
-    connection_nodes: Arc<DashMap<String, NodeId>>,
+    connection_nodes: ConnectionNodeBindings,
 }
 
 impl NodeRuntimeStore {
@@ -58,13 +57,20 @@ impl NodeRuntimeStore {
         }
     }
 
-    fn audit_context(&self, node_id: &NodeId, mut context: oxideterm_audit::AuditContext) -> Option<oxideterm_audit::AuditContext> {
+    fn audit_context(
+        &self,
+        node_id: &NodeId,
+        mut context: oxideterm_audit::AuditContext,
+    ) -> Option<oxideterm_audit::AuditContext> {
         let node = self.nodes.get(node_id)?;
         context.session_id = Some(node.audit_session_id.clone());
         context.node_id = Some(oxideterm_audit::redact(&node_id.0));
         context.protocol = Some("ssh".into());
         context.remote_account = Some(oxideterm_audit::redact(&node.config.username));
-        context.target = Some(oxideterm_audit::redact(&format!("{}@{}:{}", node.config.username, node.config.host, node.config.port)));
+        context.target = Some(oxideterm_audit::redact(&format!(
+            "{}@{}:{}",
+            node.config.username, node.config.host, node.config.port
+        )));
         Some(context)
     }
 
@@ -193,10 +199,11 @@ impl NodeRuntimeStore {
         hops: Vec<SshConfig>,
         target: SshConfig,
     ) -> Result<NodeTreeExpansion, RouteError> {
-        let saved_connection_id = saved_connection_id.to_string();
+        let target_index = hops.len() as u32;
         self.expand_preset_chain_internal(hops, target, |hop_index| NodeOrigin::ManualPreset {
-            saved_connection_id: saved_connection_id.clone(),
+            saved_connection_id: saved_connection_id.to_owned(),
             hop_index,
+            is_target: hop_index == target_index,
         })
     }
 
@@ -207,16 +214,17 @@ impl NodeRuntimeStore {
         hops: Vec<SshConfig>,
         target: SshConfig,
     ) -> Result<NodeTreeExpansion, RouteError> {
-        let saved_connection_id = saved_connection_id.to_string();
+        let target_index = hops.len() as u32;
         self.expand_preset_chain_under_parent_internal(parent_id, hops, target, |hop_index| {
             NodeOrigin::ManualPreset {
-                saved_connection_id: saved_connection_id.clone(),
+                saved_connection_id: saved_connection_id.to_owned(),
                 hop_index,
+                is_target: hop_index == target_index,
             }
         })
     }
 
-    fn expand_preset_chain_internal(
+    pub(super) fn expand_preset_chain_internal(
         &self,
         hops: Vec<SshConfig>,
         target: SshConfig,
@@ -224,7 +232,7 @@ impl NodeRuntimeStore {
     ) -> Result<NodeTreeExpansion, RouteError> {
         if hops.is_empty() {
             let target_node_id = generated_tree_node_id("direct");
-            self.upsert_node_with_origin(target_node_id.clone(), target, NodeOrigin::Direct);
+            self.upsert_node_with_origin(target_node_id.clone(), target, origin_for_hop(0));
             return Ok(NodeTreeExpansion {
                 target_node_id: target_node_id.clone(),
                 path_node_ids: vec![target_node_id],
@@ -456,10 +464,7 @@ impl NodeRuntimeStore {
     }
 
     /// Reads only the non-secret X11 policy needed when opening a new shell.
-    pub fn x11_forwarding(
-        &self,
-        node_id: &NodeId,
-    ) -> Result<Option<X11ForwardPolicy>, RouteError> {
+    pub fn x11_forwarding(&self, node_id: &NodeId) -> Result<Option<X11ForwardPolicy>, RouteError> {
         self.nodes
             .get(node_id)
             .map(|route| route.config.x11_forwarding)
@@ -486,6 +491,7 @@ impl NodeRuntimeStore {
                     NodeOrigin::ManualPreset {
                         saved_connection_id: route_saved_connection_id,
                         hop_index,
+                        ..
                     } if route_saved_connection_id == saved_connection_id => Some((
                         entry.key().clone(),
                         Some(*hop_index),
@@ -510,9 +516,9 @@ impl NodeRuntimeStore {
                     let next_hop_index = index.saturating_add(1);
                     // Every hop and target share the same origin id. Only a
                     // route without the next indexed child is a target.
-                    !children_ids.iter().any(|child_id| {
-                        manual_hop_indexes.get(child_id) == Some(&next_hop_index)
-                    })
+                    !children_ids
+                        .iter()
+                        .any(|child_id| manual_hop_indexes.get(child_id) == Some(&next_hop_index))
                 });
                 is_target.then_some(node_id)
             })
@@ -540,11 +546,7 @@ impl NodeRuntimeStore {
     }
 
     /// Changes persistence ownership without copying the node's SSH config.
-    pub fn update_origin(
-        &self,
-        node_id: &NodeId,
-        origin: NodeOrigin,
-    ) -> Result<(), RouteError> {
+    pub fn update_origin(&self, node_id: &NodeId, origin: NodeOrigin) -> Result<(), RouteError> {
         let mut route = self
             .nodes
             .get_mut(node_id)
@@ -654,9 +656,13 @@ impl NodeRuntimeStore {
         }
         let ordered_root_ids =
             ordered_snapshot_ids(&snapshot.root_ids, &root_ids_from_nodes(&snapshot.nodes));
-        let audit_sessions = self.nodes.iter().map(|entry| (entry.key().clone(), entry.audit_session_id.clone())).collect::<HashMap<_, _>>();
+        let audit_sessions = self
+            .nodes
+            .iter()
+            .map(|entry| (entry.key().clone(), entry.audit_session_id.clone()))
+            .collect::<HashMap<_, _>>();
         self.nodes.clear();
-        self.connection_nodes.clear();
+        self.connection_nodes.nodes.write().clear();
         {
             let mut root_ids = self.root_ids.write();
             root_ids.clear();
@@ -667,7 +673,7 @@ impl NodeRuntimeStore {
             let node_id = node.id.clone();
             if let Some(connection_id) = node.connection_id.as_ref() {
                 self.connection_nodes
-                    .insert(connection_id.clone(), node_id.clone());
+                    .register(connection_id.clone(), node_id.clone());
             }
             let mut state = node.state;
             let terminal_endpoints =
@@ -675,7 +681,10 @@ impl NodeRuntimeStore {
             self.nodes.insert(
                 node_id.clone(),
                 NodeRuntimeEntry {
-                    audit_session_id: audit_sessions.get(&node_id).cloned().unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+                    audit_session_id: audit_sessions
+                        .get(&node_id)
+                        .cloned()
+                        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
                     config: node.config,
                     parent_id: node.parent_id.clone(),
                     children_ids: children_by_parent.remove(&node_id).unwrap_or_default(),
@@ -697,7 +706,7 @@ impl NodeRuntimeStore {
 
     pub fn clear(&self) {
         self.nodes.clear();
-        self.connection_nodes.clear();
+        self.connection_nodes.nodes.write().clear();
         self.root_ids.write().clear();
     }
 
@@ -790,6 +799,7 @@ impl NodeRuntimeStore {
             NodeReadiness::Disconnected | NodeReadiness::Ready | NodeReadiness::Connecting => None,
         };
         Ok(NodeStateEvent::ConnectionStateChanged {
+            retired_connection_id: None,
             node_id: node_id.0.clone(),
             generation: route.generation,
             state: route.state.readiness.clone(),
@@ -815,28 +825,53 @@ impl NodeRuntimeStore {
         nodes
     }
 
+    /// Automatic list cleanup may remove only the leaf that passed the ownership check.
+    pub fn remove_disconnected_leaf(&self, id: &NodeId) -> bool {
+        let Some((_, node)) = self.nodes.remove_if(id, |_, node| {
+            node.children_ids.is_empty()
+                && node.state.readiness == NodeReadiness::Disconnected
+                && node.connection_id.is_none()
+                && node.terminal_session_id.is_none()
+                && node.terminal_endpoints.is_empty()
+                && node.sftp_session_id.is_none()
+        }) else {
+            return false;
+        };
+        if let Some(parent_id) = node.parent_id {
+            if let Some(mut parent) = self.nodes.get_mut(&parent_id) {
+                parent.children_ids.retain(|child| child != id);
+                parent.generation += 1;
+            }
+        } else {
+            self.root_ids.write().retain(|root| root != id);
+        }
+        true
+    }
+
     pub fn remove_subtree(&self, node_id: &NodeId) -> Vec<NodeId> {
         let nodes = self.subtree_postorder(node_id);
         if nodes.is_empty() {
             return nodes;
         }
 
-        if let Some(parent_id) = self.nodes.get(node_id).and_then(|node| node.parent_id.clone()) {
+        if let Some(parent_id) = self
+            .nodes
+            .get(node_id)
+            .and_then(|node| node.parent_id.clone())
+        {
             if let Some(mut parent) = self.nodes.get_mut(&parent_id) {
                 parent.children_ids.retain(|child_id| child_id != node_id);
                 parent.generation += 1;
             }
         } else {
-            self.root_ids
-                .write()
-                .retain(|root_id| root_id != node_id);
+            self.root_ids.write().retain(|root_id| root_id != node_id);
         }
 
         for removed_id in &nodes {
             if let Some((_id, removed)) = self.nodes.remove(removed_id)
                 && let Some(connection_id) = removed.connection_id
             {
-                self.connection_nodes.remove(&connection_id);
+                self.connection_nodes.unbind(&connection_id, removed_id);
             }
         }
         nodes
@@ -855,10 +890,10 @@ impl NodeRuntimeStore {
         if let Some(previous_id) = route.connection_id.as_ref()
             && previous_id != &connection_id
         {
-            self.connection_nodes.remove(previous_id);
+            self.connection_nodes.unbind(previous_id, node_id);
         }
         self.connection_nodes
-            .insert(connection_id.clone(), node_id.clone());
+            .register(connection_id.clone(), node_id.clone());
         route.connection_id = Some(connection_id);
         route.generation += 1;
         route.state.readiness = readiness_for_connection(connection);
@@ -868,6 +903,7 @@ impl NodeRuntimeStore {
             _ => None,
         };
         Ok(NodeStateEvent::ConnectionStateChanged {
+            retired_connection_id: None,
             node_id: node_id.0.clone(),
             generation: route.generation,
             state: route.state.readiness.clone(),
@@ -885,8 +921,30 @@ impl NodeRuntimeStore {
             .nodes
             .get_mut(node_id)
             .ok_or_else(|| RouteError::NodeNotFound(node_id.0.clone()))?;
+        self.clear_disconnected_route(node_id, &mut route);
+        Ok(NodeStateEvent::ConnectionStateChanged {
+            retired_connection_id: None,
+            node_id: node_id.0.clone(),
+            generation: route.generation,
+            state: NodeReadiness::Disconnected,
+            reason,
+        })
+    }
+
+    pub fn clear_retired_connection(&self, node_id: &NodeId, connection_id: &str) -> bool {
+        let Some(mut route) = self.nodes.get_mut(node_id) else {
+            return false;
+        };
+        if route.connection_id.as_deref() != Some(connection_id) {
+            return false;
+        }
+        self.clear_disconnected_route(node_id, &mut route);
+        true
+    }
+
+    fn clear_disconnected_route(&self, node_id: &NodeId, route: &mut NodeRuntimeEntry) {
         if let Some(connection_id) = route.connection_id.take() {
-            self.connection_nodes.remove(&connection_id);
+            self.connection_nodes.unbind(&connection_id, node_id);
         }
         route.terminal_session_id = None;
         route.terminal_endpoints.clear();
@@ -897,12 +955,6 @@ impl NodeRuntimeStore {
         route.state.sftp_cwd = None;
         route.state.ws_endpoint = None;
         route.generation += 1;
-        Ok(NodeStateEvent::ConnectionStateChanged {
-            node_id: node_id.0.clone(),
-            generation: route.generation,
-            state: NodeReadiness::Disconnected,
-            reason,
-        })
     }
 
     fn bind_terminal_session(
@@ -1097,6 +1149,7 @@ impl NodeRuntimeStore {
             _ => None,
         };
         Ok(NodeStateEvent::ConnectionStateChanged {
+            retired_connection_id: None,
             node_id: node_id.0.clone(),
             generation: route.generation,
             state: route.state.readiness.clone(),
@@ -1105,9 +1158,7 @@ impl NodeRuntimeStore {
     }
 
     pub fn node_id_for_connection(&self, connection_id: &str) -> Option<NodeId> {
-        self.connection_nodes
-            .get(connection_id)
-            .map(|entry| entry.value().clone())
+        self.connection_nodes.primary(connection_id)
     }
 
     pub fn connection_id_for_node(&self, node_id: &NodeId) -> Option<String> {
@@ -1191,11 +1242,11 @@ impl NodeRuntimeStore {
     }
 
     fn rebuild_connection_index(&self) {
-        self.connection_nodes.clear();
+        self.connection_nodes.nodes.write().clear();
         for entry in self.nodes.iter() {
             if let Some(connection_id) = entry.value().connection_id.as_ref() {
                 self.connection_nodes
-                    .insert(connection_id.clone(), entry.key().clone());
+                    .register(connection_id.clone(), entry.key().clone());
             }
         }
     }
@@ -1274,10 +1325,7 @@ fn validate_snapshot_parent_graph(
     Ok(())
 }
 
-fn snapshot_node_depth(
-    node_id: &NodeId,
-    parent_by_id: &HashMap<NodeId, Option<NodeId>>,
-) -> u32 {
+fn snapshot_node_depth(node_id: &NodeId, parent_by_id: &HashMap<NodeId, Option<NodeId>>) -> u32 {
     let mut depth = 0_u32;
     let mut current = parent_by_id.get(node_id).cloned().flatten();
     while let Some(parent_id) = current {

@@ -11,14 +11,10 @@ pub(in crate::workspace) enum ForwardingDeliveryIntent {
         tab_id: TabId,
         message_key: &'static str,
         sync_saved_forwards_on_success: bool,
-        binding: Option<(String, String, ConnectionConsumer)>,
         result: Result<(), String>,
     },
-    Binding {
-        binding: Option<(String, String, ConnectionConsumer)>,
-    },
     PortScan {
-        binding: Option<(String, String, ConnectionConsumer)>,
+        connection_id: String,
     },
     ReconnectRestore {
         node_id: NodeId,
@@ -27,7 +23,6 @@ pub(in crate::workspace) enum ForwardingDeliveryIntent {
         detail: String,
         job_id: String,
         created_forwards: Vec<(Arc<ForwardingManager>, String)>,
-        bindings: Vec<(String, String, ConnectionConsumer)>,
     },
     Runtime(ForwardEvent),
 }
@@ -244,10 +239,7 @@ impl ForwardingWorkspaceEntity {
     }
 
     pub(in crate::workspace) fn request_session_restore(&self, node_id: NodeId) {
-        // Reconnect restores the node-owned runtime without exposing the
-        // Entity's delivery sender to workspace coordination code.
-        self.runtime_service
-            .submit_session_restore(node_id, self.worker_tx.clone());
+        self.runtime_service.submit_session_restore(node_id);
     }
 
     pub(in crate::workspace) fn request_reconnect_restore(
@@ -320,12 +312,7 @@ impl ForwardingWorkspaceEntity {
             && !self.tab_nodes.values().any(|mapped| mapped == node_id)
         {
             self.runtime_snapshots.remove(node_id);
-            // A closed page releases its sampler, not the forwarding consumer.
-            if let Some(connection_id) = self.runtime_service.connection_id_for_node(node_id) {
-                self.runtime_service
-                    .registry()
-                    .stop_port_profiler(&connection_id);
-            }
+            self.untrack_port_profiler(node_id, cx);
         }
         if removed.is_some() && self.tab_nodes.is_empty() {
             // Cancel the page sampler without touching long-lived runtime state.
@@ -492,7 +479,6 @@ impl ForwardingWorkspaceEntity {
                     tab_id,
                     message_key,
                     sync_saved_forwards_on_success,
-                    binding,
                     result,
                 } => {
                     if let Some(node_id) = self.node_for_tab(tab_id) {
@@ -503,23 +489,35 @@ impl ForwardingWorkspaceEntity {
                             tab_id,
                             message_key,
                             sync_saved_forwards_on_success,
-                            binding,
                             result,
                         });
                 }
-                ForwardingWorkerResult::Binding { binding } => self
-                    .delivery_intents
-                    .push_back(ForwardingDeliveryIntent::Binding { binding }),
                 ForwardingWorkerResult::PortScan {
                     node_id,
                     connection_id,
-                    binding,
                     result,
                 } => {
-                    self.apply_port_detection_result(&node_id, connection_id, result, cx);
-                    self.refresh_runtime_snapshot(&node_id, cx);
-                    self.delivery_intents
-                        .push_back(ForwardingDeliveryIntent::PortScan { binding });
+                    if self.tab_nodes.values().any(|mapped| mapped == &node_id) {
+                        let state = self
+                            .port_detection_by_node
+                            .entry(node_id.clone())
+                            .or_default();
+                        if connection_id.is_none()
+                            || self.runtime_service.connection_id_for_node(&node_id)
+                                == connection_id
+                        {
+                            state.apply(connection_id.clone(), result);
+                        } else {
+                            // This scan completed on the previous transport.
+                            state.port_scan_pending = false;
+                        }
+                        self.notify_node(&node_id, cx);
+                        self.refresh_runtime_snapshot(&node_id, cx);
+                    }
+                    if let Some(connection_id) = connection_id {
+                        self.delivery_intents
+                            .push_back(ForwardingDeliveryIntent::PortScan { connection_id });
+                    }
                 }
                 ForwardingWorkerResult::ReconnectRestore {
                     node_id,
@@ -528,7 +526,6 @@ impl ForwardingWorkspaceEntity {
                     detail,
                     job_id,
                     created_forwards,
-                    bindings,
                 } => self
                     .delivery_intents
                     .push_back(ForwardingDeliveryIntent::ReconnectRestore {
@@ -538,7 +535,6 @@ impl ForwardingWorkspaceEntity {
                         detail,
                         job_id,
                         created_forwards,
-                        bindings,
                     }),
             }
         }
@@ -565,6 +561,7 @@ impl ForwardingWorkspaceEntity {
                             .insert(forward_id.clone(), stats.clone());
                         self.notify_node(&node_id, cx);
                     }
+                    continue;
                 }
                 ForwardEvent::StatusChanged { session_id, .. }
                 | ForwardEvent::SessionSuspended { session_id, .. } => {
@@ -573,7 +570,33 @@ impl ForwardingWorkspaceEntity {
                         self.refresh_runtime_snapshot(&node_id, cx);
                     }
                 }
-                ForwardEvent::PortDetected { .. } => {}
+                ForwardEvent::PortDetected {
+                    connection_id,
+                    new_ports,
+                    closed_ports,
+                    all_ports,
+                } => {
+                    for node in &self.port_profiler_nodes {
+                        if self.runtime_service.connection_id_for_node(node).as_deref()
+                            == Some(connection_id)
+                        {
+                            self.port_detection_by_node
+                                .entry(node.clone())
+                                .or_default()
+                                .apply_snapshot(
+                                    Some(connection_id.clone()),
+                                    PortDetectionSnapshot {
+                                        new_ports: new_ports.clone(),
+                                        closed_ports: closed_ports.clone(),
+                                        all_ports: all_ports.clone(),
+                                        has_scanned: true,
+                                    },
+                                );
+                            self.notify_node(node, cx);
+                        }
+                    }
+                    continue;
+                }
             }
             self.delivery_intents
                 .push_back(ForwardingDeliveryIntent::Runtime(event));
@@ -583,20 +606,6 @@ impl ForwardingWorkspaceEntity {
         }
         worker_drain.outcome.backlog_remaining || event_drain.outcome.backlog_remaining
     }
-
-    pub(in crate::workspace) fn apply_port_detection_result(
-        &mut self,
-        node_id: &NodeId,
-        connection_id: Option<String>,
-        result: Result<PortDetectionSnapshot, String>,
-        cx: &mut App,
-    ) {
-        self.port_detection_by_node
-            .entry(node_id.clone())
-            .or_default()
-            .apply(connection_id, result);
-        self.notify_node(node_id, cx);
-    }
 }
 
 impl gpui::EventEmitter<ForwardingWorkspaceEvent> for ForwardingWorkspaceEntity {}
@@ -605,6 +614,113 @@ impl gpui::EventEmitter<ForwardingWorkspaceEvent> for ForwardingWorkspaceEntity 
 mod tests {
     use super::*;
     use gpui::{AppContext, TestAppContext};
+
+    #[gpui::test]
+    fn port_events_reach_only_subscribed_nodes_on_the_current_transport(cx: &mut TestAppContext) {
+        use oxideterm_ssh::{ConnectionConsumer, SshConfig, SshConnectionRegistry};
+        let ssh = SshConnectionRegistry::default();
+        let router = NodeRouter::new(ssh.clone());
+        let runtime = Arc::new(
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap(),
+        );
+        let service = ForwardingRuntimeService::new(
+            ForwardingRegistry::new(),
+            ssh.clone(),
+            router.clone(),
+            runtime,
+            String::new(),
+        );
+        let (worker_tx, worker_rx) = delivery::ActiveDeliverySender::channel();
+        let (event_tx, event_rx) = std::sync::mpsc::channel();
+        let entity = cx
+            .new(|cx| ForwardingWorkspaceEntity::new(worker_tx, worker_rx, event_rx, service, cx));
+        let a = NodeId::new("first");
+        let b = NodeId::new("second");
+        let hidden = NodeId::new("unsubscribed");
+        let config = SshConfig::default();
+        let handle = ssh.acquire(config.clone(), ConnectionConsumer::NodeRouter(a.0.clone()));
+        for node in [&a, &b, &hidden] {
+            router.upsert_node(node.clone(), config.clone());
+            router
+                .bind_connection(node, handle.connection_id())
+                .unwrap();
+        }
+        entity.update(cx, |state, cx| {
+            for (tab, node) in [(TabId(1), &a), (TabId(2), &b)] {
+                state.map_tab_to_node(tab, node.clone(), cx);
+                state.track_port_profiler(node.clone());
+            }
+            state.mark_port_scan_started(a.clone());
+        });
+        let port = oxideterm_forwarding::DetectedPort {
+            port: 8080,
+            bind_addr: "127.0.0.1".into(),
+            process_name: None,
+            pid: None,
+        };
+        let publish = || {
+            event_tx
+                .send(ForwardEvent::PortDetected {
+                    connection_id: handle.connection_id().to_owned(),
+                    new_ports: vec![port.clone()],
+                    closed_ports: vec![],
+                    all_ports: vec![port.clone()],
+                })
+                .unwrap()
+        };
+        publish();
+        entity.update(cx, |state, cx| {
+            state.drain_deliveries(cx);
+            for node in [&a, &b] {
+                assert_eq!(
+                    state.port_detection_state(node).unwrap().detected_ports,
+                    [port.clone()]
+                );
+            }
+            assert!(state.port_detection_state(&hidden).is_none());
+            assert!(state.port_scan_pending(&a));
+        });
+        let next = ssh.acquire(
+            SshConfig {
+                port: 2202,
+                ..config
+            },
+            ConnectionConsumer::NodeRouter(b.0.clone()),
+        );
+        entity.read_with(cx, |state, _| {
+            // A manager keeps its previous handle until asynchronous forwarding restoration.
+            state.runtime_service.registry().register(
+                ForwardingRuntimeService::session_id_for_node(&b),
+                handle.clone(),
+            );
+        });
+        router.bind_connection(&b, next.connection_id()).unwrap();
+        event_tx
+            .send(ForwardEvent::PortDetected {
+                connection_id: handle.connection_id().to_string(),
+                new_ports: vec![],
+                all_ports: vec![],
+                closed_ports: vec![port.clone()],
+            })
+            .unwrap();
+        entity.update(cx, |state, cx| {
+            state.drain_deliveries(cx);
+            assert!(
+                state
+                    .port_detection_state(&a)
+                    .unwrap()
+                    .detected_ports
+                    .is_empty()
+            );
+            assert_eq!(
+                state.port_detection_state(&b).unwrap().detected_ports,
+                [port]
+            );
+        });
+    }
 
     #[gpui::test]
     fn hidden_mount_stops_sampling_without_blocking_reliable_delivery(cx: &mut TestAppContext) {
@@ -653,7 +769,6 @@ mod tests {
                 detail: "restored 1 forward".to_string(),
                 job_id: "hidden-job".to_string(),
                 created_forwards: Vec::new(),
-                bindings: Vec::new(),
             })
             .expect("hidden reconnect restore delivery");
         cx.run_until_parked();
@@ -672,6 +787,13 @@ mod tests {
         let removed = entity.update(cx, |entity, cx| entity.unmap_tab(tab_id, cx));
         assert_eq!(removed, Some(node_id.clone()));
         worker_tx
+            .send(ForwardingWorkerResult::PortScan {
+                node_id: node_id.clone(),
+                connection_id: Some("closed-page-connection".into()),
+                result: Ok(PortDetectionSnapshot::default()),
+            })
+            .expect("late scan result");
+        worker_tx
             .send(ForwardingWorkerResult::ReconnectRestore {
                 node_id: node_id.clone(),
                 result: PhaseResult::Ok,
@@ -679,11 +801,18 @@ mod tests {
                 detail: "restored after close".to_string(),
                 job_id: "closed-view-job".to_string(),
                 created_forwards: Vec::new(),
-                bindings: Vec::new(),
             })
             .expect("closed-view reconnect restore delivery");
         cx.run_until_parked();
-        let intents = entity.update(cx, |entity, _cx| entity.take_delivery_intents());
+        let intents = entity.update(cx, |entity, _cx| {
+            assert!(entity.port_detection_state(&node_id).is_none());
+            entity.take_delivery_intents()
+        });
+        assert!(matches!(
+            intents.front(),
+            Some(ForwardingDeliveryIntent::PortScan { connection_id })
+                if connection_id == "closed-page-connection"
+        ));
         assert!(matches!(
             intents.back(),
             Some(ForwardingDeliveryIntent::ReconnectRestore {
@@ -731,12 +860,14 @@ mod tests {
             bytes_received: 256,
         };
 
+        let session_id = ForwardingRuntimeService::session_id_for_node(&node_id);
+        let stats_event = ForwardEvent::StatsUpdated {
+            forward_id: forward_id.clone(),
+            session_id: session_id.clone(),
+            stats: stats.clone(),
+        };
         runtime_tx
-            .send(ForwardEvent::StatsUpdated {
-                forward_id: forward_id.clone(),
-                session_id: ForwardingRuntimeService::session_id_for_node(&node_id),
-                stats: stats.clone(),
-            })
+            .send(stats_event.clone())
             .expect("stats delivery");
         delivery_wake.mark();
         cx.run_until_parked();
@@ -751,15 +882,23 @@ mod tests {
             assert_eq!(snapshot.stats_by_forward_id.get(&forward_id), Some(&stats));
         });
         let intents = entity.update(cx, |entity, _cx| entity.take_delivery_intents());
+        assert!(intents.is_empty());
+
+        let stopped = ForwardEvent::StatusChanged {
+            forward_id,
+            session_id,
+            status: ForwardStatus::Stopped,
+            error: None,
+        };
+        runtime_tx.send(stats_event).unwrap();
+        runtime_tx.send(stopped.clone()).unwrap();
+        delivery_wake.mark();
+        cx.run_until_parked();
+        let intents = entity.update(cx, |entity, _cx| entity.take_delivery_intents());
         assert_eq!(intents.len(), 1);
         assert!(matches!(
             intents.front(),
-            Some(ForwardingDeliveryIntent::Runtime(
-                ForwardEvent::StatsUpdated {
-                    forward_id: delivered_forward_id,
-                    ..
-                }
-            )) if delivered_forward_id == &forward_id
+            Some(ForwardingDeliveryIntent::Runtime(event)) if event == &stopped
         ));
     }
 
@@ -785,7 +924,6 @@ mod tests {
                 detail: "restored 2 forward(s)".to_string(),
                 job_id: "job-a".to_string(),
                 created_forwards: Vec::new(),
-                bindings: Vec::new(),
             })
             .expect("reconnect restore delivery");
 

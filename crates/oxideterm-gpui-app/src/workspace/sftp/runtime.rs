@@ -45,12 +45,95 @@ fn sidebar_sftp_target(
 }
 
 impl WorkspaceApp {
-    fn dedicated_sftp_connection_slot(&self, node_id: &NodeId) -> DedicatedSftpConnectionSlot {
-        self.dedicated_sftp_connections
-            .lock()
-            .entry(node_id.clone())
-            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(None)))
-            .clone()
+    fn dedicated_sftp_connection_slot(
+        &self,
+        node_id: &NodeId,
+        route: Option<&ConnectionConsumerLease>,
+    ) -> Arc<DedicatedSftpConnectionSlot> {
+        let Some(route) = route else {
+            return Arc::default();
+        };
+        let mut slots = self.dedicated_sftp_connections.lock();
+        if let Some(previous) = slots.get(node_id)
+            && previous.connection_id == route.connection_id()
+            && let Some(slot) = previous.slot.upgrade()
+        {
+            return slot;
+        }
+        // A replacement route can use another jump transport while old requests drain.
+        let slot = Arc::default();
+        slots.insert(
+            node_id.clone(),
+            DedicatedSftpRouteSlot {
+                connection_id: route.connection_id().to_owned(),
+                slot: Arc::downgrade(&slot),
+            },
+        );
+        slot
+    }
+
+    fn lease_sftp_route(&self, node_id: &NodeId) -> Option<Arc<ConnectionConsumerLease>> {
+        let id = self.node_router.connection_id_for_node(node_id)?;
+        if self
+            .ssh_nodes
+            .get(node_id)
+            .is_some_and(|node| node.ssh_channel_strategy.requires_dedicated_consumers())
+        {
+            // The browsing transport owns the SFTP consumer; this lease only keeps its route alive.
+            return self.node_router.lease_connection_handoff(&id).map(Arc::new);
+        }
+        self.ssh_registry
+            .lease_consumer(
+                &id,
+                ConnectionConsumer::Sftp(uuid::Uuid::new_v4().to_string()),
+            )
+            .map(Arc::new)
+    }
+
+    fn bind_sftp_surface_lease(&mut self, surface: SftpSurfaceId, node_id: &NodeId) {
+        if self.sftp_surface_leases.get(&surface).is_some_and(|lease| {
+            &lease.node_id == node_id
+                && self.node_router.connection_id_for_node(node_id).as_deref()
+                    == Some(lease.route.connection_id())
+        }) {
+            return;
+        }
+        if let Some(route) = self.lease_sftp_route(node_id) {
+            let lease = SftpSurfaceLease {
+                node_id: node_id.clone(),
+                _dedicated_slot: self.dedicated_sftp_connection_slot(node_id, Some(&route)),
+                route,
+            };
+            self.sftp_surface_leases.insert(surface, lease);
+        } else {
+            self.sftp_surface_leases.remove(&surface);
+        }
+    }
+
+    pub(in crate::workspace) fn rebind_sftp_surfaces_for_node(
+        &mut self,
+        node_id: &NodeId,
+        cx: &App,
+    ) {
+        // Background pages continue owning the route while another tab is focused.
+        let tabs: Vec<_> = self
+            .sftp_tab_nodes
+            .iter()
+            .filter_map(|(tab, bound)| (bound == node_id).then_some(*tab))
+            .collect();
+        for tab in tabs {
+            self.bind_sftp_surface_lease(SftpSurfaceId::Tab(tab), node_id);
+        }
+        let sidebar = self.sftp_view.read(cx);
+        if sidebar.current_surface_id == Some(SftpSurfaceId::Sidebar)
+            && sidebar
+                .current_remote_id
+                .as_ref()
+                .and_then(SftpRemoteId::node_id)
+                == Some(node_id)
+        {
+            self.bind_sftp_surface_lease(SftpSurfaceId::Sidebar, node_id);
+        }
     }
 
     pub(in crate::workspace::sftp) fn sftp_remote_backend(
@@ -63,18 +146,22 @@ impl WorkspaceApp {
                 .get(id)
                 .cloned()
                 .map(|runtime| SftpRemoteBackend::Ftp { runtime }),
-            SftpRemoteId::Node(node_id) => Some(SftpRemoteBackend::Node {
-                router: self.node_router.clone(),
-                node_id: node_id.clone(),
-                channel_strategy: self
-                    .ssh_nodes
-                    .get(node_id)
-                    .map(|node| node.ssh_channel_strategy)
-                    .unwrap_or_default(),
-                prompt_handler: self.ssh_consumer_prompt_handler.clone(),
-                managed_key_resolver: self.ssh_consumer_managed_key_resolver.clone(),
-                dedicated_slot: self.dedicated_sftp_connection_slot(node_id),
-            }),
+            SftpRemoteId::Node(node_id) => {
+                let route = self.lease_sftp_route(node_id);
+                Some(SftpRemoteBackend::Node {
+                    router: self.node_router.clone(),
+                    node_id: node_id.clone(),
+                    channel_strategy: self
+                        .ssh_nodes
+                        .get(node_id)
+                        .map(|node| node.ssh_channel_strategy)
+                        .unwrap_or_default(),
+                    prompt_handler: self.ssh_consumer_prompt_handler.clone(),
+                    managed_key_resolver: self.ssh_consumer_managed_key_resolver.clone(),
+                    dedicated_slot: self.dedicated_sftp_connection_slot(node_id, route.as_deref()),
+                    _route_lease: route,
+                })
+            }
             SftpRemoteId::Standalone(profile_id) => self
                 .standalone_sftp_sessions
                 .get(profile_id)
@@ -88,42 +175,29 @@ impl WorkspaceApp {
         &self,
         remote_id: &SftpRemoteId,
         transfer_id: &str,
-    ) -> Option<(SftpRemoteBackend, Option<StandaloneSftpConsumerLease>)> {
+    ) -> Option<(SftpRemoteBackend, Option<ConnectionConsumerLease>)> {
         match remote_id {
             SftpRemoteId::Ftp(id) => self
                 .ftp_sessions
                 .get(id)
                 .cloned()
                 .map(|runtime| (SftpRemoteBackend::Ftp { runtime }, None)),
-            SftpRemoteId::Node(node_id) => Some((
-                SftpRemoteBackend::Node {
-                    router: self.node_router.clone(),
-                    node_id: node_id.clone(),
-                    channel_strategy: self
-                        .ssh_nodes
-                        .get(node_id)
-                        .map(|node| node.ssh_channel_strategy)
-                        .unwrap_or_default(),
-                    prompt_handler: self.ssh_consumer_prompt_handler.clone(),
-                    managed_key_resolver: self.ssh_consumer_managed_key_resolver.clone(),
-                    dedicated_slot: self.dedicated_sftp_connection_slot(node_id),
-                },
-                None,
-            )),
+            SftpRemoteId::Node(_) => Some((self.sftp_remote_backend(remote_id)?, None)),
             SftpRemoteId::Standalone(profile_id) => {
                 let runtime = self.standalone_sftp_sessions.get(profile_id)?;
                 let consumer = ConnectionConsumer::Sftp(format!(
-                    "standalone-transfer:{profile_id}:{transfer_id}"
+                    "standalone-transfer:{profile_id}:{transfer_id}:{}",
+                    uuid::Uuid::new_v4()
                 ));
-                let handle = self
+                let lease = self
                     .ssh_registry
-                    .acquire_consumer_for_connection(&runtime.connection_id, consumer.clone())?;
-                let lease = StandaloneSftpConsumerLease {
-                    registry: self.ssh_registry.clone(),
-                    connection_id: runtime.connection_id.clone(),
-                    consumer,
-                };
-                Some((SftpRemoteBackend::Standalone { handle }, Some(lease)))
+                    .lease_consumer(&runtime.connection_id, consumer)?;
+                Some((
+                    SftpRemoteBackend::Standalone {
+                        handle: lease.handle().clone(),
+                    },
+                    Some(lease),
+                ))
             }
         }
     }
@@ -644,6 +718,7 @@ impl WorkspaceApp {
         let _scope = self.enter_sftp_surface(SftpSurfaceId::Sidebar);
         // An explicit request for another server stays visible until the user enables following.
         self.embedded_sftp_pinned = self.active_ssh_terminal_node_id(cx).as_ref() != Some(&node_id);
+        self.bind_sftp_surface_lease(SftpSurfaceId::Sidebar, &node_id);
         self.embedded_sftp_node_id = Some(node_id.clone());
         self.active_ssh_node_id = Some(node_id.clone());
         self.expanded_ssh_nodes.insert(node_id.clone());
@@ -681,6 +756,7 @@ impl WorkspaceApp {
             return false;
         }
 
+        self.sftp_surface_leases.remove(&SftpSurfaceId::Sidebar);
         self.embedded_sftp_node_id = None;
         self.embedded_sftp_pinned = false;
         self.embedded_sftp_sidebar_resizing = false;
@@ -771,8 +847,10 @@ impl WorkspaceApp {
             self.ime_marked_text = None;
         }
         let Some(node_id) = target else {
+            self.sftp_surface_leases.remove(&SftpSurfaceId::Sidebar);
             return;
         };
+        self.bind_sftp_surface_lease(SftpSurfaceId::Sidebar, &node_id);
         self.embedded_sftp_node_id = Some(node_id.clone());
         let already_active = {
             let sftp = self.sftp_view().read(cx);
@@ -796,6 +874,7 @@ impl WorkspaceApp {
         node_id: &NodeId,
         cx: &mut Context<Self>,
     ) {
+        self.bind_sftp_surface_lease(SftpSurfaceId::Tab(tab_id), node_id);
         self.ensure_sftp_page(tab_id, cx);
         let _scope = self.enter_sftp_surface(SftpSurfaceId::Tab(tab_id));
         self.sftp_view().update(cx, |sftp, cx| {

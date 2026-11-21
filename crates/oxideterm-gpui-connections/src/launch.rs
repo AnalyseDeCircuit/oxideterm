@@ -163,9 +163,7 @@ pub enum SshConnectionWorkerResult {
         status: HostKeyStatus,
     },
     SessionTreePreflight {
-        generation: u64,
-        step_index: usize,
-        upstream_proxy: Option<UpstreamProxyConfig>,
+        context: crate::entity::ProxyConnectPreflightContext,
         status: HostKeyStatus,
     },
     Test {

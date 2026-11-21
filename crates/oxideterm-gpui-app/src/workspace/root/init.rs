@@ -168,9 +168,9 @@ impl WorkspaceApp {
         // the GPUI shared backdrop layer tied to the same render-policy switch.
         set_tauri_backdrop_blur_allowed(render_policy.allow_background_blur);
         let ssh_registry = SshConnectionRegistry::new(ConnectionPoolConfig {
-            idle_timeout: Some(Duration::from_secs(
-                settings.connection_pool.idle_timeout_secs as u64,
-            )),
+            idle_timeout: oxideterm_settings::configured_timeout(
+                settings.connection_pool.idle_timeout_secs,
+            ),
             ..ConnectionPoolConfig::default()
         });
         let forwarding_runtime = Arc::new(
@@ -345,6 +345,9 @@ impl WorkspaceApp {
             &forwarding,
             |workspace, _forwarding, event: &forwards::ForwardingWorkspaceEvent, cx| {
                 workspace.handle_forwarding_workspace_event(*event, cx);
+                if matches!(event, forwards::ForwardingWorkspaceEvent::DeliveryReady) {
+                    workspace.sync_session_retention(cx);
+                }
             },
         );
         let sftp_view = cx.new(sftp::SftpWorkspaceEntity::new);
@@ -377,6 +380,7 @@ impl WorkspaceApp {
                     ConnectionFlowEvent::ConnectionFormClosed => {
                         // Apply runtime cleanup after the Entity has already cleared ownership.
                         workspace.cleanup_cancelled_proxy_connect_runs(cx);
+                        workspace.sync_session_retention(cx);
                         if workspace.active_pane(cx).is_some() {
                             workspace.needs_active_pane_focus = true;
                         }
@@ -870,6 +874,7 @@ impl WorkspaceApp {
             detached_local_terminal_order: Vec::new(),
             serial_terminal_configs: HashMap::new(),
             telnet_terminal_profile_ids: HashMap::new(),
+            session_retention: Default::default(),
             standalone_connections: standalone_connections::StandaloneConnectionRegistry::default(),
             detached_local_terminals_popover_open: false,
             command_palette,
@@ -1062,6 +1067,7 @@ impl WorkspaceApp {
             _forwarding_subscription: forwarding_subscription,
             file_manager,
             sftp_tab_nodes: HashMap::new(),
+            sftp_surface_leases: HashMap::new(),
             standalone_sftp_tabs: HashMap::new(),
             standalone_sftp_sessions: HashMap::new(),
             ftp_sessions: HashMap::new(),
@@ -1165,6 +1171,7 @@ impl WorkspaceApp {
                 default_session_tree_path().with_file_name("standalone_sessions.json"),
                 &workspace.connection_store,
             );
+        workspace.configure_session_retention(cx);
         workspace.sync_terminal_command_sender_appearance(cx);
         workspace.sync_active_terminal_metadata_context(cx);
         workspace.sync_active_terminal_recording_elapsed_tick(cx);

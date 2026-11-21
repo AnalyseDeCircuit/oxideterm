@@ -23,9 +23,41 @@ impl NodeEventSequencer {
 }
 
 #[derive(Clone, Debug, Default)]
+struct ConnectionNodeBindings {
+    nodes: Arc<parking_lot::RwLock<HashMap<String, Vec<NodeId>>>>,
+}
+
+impl ConnectionNodeBindings {
+    fn register(&self, connection_id: String, node_id: NodeId) {
+        let mut nodes = self.nodes.write();
+        let bound = nodes.entry(connection_id).or_default();
+        if !bound.contains(&node_id) {
+            bound.push(node_id);
+        }
+    }
+
+    fn unbind(&self, connection_id: &str, node_id: &NodeId) -> bool {
+        let mut nodes = self.nodes.write();
+        let Some(bound) = nodes.get_mut(connection_id) else {
+            return false;
+        };
+        bound.retain(|id| id != node_id);
+        if bound.is_empty() {
+            nodes.remove(connection_id);
+            return false;
+        }
+        true
+    }
+
+    fn primary(&self, connection_id: &str) -> Option<NodeId> {
+        self.nodes.read().get(connection_id)?.last().cloned()
+    }
+}
+
+#[derive(Clone, Debug, Default)]
 pub struct NodeEventEmitter {
     sequencer: NodeEventSequencer,
-    connection_nodes: Arc<DashMap<String, NodeId>>,
+    connection_nodes: ConnectionNodeBindings,
     listeners: Arc<parking_lot::RwLock<Vec<mpsc::Sender<NodeStateEvent>>>>,
     mailbox_listeners: Arc<parking_lot::RwLock<HashMap<u64, Weak<NodeEventMailbox>>>>,
     next_listener_id: Arc<AtomicU64>,
@@ -77,10 +109,7 @@ impl NodeEventEmitter {
         self.listeners.write().push(sender);
     }
 
-    pub fn subscribe_bounded(
-        &self,
-        capacity: usize,
-    ) -> (NodeEventSubscription, NodeEventReceiver) {
+    pub fn subscribe_bounded(&self, capacity: usize) -> (NodeEventSubscription, NodeEventReceiver) {
         self.subscribe_bounded_with_wake(capacity, None)
     }
 
@@ -114,19 +143,38 @@ impl NodeEventEmitter {
     }
 
     pub fn register(&self, connection_id: impl Into<String>, node_id: NodeId) {
-        self.connection_nodes.insert(connection_id.into(), node_id);
+        self.connection_nodes
+            .register(connection_id.into(), node_id);
     }
 
     pub fn unregister(&self, connection_id: &str) -> Option<NodeId> {
         self.connection_nodes
+            .nodes
+            .write()
             .remove(connection_id)
-            .map(|(_, node_id)| node_id)
+            .and_then(|mut nodes| nodes.pop())
+    }
+
+    /// Removes one route and reports whether the transport still serves other routes.
+    pub fn unbind_node(&self, connection_id: &str, node_id: &NodeId) -> bool {
+        self.connection_nodes.unbind(connection_id, node_id)
     }
 
     pub fn node_id_for_connection(&self, connection_id: &str) -> Option<NodeId> {
-        self.connection_nodes
-            .get(connection_id)
-            .map(|entry| entry.value().clone())
+        self.connection_nodes.primary(connection_id)
+    }
+
+    pub(crate) fn only_bound_node_consumers(
+        &self,
+        connection_id: &str,
+        consumers: &[ConnectionConsumer],
+    ) -> bool {
+        let nodes = self.connection_nodes.nodes.read();
+        nodes.get(connection_id).is_some_and(|bound| {
+            consumers.iter().all(|consumer| {
+                matches!(consumer, ConnectionConsumer::NodeRouter(id) if bound.iter().any(|node| &node.0 == id))
+            })
+        })
     }
 
     pub fn emit_connection_state_changed(
@@ -135,16 +183,55 @@ impl NodeEventEmitter {
         state: NodeReadiness,
         reason: impl Into<String>,
     ) -> Option<NodeStateEvent> {
-        let node_id = self.node_id_for_connection(connection_id)?;
-        let generation = self.sequencer.next(&node_id);
+        self.emit_bound_state(connection_id, state, &reason.into(), None)
+    }
+
+    pub(crate) fn emit_idle_retirement(&self, connection_id: &str, reason: &str) {
+        self.emit_bound_state(
+            connection_id,
+            NodeReadiness::Disconnected,
+            reason,
+            Some(connection_id),
+        );
+    }
+
+    fn emit_bound_state(
+        &self,
+        connection_id: &str,
+        state: NodeReadiness,
+        reason: &str,
+        retired_connection_id: Option<&str>,
+    ) -> Option<NodeStateEvent> {
+        let nodes = self
+            .connection_nodes
+            .nodes
+            .read()
+            .get(connection_id)?
+            .clone();
+        let mut last = None;
+        for node_id in nodes {
+            last =
+                Some(self.emit_node_state(&node_id, state.clone(), reason, retired_connection_id));
+        }
+        last
+    }
+
+    fn emit_node_state(
+        &self,
+        node_id: &NodeId,
+        state: NodeReadiness,
+        reason: &str,
+        retired_connection_id: Option<&str>,
+    ) -> NodeStateEvent {
         let event = NodeStateEvent::ConnectionStateChanged {
-            node_id: node_id.0,
-            generation,
+            retired_connection_id: retired_connection_id.map(str::to_owned),
+            node_id: node_id.0.clone(),
+            generation: self.sequencer.next(node_id),
             state,
-            reason: reason.into(),
+            reason: reason.to_owned(),
         };
         self.dispatch(&event);
-        Some(event)
+        event
     }
 
     pub fn emit_state_from_connection(
@@ -153,18 +240,20 @@ impl NodeEventEmitter {
         connection_state: &ConnectionState,
         reason: impl Into<String>,
     ) -> Option<NodeStateEvent> {
-        let reason = reason.into();
-        let reason = match connection_state {
+        self.emit_connection_state_changed(
+            connection_id,
+            readiness_for_connection_state(connection_state),
+            Self::connection_reason(connection_state, reason.into()),
+        )
+    }
+
+    fn connection_reason(state: &ConnectionState, reason: String) -> String {
+        match state {
             ConnectionState::Error(error) if reason.is_empty() => error.clone(),
             ConnectionState::Error(error) => format!("{reason}: {error}"),
             ConnectionState::LinkDown if reason.is_empty() => "link down".to_string(),
             _ => reason,
-        };
-        self.emit_connection_state_changed(
-            connection_id,
-            readiness_for_connection_state(connection_state),
-            reason,
-        )
+        }
     }
 
     pub fn emit_connection_status_changed(
@@ -234,9 +323,7 @@ impl NodeEventEmitter {
                 return true;
             }
             if !node_event_requires_reliable_delivery(event)
-                && let Some(index) = queue
-                .iter()
-                .position(|queued| {
+                && let Some(index) = queue.iter().position(|queued| {
                     !node_event_requires_reliable_delivery(queued)
                         && node_event_coalesce_key(queued) == node_event_coalesce_key(event)
                 })
@@ -329,7 +416,10 @@ mod mailbox_tests {
 
         assert!(matches!(
             receiver.try_recv().unwrap(),
-            NodeStateEvent::ConnectionStateChanged { state: NodeReadiness::Ready, .. }
+            NodeStateEvent::ConnectionStateChanged {
+                state: NodeReadiness::Ready,
+                ..
+            }
         ));
         drop(subscription);
         emitter.emit_connection_state_changed_for_test("node-a", NodeReadiness::Error);
@@ -341,6 +431,7 @@ mod mailbox_tests {
         let emitter = NodeEventEmitter::new();
         let (_subscription, receiver) = emitter.subscribe_bounded(2);
         emitter.dispatch(&NodeStateEvent::ConnectionStateChanged {
+            retired_connection_id: None,
             node_id: "node-a".to_string(),
             generation: 1,
             state: NodeReadiness::Connecting,
@@ -353,6 +444,7 @@ mod mailbox_tests {
             cwd: None,
         });
         emitter.dispatch(&NodeStateEvent::ConnectionStateChanged {
+            retired_connection_id: None,
             node_id: "node-a".to_string(),
             generation: 3,
             state: NodeReadiness::Ready,
@@ -374,12 +466,14 @@ mod mailbox_tests {
         let emitter = NodeEventEmitter::new();
         let (_subscription, receiver) = emitter.subscribe_bounded(1);
         emitter.dispatch(&NodeStateEvent::ConnectionStateChanged {
+            retired_connection_id: None,
             node_id: "node-a".to_string(),
             generation: 1,
             state: NodeReadiness::Error,
             reason: "link down".to_string(),
         });
         emitter.dispatch(&NodeStateEvent::ConnectionStateChanged {
+            retired_connection_id: None,
             node_id: "node-a".to_string(),
             generation: 2,
             state: NodeReadiness::Connecting,
@@ -444,6 +538,7 @@ mod mailbox_tests {
     impl NodeEventEmitter {
         fn emit_connection_state_changed_for_test(&self, node_id: &str, state: NodeReadiness) {
             self.dispatch(&NodeStateEvent::ConnectionStateChanged {
+                retired_connection_id: None,
                 node_id: node_id.to_string(),
                 generation: 0,
                 state,

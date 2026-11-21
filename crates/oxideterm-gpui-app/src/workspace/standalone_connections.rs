@@ -152,6 +152,7 @@ impl WorkspaceApp {
         } else {
             // Pending asynchronous launches observe this state before mounting a surface.
             self.standalone_connections.mark_disconnected(connection_id);
+            self.sync_session_retention(cx);
             cx.notify();
         }
     }
@@ -168,15 +169,13 @@ impl WorkspaceApp {
         let Some((title, surface, plan)) = self.standalone_reconnect_plan(connection_id) else {
             return;
         };
+        let Some(connection_attempt_id) = self.begin_standalone_reconnect(connection_id, cx) else {
+            return;
+        };
         if let Some(surface) = surface {
             // A reconnect always receives a new pane or desktop tab identity.
             self.close_standalone_connection_surface(surface, window, cx);
         }
-        let Some(connection_attempt_id) =
-            self.standalone_connections.begin_reconnect(connection_id)
-        else {
-            return;
-        };
 
         let result = match plan {
             StandaloneReconnectPlan::Serial {
@@ -368,6 +367,7 @@ impl WorkspaceApp {
         }
         self.expanded_standalone_connections.remove(connection_id);
         self.standalone_connections.remove(connection_id);
+        self.sync_session_retention(cx);
         cx.notify();
     }
 
@@ -745,6 +745,14 @@ mod tests {
 }
 
 impl StandaloneConnectionRegistry {
+    pub(super) fn closed_records(&self) -> impl Iterator<Item = &StandaloneConnectionRecord> {
+        self.records.iter().filter(|record| {
+            record.readiness == ActiveSessionReadiness::Disconnected
+                && record.surface.is_none()
+                && record.pending_ble.is_none()
+        })
+    }
+
     pub(super) fn records(&self) -> &[StandaloneConnectionRecord] {
         &self.records
     }
@@ -973,6 +981,11 @@ impl StandaloneConnectionRegistry {
             self.records.remove(index);
             self.persist();
         }
+    }
+
+    pub(super) fn remove_closed_records(&mut self, ids: &HashSet<String>) {
+        self.records.retain(|record| !ids.contains(&record.id));
+        self.persist();
     }
 
     pub(super) fn remove(&mut self, id: &str) -> Option<StandaloneConnectionRecord> {

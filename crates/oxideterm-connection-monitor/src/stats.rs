@@ -5,14 +5,6 @@ use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ConnectionMonitorConsumerKind {
-    Terminal,
-    Sftp,
-    PortForward,
-    Other,
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PoolConnectionMonitorSnapshot {
     pub is_active: bool,
@@ -21,7 +13,7 @@ pub struct PoolConnectionMonitorSnapshot {
     pub is_link_down: bool,
     pub ref_count: u64,
     pub has_sftp_session: bool,
-    pub consumers: Vec<ConnectionMonitorConsumerKind>,
+    pub terminal_count: usize,
 }
 
 /// Tauri-compatible connection state for `ssh_list_connection_summaries`.
@@ -122,15 +114,14 @@ pub struct ConnectionPoolMonitorStats {
     pub link_down_connections: usize,
     pub total_terminals: usize,
     pub total_sftp_sessions: usize,
-    pub total_forwards: usize,
     pub total_ref_count: u32,
-    pub idle_timeout_secs: u64,
+    pub idle_timeout_secs: Option<u64>,
 }
 
 impl ConnectionPoolMonitorStats {
     pub fn from_snapshots(
         snapshots: impl IntoIterator<Item = PoolConnectionMonitorSnapshot>,
-        idle_timeout_secs: u64,
+        idle_timeout_secs: Option<u64>,
     ) -> Self {
         let mut stats = Self {
             idle_timeout_secs,
@@ -152,14 +143,7 @@ impl ConnectionPoolMonitorStats {
                 stats.link_down_connections += 1;
             }
 
-            for consumer in snapshot.consumers {
-                match consumer {
-                    ConnectionMonitorConsumerKind::Terminal => stats.total_terminals += 1,
-                    ConnectionMonitorConsumerKind::PortForward => stats.total_forwards += 1,
-                    ConnectionMonitorConsumerKind::Sftp | ConnectionMonitorConsumerKind::Other => {}
-                }
-            }
-
+            stats.total_terminals += snapshot.terminal_count;
             if snapshot.has_sftp_session {
                 stats.total_sftp_sessions += 1;
             }

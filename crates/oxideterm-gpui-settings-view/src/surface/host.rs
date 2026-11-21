@@ -292,6 +292,7 @@ impl<'a> SettingsPageFrame<'a> {
             }
             ConnectionsDefaults
             | ConnectionsIdleTimeout
+            | ConnectionsRetention
             | ConnectionsSshKeys
             | ConnectionsSshConfigImport
             | ConnectionsImporters => {

@@ -64,6 +64,30 @@ fn authentication_key_suffix(auth: &AuthMethod) -> String {
     format!(":gssapi={digest:x}:delegate={delegate_credentials}")
 }
 
+fn host_key_policy_suffix(
+    strict: bool,
+    trust: Option<bool>,
+    fingerprint: Option<&str>,
+    replacement: Option<&crate::HostKeyReplacement>,
+) -> String {
+    if !strict && trust.is_none() && fingerprint.is_none() && replacement.is_none() {
+        return String::new();
+    }
+    // A different approval must run its own handshake, including any known_hosts write.
+    // Hash the framed public metadata so it cannot introduce delimiters in a route key.
+    let replacement = replacement.map(|change| {
+        (
+            change.host.as_str(),
+            change.port,
+            change.key_type.as_str(),
+            change.previous_fingerprint.as_str(),
+            change.fingerprint.as_str(),
+        )
+    });
+    let policy = format!("{strict}:{trust:?}:{fingerprint:?}:{replacement:?}");
+    format!(":host-key={:x}", Sha256::digest(policy.as_bytes()))
+}
+
 fn algorithm_preferences_key_suffix(preferences: &SshAlgorithmPreferences) -> String {
     if preferences.is_default() {
         return String::new();
@@ -302,8 +326,14 @@ impl SshConfig {
                         totp_key_suffix(hop.totp.as_ref())
                     );
                     let algorithm_suffix = algorithm_preferences_key_suffix(&hop.ssh_algorithms);
+                    let host_key_suffix = host_key_policy_suffix(
+                        hop.strict_host_key_checking,
+                        hop.trust_host_key,
+                        hop.expected_host_key_fingerprint.as_deref(),
+                        None,
+                    );
                     format!(
-                        "{}@{}:{}{}{}{}{}{}{}",
+                        "{}@{}:{}{}{}{}{}{}{}{host_key_suffix}",
                         hop.username,
                         hop.host,
                         hop.port,
@@ -362,13 +392,19 @@ impl SshConfig {
             totp_key_suffix(self.totp.as_ref())
         );
         let algorithm_key = algorithm_preferences_key_suffix(&self.ssh_algorithms);
+        let host_key_suffix = host_key_policy_suffix(
+            self.strict_host_key_checking,
+            self.trust_host_key,
+            self.expected_host_key_fingerprint.as_deref(),
+            self.host_key_replacement.as_ref(),
+        );
         let channel_strategy_key = if self.ssh_channel_strategy.requires_dedicated_consumers() {
             "|channel_strategy=dedicated_per_consumer"
         } else {
             ""
         };
         format!(
-            "{}@{}:{}|{}{}{}{}{}{}{}{}{}{}",
+            "{}@{}:{}|{}{}{}{}{}{}{}{}{}{}{host_key_suffix}",
             self.username,
             self.host,
             self.port,

@@ -345,6 +345,12 @@ fn copy_section(
             );
             copy_object_keys(source, target, &["reconnect"], RECONNECT_KEYS);
             copy_object_keys(source, target, &["connectionPool"], CONNECTION_POOL_KEYS);
+            copy_object_keys(
+                source,
+                target,
+                &["sidebarUI"],
+                &["closedSessionRetentionSecs"],
+            );
         }
         "network" => copy_object_keys(source, target, &["network"], NETWORK_KEYS),
         "ai" => copy_object_keys(source, target, &["ai"], AI_KEYS),
@@ -480,6 +486,31 @@ mod tests {
     }
     use super::*;
     use crate::{Language, PersistedSettings};
+
+    #[test]
+    fn connections_snapshot_transfers_retention_only_when_present() {
+        let mut settings = PersistedSettings::default();
+        settings.sidebar_ui.closed_session_retention_secs = 60;
+        let sections = HashSet::from(["connections".to_owned()]);
+        let exported =
+            export_oxide_settings_snapshot_json(&settings, Some(&sections), false).unwrap();
+        let doc: Value = serde_json::from_str(&exported).unwrap();
+        assert_eq!(
+            doc.pointer("/settings/sidebarUI/closedSessionRetentionSecs"),
+            Some(&json!(60))
+        );
+        assert_eq!(
+            merge_oxide_settings_snapshot(&PersistedSettings::default(), &exported, None)
+                .unwrap()
+                .sidebar_ui
+                .closed_session_retention_secs,
+            60
+        );
+        let old = r#"{"connectionPool":{"idleTimeoutSecs":300}}"#;
+        let imported = merge_oxide_settings_snapshot(&settings, old, Some(&sections)).unwrap();
+        assert_eq!(imported.connection_pool.idle_timeout_secs, 300);
+        assert_eq!(imported.sidebar_ui.closed_session_retention_secs, 60);
+    }
 
     #[test]
     fn theme_snapshot_preserves_independent_choices_and_section_boundaries() {

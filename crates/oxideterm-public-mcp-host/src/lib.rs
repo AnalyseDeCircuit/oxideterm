@@ -37,7 +37,10 @@ pub use model::{
     CONNECTION_TYPE_SERIAL, CONNECTION_TYPE_TELNET, PublicMcpDesktopRecord, PublicMcpHost,
     PublicMcpNodeLease, PublicMcpPendingTerminalOpen, PublicMcpTerminalRecord,
 };
-pub use ports::{PublicMcpForwardMutation, PublicMcpForwardPort, PublicMcpHostEffect};
+pub use ports::{
+    PublicMcpForwardMutation, PublicMcpForwardPort, PublicMcpForwardStopHandoff,
+    PublicMcpHostEffect,
+};
 use sync_handles::{
     PublicMcpLocalSyncCheckpoint, PublicMcpSyncPlan, PublicMcpSyncPlanKind, PublicMcpSyncUndo,
 };

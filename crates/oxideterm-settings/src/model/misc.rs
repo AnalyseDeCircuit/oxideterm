@@ -175,6 +175,14 @@ impl Default for ReconnectSettings {
     }
 }
 
+pub const NO_TIMEOUT_SECS: i64 = -1;
+
+pub fn configured_timeout(seconds: i64) -> Option<std::time::Duration> {
+    u64::try_from(seconds)
+        .ok()
+        .map(std::time::Duration::from_secs)
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionPoolSettings {

@@ -1187,13 +1187,20 @@
         "remove_failed": "Impossible de supprimer les fichiers d’intégration. Vérifiez les permissions distantes.",
         "installation_incomplete": "L’installation de l’intégration Shell est incomplète. Vérifiez son état dans les paramètres."
       },
+      "retention": {
+        "immediate": "Retirer dès la fermeture",
+        "label": "Conservation des sessions fermées",
+        "hint": "Durée de conservation des sessions fermées dans la liste des sessions actives.",
+        "never": "Ne jamais retirer automatiquement"
+      },
       "idle_timeout": {
         "title": "Connexions SSH en arrière-plan",
         "description": "Configure quand les connexions SSH en arrière-plan inutilisées sont récupérées.",
         "label": "Récupération après inactivité",
+        "immediate": "Déconnecter dès l’inactivité",
         "5min": "5 minutes",
         "15min": "15 minutes",
-        "30min": "30 minutes (par défaut)",
+        "30min": "30 minutes",
         "1hr": "1 heure",
         "never": "Jamais (maintenir la connexion)",
         "hint": "Les connexions SSH en arrière-plan sans terminaux ouverts, sessions SFTP ni redirections de ports sont récupérées après cette période. Définissez sur « Jamais » pour les maintenir indéfiniment.",

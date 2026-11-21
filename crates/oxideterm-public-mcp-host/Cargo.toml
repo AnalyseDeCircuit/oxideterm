@@ -41,3 +41,8 @@ oxideterm-terminal-recording = { path = "../oxideterm-terminal-recording" }
 oxideterm-session-adapter = { path = "../oxideterm-session-adapter" }
 oxideterm-terminal = { path = "../oxideterm-terminal" }
 image.workspace = true
+
+[dev-dependencies]
+rand10.workspace = true
+russh.workspace = true
+russh-sftp = { path = "../russh-sftp" }

@@ -976,6 +976,7 @@ mod privilege_prompt_helper_tests {
         let manual_preset = NodeOrigin::ManualPreset {
             saved_connection_id: "jump-chain".to_string(),
             hop_index: 1,
+            is_target: true,
         };
 
         let direct = NodeOrigin::Direct;

@@ -186,12 +186,14 @@ impl WorkspaceApp {
             return self.report_proxy_session_tree_error(CHAIN_LOCK_BUSY.to_owned(), cx);
         }
         let request = ProxyExpansion::prepare(&mut config, title, intent, save);
-        let id = request.expansion_id(self.next_ssh_node_id);
-        let expansion =
-            match self.expand_saved_connection_tree(&id, config, request.title().to_owned()) {
-                Ok(expansion) => expansion,
-                Err(error) => return self.report_proxy_session_tree_error(error.to_string(), cx),
-            };
+        let expansion = match self.expand_ssh_connection_tree(
+            request.saved_connection_id(),
+            config,
+            request.title().to_owned(),
+        ) {
+            Ok(expansion) => expansion,
+            Err(error) => return self.report_proxy_session_tree_error(error.to_string(), cx),
+        };
         let result = self.connections.flow.update(cx, |flow, cx| {
             flow.stage_proxy_expansion(request, &expansion, cx)
         });
@@ -237,6 +239,7 @@ impl WorkspaceApp {
         match result {
             Ok(false) => false,
             Ok(true) => {
+                self.sync_session_retention(cx);
                 self.continue_active_proxy_session_tree_connect(window, cx);
                 true
             }
@@ -270,9 +273,11 @@ impl WorkspaceApp {
     ) {
         self.release_proxy_session_tree_locks(&plan, cx);
         if let Some(report) = report {
+            self.sync_session_retention(cx);
             return self.report_proxy_session_tree_error(report, cx);
         }
         let Some(terminal) = terminal else {
+            self.sync_session_retention(cx);
             return;
         };
         if let Some(options) = terminal.options
@@ -297,6 +302,7 @@ impl WorkspaceApp {
             window,
             cx,
         );
+        self.sync_session_retention(cx);
     }
 
     pub(in crate::workspace) fn active_proxy_connect_waits_for_node(
@@ -395,22 +401,11 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         self.release_proxy_session_tree_locks(plan, cx);
-        let Some(cleanup_root) = plan.cleanup_root_node_id() else {
-            return;
-        };
-        let removed_nodes = self.workspace_runtime.update(cx, |runtime, cx| {
-            runtime.remove_node_runtime_subtree(&cleanup_root, cx)
-        });
-        for node_id in removed_nodes {
-            self.workspace_runtime.update(cx, |runtime, _cx| {
-                runtime.remove_pending_ssh_terminal_opens_for_node(&node_id);
-            });
-            self.ssh_nodes.remove(&node_id);
-            self.expanded_ssh_nodes.remove(&node_id);
-            self.saved_ssh_nodes
-                .retain(|_saved_id, saved_node_id| saved_node_id != &node_id);
+        if let Some(cleanup_root) = plan.cleanup_root_node_id() {
+            self.cleanup_temporary_session_tree_node(&cleanup_root, cx);
+            self.persist_session_tree_snapshot();
         }
-        self.persist_session_tree_snapshot();
+        self.sync_session_retention(cx);
     }
 
     pub(super) fn release_proxy_session_tree_locks(
@@ -682,8 +677,7 @@ impl WorkspaceApp {
                 Some(config),
             ),
             VerifiedManualSshRoute::SessionTree => {
-                let expansion_id = format!("manual-{}", self.next_ssh_node_id);
-                match self.expand_saved_connection_tree(&expansion_id, config, title.clone()) {
+                match self.expand_ssh_connection_tree(None, config, title.clone()) {
                     Ok(expansion) => (expansion.target_node_id, None),
                     Err(error) => return self.set_connection_status(Some(error.to_string()), cx),
                 }

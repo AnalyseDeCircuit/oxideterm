@@ -177,6 +177,7 @@ pub enum SelectAnchorId {
     SettingsLocalPrivilegeResponseMode,
     SettingsLocalPrivilegeTotpCredential,
     SettingsConnectionIdleTimeout,
+    SettingsClosedSessionRetention,
     SettingsReconnectMaxAttempts,
     SettingsReconnectBaseDelay,
     SettingsReconnectMaxDelay,
@@ -319,6 +320,7 @@ impl SelectAnchorId {
                 | Self::SettingsLocalPrivilegePromptType
                 | Self::SettingsLocalPrivilegeResponseMode
                 | Self::SettingsConnectionIdleTimeout
+                | Self::SettingsClosedSessionRetention
                 | Self::SettingsReconnectMaxAttempts
                 | Self::SettingsReconnectBaseDelay
                 | Self::SettingsReconnectMaxDelay

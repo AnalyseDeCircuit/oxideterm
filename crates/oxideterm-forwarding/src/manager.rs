@@ -2,14 +2,15 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use std::{
+    collections::HashMap,
     net::TcpListener as StdTcpListener,
     sync::mpsc::Sender,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, Weak},
     time::Duration,
 };
 
 use dashmap::DashMap;
-use oxideterm_ssh::SshConnectionHandle;
+use oxideterm_ssh::{ConnectionConsumer, SshConnectionHandle, SshConnectionRegistry};
 
 use crate::{
     ForwardEvent, ForwardEventDeliverySender, ForwardRule, ForwardStats, ForwardStatus,
@@ -20,18 +21,20 @@ use crate::{
     },
     dynamic::DynamicForward,
     local::LocalForward,
-    remote::{RemoteForward, RemoteForwardRouter},
+    remote::RemoteForward,
 };
 
 pub struct ForwardingManager {
     session_id: String,
     ssh_connection: Mutex<SshConnectionHandle>,
+    ssh_registry: Option<SshConnectionRegistry>,
     event_tx: Option<ForwardEventDeliverySender>,
-    remote_router: Arc<RemoteForwardRouter>,
     local_forwards: DashMap<String, LocalForward>,
     remote_forwards: DashMap<String, RemoteForward>,
     dynamic_forwards: DashMap<String, DynamicForward>,
     stopped_forwards: DashMap<String, ForwardRule>,
+    closing_rules: Mutex<HashMap<String, Weak<tokio::sync::Mutex<()>>>>,
+    suspension: tokio::sync::Mutex<()>,
     port_detection: Mutex<PortDetectionTracker>,
     port_scan_platform: Mutex<Option<RemotePortScanPlatform>>,
 }
@@ -118,15 +121,26 @@ impl ForwardingManager {
         ssh_connection: SshConnectionHandle,
         event_tx: Option<ForwardEventDeliverySender>,
     ) -> Self {
+        Self::with_ssh_registry(session_id.into(), ssh_connection, event_tx, None)
+    }
+
+    pub(crate) fn with_ssh_registry(
+        session_id: String,
+        ssh_connection: SshConnectionHandle,
+        event_tx: Option<ForwardEventDeliverySender>,
+        ssh_registry: Option<SshConnectionRegistry>,
+    ) -> Self {
         Self {
-            session_id: session_id.into(),
+            session_id,
+            ssh_registry,
             ssh_connection: Mutex::new(ssh_connection),
             event_tx,
-            remote_router: Arc::new(RemoteForwardRouter::default()),
             local_forwards: DashMap::new(),
             remote_forwards: DashMap::new(),
             dynamic_forwards: DashMap::new(),
             stopped_forwards: DashMap::new(),
+            closing_rules: Mutex::default(),
+            suspension: tokio::sync::Mutex::default(),
             port_detection: Mutex::new(PortDetectionTracker::default()),
             port_scan_platform: Mutex::new(None),
         }
@@ -200,47 +214,67 @@ impl ForwardingManager {
             action,
             Some(&detail),
         );
-        let audit_result = async {
-            rule.normalize_hosts_for_runtime();
-            if self.has_rule(&rule.id) {
-                return Err(ForwardingError::AlreadyExists(rule.id));
-            }
+        let audit_result =
+            async {
+                rule.normalize_hosts_for_runtime();
+                if self.has_rule(&rule.id) {
+                    return Err(ForwardingError::AlreadyExists(rule.id));
+                }
 
-            let result = match rule.forward_type {
-                ForwardType::Local => LocalForward::start(rule, self.current_ssh_connection())
-                    .await
-                    .map(|forward| {
-                        let active_rule = forward.rule();
-                        self.local_forwards.insert(active_rule.id.clone(), forward);
-                        active_rule
-                    }),
-                ForwardType::Dynamic => DynamicForward::start(rule, self.current_ssh_connection())
-                    .await
-                    .map(|forward| {
-                        let active_rule = forward.rule();
-                        self.dynamic_forwards
-                            .insert(active_rule.id.clone(), forward);
-                        active_rule
-                    }),
-                ForwardType::Remote => RemoteForward::start(
-                    rule,
-                    self.current_ssh_connection(),
-                    self.remote_router.clone(),
-                )
-                .await
-                .map(|forward| {
-                    let active_rule = forward.rule();
-                    self.remote_forwards.insert(active_rule.id.clone(), forward);
-                    active_rule
-                }),
-            };
+                let connection = self.current_ssh_connection();
+                // A listener owns its transport through startup, rollback and stop.
+                // The cached manager and its stopped rules do not pin the physical connection.
+                let lease = self
+                    .ssh_registry
+                    .as_ref()
+                    .map(|registry| {
+                        registry
+                            .lease_consumer(
+                                connection.connection_id(),
+                                ConnectionConsumer::PortForward(format!(
+                                    "{}:{}",
+                                    self.session_id, rule.id
+                                )),
+                            )
+                            .ok_or_else(|| {
+                                ForwardingError::ConnectionFailed(
+                                    "Forwarding connection or rule is no longer available".into(),
+                                )
+                            })
+                    })
+                    .transpose()?;
+                let result =
+                    match rule.forward_type {
+                        ForwardType::Local => LocalForward::start(rule, connection, lease)
+                            .await
+                            .map(|forward| {
+                                let active_rule = forward.rule();
+                                self.local_forwards.insert(active_rule.id.clone(), forward);
+                                active_rule
+                            }),
+                        ForwardType::Dynamic => DynamicForward::start(rule, connection, lease)
+                            .await
+                            .map(|forward| {
+                                let active_rule = forward.rule();
+                                self.dynamic_forwards
+                                    .insert(active_rule.id.clone(), forward);
+                                active_rule
+                            }),
+                        ForwardType::Remote => RemoteForward::start(rule, connection, lease)
+                            .await
+                            .map(|forward| {
+                                let active_rule = forward.rule();
+                                self.remote_forwards.insert(active_rule.id.clone(), forward);
+                                active_rule
+                            }),
+                    };
 
-            if let Ok(active_rule) = &result {
-                self.emit_status_changed(&active_rule.id, active_rule.status.clone(), None);
+                if let Ok(active_rule) = &result {
+                    self.emit_status_changed(&active_rule.id, active_rule.status.clone(), None);
+                }
+                result
             }
-            result
-        }
-        .await;
+            .await;
         audit.result(&audit_result);
         audit_result
     }
@@ -305,7 +339,48 @@ impl ForwardingManager {
         );
     }
 
+    // A listener is absent from the maps while cancellation is awaiting its acknowledgement.
+    async fn lock_rule_close(&self, id: &str) -> tokio::sync::OwnedMutexGuard<()> {
+        let lock = {
+            let mut locks = self.closing_rules.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(lock) = locks.get(id).and_then(Weak::upgrade) {
+                lock
+            } else {
+                locks.retain(|_, lock| lock.strong_count() > 0);
+                let lock = Arc::new(tokio::sync::Mutex::new(()));
+                locks.insert(id.to_owned(), Arc::downgrade(&lock));
+                lock
+            }
+        };
+        lock.lock_owned().await
+    }
+
+    pub async fn close_forward_if_present(
+        &self,
+        id: &str,
+        delete: bool,
+    ) -> Result<(), ForwardingError> {
+        let _guard = self.lock_rule_close(id).await;
+        if !self.has_rule(id) {
+            return Ok(());
+        }
+        let result = if delete {
+            self.delete_forward_locked(id).await
+        } else {
+            self.stop_forward_locked(id).await.map(|_| ())
+        };
+        match result {
+            Err(ForwardingError::NotFound(_)) => Ok(()),
+            result => result,
+        }
+    }
+
     pub async fn stop_forward(&self, rule_id: &str) -> Result<ForwardRule, ForwardingError> {
+        let _guard = self.lock_rule_close(rule_id).await;
+        self.stop_forward_locked(rule_id).await
+    }
+
+    async fn stop_forward_locked(&self, rule_id: &str) -> Result<ForwardRule, ForwardingError> {
         let audit = self.audit_rule_operation("stop_forward", rule_id);
         let audit_result = async {
             if let Some((_, forward)) = self.local_forwards.remove(rule_id) {
@@ -371,6 +446,11 @@ impl ForwardingManager {
     }
 
     pub async fn delete_forward(&self, rule_id: &str) -> Result<(), ForwardingError> {
+        let _guard = self.lock_rule_close(rule_id).await;
+        self.delete_forward_locked(rule_id).await
+    }
+
+    async fn delete_forward_locked(&self, rule_id: &str) -> Result<(), ForwardingError> {
         let audit = self.audit_rule_operation("delete_forward", rule_id);
         let audit_result = async {
             if let Some((_, forward)) = self.local_forwards.remove(rule_id) {
@@ -442,6 +522,25 @@ impl ForwardingManager {
         // with Tauri while retaining the explicit native helper for call sites
         // that need to document the stopped-rule constraint.
         self.update_stopped_forward(rule_id, update)
+    }
+
+    /// A failed listener restart may have yielded to another edit, start, or deletion.
+    pub fn revert_stopped_update(&self, updated: &ForwardRule, original: &ForwardRule) -> bool {
+        let Some(mut current) = self.stopped_forwards.get_mut(&updated.id) else {
+            return false;
+        };
+        if *current != *updated {
+            return false;
+        }
+        *current = original.clone();
+        current.status = ForwardStatus::Stopped;
+        drop(current);
+        self.emit_status_changed(&updated.id, ForwardStatus::Stopped, None);
+        true
+    }
+
+    pub fn active_forward_count(&self) -> usize {
+        self.local_forwards.len() + self.remote_forwards.len() + self.dynamic_forwards.len()
     }
 
     pub fn list_forwards(&self) -> Vec<ForwardRule> {
@@ -698,6 +797,11 @@ impl ForwardingManager {
     }
 
     pub async fn suspend_all_and_save_rules(&self) -> Vec<ForwardRule> {
+        self.suspend_connection_forwards(None).await
+    }
+
+    pub async fn suspend_connection_forwards(&self, connection: Option<&str>) -> Vec<ForwardRule> {
+        let _draining = self.suspension.lock().await;
         let mut suspended = Vec::new();
         let mut audit_context = self.automatic_audit_context();
         if let Some(context) = &mut audit_context {
@@ -711,7 +815,13 @@ impl ForwardingManager {
             .collect();
         let local_forwards: Vec<_> = local_ids
             .into_iter()
-            .filter_map(|id| self.local_forwards.remove(&id).map(|(_, forward)| forward))
+            .filter_map(|id| {
+                self.local_forwards
+                    .remove_if(&id, |_, f| {
+                        connection.is_none_or(|id| f.connection_id() == id)
+                    })
+                    .map(|(_, forward)| forward)
+            })
             .collect();
         let dynamic_ids: Vec<_> = self
             .dynamic_forwards
@@ -722,7 +832,9 @@ impl ForwardingManager {
             .into_iter()
             .filter_map(|id| {
                 self.dynamic_forwards
-                    .remove(&id)
+                    .remove_if(&id, |_, f| {
+                        connection.is_none_or(|id| f.connection_id() == id)
+                    })
                     .map(|(_, forward)| forward)
             })
             .collect();
@@ -733,7 +845,13 @@ impl ForwardingManager {
             .collect();
         let remote_forwards: Vec<_> = remote_ids
             .into_iter()
-            .filter_map(|id| self.remote_forwards.remove(&id).map(|(_, forward)| forward))
+            .filter_map(|id| {
+                self.remote_forwards
+                    .remove_if(&id, |_, f| {
+                        connection.is_none_or(|id| f.connection_id() == id)
+                    })
+                    .map(|(_, forward)| forward)
+            })
             .collect();
 
         for forward in local_forwards {
@@ -743,21 +861,14 @@ impl ForwardingManager {
                 "suspend_forward",
                 Some(&forward.rule().id),
             );
-            let mut rule = forward.stop().await;
+            let rule = forward.stop().await;
             audit.finish(
                 oxideterm_audit::AuditOutcome::Interrupted,
                 oxideterm_audit::AuditEvidence::Lifecycle,
                 None,
                 None,
             );
-            rule.status = ForwardStatus::Suspended;
-            self.stopped_forwards.insert(rule.id.clone(), rule.clone());
-            self.emit_status_changed(
-                &rule.id,
-                ForwardStatus::Suspended,
-                Some("SSH connection lost".to_string()),
-            );
-            suspended.push(rule);
+            self.record_suspended_rule(rule, connection, &mut suspended);
         }
         for forward in dynamic_forwards {
             let audit = oxideterm_audit::AuditOperation::in_context(
@@ -766,21 +877,14 @@ impl ForwardingManager {
                 "suspend_forward",
                 Some(&forward.rule().id),
             );
-            let mut rule = forward.stop().await;
+            let rule = forward.stop().await;
             audit.finish(
                 oxideterm_audit::AuditOutcome::Interrupted,
                 oxideterm_audit::AuditEvidence::Lifecycle,
                 None,
                 None,
             );
-            rule.status = ForwardStatus::Suspended;
-            self.stopped_forwards.insert(rule.id.clone(), rule.clone());
-            self.emit_status_changed(
-                &rule.id,
-                ForwardStatus::Suspended,
-                Some("SSH connection lost".to_string()),
-            );
-            suspended.push(rule);
+            self.record_suspended_rule(rule, connection, &mut suspended);
         }
         for forward in remote_forwards {
             let audit = oxideterm_audit::AuditOperation::in_context(
@@ -789,23 +893,45 @@ impl ForwardingManager {
                 "suspend_forward",
                 Some(&forward.rule().id),
             );
-            let mut rule = forward.stop_best_effort().await;
+            let rule = forward.stop_best_effort().await;
             audit.finish(
                 oxideterm_audit::AuditOutcome::Partial,
                 oxideterm_audit::AuditEvidence::Lifecycle,
                 None,
                 None,
             );
-            rule.status = ForwardStatus::Suspended;
-            self.stopped_forwards.insert(rule.id.clone(), rule.clone());
-            self.emit_status_changed(
-                &rule.id,
-                ForwardStatus::Suspended,
-                Some("SSH connection lost".to_string()),
-            );
-            suspended.push(rule);
+            self.record_suspended_rule(rule, connection, &mut suspended);
         }
         suspended
+    }
+
+    fn record_suspended_rule(
+        &self,
+        mut rule: ForwardRule,
+        expected: Option<&str>,
+        suspended: &mut Vec<ForwardRule>,
+    ) {
+        // Rebinding may finish while an old listener is draining.
+        let bound = self
+            .ssh_connection
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if expected.is_some_and(|id| bound.connection_id() != id) {
+            return;
+        }
+        rule.status = ForwardStatus::Suspended;
+        self.stopped_forwards.insert(rule.id.clone(), rule.clone());
+        drop(bound);
+        self.emit_status_changed(
+            &rule.id,
+            ForwardStatus::Suspended,
+            Some("SSH connection lost".into()),
+        );
+        suspended.push(rule);
+    }
+
+    pub fn suspension_in_progress(&self) -> bool {
+        self.suspension.try_lock().is_err()
     }
 
     pub fn list_stopped_forwards(&self) -> Vec<ForwardRule> {
@@ -822,16 +948,22 @@ impl ForwardingManager {
         &self,
         ssh_connection: SshConnectionHandle,
     ) -> Vec<Result<ForwardRule, ForwardingError>> {
+        // Wait until the previous transport has released its ports and published its suspended rules.
+        let draining = self.suspension.lock().await;
         self.replace_ssh_connection(ssh_connection);
         let rules = self.list_stopped_forwards();
+        drop(draining);
         let mut restored = Vec::with_capacity(rules.len());
 
-        for rule in rules
-            .into_iter()
-            .filter(|rule| rule.status == ForwardStatus::Suspended)
-        {
-            self.stopped_forwards.remove(&rule.id);
-            let mut restarting = rule;
+        for rule in rules {
+            // A racing restore or manual stop can claim the rule after the snapshot.
+            let Some((_, mut restarting)) =
+                self.stopped_forwards.remove_if(&rule.id, |_, current| {
+                    current.status == ForwardStatus::Suspended
+                })
+            else {
+                continue;
+            };
             restarting.status = ForwardStatus::Starting;
             let result = self
                 .start_forward(restarting.clone(), "restore_forward", true)
@@ -840,7 +972,7 @@ impl ForwardingManager {
                 let mut suspended = restarting;
                 suspended.status = ForwardStatus::Suspended;
                 self.stopped_forwards
-                    .insert(suspended.id.clone(), suspended.clone());
+                    .insert(suspended.id.clone(), suspended);
             }
             restored.push(result);
         }

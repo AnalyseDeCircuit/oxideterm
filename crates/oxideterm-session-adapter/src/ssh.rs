@@ -555,32 +555,45 @@ pub fn ssh_config_for_saved_connection_hop(
     connection: &SavedConnection,
     hop_index: u32,
 ) -> Option<SshConfig> {
+    resolve_saved_connection_hop(store, settings, connection, hop_index).map(|(config, _)| config)
+}
+
+/// Returns the materialized hop and whether it is the destination of the resolved route.
+pub fn resolve_saved_connection_hop(
+    store: &ConnectionStore,
+    settings: &PersistedSettings,
+    connection: &SavedConnection,
+    hop_index: u32,
+) -> Option<(SshConfig, bool)> {
     let hop_index = hop_index as usize;
     let mut target = ssh_config_from_saved_connection(store, settings, connection)?;
     let hops = target.proxy_chain.take().unwrap_or_default();
     if hop_index == hops.len() {
-        return Some(target);
+        return Some((target, true));
     }
     if let Some(hop) = hops.into_iter().nth(hop_index) {
-        return Some(SshConfig {
-            totp: hop.totp,
-            host: hop.host,
-            port: hop.port,
-            username: hop.username,
-            auth: hop.auth,
-            timeout_secs: connection.options.effective_connect_timeout_seconds(),
-            proxy_chain: None,
-            upstream_proxy: target.upstream_proxy.clone(),
-            agent_forwarding: hop.agent_forwarding,
-            identity_agent: hop.identity_agent,
-            agent_forwarding_socket: hop.agent_forwarding_socket,
-            legacy_ssh_compatibility: hop.legacy_ssh_compatibility,
-            ssh_algorithms: hop.ssh_algorithms,
-            strict_host_key_checking: hop.strict_host_key_checking,
-            trust_host_key: hop.trust_host_key,
-            expected_host_key_fingerprint: hop.expected_host_key_fingerprint,
-            ..SshConfig::default()
-        });
+        return Some((
+            SshConfig {
+                totp: hop.totp,
+                host: hop.host,
+                port: hop.port,
+                username: hop.username,
+                auth: hop.auth,
+                timeout_secs: connection.options.effective_connect_timeout_seconds(),
+                proxy_chain: None,
+                upstream_proxy: target.upstream_proxy.clone(),
+                agent_forwarding: hop.agent_forwarding,
+                identity_agent: hop.identity_agent,
+                agent_forwarding_socket: hop.agent_forwarding_socket,
+                legacy_ssh_compatibility: hop.legacy_ssh_compatibility,
+                ssh_algorithms: hop.ssh_algorithms,
+                strict_host_key_checking: hop.strict_host_key_checking,
+                trust_host_key: hop.trust_host_key,
+                expected_host_key_fingerprint: hop.expected_host_key_fingerprint,
+                ..SshConfig::default()
+            },
+            false,
+        ));
     }
     None
 }

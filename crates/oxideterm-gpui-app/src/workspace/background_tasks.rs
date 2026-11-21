@@ -43,6 +43,7 @@ impl WorkspaceApp {
                 if workspace
                     .update(cx, |this, cx| {
                         this.background_transfers = transfers;
+                        this.sync_session_retention(cx);
                         cx.notify();
                     })
                     .is_err()

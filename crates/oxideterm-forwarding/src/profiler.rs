@@ -84,6 +84,15 @@ impl PortDetectionProfiler {
         ssh_connection: SshConnectionHandle,
         event_tx: ForwardEventDeliverySender,
     ) -> Self {
+        Self::spawn_with_lease(connection_id, ssh_connection, event_tx, None)
+    }
+
+    pub(crate) fn spawn_with_lease(
+        connection_id: String,
+        ssh_connection: SshConnectionHandle,
+        event_tx: ForwardEventDeliverySender,
+        lease: Option<oxideterm_ssh::ConnectionConsumerLease>,
+    ) -> Self {
         let detected_ports = Arc::new(Mutex::new(Vec::new()));
         let ignored_ports = Arc::new(Mutex::new(HashSet::new()));
         let lifecycle = Arc::new(AtomicU8::new(ProfilerLifecycle::Running.as_u8()));
@@ -93,6 +102,7 @@ impl PortDetectionProfiler {
         let task_lifecycle = lifecycle.clone();
         let task_connection_id = connection_id.clone();
         let task = tokio::spawn(async move {
+            let _lease = lease;
             profiler_loop(
                 task_connection_id,
                 ssh_connection,

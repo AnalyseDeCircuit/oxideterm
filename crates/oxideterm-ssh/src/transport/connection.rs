@@ -95,8 +95,12 @@ impl SshConnectionHandle {
     /// `ConnectionEntry` ownership requires the physical transport to be valid,
     /// independent of whether any terminal pane still exists.
     pub async fn transport_status(&self) -> ConnectionTransportStatus {
+        self.transport_status_now()
+    }
+
+    pub(crate) fn transport_status_now(&self) -> ConnectionTransportStatus {
         if let Some(pooled) = self.physical::<PooledSshConnection>() {
-            if pooled.is_closed().await {
+            if pooled.target.is_closed() {
                 ConnectionTransportStatus::Closed
             } else {
                 ConnectionTransportStatus::Open
@@ -701,26 +705,24 @@ impl SshConnectionHandle {
         Ok(())
     }
 
-    pub fn set_remote_forward_handler(
+    pub fn shared_remote_forward_handler<T: RemoteForwardHandler + Default>(
         &self,
-        handler: Arc<dyn RemoteForwardHandler>,
-    ) -> Result<(), SshTransportError> {
+    ) -> Result<Arc<T>, SshTransportError> {
         let Some(pooled) = self.physical::<PooledSshConnection>() else {
             return Err(SshTransportError::ConnectionFailed(
                 "no active SSH connection is available for remote port forwarding".to_string(),
             ));
         };
-        *pooled.remote_forward_handler.write() = Some(RemoteForwardRegistration {
-            connection_id: self.connection_id().to_string(),
-            handler,
+        // Each physical transport dispatches every logical node's incoming channels through one router.
+        let mut slot = pooled.remote_forward_handler.write();
+        let registration = slot.get_or_insert_with(|| RemoteForwardRegistration {
+            connection_id: self.connection_id().to_owned(),
+            handler: Arc::new(T::default()),
         });
-        Ok(())
-    }
-
-    pub fn clear_remote_forward_handler(&self) {
-        if let Some(pooled) = self.physical::<PooledSshConnection>() {
-            *pooled.remote_forward_handler.write() = None;
-        }
+        let handler: Arc<dyn std::any::Any + Send + Sync> = registration.handler.clone();
+        handler.downcast::<T>().map_err(|_| {
+            SshTransportError::ConnectionFailed("remote forward dispatcher type mismatch".into())
+        })
     }
 
     pub fn set_x11_forward_handler(

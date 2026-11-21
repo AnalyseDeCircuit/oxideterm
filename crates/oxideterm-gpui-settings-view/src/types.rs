@@ -108,6 +108,7 @@ impl SettingsSelectAnchorExt for SettingsSelect {
                 SelectAnchorId::SettingsLocalPrivilegeTotpCredential
             }
             Self::ConnectionIdleTimeout => SelectAnchorId::SettingsConnectionIdleTimeout,
+            Self::ClosedSessionRetention => SelectAnchorId::SettingsClosedSessionRetention,
             Self::ReconnectMaxAttempts => SelectAnchorId::SettingsReconnectMaxAttempts,
             Self::ReconnectBaseDelay => SelectAnchorId::SettingsReconnectBaseDelay,
             Self::ReconnectMaxDelay => SelectAnchorId::SettingsReconnectMaxDelay,

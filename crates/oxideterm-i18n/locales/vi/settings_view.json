@@ -1187,13 +1187,20 @@
         "remove_failed": "Không thể xóa các tệp tích hợp. Hãy kiểm tra quyền truy cập từ xa.",
         "installation_incomplete": "Cài đặt tích hợp Shell chưa hoàn tất. Hãy kiểm tra trạng thái trong phần cài đặt."
       },
+      "retention": {
+        "immediate": "Xóa khỏi danh sách ngay khi đóng",
+        "label": "Thời gian giữ phiên đã đóng",
+        "hint": "Thời gian giữ phiên đã đóng trong danh sách phiên đang hoạt động.",
+        "never": "Không tự động xóa"
+      },
       "idle_timeout": {
         "title": "Kết nối SSH nền",
         "description": "Cấu hình thời điểm thu hồi các kết nối SSH nền không dùng đến.",
         "label": "Thu hồi khi không hoạt động",
+        "immediate": "Ngắt kết nối ngay khi rảnh",
         "5min": "5 phút",
         "15min": "15 phút",
-        "30min": "30 phút (mặc định)",
+        "30min": "30 phút",
         "1hr": "1 giờ",
         "never": "Không bao giờ (duy trì kết nối)",
         "hint": "Các kết nối SSH nền không có terminal, phiên SFTP hoặc chuyển tiếp cổng đang mở sẽ được thu hồi sau khoảng thời gian này. Đặt thành 'Không bao giờ' để duy trì kết nối vô thời hạn.",

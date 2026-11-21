@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     sync::{
         Arc,
         atomic::{AtomicU8, Ordering},
@@ -11,8 +11,8 @@ use std::{
     time::Duration,
 };
 
-use dashmap::DashMap;
-use oxideterm_ssh::SshConnectionHandle;
+use dashmap::{DashMap, mapref::entry::Entry};
+use oxideterm_ssh::{ConnectionConsumer, SshConnectionHandle, SshConnectionRegistry};
 
 use crate::{
     ApplySavedForwardsSyncSnapshotResult, ForwardEvent, ForwardEventDeliverySender, ForwardRule,
@@ -34,6 +34,7 @@ pub struct ForwardingShutdownReport {
 
 #[derive(Clone, Debug, Default)]
 pub struct ForwardingRegistry {
+    ssh_registry: Option<SshConnectionRegistry>,
     managers: Arc<DashMap<String, Arc<ForwardingManager>>>,
     port_profilers: Arc<DashMap<String, Arc<PortDetectionProfiler>>>,
     event_tx: Option<ForwardEventDeliverySender>,
@@ -48,6 +49,7 @@ impl ForwardingRegistry {
 
     pub fn new_with_store(saved_store: SavedForwardStore) -> Self {
         Self {
+            ssh_registry: None,
             managers: Arc::new(DashMap::new()),
             port_profilers: Arc::new(DashMap::new()),
             event_tx: None,
@@ -62,6 +64,7 @@ impl ForwardingRegistry {
 
     pub fn new_with_event_delivery(event_tx: ForwardEventDeliverySender) -> Self {
         Self {
+            ssh_registry: None,
             managers: Arc::new(DashMap::new()),
             port_profilers: Arc::new(DashMap::new()),
             event_tx: Some(event_tx),
@@ -85,12 +88,19 @@ impl ForwardingRegistry {
         saved_store: SavedForwardStore,
     ) -> Self {
         Self {
+            ssh_registry: None,
             managers: Arc::new(DashMap::new()),
             port_profilers: Arc::new(DashMap::new()),
             event_tx: Some(event_tx),
             saved_store: Some(Arc::new(saved_store)),
             shutdown_state: Arc::new(AtomicU8::new(REGISTRY_RUNNING)),
         }
+    }
+
+    /// Couples listener and profiler lifetimes to the pool that owns their transport.
+    pub fn with_ssh_registry(mut self, registry: SshConnectionRegistry) -> Self {
+        self.ssh_registry = Some(registry);
+        self
     }
 
     pub fn register(
@@ -103,10 +113,11 @@ impl ForwardingRegistry {
             .entry(session_id.clone())
             .and_modify(|manager| manager.replace_ssh_connection(ssh_connection.clone()))
             .or_insert_with(|| {
-                Arc::new(ForwardingManager::new_with_event_delivery(
+                Arc::new(ForwardingManager::with_ssh_registry(
                     session_id,
                     ssh_connection,
                     self.event_tx.clone(),
+                    self.ssh_registry.clone(),
                 ))
             })
             .clone()
@@ -137,8 +148,9 @@ impl ForwardingRegistry {
             (connection_id != ssh_connection.connection_id()).then_some(connection_id)
         });
 
-        if let (Some(manager), Some(connection_id)) =
-            (existing_manager.as_ref(), previous_connection_id.as_ref())
+        if let Some(manager) = existing_manager
+            .as_ref()
+            .filter(|_| previous_connection_id.is_some())
         {
             // Tauri replaces the forwarding manager with a fresh HandleController
             // after reconnect. Native keeps the manager object so GPUI state stays
@@ -146,12 +158,14 @@ impl ForwardingRegistry {
             // handle. Suspend first, then recreate against the newly acquired
             // NodeRouter handle, so local/remote/dynamic forwards never keep
             // terminal-era or stale reconnect liveness.
-            self.stop_port_profiler(connection_id);
-            let _ = manager.suspend_all_and_save_rules().await;
+            let _ = manager
+                .suspend_connection_forwards(previous_connection_id.as_deref())
+                .await;
         }
 
-        let manager = self.register(session_id, ssh_connection.clone());
-        let restored = if previous_connection_id.is_some() {
+        let manager = self.register(session_id.clone(), ssh_connection.clone());
+        let restored = if let Some(connection) = previous_connection_id {
+            self.stop_session_port_profiler(&session_id, &connection);
             manager.restore_saved_forwards(ssh_connection).await
         } else {
             Vec::new()
@@ -188,9 +202,19 @@ impl ForwardingRegistry {
         self.register(session_id, ssh_connection)
     }
 
+    /// Forget stopped and suspended runtime rules once their logical node leaves the session tree.
+    pub fn forget_inactive_session(&self, session_id: &str) {
+        // A sibling node can still own the profiler on this physical connection.
+        self.managers
+            .remove_if(session_id, |_, manager| manager.active_forward_count() == 0);
+    }
+
     pub async fn remove(&self, session_id: &str) -> Option<Arc<ForwardingManager>> {
         let (_, manager) = self.managers.remove(session_id)?;
-        self.stop_port_profiler(manager.ssh_connection_handle().connection_id());
+        self.stop_session_port_profiler(
+            session_id,
+            manager.ssh_connection_handle().connection_id(),
+        );
         manager.stop_all().await;
         Some(manager)
     }
@@ -219,27 +243,56 @@ impl ForwardingRegistry {
     ) -> Option<Arc<PortDetectionProfiler>> {
         let event_tx = self.event_tx.clone()?;
         let connection_id = connection_id.into();
-        if self
+        if !self.accepts_new_work() {
+            return None;
+        }
+        if let Some((_, old)) = self
             .port_profilers
-            .get(&connection_id)
-            .is_some_and(|profiler| {
+            .remove_if(&connection_id, |_, profiler| {
                 profiler.is_stopped() || (restart_degraded && profiler.is_degraded())
             })
         {
-            self.port_profilers.remove(&connection_id);
+            old.stop();
         }
-        Some(
-            self.port_profilers
-                .entry(connection_id.clone())
-                .or_insert_with(|| {
-                    Arc::new(PortDetectionProfiler::spawn_with_event_delivery(
-                        connection_id,
-                        ssh_connection,
-                        event_tx,
-                    ))
-                })
-                .clone(),
-        )
+        let profiler = match self.port_profilers.entry(connection_id.clone()) {
+            Entry::Occupied(entry) => entry.get().clone(),
+            Entry::Vacant(entry) => {
+                let lease = match &self.ssh_registry {
+                    Some(registry) => Some(registry.lease_consumer(
+                        &connection_id,
+                        ConnectionConsumer::Monitor(format!(
+                            "port-profiler:{}",
+                            uuid::Uuid::new_v4()
+                        )),
+                    )?),
+                    None => None,
+                };
+                let profiler = Arc::new(PortDetectionProfiler::spawn_with_lease(
+                    connection_id.clone(),
+                    ssh_connection,
+                    event_tx,
+                    lease,
+                ));
+                entry.insert(profiler.clone());
+                profiler
+            }
+        };
+        if !self.accepts_new_work() {
+            self.stop_port_profiler(&connection_id);
+            return None;
+        }
+        Some(profiler)
+    }
+
+    /// A node teardown can stop a physical profiler only when no sibling manager shares its route.
+    pub fn stop_session_port_profiler(&self, session_id: &str, connection_id: &str) {
+        let shared = self.managers.iter().any(|manager| {
+            manager.key() != session_id
+                && manager.ssh_connection_handle().connection_id() == connection_id
+        });
+        if !shared {
+            self.stop_port_profiler(connection_id);
+        }
     }
 
     pub fn stop_port_profiler(&self, connection_id: &str) {
@@ -389,6 +442,18 @@ impl ForwardingRegistry {
             completed,
             stopped_managers,
         }
+    }
+
+    pub fn active_forward_counts_by_connection(&self) -> HashMap<String, usize> {
+        let mut counts = HashMap::new();
+        for manager in self.managers.iter() {
+            let active = manager.active_forward_count();
+            if active > 0 {
+                let handle = manager.ssh_connection_handle();
+                *counts.entry(handle.connection_id().to_owned()).or_default() += active;
+            }
+        }
+        counts
     }
 
     pub fn session_ids(&self) -> Vec<String> {

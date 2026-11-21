@@ -37,6 +37,7 @@ impl WorkspaceApp {
             self.forwarding.update(cx, |forwarding, _cx| {
                 forwarding.map_tab_to_node(tab_id, node_id.clone(), _cx);
             });
+            self.sync_session_retention(cx);
             tab_id
         };
 
@@ -139,7 +140,7 @@ impl WorkspaceApp {
         Some(ForwardsFrame {
             tab_id: tab,
             node_ready: node.is_some_and(|node| node.readiness == NodeReadiness::Ready),
-            can_save: node.is_some_and(|node| node.saved_connection_id.is_some()),
+            can_save: self.forward_owner_for_node(&node_id).is_some(),
             runtime: forwarding.runtime_snapshot(&node_id),
             ports: forwarding
                 .port_detection_state(&node_id)

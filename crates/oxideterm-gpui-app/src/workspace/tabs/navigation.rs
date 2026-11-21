@@ -418,8 +418,6 @@ impl WorkspaceApp {
         let forwarding_registry = self.forwarding_service.registry().clone();
         let forwarding_runtime = self.forwarding_runtime.clone();
         let forwarding_session_id = session_id.0.to_string();
-        self.forwarding_service
-            .release_binding_for_session(&forwarding_session_id);
         forwarding_runtime.spawn(async move {
             let _ = forwarding_registry.remove(&forwarding_session_id).await;
         });
@@ -577,9 +575,9 @@ impl WorkspaceApp {
         node_id: &NodeId,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
+    ) -> Option<usize> {
         if !self.ssh_nodes.contains_key(node_id) {
-            return;
+            return None;
         }
 
         let mut nodes_to_disconnect = self.node_router.subtree_postorder(node_id);
@@ -587,8 +585,7 @@ impl WorkspaceApp {
             nodes_to_disconnect.push(node_id.clone());
         }
         for affected_node_id in &nodes_to_disconnect {
-            // Dropping the node-scoped slot releases the dedicated browsing
-            // transport without affecting transfers that still own their lease.
+            // A later connection must not reuse an in-flight operation's old browsing slot.
             self.dedicated_sftp_connections
                 .lock()
                 .remove(affected_node_id);
@@ -606,7 +603,6 @@ impl WorkspaceApp {
             let forwarding_registry = self.forwarding_service.registry().clone();
             let forwarding_runtime = self.forwarding_runtime.clone();
             let forwarding_session_id = self.forwarding_session_id_for_node(affected_node_id);
-            self.release_forwarding_binding_for_node(affected_node_id);
             forwarding_runtime.spawn(async move {
                 let _ = forwarding_registry.remove(&forwarding_session_id).await;
             });
@@ -621,7 +617,11 @@ impl WorkspaceApp {
         let disconnected_nodes = self.workspace_runtime.update(cx, |runtime, cx| {
             runtime.disconnect_node_runtime_subtree(node_id, cx)
         });
+        let invalidated_handles = self
+            .public_mcp
+            .invalidate_disconnected_nodes(&disconnected_nodes);
         for affected_node_id in disconnected_nodes {
+            self.note_closed_ssh_session(&affected_node_id);
             if let Some(node) = self.ssh_nodes.get_mut(&affected_node_id) {
                 // Tauri disconnect_tree_node marks every affected subtree node
                 // as Disconnected. Link-down propagation uses Error elsewhere;
@@ -630,8 +630,12 @@ impl WorkspaceApp {
                 node.terminal_ids.clear();
             }
         }
-        self.persist_session_tree_snapshot();
+        let snapshot_requested = self.sync_session_retention(cx);
+        if !snapshot_requested {
+            self.persist_session_tree_snapshot();
+        }
         cx.notify();
+        Some(invalidated_handles)
     }
 
     pub(in crate::workspace) fn request_close_active_tab(
@@ -1152,6 +1156,8 @@ impl WorkspaceApp {
         // Tauri keeps node SFTP alive when the SFTP tab is closed; the tab is
         // only a view over the node-owned ConnectionEntry session.
         self.close_sftp_page(tab.id);
+        self.sftp_surface_leases
+            .remove(&sftp::SftpSurfaceId::Tab(tab.id));
         self.sftp_tab_nodes.remove(&tab.id);
         if let Some(binding) = self.standalone_sftp_tabs.remove(&tab.id) {
             let endpoint_ids =
@@ -1179,8 +1185,13 @@ impl WorkspaceApp {
         });
         self.knowledge_state()
             .update(cx, |workspace, _cx| workspace.close_tab(tab.id));
-        self.forwarding
-            .update(cx, |forwarding, cx| forwarding.unmap_tab(tab.id, cx));
+        if let Some(node) = self
+            .forwarding
+            .update(cx, |forwarding, cx| forwarding.unmap_tab(tab.id, cx))
+            && let Some(connection_id) = self.forwarding_connection_id_for_node(&node)
+        {
+            self.stop_hidden_port_profiler(&connection_id, cx);
+        }
         let mut pane_ids = Vec::new();
         let mut session_ids = Vec::new();
         if let Some(root_pane) = &tab.root_pane {
@@ -1204,6 +1215,7 @@ impl WorkspaceApp {
             }
         }
 
+        self.sync_session_retention(cx);
         self.apply_main_window_active_tab_change(previous_active_tab_id, next_active_tab_id, cx);
         self.sync_active_tab_surface(cx);
         self.needs_active_pane_focus = self

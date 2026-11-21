@@ -27,6 +27,7 @@ use oxideterm_workspace::delivery;
 
 /// Owns one proxy-chain connection attempt without duplicating authentication material.
 pub struct NativeProxyConnectRun {
+    pub(crate) parent_lease: Option<oxideterm_ssh::ConnectionConsumerLease>,
     pub generation: u64,
     pub plan: NativeSessionTreeConnectPlan,
     pub title: String,
@@ -37,6 +38,7 @@ pub struct NativeProxyConnectRun {
 
 /// Moves the one upstream-proxy value through a single preflight worker.
 pub struct ProxyConnectPreflightContext {
+    pub(crate) parent_lease: Option<oxideterm_ssh::ConnectionConsumerLease>,
     pub generation: u64,
     pub step_index: usize,
     pub upstream_proxy: Option<UpstreamProxyConfig>,
@@ -260,6 +262,7 @@ impl ConnectionFlowEntity {
     ) -> Option<ProxyConnectPreflightContext> {
         let run = self.active_proxy_connect_run.as_mut()?;
         let context = ProxyConnectPreflightContext {
+            parent_lease: run.parent_lease.take(),
             generation: run.generation,
             step_index: run.plan.current_index,
             upstream_proxy: run.upstream_proxy.take(),
@@ -279,6 +282,7 @@ impl ConnectionFlowEntity {
         if run.generation != context.generation || run.plan.current_index != context.step_index {
             return false;
         }
+        run.parent_lease = context.parent_lease;
         run.upstream_proxy = context.upstream_proxy;
         cx.notify();
         true
@@ -337,6 +341,16 @@ impl ConnectionFlowEntity {
         }
         cx.notify();
         result
+    }
+
+    pub fn proxy_chain_needs_node(&self, node_id: &oxideterm_ssh::NodeId) -> bool {
+        self.active_proxy_connect_run.as_ref().is_some_and(|run| {
+            run.plan
+                .steps
+                .iter()
+                .skip(run.plan.current_index)
+                .any(|step| &step.node_id == node_id)
+        })
     }
 
     pub fn active_proxy_connect_waits_for_node(&self, node_id: &oxideterm_ssh::NodeId) -> bool {

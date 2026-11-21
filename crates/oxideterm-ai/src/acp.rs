@@ -2121,7 +2121,7 @@ mod tests {
         let launcher = build_acp_stdio_launcher(config).unwrap();
         let (mut stdin, mut stdout, _, mut child) = launcher.spawn_process().unwrap();
         stdin.write_all(b"handshake\r\n").await.unwrap();
-        drop(stdin);
+        stdin.close().await.unwrap();
         let mut output = String::new();
         stdout.read_to_string(&mut output).await.unwrap();
         assert!(child.status().await.unwrap().success());

@@ -186,6 +186,10 @@ pub const FILE_MANAGER_SIDEBAR_DEFAULT_WIDTH: i64 = 184;
 pub const FILE_MANAGER_SIDEBAR_MIN_WIDTH: i64 = 160;
 pub const FILE_MANAGER_SIDEBAR_MAX_WIDTH: i64 = 480;
 
+fn default_closed_session_retention_secs() -> i64 {
+    NO_TIMEOUT_SECS
+}
+
 fn default_file_manager_sidebar_width() -> i64 {
     FILE_MANAGER_SIDEBAR_DEFAULT_WIDTH
 }
@@ -218,6 +222,8 @@ pub enum PluginMarketplaceSort {
 pub struct SidebarUiState {
     #[serde(default)]
     pub session_sort_order: SessionSortOrder,
+    #[serde(default = "default_closed_session_retention_secs")]
+    pub closed_session_retention_secs: i64,
     #[serde(default)]
     pub session_manual_order: Vec<String>,
     #[serde(default)]
@@ -242,6 +248,7 @@ impl Default for SidebarUiState {
             collapsed: false,
             active_section: "sessions".to_string(),
             session_sort_order: SessionSortOrder::Default,
+            closed_session_retention_secs: NO_TIMEOUT_SECS,
             session_manual_order: Vec::new(),
             hidden_local_terminal_profile_ids: Vec::new(),
             width: 300,

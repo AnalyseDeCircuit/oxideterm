@@ -32,7 +32,7 @@ enum PublicMcpTransferJob {
         overwrite: bool,
     },
     Download {
-        temporary_file: NamedTempFile,
+        directory: tempfile::TempDir,
     },
 }
 
@@ -83,21 +83,6 @@ impl PublicMcpBackground {
             ));
             return;
         }
-        let session_is_ready = self
-            .runtime_handles
-            .lock()
-            .file_sessions
-            .get(&file_session_ref)
-            .is_some_and(|record| {
-                record.client_ref == request.client_ref
-                    && record.root.is_some()
-                    && record.session.is_some()
-            });
-        if !session_is_ready {
-            request.finish(ToolEnvelope::failed("The SFTP handle is unavailable"));
-            return;
-        }
-
         let (job, initial_size) = match args {
             StartTransferArgs::Upload {
                 artifact_ref,
@@ -143,7 +128,14 @@ impl PublicMcpBackground {
                 )
             }
             StartTransferArgs::Download { .. } => {
-                let temporary_file = match NamedTempFile::new() {
+                let mut builder = tempfile::Builder::new();
+                builder.prefix("oxideterm-download-");
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    builder.permissions(std::fs::Permissions::from_mode(0o700));
+                }
+                let directory = match builder.tempdir() {
                     Ok(file) => file,
                     Err(_) => {
                         request.finish(ToolEnvelope::failed(
@@ -152,7 +144,7 @@ impl PublicMcpBackground {
                         return;
                     }
                 };
-                (PublicMcpTransferJob::Download { temporary_file }, 0)
+                (PublicMcpTransferJob::Download { directory }, 0)
             }
         };
 
@@ -161,6 +153,18 @@ impl PublicMcpBackground {
         let internal_id = transfer_ref.to_string();
         {
             let mut handles = self.runtime_handles.lock();
+            // An open grant can outlive its channel. The worker refreshes it on the current route.
+            if !handles
+                .file_sessions
+                .get(&file_session_ref)
+                .is_some_and(|record| {
+                    record.client_ref == request.client_ref && record.root.is_some()
+                })
+            {
+                drop(handles);
+                request.finish(ToolEnvelope::failed("The SFTP handle is unavailable"));
+                return;
+            }
             expire_transfer_records(&mut handles);
             let client_count = handles
                 .transfers
@@ -447,7 +451,7 @@ async fn run_transfer_job(
                 Err(error) => Err(upload_protocol_failure(error)),
             }
         }
-        PublicMcpTransferJob::Download { temporary_file } => {
+        PublicMcpTransferJob::Download { directory } => {
             let target = session
                 .canonicalize(&files::path_from_root(root, remote_path))
                 .await
@@ -465,8 +469,9 @@ async fn run_transfer_job(
                 return Err(transfer_failure("remote_too_large"));
             }
             set_transfer_total(handles, transfer_ref, info.size);
-            let local_path = temporary_file
-                .path()
+            // The downloader creates the destination exclusively inside this job's private directory.
+            let path = directory.path().join("download");
+            let local_path = path
                 .to_str()
                 .ok_or_else(|| transfer_failure("private_workspace_unavailable"))?;
             let (progress_tx, progress_task) = start_progress_delivery(handles, transfer_ref);
@@ -481,7 +486,7 @@ async fn run_transfer_job(
                 .await;
             let _ = progress_task.await;
             let total_bytes = result.map_err(transfer_protocol_failure)?;
-            let bytes = tokio::fs::read(temporary_file.path())
+            let bytes = tokio::fs::read(&path)
                 .await
                 .map_err(|_| transfer_failure("private_workspace_unavailable"))?;
             if !transfer_is_live(handles, transfer_ref, client_ref) {

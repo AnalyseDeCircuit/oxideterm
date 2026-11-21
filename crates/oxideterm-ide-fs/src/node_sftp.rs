@@ -3,7 +3,7 @@
 
 use crate::text::{check_size, decode_file};
 use oxideterm_ide_core::{MAX_EDITABLE_FILE_SIZE, TextFileFormat};
-use std::{future::Future, pin::Pin, sync::Arc};
+use std::{future::Future, pin::Pin};
 
 use futures_util::future::join_all;
 use oxideterm_backend_classification::{
@@ -15,10 +15,8 @@ use oxideterm_ide_core::{
     IdeProjectInfo, SavedFileVersion, WriteMode,
 };
 use oxideterm_sftp::{FileInfo, FileType, ListFilter, PreviewContent, SftpError, SftpSession};
-use oxideterm_ssh::{NodeId, NodeRouter, RouteError};
-use tokio::sync::Mutex;
+use oxideterm_ssh::{NodeId, NodeRouter, RouteError, RoutedSftpSession as SharedSftp};
 
-type SharedSftp = Arc<Mutex<SftpSession>>;
 type IdeOperationFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, IdeFileError>> + Send + 'a>>;
 
 #[derive(Clone, Debug)]

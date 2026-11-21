@@ -42,6 +42,7 @@
       "title": "Connection Pool",
       "loading": "Loading stats...",
       "idle_timeout": "Idle: {{min}}min",
+      "idle_timeout_immediate": "Idle: Disconnect immediately",
       "idle_timeout_never": "Idle: Never",
       "active": "Active",
       "idle": "Idle",

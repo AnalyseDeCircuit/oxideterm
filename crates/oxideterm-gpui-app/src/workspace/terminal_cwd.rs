@@ -64,8 +64,7 @@ async fn run_terminal_cwd_remote_stages<H, T, AcquireError, ListError>(
     list_timeout: Duration,
     list: impl AsyncFnOnce(H) -> Result<T, ListError>,
 ) -> Result<T, ()> {
-    // Shared SFTP initialization is registry-owned and is not cancellation-safe,
-    // so only the directory request receives an outer timeout.
+    // The listing budget starts once the shared SFTP channel is available.
     let handle = acquire.await.map_err(|_| ())?;
     tokio::time::timeout(list_timeout, list(handle))
         .await

@@ -1187,13 +1187,20 @@
         "remove_failed": "无法移除集成文件。请检查远端权限。",
         "installation_incomplete": "Shell 集成安装未完成。请到设置中检查其状态。"
       },
+      "retention": {
+        "immediate": "关闭后立即移除",
+        "label": "已关闭会话保留时间",
+        "hint": "会话关闭后，在活动会话列表中保留的时间。",
+        "never": "从不自动移除"
+      },
       "idle_timeout": {
         "title": "后台 SSH 连接",
         "description": "配置未使用的后台 SSH 连接回收策略。",
         "label": "空闲回收",
+        "immediate": "空闲时立即断开",
         "5min": "5 分钟",
         "15min": "15 分钟",
-        "30min": "30 分钟（默认）",
+        "30min": "30 分钟",
         "1hr": "1 小时",
         "never": "永不超时（保持连接）",
         "hint": "没有打开终端、SFTP 会话或端口转发的后台 SSH 连接将在此时间后回收。设为「永不超时」可保持连接始终在线。",

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use oxideterm_forwarding::{ForwardRule, ForwardStatus, ForwardType, ForwardingManager};
-use oxideterm_ssh::{ConnectionConsumer, NodeRouter, PhaseResult, ReconnectForwardRule};
+use oxideterm_ssh::{PhaseResult, ReconnectForwardRule};
 use std::sync::Arc;
 
 pub(in crate::workspace) async fn cleanup_reconnect_created_forwards(
@@ -12,15 +12,6 @@ pub(in crate::workspace) async fn cleanup_reconnect_created_forwards(
     // replacement manager which may now contain the same durable rule ID.
     for (manager, rule_id) in created_forwards {
         let _ = manager.delete_forward(rule_id).await;
-    }
-}
-
-pub(in crate::workspace) fn release_reconnect_forward_bindings(
-    router: &NodeRouter,
-    bindings: &[(String, String, ConnectionConsumer)],
-) {
-    for (_, connection_id, consumer) in bindings {
-        router.release_consumer(connection_id, consumer);
     }
 }
 

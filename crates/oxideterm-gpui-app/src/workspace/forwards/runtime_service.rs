@@ -3,12 +3,16 @@
 
 use super::*;
 use crate::workspace::delivery;
+use oxideterm_public_mcp_host::PublicMcpForwardStopHandoff;
 use oxideterm_remote_desktop::RemoteDesktopEndpoint;
 #[cfg(test)]
 use oxideterm_ssh::ConnectionPoolConfig;
-use oxideterm_ssh::{ReconnectForwardRuleSnapshot, SshConnectionRegistry};
+use oxideterm_ssh::{
+    ConnectionConsumer, ConnectionConsumerLease, ReconnectForwardRuleSnapshot,
+    SshConnectionRegistry,
+};
 use std::{
-    collections::HashSet,
+    collections::{BTreeSet, HashSet},
     sync::{
         Mutex, MutexGuard,
         atomic::{AtomicBool, Ordering},
@@ -26,6 +30,7 @@ const WORKSPACE_SESSION_SERVICE_SHUTDOWN_GRACE_PERIOD: Duration = Duration::from
 pub(in crate::workspace) struct ReconnectForwardRestoreRequest {
     pub(in crate::workspace) root_node_id: NodeId,
     pub(in crate::workspace) snapshots: Vec<ReconnectForwardRuleSnapshot>,
+    pub(in crate::workspace) snapshot_reader: Arc<ForwardRestoreReader>,
     pub(in crate::workspace) old_connection_ids_by_node: HashMap<String, String>,
     pub(in crate::workspace) owner_connection_ids: HashMap<String, Option<String>>,
     pub(in crate::workspace) cancellation: Arc<AtomicBool>,
@@ -35,11 +40,6 @@ pub(in crate::workspace) struct ReconnectForwardRestoreRequest {
 pub(in crate::workspace) struct PublicMcpForwardMutation {
     pub(in crate::workspace) rule: ForwardRule,
     pub(in crate::workspace) persisted: bool,
-}
-
-#[derive(Default)]
-struct ForwardingBindingState {
-    consumers: HashMap<String, (String, ConnectionConsumer)>,
 }
 
 #[derive(Default)]
@@ -53,56 +53,94 @@ struct RemoteDesktopTunnelBinding {
     audit: Option<oxideterm_audit::AuditContext>,
 }
 
-impl ForwardingBindingState {
-    fn connection_id(&self, session_id: &str) -> Option<String> {
-        self.consumers
-            .get(session_id)
-            .map(|(connection_id, _)| connection_id.clone())
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum ForwardRestoreBlock {
+    Stopped,
+    Deleted,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+struct ForwardIntent {
+    block: ForwardRestoreBlock,
+    revision: u64,
+    deleted_at: Option<u64>,
+}
+
+#[derive(Clone, Copy)]
+pub(in crate::workspace) struct ForwardStopRequest {
+    intent: ForwardIntent,
+    first_revision: u64,
+}
+
+impl ForwardStopRequest {
+    async fn apply(
+        &self,
+        service: &ForwardingRuntimeService,
+        manager: &ForwardingManager,
+        id: &str,
+    ) -> Result<bool, String> {
+        if service.forward_intent(id) != Some(self.intent) {
+            return Ok(false);
+        }
+        let result = self.intent.block.apply(manager, id).await;
+        if result.is_err() {
+            service.finish_desktop_stop(id, *self, false);
+        }
+        result.map(|_| true)
+    }
+}
+
+#[derive(Default)]
+struct ForwardRestoreState {
+    revision: u64,
+    readers: BTreeSet<u64>,
+    blocked: HashMap<String, ForwardIntent>,
+    // Queued desktop requests suppress restoration immediately, but only an applied stop is durable intent.
+    requested: HashMap<String, ForwardStopRequest>,
+}
+
+impl ForwardRestoreState {
+    fn current(&self, id: &str) -> Option<ForwardIntent> {
+        self.requested
+            .get(id)
+            .map(|stop| stop.intent)
+            .or_else(|| self.blocked.get(id).copied())
     }
 
-    fn node_for_connection_id(&self, connection_id: &str) -> Option<NodeId> {
-        self.consumers
-            .iter()
-            .find_map(|(session_id, (candidate_connection_id, _))| {
-                (candidate_connection_id == connection_id)
-                    .then(|| node_id_from_forwarding_session(session_id))
-                    .flatten()
-            })
+    fn next_revision(&mut self) -> u64 {
+        self.revision += 1;
+        self.revision
     }
+}
 
-    fn replace(
-        &mut self,
-        session_id: String,
-        connection_id: String,
-        consumer: ConnectionConsumer,
-    ) -> Option<(String, ConnectionConsumer)> {
-        self.consumers.insert(session_id, (connection_id, consumer))
-    }
+/// A snapshot can outlive the disconnect that captured it, including retry and cancellation.
+pub(in crate::workspace) struct ForwardRestoreReader {
+    state: Arc<Mutex<ForwardRestoreState>>,
+    revision: u64,
+}
 
-    fn remove(&mut self, session_id: &str) -> Option<(String, ConnectionConsumer)> {
-        self.consumers.remove(session_id)
-    }
-
-    fn remove_exact(
-        &mut self,
-        session_id: &str,
-        connection_id: &str,
-        consumer: &ConnectionConsumer,
-    ) {
-        if self
-            .consumers
-            .get(session_id)
-            .is_some_and(|(stored_connection_id, stored_consumer)| {
-                stored_connection_id == connection_id && stored_consumer == consumer
-            })
-        {
-            self.consumers.remove(session_id);
+impl Drop for ForwardRestoreReader {
+    fn drop(&mut self) {
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        let oldest = state.readers.first().copied();
+        state.readers.remove(&self.revision);
+        if oldest == Some(self.revision) {
+            let next = state.readers.first().copied();
+            state.blocked.retain(|_, intent| {
+                intent
+                    .deleted_at
+                    .is_none_or(|deleted| next.is_some_and(|reader| reader <= deleted))
+            });
         }
     }
+}
 
-    fn drain(&mut self) -> Vec<(String, ConnectionConsumer)> {
-        // Final session shutdown releases every logical PortForward consumer once.
-        self.consumers.drain().map(|(_, binding)| binding).collect()
+impl ForwardRestoreBlock {
+    async fn apply(self, manager: &ForwardingManager, id: &str) -> Result<(), String> {
+        manager
+            .close_forward_if_present(id, self == Self::Deleted)
+            .await
+            .map_err(|e| e.to_string())
     }
 }
 
@@ -110,20 +148,17 @@ impl ForwardingBindingState {
 pub(in crate::workspace) struct WorkspaceSessionServiceShutdownReport {
     pub(in crate::workspace) sftp: oxideterm_sftp::SftpTransferShutdownReport,
     pub(in crate::workspace) forwarding: oxideterm_forwarding::ForwardingShutdownReport,
-    pub(in crate::workspace) released_forwarding_bindings: usize,
 }
 
-/// Owns forwarding managers and SSH consumer bindings independently of UI mounts.
+/// Owns node forwarding managers independently of UI mounts.
 #[derive(Clone)]
 pub(in crate::workspace) struct ForwardingRuntimeService {
     registry: ForwardingRegistry,
-    ssh_registry: SshConnectionRegistry,
     node_router: NodeRouter,
     task_runtime: Arc<tokio::runtime::Runtime>,
     single_channel_forwarding_error: Arc<String>,
-    bindings: Arc<Mutex<ForwardingBindingState>>,
     remote_desktop_tunnels: Arc<Mutex<RemoteDesktopTunnelState>>,
-    suppressed_tunnel_restores: Arc<Mutex<HashSet<String>>>,
+    suppressed_restores: Arc<Mutex<ForwardRestoreState>>,
 }
 
 impl ForwardingRuntimeService {
@@ -135,20 +170,28 @@ impl ForwardingRuntimeService {
         single_channel_forwarding_error: String,
     ) -> Self {
         Self {
-            registry,
-            ssh_registry,
+            registry: registry.with_ssh_registry(ssh_registry),
             node_router,
             task_runtime,
             single_channel_forwarding_error: Arc::new(single_channel_forwarding_error),
-            bindings: Arc::new(Mutex::new(ForwardingBindingState::default())),
             remote_desktop_tunnels: Arc::new(Mutex::new(RemoteDesktopTunnelState::default())),
-            suppressed_tunnel_restores: Arc::new(Mutex::new(HashSet::new())),
+            suppressed_restores: Arc::default(),
         }
     }
 
     #[cfg(test)]
     pub(in crate::workspace) fn test_fixture() -> Self {
-        let ssh_registry = SshConnectionRegistry::new(ConnectionPoolConfig::default());
+        Self::test_fixture_with_registries(
+            ForwardingRegistry::new(),
+            SshConnectionRegistry::new(ConnectionPoolConfig::default()),
+        )
+    }
+
+    #[cfg(test)]
+    fn test_fixture_with_registries(
+        registry: ForwardingRegistry,
+        ssh_registry: SshConnectionRegistry,
+    ) -> Self {
         let node_router = NodeRouter::new(ssh_registry.clone());
         let task_runtime = Arc::new(
             tokio::runtime::Builder::new_current_thread()
@@ -157,7 +200,7 @@ impl ForwardingRuntimeService {
                 .expect("forwarding test runtime"),
         );
         Self::new(
-            ForwardingRegistry::new(),
+            registry,
             ssh_registry,
             node_router,
             task_runtime,
@@ -169,24 +212,208 @@ impl ForwardingRuntimeService {
         &self.registry
     }
 
-    pub(in crate::workspace) fn set_tunnel_start_requested(&self, id: &str, running: bool) {
-        let mut stopped = self
-            .suppressed_tunnel_restores
+    pub(in crate::workspace) fn track_forward_restore(&self) -> Arc<ForwardRestoreReader> {
+        let mut state = self
+            .suppressed_restores
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let revision = state.next_revision();
+        state.readers.insert(revision);
+        Arc::new(ForwardRestoreReader {
+            state: self.suppressed_restores.clone(),
+            revision,
+        })
+    }
+
+    pub(in crate::workspace) fn request_forward_start(&self, id: &str) {
+        let mut state = self
+            .suppressed_restores
             .lock()
             .unwrap_or_else(|e| e.into_inner());
-        if running {
-            stopped.remove(id);
+        state.requested.remove(id);
+        state.blocked.remove(id);
+    }
+
+    pub(in crate::workspace) fn request_forward_stop(
+        &self,
+        id: &str,
+        delete: bool,
+    ) -> ForwardStopRequest {
+        let mut state = self
+            .suppressed_restores
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if !delete
+            && let Some(intent) = state
+                .current(id)
+                .filter(|intent| intent.block == ForwardRestoreBlock::Deleted)
+        {
+            return state
+                .requested
+                .get(id)
+                .copied()
+                .unwrap_or(ForwardStopRequest {
+                    intent,
+                    first_revision: intent.revision,
+                });
+        }
+        let revision = state.next_revision();
+        let request = ForwardStopRequest {
+            intent: ForwardIntent {
+                block: if delete {
+                    ForwardRestoreBlock::Deleted
+                } else {
+                    ForwardRestoreBlock::Stopped
+                },
+                revision,
+                deleted_at: None,
+            },
+            first_revision: state
+                .requested
+                .get(id)
+                .map_or(revision, |pending| pending.first_revision),
+        };
+        state.requested.insert(id.to_owned(), request);
+        request
+    }
+
+    fn finish_desktop_stop(&self, id: &str, request: ForwardStopRequest, applied: bool) -> bool {
+        let mut state = self
+            .suppressed_restores
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let Some(pending) = state.requested.get(id).copied() else {
+            return false;
+        };
+        if pending.first_revision != request.first_revision {
+            return false;
+        }
+        if applied
+            && state
+                .blocked
+                .get(id)
+                .is_none_or(|old| old.revision <= request.intent.revision)
+        {
+            state.blocked.insert(id.to_owned(), request.intent);
+        }
+        let current = pending.intent == request.intent;
+        if current {
+            state.requested.remove(id);
+        }
+        current
+    }
+
+    fn block_forward(&self, id: &str, delete: bool) -> (Option<ForwardIntent>, ForwardIntent) {
+        let mut state = self
+            .suppressed_restores
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let previous = state.current(id);
+        if !delete
+            && let Some(deleted) =
+                previous.filter(|intent| intent.block == ForwardRestoreBlock::Deleted)
+        {
+            return (previous, deleted);
+        }
+        let block = if delete {
+            ForwardRestoreBlock::Deleted
         } else {
-            stopped.insert(id.to_string());
+            ForwardRestoreBlock::Stopped
+        };
+        let intent = ForwardIntent {
+            block,
+            revision: state.next_revision(),
+            deleted_at: None,
+        };
+        state.requested.remove(id);
+        let confirmed = state.blocked.insert(id.to_owned(), intent);
+        (confirmed, intent)
+    }
+
+    fn forward_intent(&self, id: &str) -> Option<ForwardIntent> {
+        self.suppressed_restores
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .current(id)
+    }
+
+    fn restore_block(&self, id: &str) -> Option<ForwardRestoreBlock> {
+        self.forward_intent(id).map(|intent| intent.block)
+    }
+
+    fn replace_intent_if_current(
+        &self,
+        id: &str,
+        expected: Option<ForwardIntent>,
+        next: Option<ForwardIntent>,
+    ) -> bool {
+        let mut state = self
+            .suppressed_restores
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if state.current(id) != expected {
+            return false;
+        }
+        if expected == next {
+            return true;
+        }
+        state.requested.remove(id);
+        match next {
+            Some(intent) => {
+                state.blocked.insert(id.to_owned(), intent);
+            }
+            None => {
+                state.blocked.remove(id);
+            }
+        }
+        true
+    }
+
+    fn delete_saved_rule_for_intent(&self, id: &str, intent: ForwardIntent) -> Result<(), String> {
+        self.registry
+            .delete_persisted_forward(id)
+            .map_err(|e| e.to_string())?;
+        self.finish_forward_delete(id, Some(intent));
+        Ok(())
+    }
+
+    fn finish_forward_delete(&self, id: &str, expected: Option<ForwardIntent>) {
+        let mut state = self
+            .suppressed_restores
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if expected.is_none_or(|intent| intent.block != ForwardRestoreBlock::Deleted)
+            || state.blocked.get(id).copied() != expected
+        {
+            return;
+        }
+        if state.readers.is_empty() {
+            state.blocked.remove(id);
+        } else {
+            // Readers that captured the rule before the durable removal can still recreate it.
+            let deleted_at = state.next_revision();
+            if let Some(intent) = state.blocked.get_mut(id) {
+                intent.deleted_at = Some(deleted_at);
+            }
         }
     }
 
-    fn tunnel_restore_allowed(&self, id: &str) -> bool {
-        !self
-            .suppressed_tunnel_restores
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .contains(id)
+    async fn discard_blocked_restore(
+        &self,
+        manager: &ForwardingManager,
+        id: &str,
+    ) -> Result<bool, String> {
+        let Some(block) = self.restore_block(id) else {
+            return Ok(false);
+        };
+        // A user can delete a rule while its listener is still starting or stopping.
+        block.apply(manager, id).await?;
+        if block == ForwardRestoreBlock::Stopped
+            && self.restore_block(id) == Some(ForwardRestoreBlock::Deleted)
+        {
+            ForwardRestoreBlock::Deleted.apply(manager, id).await?;
+        }
+        Ok(true)
     }
 
     fn persist_started_rule(
@@ -198,10 +425,10 @@ impl ForwardingRuntimeService {
         // Serialize the final durable write with a user's stop/delete intent.
         // A reconnect snapshot captured earlier cannot recreate the saved entry.
         let stopped = self
-            .suppressed_tunnel_restores
+            .suppressed_restores
             .lock()
             .unwrap_or_else(|e| e.into_inner());
-        if stopped.contains(&rule.id) {
+        if stopped.current(&rule.id).is_some() {
             return Ok(false);
         }
         self.persist_rule(session, owner, rule)?;
@@ -211,28 +438,23 @@ impl ForwardingRuntimeService {
     pub(in crate::workspace) async fn stop_saved_tunnel(
         &self,
         id: &str,
-        delete: bool,
+        stop: ForwardStopRequest,
     ) -> Result<(), String> {
-        self.set_tunnel_start_requested(id, false);
+        let _reader = self.track_forward_restore();
+        let intent = stop.intent;
         // Stopping a saved entry must not connect its host or disturb sibling consumers.
         for session in self.registry.session_ids() {
             if let Some(manager) = self.registry.get(&session)
-                && manager.has_rule(id)
+                && !stop.apply(self, &manager, id).await?
             {
-                if delete {
-                    manager
-                        .delete_forward(id)
-                        .await
-                        .map_err(|e| e.to_string())?;
-                } else {
-                    manager.stop_forward(id).await.map_err(|e| e.to_string())?;
-                }
+                return Ok(());
             }
         }
-        if delete {
-            self.registry
-                .delete_persisted_forward(id)
-                .map_err(|e| e.to_string())
+        if !self.finish_desktop_stop(id, stop, true) {
+            return Ok(());
+        }
+        if intent.block == ForwardRestoreBlock::Deleted {
+            self.delete_saved_rule_for_intent(id, intent)
         } else if self
             .registry
             .list_all_saved_forwards()
@@ -253,55 +475,17 @@ impl ForwardingRuntimeService {
         owner: String,
         id: String,
     ) -> Result<(), String> {
-        if !self.tunnel_restore_allowed(&id) {
+        let _reader = self.track_forward_restore();
+        if self.restore_block(&id).is_some() {
             return Ok(());
         }
-        let (binding, result) = self
-            .execute_operation(
-                node,
-                Some(owner),
-                ForwardingRuntimeOperation::Restart { forward_id: id },
-            )
-            .await;
-        self.remember_binding(binding, false);
-        result
-    }
-
-    async fn shutdown_session_runtime(
-        &self,
-        grace_period: Duration,
-    ) -> (oxideterm_forwarding::ForwardingShutdownReport, usize) {
-        let manager_bindings = self
-            .registry
-            .session_ids()
-            .into_iter()
-            .filter_map(|session_id| {
-                self.registry.get(&session_id).map(|manager| {
-                    (
-                        manager.ssh_connection_handle().connection_id().to_string(),
-                        ConnectionConsumer::PortForward(session_id),
-                    )
-                })
-            })
-            .collect::<Vec<_>>();
-        let report = self.registry.shutdown(grace_period).await;
-        if !report.started {
-            return (report, 0);
-        }
-
-        let mut bindings = self
-            .binding_state()
-            .drain()
-            .into_iter()
-            .collect::<HashSet<_>>();
-        // A manager may exist before its worker result records the same binding.
-        bindings.extend(manager_bindings);
-        let released_bindings = bindings.len();
-        for (connection_id, consumer) in bindings {
-            // Forward listeners stop before their SSH ownership is released.
-            self.ssh_registry.release(&connection_id, &consumer);
-        }
-        (report, released_bindings)
+        self.execute_operation(
+            node,
+            Some(owner),
+            ForwardingRuntimeOperation::Restart { forward_id: id },
+            None,
+        )
+        .await
     }
 
     pub(in crate::workspace) fn session_id_for_node(node_id: &NodeId) -> String {
@@ -313,15 +497,7 @@ impl ForwardingRuntimeService {
     }
 
     pub(in crate::workspace) fn connection_id_for_node(&self, node_id: &NodeId) -> Option<String> {
-        self.binding_state()
-            .connection_id(&Self::session_id_for_node(node_id))
-    }
-
-    pub(in crate::workspace) fn node_for_connection_id(
-        &self,
-        connection_id: &str,
-    ) -> Option<NodeId> {
-        self.binding_state().node_for_connection_id(connection_id)
+        self.node_router.connection_id_for_node(node_id)
     }
 
     pub(in crate::workspace) fn manager_for_node(
@@ -357,8 +533,8 @@ impl ForwardingRuntimeService {
         target_host: String,
         target_port: u16,
     ) -> Result<RemoteDesktopEndpoint, String> {
-        let manager = self
-            .owned_manager_for_node(node_id, Some(owner_connection_id))
+        let (manager, _operation) = self
+            .manager_for_node_async(node_id, Some(owner_connection_id))
             .await?;
         let mut rule = ForwardRule::local("127.0.0.1", 0, target_host, target_port);
         rule.description = format!("{REMOTE_DESKTOP_TUNNEL_DESCRIPTION_PREFIX}{lease_id}");
@@ -415,6 +591,61 @@ impl ForwardingRuntimeService {
             .and_then(|forward| forward.owner_connection_id)
     }
 
+    async fn finish_mcp_forward_mutation(
+        &self,
+        node_id: &NodeId,
+        owner: Option<&str>,
+        manager: &ForwardingManager,
+        rule: ForwardRule,
+        persist: bool,
+        original: Option<&ForwardRule>,
+    ) -> Result<PublicMcpForwardMutation, String> {
+        let result = {
+            let state = self
+                .suppressed_restores
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            let block = state.current(&rule.id).map(|intent| intent.block);
+            if block == Some(ForwardRestoreBlock::Deleted)
+                || (block.is_some() && rule.status == ForwardStatus::Active)
+            {
+                None
+            } else {
+                Some(
+                    persist
+                        && self
+                            .registry
+                            .sync_persisted_forward_rule(
+                                &rule.id,
+                                &Self::session_id_for_node(node_id),
+                                owner.map(ToOwned::to_owned),
+                                rule.clone(),
+                            )
+                            .is_ok_and(|saved| saved.is_some()),
+                )
+            }
+        };
+        if let Some(persisted) = result {
+            return Ok(PublicMcpForwardMutation { rule, persisted });
+        }
+        self.discard_blocked_restore(manager, &rule.id).await?;
+        if let Some(original) = original {
+            let state = self
+                .suppressed_restores
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            if state
+                .current(&rule.id)
+                .is_some_and(|intent| intent.block == ForwardRestoreBlock::Stopped)
+            {
+                let mut stopped = rule;
+                stopped.status = ForwardStatus::Stopped;
+                manager.revert_stopped_update(&stopped, original);
+            }
+        }
+        Err("The forward changed during the operation".into())
+    }
+
     pub(in crate::workspace) async fn public_mcp_open_forward(
         &self,
         node_id: &NodeId,
@@ -423,24 +654,23 @@ impl ForwardingRuntimeService {
         check_health: bool,
         persist: bool,
     ) -> Result<PublicMcpForwardMutation, String> {
-        let manager = self
-            .owned_manager_for_node(node_id, owner_connection_id)
+        let _reader = self.track_forward_restore();
+        let (manager, _operation) = self
+            .manager_for_node_async(node_id, owner_connection_id)
             .await?;
         let rule = manager
             .create_forward_with_health_check(rule, check_health)
             .await
             .map_err(|error| error.to_string())?;
-        let persisted = persist
-            && self
-                .registry
-                .sync_persisted_forward_rule(
-                    &rule.id,
-                    &Self::session_id_for_node(node_id),
-                    owner_connection_id.map(ToOwned::to_owned),
-                    rule.clone(),
-                )
-                .is_ok_and(|saved| saved.is_some());
-        Ok(PublicMcpForwardMutation { rule, persisted })
+        self.finish_mcp_forward_mutation(
+            node_id,
+            owner_connection_id,
+            &manager,
+            rule,
+            persist,
+            None,
+        )
+        .await
     }
 
     pub(in crate::workspace) async fn public_mcp_change_forward(
@@ -452,8 +682,9 @@ impl ForwardingRuntimeService {
         update: ForwardUpdate,
         persist: bool,
     ) -> Result<PublicMcpForwardMutation, String> {
-        let manager = self
-            .owned_manager_for_node(node_id, owner_connection_id)
+        let _reader = self.track_forward_restore();
+        let (manager, _operation) = self
+            .manager_for_node_async(node_id, owner_connection_id)
             .await?;
         let original = manager
             .list_forwards()
@@ -473,39 +704,43 @@ impl ForwardingRuntimeService {
                 .stop_forward(forward_id)
                 .await
                 .map_err(|error| error.to_string())?;
-        }
-        let updated = match manager.update_forward(forward_id, update) {
-            Ok(updated) => updated,
-            Err(error) => {
-                if restart {
-                    let _ = manager.restart_forward(forward_id).await;
-                }
-                return Err(error.to_string());
+            if self.discard_blocked_restore(&manager, forward_id).await? {
+                return Err("The forward changed during the operation".into());
             }
-        };
+        }
+        let updated = manager
+            .update_forward(forward_id, update)
+            .map_err(|error| error.to_string())?;
         let rule = if restart {
             match manager.restart_forward(forward_id).await {
                 Ok(rule) => rule,
                 Err(error) => {
-                    let _ = manager.update_forward(forward_id, forward_update_from_rule(&original));
-                    let _ = manager.restart_forward(forward_id).await;
+                    // Only the failed edit's stopped definition can be rolled back.
+                    if manager.revert_stopped_update(&updated, &original)
+                        && self.restore_block(forward_id).is_none()
+                    {
+                        let rollback = manager.restart_forward(forward_id).await;
+                        if let Err(rollback) = rollback {
+                            self.discard_blocked_restore(&manager, forward_id).await?;
+                            return Err(format!("{error}; {rollback}"));
+                        }
+                    }
+                    self.discard_blocked_restore(&manager, forward_id).await?;
                     return Err(error.to_string());
                 }
             }
         } else {
             updated
         };
-        let persisted = persist
-            && self
-                .registry
-                .sync_persisted_forward_rule(
-                    &rule.id,
-                    &Self::session_id_for_node(node_id),
-                    owner_connection_id.map(ToOwned::to_owned),
-                    rule.clone(),
-                )
-                .is_ok_and(|saved| saved.is_some());
-        Ok(PublicMcpForwardMutation { rule, persisted })
+        self.finish_mcp_forward_mutation(
+            node_id,
+            owner_connection_id,
+            &manager,
+            rule,
+            persist,
+            Some(&original),
+        )
+        .await
     }
 
     pub(in crate::workspace) async fn public_mcp_stop_forward(
@@ -513,12 +748,32 @@ impl ForwardingRuntimeService {
         node_id: &NodeId,
         owner_connection_id: Option<&str>,
         forward_id: &str,
-    ) -> Result<ForwardRule, String> {
-        self.owned_manager_for_node(node_id, owner_connection_id)
-            .await?
-            .stop_forward(forward_id)
-            .await
-            .map_err(|error| error.to_string())
+    ) -> Result<(ForwardRule, PublicMcpForwardStopHandoff), String> {
+        let _reader = self.track_forward_restore();
+        let (manager, connection) = self
+            .manager_for_node_async(node_id, owner_connection_id)
+            .await?;
+        let (previous, intent) = self.block_forward(forward_id, false);
+        match manager.stop_forward(forward_id).await {
+            Ok(stopped) => {
+                if self.restore_block(forward_id) == Some(ForwardRestoreBlock::Deleted) {
+                    ForwardRestoreBlock::Deleted
+                        .apply(&manager, forward_id)
+                        .await?;
+                }
+                Ok((
+                    stopped,
+                    PublicMcpForwardStopHandoff {
+                        revision: intent.revision,
+                        connection,
+                    },
+                ))
+            }
+            Err(error) => {
+                self.replace_intent_if_current(forward_id, Some(intent), previous);
+                Err(error.to_string())
+            }
+        }
     }
 
     pub(in crate::workspace) async fn public_mcp_restart_forward(
@@ -528,24 +783,33 @@ impl ForwardingRuntimeService {
         forward_id: &str,
         persist: bool,
     ) -> Result<PublicMcpForwardMutation, String> {
-        let manager = self
-            .owned_manager_for_node(node_id, owner_connection_id)
+        let _reader = self.track_forward_restore();
+        let (manager, _operation) = self
+            .manager_for_node_async(node_id, owner_connection_id)
             .await?;
+        // A grant to restart a stopped rule does not override a concurrent deletion.
+        let prior = self.forward_intent(forward_id);
+        if prior.is_some_and(|intent| intent.block == ForwardRestoreBlock::Deleted) {
+            return Err("The forward is being removed".into());
+        }
         let rule = manager
             .restart_forward(forward_id)
             .await
             .map_err(|error| error.to_string())?;
-        let persisted = persist
-            && self
-                .registry
-                .sync_persisted_forward_rule(
-                    &rule.id,
-                    &Self::session_id_for_node(node_id),
-                    owner_connection_id.map(ToOwned::to_owned),
-                    rule.clone(),
-                )
-                .is_ok_and(|saved| saved.is_some());
-        Ok(PublicMcpForwardMutation { rule, persisted })
+        if !self.replace_intent_if_current(forward_id, prior, None)
+            && self.discard_blocked_restore(&manager, forward_id).await?
+        {
+            return Err("The forward was stopped during restart".into());
+        }
+        self.finish_mcp_forward_mutation(
+            node_id,
+            owner_connection_id,
+            &manager,
+            rule,
+            persist,
+            None,
+        )
+        .await
     }
 
     pub(in crate::workspace) async fn public_mcp_remove_forward(
@@ -555,15 +819,19 @@ impl ForwardingRuntimeService {
         forward_id: &str,
         remove_saved: bool,
     ) -> Result<bool, String> {
-        self.owned_manager_for_node(node_id, owner_connection_id)
-            .await?
-            .delete_forward(forward_id)
-            .await
-            .map_err(|error| error.to_string())?;
-        if !remove_saved {
-            return Ok(false);
+        let _reader = self.track_forward_restore();
+        let (manager, _operation) = self
+            .manager_for_node_async(node_id, owner_connection_id)
+            .await?;
+        let (previous, intent) = self.block_forward(forward_id, true);
+        if let Err(error) = manager.delete_forward(forward_id).await {
+            self.replace_intent_if_current(forward_id, Some(intent), previous);
+            return Err(error.to_string());
         }
-        Ok(self.registry.delete_persisted_forward(forward_id).is_ok())
+        let saved_removed =
+            remove_saved && self.registry.delete_persisted_forward(forward_id).is_ok();
+        self.finish_forward_delete(forward_id, Some(intent));
+        Ok(saved_removed)
     }
 
     pub(in crate::workspace) fn public_mcp_forward_stats(
@@ -582,8 +850,10 @@ impl ForwardingRuntimeService {
         node_id: &NodeId,
         owner_connection_id: Option<&str>,
     ) -> Result<PortDetectionSnapshot, String> {
-        self.owned_manager_for_node(node_id, owner_connection_id)
-            .await?
+        let (manager, _operation) = self
+            .manager_for_node_async(node_id, owner_connection_id)
+            .await?;
+        manager
             .scan_remote_ports()
             .await
             .map_err(|error| error.to_string())
@@ -595,16 +865,16 @@ impl ForwardingRuntimeService {
         forward_id: &str,
         persisted: bool,
     ) {
+        let _reader = self.track_forward_restore();
+        let (_, intent) = self.block_forward(forward_id, !persisted);
         if persisted {
             let _ = self.registry.update_auto_start(forward_id, false);
         }
-        let Some(manager) = self.manager_for_node(node_id) else {
-            return;
-        };
-        if persisted {
-            let _ = manager.stop_forward(forward_id).await;
-        } else {
-            let _ = manager.delete_forward(forward_id).await;
+        if let Some(manager) = self.manager_for_node(node_id) {
+            let _ = intent.block.apply(&manager, forward_id).await;
+        }
+        if !persisted {
+            self.finish_forward_delete(forward_id, Some(intent));
         }
     }
 
@@ -614,11 +884,26 @@ impl ForwardingRuntimeService {
         owner_connection_id: Option<&str>,
         original_rule: &ForwardRule,
         revoked_rule: &ForwardRule,
+        stop_handoff: Option<&PublicMcpForwardStopHandoff>,
         created_by_client: bool,
         persisted: bool,
     ) -> bool {
-        let Some(manager) = self.manager_for_node(node_id) else {
-            return false;
+        let _reader = self.track_forward_restore();
+        let restore_active = !created_by_client && original_rule.status == ForwardStatus::Active;
+        // Rollback can stop the last listener before restarting it with its original target.
+        let (manager, _operation) = if restore_active {
+            let Ok((manager, lease)) = self
+                .manager_for_node_async(node_id, owner_connection_id)
+                .await
+            else {
+                return false;
+            };
+            (manager, Some(lease))
+        } else {
+            let Some(manager) = self.manager_for_node(node_id) else {
+                return false;
+            };
+            (manager, None)
         };
         let Some(current_rule) = manager
             .list_forwards()
@@ -639,9 +924,26 @@ impl ForwardingRuntimeService {
             return false;
         }
         if created_by_client && !persisted {
-            return manager.delete_forward(&current_rule.id).await.is_ok();
+            let (previous, intent) = self.block_forward(&current_rule.id, true);
+            if manager.delete_forward(&current_rule.id).await.is_err() {
+                self.replace_intent_if_current(&current_rule.id, Some(intent), previous);
+                return false;
+            }
+            self.finish_forward_delete(&current_rule.id, Some(intent));
+            return true;
         }
 
+        // Reconcile the original owner only after matching the revoked mutation.
+        let prior = self.forward_intent(&current_rule.id);
+        let stop_revision = stop_handoff.map(|stop| stop.revision);
+        if prior.is_some_and(|intent| intent.block == ForwardRestoreBlock::Deleted)
+            || (restore_active && prior.map(|intent| intent.revision) != stop_revision)
+        {
+            return false;
+        }
+        if !restore_active {
+            self.block_forward(&current_rule.id, false);
+        }
         if current_rule.status == ForwardStatus::Active
             && manager.stop_forward(&current_rule.id).await.is_err()
         {
@@ -652,41 +954,33 @@ impl ForwardingRuntimeService {
         else {
             return false;
         };
-        let restored_rule = if !created_by_client && original_rule.status == ForwardStatus::Active {
+        let restored_rule = if restore_active {
             let Ok(restored_active) = manager.restart_forward(&original_rule.id).await else {
                 return false;
             };
+            if !self.replace_intent_if_current(&original_rule.id, prior, None)
+                && self
+                    .discard_blocked_restore(&manager, &original_rule.id)
+                    .await
+                    .unwrap_or(true)
+            {
+                return false;
+            }
             restored_active
         } else {
             restored_stopped
         };
 
-        if persisted {
-            let restored_forward_id = restored_rule.id.clone();
-            return self
-                .registry
-                .sync_persisted_forward_rule(
-                    &restored_forward_id,
-                    &Self::session_id_for_node(node_id),
-                    owner_connection_id.map(ToOwned::to_owned),
-                    restored_rule,
-                )
-                .is_ok();
-        }
-        true
-    }
-
-    async fn owned_manager_for_node(
-        &self,
-        node_id: &NodeId,
-        owner_connection_id: Option<&str>,
-    ) -> Result<Arc<ForwardingManager>, String> {
-        let (manager, binding) = self
-            .manager_for_node_async(node_id, owner_connection_id)
-            .await?;
-        // ForwardingRuntimeService remains the PortForward consumer owner.
-        self.remember_binding(binding, false);
-        Ok(manager)
+        self.finish_mcp_forward_mutation(
+            node_id,
+            owner_connection_id,
+            &manager,
+            restored_rule,
+            persisted,
+            None,
+        )
+        .await
+        .is_ok_and(|result| !persisted || result.persisted)
     }
 
     pub(super) fn snapshot_for_node(&self, node_id: &NodeId) -> ForwardingRuntimeSnapshot {
@@ -741,20 +1035,22 @@ impl ForwardingRuntimeService {
             .collect()
     }
 
+    fn saved_owner_for_node(&self, node_id: &NodeId) -> Option<String> {
+        self.node_router
+            .node_metadata(node_id)?
+            .origin
+            .saved_target_id()
+            .map(str::to_owned)
+    }
+
     fn saved_records_for_node(
         &self,
         node_id: &NodeId,
     ) -> Vec<oxideterm_forwarding::PersistedForward> {
-        let owner = self
-            .node_router
-            .node_metadata(node_id)
-            .and_then(|node| node.origin.saved_connection_id().map(str::to_owned));
-        match owner {
-            Some(owner) => self.registry.load_owned_forwards(&owner),
-            None => self
-                .registry
-                .load_persisted_forwards(&Self::session_id_for_node(node_id)),
-        }
+        // Runtime node IDs can be reused after restart. Only a saved connection owns disk rules.
+        self.saved_owner_for_node(node_id)
+            .map(|owner| self.registry.load_owned_forwards(&owner))
+            .unwrap_or_default()
     }
 
     fn remote_desktop_tunnel_state(&self) -> MutexGuard<'_, RemoteDesktopTunnelState> {
@@ -816,32 +1112,43 @@ impl ForwardingRuntimeService {
         operation: ForwardingRuntimeOperation,
         worker_tx: delivery::ActiveDeliverySender<ForwardingWorkerResult>,
     ) {
-        let intent = match &operation {
-            ForwardingRuntimeOperation::Create { rule, .. } => Some((&rule.id, true)),
-            ForwardingRuntimeOperation::Restart { forward_id } => Some((forward_id, true)),
-            ForwardingRuntimeOperation::Stop { forward_id }
-            | ForwardingRuntimeOperation::Delete { forward_id } => Some((forward_id, false)),
+        let stop = match &operation {
+            ForwardingRuntimeOperation::Create { rule, .. } => {
+                self.request_forward_start(&rule.id);
+                None
+            }
+            ForwardingRuntimeOperation::Restart { forward_id } => {
+                self.request_forward_start(forward_id);
+                None
+            }
+            ForwardingRuntimeOperation::Stop { forward_id } => {
+                Some(self.request_forward_stop(forward_id, false))
+            }
+            ForwardingRuntimeOperation::Delete { forward_id } => {
+                Some(self.request_forward_stop(forward_id, true))
+            }
             _ => None,
         };
-        if let Some((id, running)) = intent
-            && self
-                .registry
-                .list_all_saved_forwards()
-                .iter()
-                .any(|saved| &saved.id == id && saved.tunnel.is_some())
-        {
-            self.set_tunnel_start_requested(id, running);
-        }
+        let starting = matches!(
+            &operation,
+            ForwardingRuntimeOperation::Create { .. }
+                | ForwardingRuntimeOperation::Restart { .. }
+                | ForwardingRuntimeOperation::Quick { .. }
+        );
+        let handoff = starting
+            .then(|| self.connection_handoff(&node_id))
+            .flatten();
+        let reader = self.track_forward_restore();
         let service = self.clone();
         self.task_runtime.spawn(async move {
-            let (binding, result) = service
-                .execute_operation(node_id, owner_connection_id, operation)
+            let (_handoff, _reader) = (handoff, reader);
+            let result = service
+                .execute_operation(node_id, owner_connection_id, operation, stop)
                 .await;
             let _ = worker_tx.send(ForwardingWorkerResult::Operation {
                 tab_id,
                 message_key,
                 sync_saved_forwards_on_success,
-                binding,
                 result,
             });
         });
@@ -856,7 +1163,7 @@ impl ForwardingRuntimeService {
     ) {
         let service = self.clone();
         self.task_runtime.spawn(async move {
-            let (connection_id, binding, result) = service
+            let (connection_id, result) = service
                 .scan_ports(
                     node_id.clone(),
                     owner_connection_id,
@@ -866,45 +1173,74 @@ impl ForwardingRuntimeService {
             let _ = worker_tx.send(ForwardingWorkerResult::PortScan {
                 node_id,
                 connection_id,
-                binding,
                 result,
             });
         });
     }
 
-    pub(super) fn submit_session_restore(
-        &self,
-        node_id: NodeId,
-        worker_tx: delivery::ActiveDeliverySender<ForwardingWorkerResult>,
-    ) {
+    pub(super) fn submit_session_restore(&self, node_id: NodeId) {
+        let reader = self.track_forward_restore();
+        if !self.node_has_restorable_rules(&node_id) {
+            return;
+        }
+        let handoff = self.connection_handoff(&node_id);
         let service = self.clone();
         self.task_runtime.spawn(async move {
-            let session_id = Self::session_id_for_node(&node_id);
-            let consumer = ConnectionConsumer::PortForward(session_id.clone());
-            let binding = match service
-                .node_router
-                .acquire_connection_wait(&node_id, consumer.clone(), Duration::from_secs(15))
-                .await
-            {
-                Ok(resolved) => {
-                    let connection_id = resolved.connection_id.clone();
-                    let _ = service
-                        .registry
-                        .restore_session(&session_id, resolved.handle)
-                        .await;
-                    if let Some(manager) = service.registry.get(&session_id) {
-                        for rule in manager.list_forwards() {
-                            if !service.tunnel_restore_allowed(&rule.id) {
-                                let _ = manager.stop_forward(&rule.id).await;
-                            }
-                        }
-                    }
-                    Some((session_id, connection_id, consumer))
-                }
-                Err(_) => None,
-            };
-            let _ = worker_tx.send(ForwardingWorkerResult::Binding { binding });
+            let (_handoff, _reader) = (handoff, reader);
+            service.restore_session_for_node(&node_id).await;
         });
+    }
+
+    pub(in crate::workspace) async fn suspend_session(
+        &self,
+        session: &str,
+        connection: Option<&str>,
+    ) {
+        let Some(connection) = connection else {
+            return;
+        };
+        self.registry
+            .stop_session_port_profiler(session, connection);
+        let Some(manager) = self.registry.get(session) else {
+            return;
+        };
+        let _reader = self.track_forward_restore();
+        for rule in manager.suspend_connection_forwards(Some(connection)).await {
+            // Suspension removes a listener while it awaits shutdown, then publishes the row again.
+            let _ = self.discard_blocked_restore(&manager, &rule.id).await;
+        }
+    }
+
+    fn node_has_restorable_rules(&self, node_id: &NodeId) -> bool {
+        if let Some(manager) = self.manager_for_node(node_id) {
+            let needs_rebind = (manager.active_forward_count() > 0
+                || manager.suspension_in_progress())
+                && self.node_router.connection_id_for_node(node_id).as_deref()
+                    != Some(manager.ssh_connection_handle().connection_id());
+            needs_rebind
+                || manager
+                    .list_stopped_forwards()
+                    .iter()
+                    .any(|rule| rule.status == ForwardStatus::Suspended)
+        } else {
+            self.saved_records_for_node(node_id)
+                .iter()
+                .any(|saved| saved.auto_start && saved.tunnel.is_none())
+        }
+    }
+
+    async fn restore_session_for_node(&self, node_id: &NodeId) {
+        let owner = self.saved_owner_for_node(node_id);
+        if let Ok((manager, _operation)) =
+            self.manager_for_node_async(node_id, owner.as_deref()).await
+        {
+            let _ = manager
+                .restore_saved_forwards(manager.ssh_connection_handle())
+                .await;
+            for rule in manager.list_forwards() {
+                let _ = self.discard_blocked_restore(&manager, &rule.id).await;
+            }
+        }
     }
 
     pub(super) fn submit_reconnect_restore(
@@ -912,11 +1248,19 @@ impl ForwardingRuntimeService {
         request: ReconnectForwardRestoreRequest,
         worker_tx: delivery::ActiveDeliverySender<ForwardingWorkerResult>,
     ) {
+        let handoffs: Vec<_> = request
+            .snapshots
+            .iter()
+            .filter(|entry| !entry.rules.is_empty())
+            .filter_map(|entry| self.connection_handoff(&NodeId::new(entry.node_id.clone())))
+            .collect();
         let service = self.clone();
         self.task_runtime.spawn(async move {
+            let _handoffs = handoffs;
             let ReconnectForwardRestoreRequest {
                 root_node_id,
                 snapshots,
+                snapshot_reader: _snapshot_reader,
                 old_connection_ids_by_node,
                 owner_connection_ids,
                 cancellation,
@@ -926,26 +1270,18 @@ impl ForwardingRuntimeService {
             let mut failures = 0_u32;
             let mut failure_details = Vec::<String>::new();
             let mut created_forwards = Vec::<(Arc<ForwardingManager>, String)>::new();
-            let mut bindings = Vec::<(String, String, ConnectionConsumer)>::new();
             for entry in snapshots {
                 if !cancellation.load(Ordering::Acquire) {
                     cleanup_reconnect_created_forwards(&created_forwards).await;
-                    release_reconnect_forward_bindings(&service.node_router, &bindings);
                     return;
                 }
                 let entry_node_id = NodeId::new(entry.node_id.clone());
                 let session_id = Self::session_id_for_node(&entry_node_id);
-                let consumer = ConnectionConsumer::PortForward(session_id.clone());
-                let resolved = match service
-                    .node_router
-                    .acquire_connection_wait(
-                        &entry_node_id,
-                        consumer.clone(),
-                        Duration::from_secs(15),
-                    )
-                    .await
-                {
-                    Ok(resolved) => resolved,
+                if entry.rules.is_empty() {
+                    continue;
+                }
+                let lease = match service.lease_operation(&entry_node_id).await {
+                    Ok(lease) => lease,
                     Err(error) => {
                         failures += entry.rules.len() as u32;
                         for rule in &entry.rules {
@@ -958,37 +1294,27 @@ impl ForwardingRuntimeService {
                         continue;
                     }
                 };
-                let binding = (
-                    session_id.clone(),
-                    resolved.connection_id.clone(),
-                    consumer.clone(),
-                );
                 if !cancellation.load(Ordering::Acquire) {
-                    service
-                        .node_router
-                        .release_consumer(&resolved.connection_id, &consumer);
                     cleanup_reconnect_created_forwards(&created_forwards).await;
-                    release_reconnect_forward_bindings(&service.node_router, &bindings);
                     return;
                 }
                 let manager = service
                     .registry
                     .register_for_reconnect_restore(
                         session_id.clone(),
-                        resolved.handle,
+                        lease.handle().clone(),
                         old_connection_ids_by_node
                             .get(&entry.node_id)
                             .map(String::as_str),
                     )
                     .await;
-                bindings.push(binding);
                 let mut live_keys = manager
                     .list_forwards()
                     .into_iter()
                     .map(|rule| forward_restore_key_for_rule(&rule))
                     .collect::<HashSet<_>>();
                 for snapshot_rule in entry.rules {
-                    if !service.tunnel_restore_allowed(&snapshot_rule.id) {
+                    if service.restore_block(&snapshot_rule.id).is_some() {
                         continue;
                     }
                     let remote_desktop_lease_id = snapshot_rule
@@ -1011,7 +1337,6 @@ impl ForwardingRuntimeService {
                     }
                     if !cancellation.load(Ordering::Acquire) {
                         cleanup_reconnect_created_forwards(&created_forwards).await;
-                        release_reconnect_forward_bindings(&service.node_router, &bindings);
                         return;
                     }
                     let failure_label = forward_restore_failure_label(&snapshot_rule);
@@ -1025,9 +1350,14 @@ impl ForwardingRuntimeService {
                     };
                     match manager.create_forward_with_health_check(rule, true).await {
                         Ok(created) => {
-                            if !service.tunnel_restore_allowed(&created.id) {
-                                let _ = manager.delete_forward(&created.id).await;
-                                continue;
+                            match service.discard_blocked_restore(&manager, &created.id).await {
+                                Ok(true) => continue,
+                                Ok(false) => {}
+                                Err(error) => {
+                                    failures += 1;
+                                    failure_details.push(format!("{failure_label}: {error}"));
+                                    continue;
+                                }
                             }
                             live_keys.insert(forward_restore_key_for_rule(&created));
                             if let Some(lease_id) = remote_desktop_lease_id {
@@ -1050,7 +1380,14 @@ impl ForwardingRuntimeService {
                                 ) {
                                     Ok(true) => {}
                                     Ok(false) => {
-                                        let _ = manager.delete_forward(&created_id).await;
+                                        if let Err(error) = service
+                                            .discard_blocked_restore(&manager, &created_id)
+                                            .await
+                                        {
+                                            failures += 1;
+                                            failure_details
+                                                .push(format!("{failure_label}: {error}"));
+                                        }
                                         continue;
                                     }
                                     Err(error) => {
@@ -1077,116 +1414,8 @@ impl ForwardingRuntimeService {
                 detail,
                 job_id,
                 created_forwards,
-                bindings,
             });
         });
-    }
-
-    pub(in crate::workspace) fn release_binding_for_node(
-        &self,
-        node_id: &NodeId,
-    ) -> Option<String> {
-        let session_id = Self::session_id_for_node(node_id);
-        self.release_binding_for_session_inner(&session_id, Some(node_id))
-    }
-
-    pub(in crate::workspace) fn release_binding_for_session(
-        &self,
-        session_id: &str,
-    ) -> Option<String> {
-        self.release_binding_for_session_inner(session_id, None)
-    }
-
-    pub(in crate::workspace) fn discard_binding(
-        &self,
-        session_id: &str,
-        connection_id: &str,
-        consumer: &ConnectionConsumer,
-    ) {
-        self.registry.stop_port_profiler(connection_id);
-        self.ssh_registry.release(connection_id, consumer);
-        self.binding_state()
-            .remove_exact(session_id, connection_id, consumer);
-    }
-
-    pub(in crate::workspace) fn remember_binding(
-        &self,
-        binding: Option<(String, String, ConnectionConsumer)>,
-        node_is_disconnected: bool,
-    ) {
-        let Some((session_id, connection_id, consumer)) = binding else {
-            return;
-        };
-        if !self.registry.accepts_new_work()
-            || node_is_disconnected
-            || !self.binding_is_current(&session_id, &connection_id)
-        {
-            // A late worker result cannot revive a consumer after explicit
-            // session/node teardown or after NodeRouter moved to another connection.
-            self.discard_binding(&session_id, &connection_id, &consumer);
-            return;
-        }
-
-        let previous =
-            self.binding_state()
-                .replace(session_id, connection_id.clone(), consumer.clone());
-        if let Some((previous_connection_id, previous_consumer)) = previous
-            && (previous_connection_id != connection_id || previous_consumer != consumer)
-        {
-            // Reconnect swaps the logical consumer to the fresh node-owned
-            // transport and releases the old connection reference.
-            self.registry.stop_port_profiler(&previous_connection_id);
-            self.ssh_registry
-                .release(&previous_connection_id, &previous_consumer);
-        }
-    }
-
-    fn release_binding_for_session_inner(
-        &self,
-        session_id: &str,
-        node_id: Option<&NodeId>,
-    ) -> Option<String> {
-        let consumer = ConnectionConsumer::PortForward(session_id.to_string());
-        let connection_id = if let Some((connection_id, stored_consumer)) =
-            self.binding_state().remove(session_id)
-        {
-            self.ssh_registry.release(&connection_id, &stored_consumer);
-            Some(connection_id)
-        } else if let Some(manager) = self.registry.get(session_id) {
-            // The manager may be registered before its worker delivery is
-            // applied, so explicit disconnect also releases this fallback.
-            let connection_id = manager.ssh_connection_handle().connection_id().to_string();
-            self.ssh_registry.release(&connection_id, &consumer);
-            Some(connection_id)
-        } else if let Some(connection_id) =
-            node_id.and_then(|node_id| self.node_router.connection_id_for_node(node_id))
-        {
-            self.ssh_registry.release(&connection_id, &consumer);
-            Some(connection_id)
-        } else {
-            None
-        };
-
-        if let Some(connection_id) = connection_id.as_ref() {
-            self.registry.stop_port_profiler(connection_id);
-        }
-        connection_id
-    }
-
-    fn binding_is_current(&self, session_id: &str, connection_id: &str) -> bool {
-        if !self
-            .registry
-            .get(session_id)
-            .is_some_and(|manager| manager.ssh_connection_handle().connection_id() == connection_id)
-        {
-            return false;
-        }
-        let Some(node_id) = node_id_from_forwarding_session(session_id) else {
-            return true;
-        };
-        self.node_router
-            .connection_id_for_node(&node_id)
-            .is_some_and(|current_connection_id| current_connection_id == connection_id)
     }
 
     async fn execute_operation(
@@ -1194,10 +1423,8 @@ impl ForwardingRuntimeService {
         node_id: NodeId,
         owner_connection_id: Option<String>,
         operation: ForwardingRuntimeOperation,
-    ) -> (
-        Option<(String, String, ConnectionConsumer)>,
-        Result<(), String>,
-    ) {
+        stop: Option<ForwardStopRequest>,
+    ) -> Result<(), String> {
         let session_id = Self::session_id_for_node(&node_id);
         // Configuration changes and stopping a listener must never acquire SSH.
         let manager = self.manager_for_node(&node_id);
@@ -1229,33 +1456,31 @@ impl ForwardingRuntimeService {
                 }))
             }
             ForwardingRuntimeOperation::Delete { forward_id } => {
-                let stopped =
-                    if let Some(manager) = manager.as_ref().filter(|m| m.has_rule(forward_id)) {
-                        manager
-                            .delete_forward(forward_id)
-                            .await
-                            .map_err(|e| e.to_string())
-                    } else {
-                        Ok(())
-                    };
-                Some(stopped.and_then(|_| {
-                    self.registry
-                        .delete_persisted_forward(forward_id)
-                        .map_err(|e| e.to_string())
-                }))
+                let stop = stop.unwrap_or_else(|| self.request_forward_stop(forward_id, true));
+                if let Some(manager) = &manager
+                    && !stop.apply(self, manager, forward_id).await?
+                {
+                    return Ok(());
+                }
+                if !self.finish_desktop_stop(forward_id, stop, true) {
+                    return Ok(());
+                }
+                Some(self.delete_saved_rule_for_intent(forward_id, stop.intent))
             }
             ForwardingRuntimeOperation::Stop { forward_id } => {
-                let stopped =
-                    if let Some(manager) = manager.as_ref().filter(|m| m.has_rule(forward_id)) {
-                        manager
-                            .stop_forward(forward_id)
-                            .await
-                            .map(|_| ())
-                            .map_err(|e| e.to_string())
-                    } else {
-                        Ok(())
-                    };
-                Some(stopped.and_then(|_| {
+                let stop = stop.unwrap_or_else(|| self.request_forward_stop(forward_id, false));
+                if stop.intent.block == ForwardRestoreBlock::Deleted {
+                    return Ok(());
+                }
+                if let Some(manager) = &manager
+                    && !stop.apply(self, manager, forward_id).await?
+                {
+                    return Ok(());
+                }
+                if !self.finish_desktop_stop(forward_id, stop, true) {
+                    return Ok(());
+                }
+                Some(
                     if self
                         .saved_rules_for_node(&node_id)
                         .iter()
@@ -1266,21 +1491,17 @@ impl ForwardingRuntimeService {
                             .map_err(|e| e.to_string())
                     } else {
                         Ok(())
-                    }
-                }))
+                    },
+                )
             }
             _ => None,
         };
         if let Some(result) = result {
-            return (None, result);
+            return result;
         }
-        let (manager, binding) = match self
+        let (manager, _operation) = self
             .manager_for_node_async(&node_id, owner_connection_id.as_deref())
-            .await
-        {
-            Ok(value) => value,
-            Err(error) => return (None, Err(error)),
-        };
+            .await?;
         let result = match operation {
             ForwardingRuntimeOperation::Create { rule, check_health } => manager
                 .create_forward_with_health_check(rule, check_health)
@@ -1323,29 +1544,26 @@ impl ForwardingRuntimeService {
             }
             _ => unreachable!("configuration operations were handled without SSH"),
         };
-        let result = match result {
+        match result {
             Ok(rule) => {
                 let result =
                     self.persist_started_rule(&session_id, owner_connection_id, rule.clone());
                 if matches!(result, Ok(false)) {
-                    let result = manager
-                        .stop_forward(&rule.id)
+                    return self
+                        .discard_blocked_restore(&manager, &rule.id)
                         .await
-                        .map(|_| ())
-                        .map_err(|e| e.to_string());
-                    return (binding, result);
+                        .map(|_| ());
                 }
                 if let Err(save_error) = &result {
                     // Do not leave an unrecorded listener running after a failed durable save.
                     if let Err(stop_error) = manager.stop_forward(&rule.id).await {
-                        return (binding, Err(format!("{save_error}; {stop_error}")));
+                        return Err(format!("{save_error}; {stop_error}"));
                     }
                 }
                 result.map(|_| ())
             }
             Err(error) => Err(error),
-        };
-        (binding, result)
+        }
     }
 
     async fn scan_ports(
@@ -1353,54 +1571,51 @@ impl ForwardingRuntimeService {
         node_id: NodeId,
         owner_connection_id: Option<String>,
         restart_degraded_profiler: bool,
-    ) -> (
-        Option<String>,
-        Option<(String, String, ConnectionConsumer)>,
-        Result<PortDetectionSnapshot, String>,
-    ) {
-        let (manager, binding) = match self
+    ) -> (Option<String>, Result<PortDetectionSnapshot, String>) {
+        let (_manager, lease) = match self
             .manager_for_node_async(&node_id, owner_connection_id.as_deref())
             .await
         {
             Ok(value) => value,
-            Err(error) => return (None, None, Err(error)),
+            Err(error) => return (None, Err(error)),
         };
-        let connection_id = binding
-            .as_ref()
-            .map(|(_, connection_id, _)| connection_id.clone());
-        let result = if let Some(connection_id) = connection_id.as_ref() {
-            // Profiler tasks are created inside this service's Tokio runtime.
-            if restart_degraded_profiler {
-                let _ = self.registry.restart_degraded_port_profiler(
-                    connection_id.clone(),
-                    manager.ssh_connection_handle(),
-                );
-            } else {
-                let _ = self
-                    .registry
-                    .start_port_profiler(connection_id.clone(), manager.ssh_connection_handle());
-            }
-            Ok(self
-                .registry
-                .detected_ports(connection_id)
-                .unwrap_or_default())
+        let connection_id = lease.connection_id().to_owned();
+        let handle = lease.handle().clone();
+        if restart_degraded_profiler {
+            self.registry
+                .restart_degraded_port_profiler(connection_id.clone(), handle);
         } else {
-            Err("node has no forwarding connection binding".to_string())
-        };
-        (connection_id, binding, result)
+            self.registry
+                .start_port_profiler(connection_id.clone(), handle);
+        }
+        let result = self
+            .registry
+            .detected_ports(&connection_id)
+            .unwrap_or_default();
+        (Some(connection_id), Ok(result))
+    }
+
+    fn connection_handoff(&self, node: &NodeId) -> Option<ConnectionConsumerLease> {
+        self.connection_id_for_node(node)
+            .and_then(|id| self.node_router.lease_connection_handoff(&id))
+    }
+
+    async fn lease_operation(&self, node_id: &NodeId) -> Result<ConnectionConsumerLease, String> {
+        self.node_router
+            .lease_connection_wait(
+                node_id,
+                ConnectionConsumer::PortForward(format!("operation:{}", uuid::Uuid::new_v4())),
+                Duration::from_secs(15),
+            )
+            .await
+            .map_err(|error| error.to_string())
     }
 
     async fn manager_for_node_async(
         &self,
         node_id: &NodeId,
         owner_connection_id: Option<&str>,
-    ) -> Result<
-        (
-            Arc<ForwardingManager>,
-            Option<(String, String, ConnectionConsumer)>,
-        ),
-        String,
-    > {
+    ) -> Result<(Arc<ForwardingManager>, ConnectionConsumerLease), String> {
         if !self.registry.accepts_new_work() {
             return Err(FORWARDING_SESSION_SHUTTING_DOWN.to_string());
         }
@@ -1419,26 +1634,25 @@ impl ForwardingRuntimeService {
             // a per-consumer transport cannot make that safe on one-channel appliances.
             return Err(self.single_channel_forwarding_error.as_ref().clone());
         }
+        let _reader = self.track_forward_restore();
         let manager_existed = self.registry.get(&session_id).is_some();
-        let consumer = ConnectionConsumer::PortForward(session_id.clone());
-        let resolved = self
-            .node_router
-            .acquire_connection_wait(node_id, consumer.clone(), Duration::from_secs(15))
-            .await
-            .map_err(|error| error.to_string())?;
-        let connection_id = resolved.connection_id.clone();
+        let lease = self.lease_operation(node_id).await?;
         if !self.registry.accepts_new_work() {
-            self.node_router.release_consumer(&connection_id, &consumer);
             return Err(FORWARDING_SESSION_SHUTTING_DOWN.to_string());
         }
-        let (manager, _restored) = self
+        let (manager, restored) = self
             .registry
-            .register_or_rebind(session_id.clone(), resolved.handle)
+            .register_or_rebind(session_id.clone(), lease.handle().clone())
             .await;
         if !self.registry.accepts_new_work() {
             let _ = self.registry.remove(&session_id).await;
-            self.node_router.release_consumer(&connection_id, &consumer);
             return Err(FORWARDING_SESSION_SHUTTING_DOWN.to_string());
+        }
+        if !restored.is_empty() {
+            // Failed restores can leave suspended rows, including ones deleted during startup.
+            for rule in manager.list_forwards() {
+                self.discard_blocked_restore(&manager, &rule.id).await?;
+            }
         }
 
         // Managers are node-owned. Reacquiring through NodeRouter before every
@@ -1449,24 +1663,25 @@ impl ForwardingRuntimeService {
             });
         }
         if manager_existed {
-            return Ok((manager, Some((session_id, connection_id, consumer))));
+            return Ok((manager, lease));
         }
 
-        let saved_forwards = if let Some(owner_connection_id) = owner_connection_id {
-            self.registry.load_owned_forwards(owner_connection_id)
-        } else {
-            self.registry.load_persisted_forwards(&session_id)
-        };
-        for mut rule in saved_forwards
+        for mut rule in self
+            .saved_records_for_node(node_id)
             .into_iter()
             .filter(|forward| forward.auto_start && forward.tunnel.is_none())
             .map(|forward| forward.rule)
         {
+            if self.restore_block(&rule.id).is_some() {
+                continue;
+            }
             rule.status = ForwardStatus::Starting;
-            let _ = manager.create_forward(rule).await;
+            if let Ok(started) = manager.create_forward(rule).await {
+                self.discard_blocked_restore(&manager, &started.id).await?;
+            }
         }
 
-        Ok((manager, Some((session_id, connection_id, consumer))))
+        Ok((manager, lease))
     }
 
     fn persist_rule(
@@ -1485,14 +1700,6 @@ impl ForwardingRuntimeService {
             return Err("Saved forward storage is unavailable".to_string());
         }
         Ok(())
-    }
-
-    fn binding_state(&self) -> MutexGuard<'_, ForwardingBindingState> {
-        // Preserve cleanup access after an unrelated panic; consumer release
-        // must remain available during explicit node teardown.
-        self.bindings
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 }
 
@@ -1514,15 +1721,11 @@ pub(in crate::workspace) async fn shutdown_workspace_session_services(
     grace_period: Duration,
 ) -> WorkspaceSessionServiceShutdownReport {
     // Both owners share one wall-clock bound instead of extending window teardown serially.
-    let (sftp, (forwarding, released_forwarding_bindings)) = tokio::join!(
+    let (sftp, forwarding) = tokio::join!(
         sftp_transfer_manager.shutdown_session_transfers(grace_period),
-        forwarding_runtime_service.shutdown_session_runtime(grace_period),
+        forwarding_runtime_service.registry.shutdown(grace_period),
     );
-    WorkspaceSessionServiceShutdownReport {
-        sftp,
-        forwarding,
-        released_forwarding_bindings,
-    }
+    WorkspaceSessionServiceShutdownReport { sftp, forwarding }
 }
 
 /// Completes final session shutdown before its Tokio runtime field can be dropped.
@@ -1619,6 +1822,107 @@ mod tests {
     }
 
     #[test]
+    fn reused_session_id_cannot_restore_another_hosts_listener() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("forwards.json");
+        let reused = NodeId::new("ssh-1");
+        let rule = ForwardRule::dynamic("127.0.0.1", 0);
+        {
+            let store = oxideterm_forwarding::SavedForwardStore::load(&path).unwrap();
+            store
+                .sync_persisted_forward_rule(
+                    &rule.id,
+                    &ForwardingRuntimeService::session_id_for_node(&reused),
+                    Some("saved-a".into()),
+                    rule.clone(),
+                )
+                .unwrap();
+            store.update_auto_start(&rule.id, true).unwrap();
+        }
+        let ssh = SshConnectionRegistry::default();
+        let service = ForwardingRuntimeService::test_fixture_with_registries(
+            ForwardingRegistry::new_with_store(
+                oxideterm_forwarding::SavedForwardStore::load(&path).unwrap(),
+            ),
+            ssh.clone(),
+        );
+        let config = |host: &str| oxideterm_ssh::SshConfig {
+            host: host.into(),
+            ..Default::default()
+        };
+        service
+            .node_router
+            .upsert_node(reused.clone(), config("b.invalid"));
+        let saved = service
+            .node_router
+            .expand_manual_preset("saved-a", vec![config("jump.invalid")], config("a.invalid"))
+            .unwrap();
+        let temporary = || {
+            service
+                .node_router
+                .expand_temporary_chain(vec![config("jump.invalid")], config("a.invalid"))
+                .unwrap()
+        };
+        let first = temporary();
+        let second = temporary();
+        assert_ne!(first.target_node_id, second.target_node_id);
+        for (node, expected) in [
+            (reused, vec![]),
+            (saved.path_node_ids[0].clone(), vec![]),
+            (first.target_node_id, vec![]),
+            (second.target_node_id, vec![]),
+            (saved.target_node_id, vec![rule.id.clone()]),
+        ] {
+            let config = service
+                .node_router
+                .node_runtime_snapshot(&node)
+                .unwrap()
+                .config;
+            let owner = service.saved_owner_for_node(&node);
+            let host = config.host.clone();
+            let handle = ssh.acquire(
+                config.clone(),
+                ConnectionConsumer::NodeRouter(node.0.clone()),
+            );
+            handle.set_physical(Arc::new(()));
+            ssh.mark_state(handle.connection_id(), ConnectionState::Active)
+                .unwrap();
+            assert_eq!(
+                service
+                    .snapshot_for_node(&node)
+                    .rules
+                    .into_iter()
+                    .map(|r| r.id)
+                    .collect::<Vec<_>>(),
+                expected,
+                "{host} offline rules"
+            );
+            service
+                .node_router
+                .bind_connection(&node, handle.connection_id())
+                .unwrap();
+            assert_eq!(
+                service.node_has_restorable_rules(&node),
+                !expected.is_empty()
+            );
+            service.task_runtime.block_on(async {
+                let (manager, _lease) = service
+                    .manager_for_node_async(&node, owner.as_deref())
+                    .await
+                    .unwrap();
+                let running = manager
+                    .list_forwards()
+                    .into_iter()
+                    .filter(|r| r.status == ForwardStatus::Active)
+                    .map(|r| r.id)
+                    .collect::<Vec<_>>();
+                assert_eq!(running, expected, "{host} active listeners");
+                manager.stop_all().await;
+            });
+        }
+    }
+
+    #[test]
     fn single_channel_nodes_reject_forwarding_before_connection_acquisition() {
         let service = ForwardingRuntimeService::test_fixture();
         let node_id = NodeId::new("single-channel-node");
@@ -1660,15 +1964,12 @@ mod tests {
         let mut rule = ForwardRule::local("127.0.0.1", 8080, "localhost", 80);
         rule.id = "offline-rule".into();
         let run = |operation| {
-            let (binding, result) = service.task_runtime.block_on(service.execute_operation(
+            let result = service.task_runtime.block_on(service.execute_operation(
                 node.clone(),
                 Some("saved-host".into()),
                 operation,
+                None,
             ));
-            assert!(
-                binding.is_none(),
-                "editing must not acquire an SSH consumer"
-            );
             result.unwrap();
         };
         run(ForwardingRuntimeOperation::Save { rule: rule.clone() });
@@ -1696,7 +1997,7 @@ mod tests {
         run(ForwardingRuntimeOperation::Delete {
             forward_id: rule.id.clone(),
         });
-        service.set_tunnel_start_requested(&rule.id, false);
+        service.request_forward_stop(&rule.id, true);
         assert!(
             !service
                 .persist_started_rule(
@@ -1720,10 +2021,11 @@ mod tests {
                 .unwrap(),
         );
         std::fs::write(&blocked_parent, "not a directory").unwrap();
-        let (_, result) = service.task_runtime.block_on(service.execute_operation(
+        let result = service.task_runtime.block_on(service.execute_operation(
             node.clone(),
             Some("saved-host".into()),
             ForwardingRuntimeOperation::Save { rule },
+            None,
         ));
         assert!(
             result.is_err(),
@@ -1733,51 +2035,689 @@ mod tests {
     }
 
     #[test]
-    fn binding_state_replaces_and_removes_one_logical_consumer() {
-        let mut state = ForwardingBindingState::default();
-        let session_id = ForwardingRuntimeService::session_id_for_node(&NodeId::new("node-a"));
-        let first_consumer = ConnectionConsumer::PortForward(session_id.clone());
-        let second_consumer = first_consumer.clone();
+    fn stop_and_delete_during_initial_restore_do_not_reopen_saved_listeners() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = oxideterm_forwarding::SavedForwardStore::load(dir.path().join("forwards.json"))
+            .unwrap();
+        let node = NodeId::new("restoring-node");
+        let session = ForwardingRuntimeService::session_id_for_node(&node);
+        for id in ["keep", "stop", "delete"] {
+            let mut rule = ForwardRule::dynamic("127.0.0.1", 0);
+            rule.id = id.into();
+            store
+                .sync_persisted_forward_rule(id, &session, Some("host".into()), rule)
+                .unwrap();
+            store.update_auto_start(id, true).unwrap();
+        }
+        let (events, first_status) = std::sync::mpsc::channel();
+        let (resume, resumed) = std::sync::mpsc::channel();
+        let resumed = Mutex::new(Some(resumed));
+        let delivery = oxideterm_forwarding::ForwardEventDeliverySender::with_wake(
+            events,
+            Arc::new(move || {
+                // Pause after reading the snapshot and starting the first real listener.
+                if let Some(resumed) = resumed.lock().unwrap().take() {
+                    resumed.recv_timeout(Duration::from_secs(5)).unwrap();
+                }
+            }),
+        );
+        let ssh = SshConnectionRegistry::default();
+        let service = ForwardingRuntimeService::test_fixture_with_registries(
+            ForwardingRegistry::new_with_event_delivery_and_store(delivery, store),
+            ssh.clone(),
+        );
+        let config = oxideterm_ssh::SshConfig::default();
+        let handle = ssh.acquire(
+            config.clone(),
+            ConnectionConsumer::NodeRouter(node.0.clone()),
+        );
+        handle.set_physical(Arc::new(()));
+        ssh.mark_state(handle.connection_id(), ConnectionState::Active)
+            .unwrap();
+        service.node_router.upsert_node_with_origin(
+            node.clone(),
+            config,
+            oxideterm_ssh::NodeOrigin::Restored {
+                saved_connection_id: "host".into(),
+            },
+        );
+        service
+            .node_router
+            .bind_connection(&node, handle.connection_id())
+            .unwrap();
+        let restore_runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        std::thread::scope(|scope| {
+            let restore = scope.spawn(|| {
+                restore_runtime
+                    .block_on(service.manager_for_node_async(&node, Some("host")))
+                    .unwrap()
+            });
+            let first = first_status.recv_timeout(Duration::from_secs(5)).unwrap();
+            assert!(
+                matches!(first, ForwardEvent::StatusChanged { forward_id, status: ForwardStatus::Active, .. } if forward_id == "keep")
+            );
+            for operation in [
+                ForwardingRuntimeOperation::Stop {
+                    forward_id: "stop".into(),
+                },
+                ForwardingRuntimeOperation::Delete {
+                    forward_id: "delete".into(),
+                },
+            ] {
+                let (tx, rx) = delivery::ActiveDeliverySender::channel();
+                let wake = tx.wake();
+                service.submit_operation(
+                    TabId(1),
+                    node.clone(),
+                    Some("host".into()),
+                    "",
+                    false,
+                    operation,
+                    tx,
+                );
+                service.task_runtime.block_on(wake.wait());
+                assert!(matches!(
+                    rx.try_recv().unwrap(),
+                    ForwardingWorkerResult::Operation { result: Ok(()), .. }
+                ));
+            }
+            resume.send(()).unwrap();
+            let (manager, _operation) = restore.join().unwrap();
+            assert_eq!(manager.active_forward_count(), 1);
+            let rows: Vec<_> = service
+                .snapshot_for_node(&node)
+                .rules
+                .into_iter()
+                .map(|rule| (rule.id, rule.status))
+                .collect();
+            assert_eq!(
+                rows,
+                [
+                    ("keep".into(), ForwardStatus::Active),
+                    ("stop".into(), ForwardStatus::Stopped)
+                ]
+            );
+        });
+    }
 
-        assert!(
-            state
-                .replace(
-                    session_id.clone(),
-                    "connection-a".to_string(),
-                    first_consumer,
-                )
-                .is_none()
+    #[test]
+    fn mcp_port_change_preserves_a_later_stop_or_delete() {
+        use std::net::TcpListener;
+
+        let ssh = SshConnectionRegistry::default();
+        let router = NodeRouter::new(ssh.clone());
+        let node = NodeId::new("edit-forward");
+        let config = oxideterm_ssh::SshConfig::default();
+        let handle = ssh.acquire(
+            config.clone(),
+            ConnectionConsumer::NodeRouter(node.0.clone()),
         );
-        assert_eq!(
-            state.replace(
-                session_id.clone(),
-                "connection-b".to_string(),
-                second_consumer.clone(),
+        handle.set_physical(Arc::new(()));
+        ssh.mark_state(handle.connection_id(), ConnectionState::Active)
+            .unwrap();
+        router.upsert_node(node.clone(), config);
+        router
+            .bind_connection(&node, handle.connection_id())
+            .unwrap();
+        let runtime = Arc::new(
+            tokio::runtime::Builder::new_current_thread()
+                .max_blocking_threads(1)
+                .enable_all()
+                .build()
+                .unwrap(),
+        );
+        let (events, changes) = std::sync::mpsc::channel();
+        let dir = tempfile::tempdir().unwrap();
+        let store = oxideterm_forwarding::SavedForwardStore::load(dir.path().join("forwards.json"))
+            .unwrap();
+        let service = ForwardingRuntimeService::new(
+            ForwardingRegistry::new_with_event_sender_and_store(events, store),
+            ssh,
+            router,
+            runtime.clone(),
+            String::new(),
+        );
+        let occupied = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = occupied.local_addr().unwrap().port();
+        // Cover both loopback families when localhost resolves to IPv6 as well.
+        let _ipv6 = TcpListener::bind(("::1", port)).ok();
+        runtime.block_on(async {
+            for (intent, available) in [(None, false), (Some(false), false), (Some(true), false), (Some(false), true)] {
+                let port = if available { TcpListener::bind(("127.0.0.1",0)).unwrap().local_addr().unwrap().port() } else { port };
+                let original = service
+                    .public_mcp_open_forward(
+                        &node, Some("host"), ForwardRule::dynamic("127.0.0.1", 0), false, true,
+                    )
+                    .await
+                    .unwrap()
+                    .rule;
+                // Hold Tokio's DNS worker so the new bind cannot finish before the user's command.
+                let (resume, wait) = std::sync::mpsc::channel();
+                let blocker = tokio::task::spawn_blocking(move || {
+                    wait.recv_timeout(Duration::from_secs(10))
+                });
+                let edit = tokio::spawn({
+                    let service = service.clone();
+                    let node = node.clone();
+                    let original = original.clone();
+                    async move {
+                        let update = ForwardUpdate {
+                            bind_address: Some("localhost".into()),
+                            bind_port: Some(port),
+                            ..Default::default()
+                        };
+                        service
+                            .public_mcp_change_forward(&node, Some("host"), &original.id, &original, update, true)
+                            .await
+                    }
+                });
+                tokio::time::timeout(Duration::from_secs(3), async {
+                    loop {
+                        let stopped = changes.try_iter().any(|event| matches!(
+                            event,
+                            ForwardEvent::StatusChanged { forward_id, status: ForwardStatus::Stopped, .. }
+                                if forward_id == original.id
+                        ));
+                        if stopped {
+                            break;
+                        }
+                        tokio::task::yield_now().await;
+                    }
+                })
+                .await
+                .unwrap();
+                let manager = service.manager_for_node(&node).unwrap();
+                assert!(!manager.has_rule(&original.id), "the changed listener is still binding");
+                if let Some(delete) = intent {
+                    service.stop_saved_tunnel(&original.id, service.request_forward_stop(&original.id, delete)).await.unwrap();
+                }
+                resume.send(()).unwrap();
+                blocker.await.unwrap().unwrap();
+                assert!(edit.await.unwrap().is_err());
+                let row = manager.list_forwards().into_iter().find(|rule| rule.id == original.id);
+                match intent {
+                    None => {
+                        assert_eq!(row.as_ref(), Some(&original));
+                        assert!(std::net::TcpStream::connect(("127.0.0.1", original.bind_port)).is_ok());
+                        service.stop_saved_tunnel(&original.id, service.request_forward_stop(&original.id, true)).await.unwrap();
+                    }
+                    Some(false) => {
+                        let mut expected = original.clone();
+                        expected.status = ForwardStatus::Stopped;
+                        assert_eq!(row, Some(expected));
+                        let persisted = service.registry.list_all_saved_forwards().into_iter().find(|saved| saved.id == original.id).unwrap();
+                        assert_eq!(persisted.rule.bind_port, original.bind_port);
+                        if available { TcpListener::bind(("127.0.0.1",port)).expect("the replacement port was released"); }
+                    }
+                    Some(true) => assert_eq!(row, None),
+                }
+                TcpListener::bind(("127.0.0.1", original.bind_port))
+                    .expect("a failed edit cannot reopen the original listener");
+            }
+        });
+    }
+
+    #[allow(
+        dead_code,
+        reason = "The protocol tests also inspect direct TCP channel requests."
+    )]
+    mod ssh_peer {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../oxideterm-forwarding/tests/support/peer.rs"
+        ));
+    }
+
+    #[test]
+    fn refused_desktop_stop_and_delete_allow_remote_listener_to_reconnect() {
+        use oxideterm_ssh::{SshConfig, SshTransportClient};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let ssh = SshConnectionRegistry::default();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("forwards.json");
+        let service = ForwardingRuntimeService::test_fixture_with_registries(
+            ForwardingRegistry::new_with_store(
+                oxideterm_forwarding::SavedForwardStore::load(&path).unwrap(),
             ),
-            Some((
-                "connection-a".to_string(),
-                ConnectionConsumer::PortForward(session_id.clone()),
-            ))
+            ssh.clone(),
         );
-        assert_eq!(
-            state.node_for_connection_id("connection-b"),
-            Some(NodeId::new("node-a"))
+        service.task_runtime.block_on(async {
+            let server = ssh_peer::start_forwarding_ssh_server().await;
+            let mut config = SshConfig::password("127.0.0.1", server.port, "tester", "password");
+            config.expected_host_key_fingerprint = Some(server.host_key_fingerprint.clone());
+            let node = NodeId::new("remote-cancel");
+            service
+                .node_router
+                .upsert_node(node.clone(), config.clone());
+            let connect = || {
+                SshTransportClient::new(config.clone()).connect_node_with_registry(
+                    ssh.clone(),
+                    ConnectionConsumer::NodeRouter(node.0.clone()),
+                )
+            };
+            let first = connect().await.unwrap();
+            service
+                .node_router
+                .bind_connection(&node, first.connection_id())
+                .unwrap();
+            let target = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+                .await
+                .unwrap();
+            let rule = service
+                .public_mcp_open_forward(
+                    &node,
+                    Some("saved-host"),
+                    ForwardRule::remote(
+                        "127.0.0.1",
+                        0,
+                        "127.0.0.1",
+                        target.local_addr().unwrap().port(),
+                    ),
+                    false,
+                    true,
+                )
+                .await
+                .unwrap()
+                .rule;
+            let manager = service.manager_for_node(&node).unwrap();
+            // Pause the edit after its new listener was bound, before the service commits it.
+            manager.stop_forward(&rule.id).await.unwrap();
+            let port = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap().local_addr().unwrap().port();
+            manager.update_forward(&rule.id, ForwardUpdate { bind_port: Some(port), ..Default::default() }).unwrap();
+            let replacement = manager.restart_forward(&rule.id).await.unwrap();
+            let stop = service.request_forward_stop(&rule.id, false);
+            let (stopped, edited) = tokio::join!(biased;
+                service.stop_saved_tunnel(&rule.id, stop),
+                async {
+                    assert!(!manager.has_rule(&rule.id), "the remote cancellation is awaiting its reply");
+                    service.finish_mcp_forward_mutation(&node, Some("saved-host"), &manager, replacement, true, Some(&rule)).await
+                }
+            );
+            stopped.unwrap();
+            assert!(edited.is_err());
+            let saved = oxideterm_forwarding::SavedForwardStore::load(&path).unwrap().load_owned_forwards("saved-host");
+            assert_eq!(saved[0].rule.bind_port, rule.bind_port);
+            let mut expected = rule.clone();
+            expected.status = ForwardStatus::Stopped;
+            assert_eq!(manager.list_forwards(), [expected]);
+            service.public_mcp_restart_forward(&node, Some("saved-host"), &rule.id, true).await.unwrap();
+
+            server.reject_remote_cancel.store(true, Ordering::SeqCst);
+            let stop = service.request_forward_stop(&rule.id, false);
+            let (stopped, deleted) = tokio::join!(biased;
+                service.stop_saved_tunnel(&rule.id, stop),
+                async {
+                    assert!(!manager.has_rule(&rule.id), "delete is submitted before the stop reply");
+                    let delete = service.request_forward_stop(&rule.id, true);
+                    let operation = ForwardingRuntimeOperation::Delete { forward_id: rule.id.clone() };
+                    service.execute_operation(node.clone(), None, operation, Some(delete)).await
+                }
+            );
+            assert!(stopped.is_err() && deleted.is_err());
+            server.reject_remote_cancel.store(false, Ordering::SeqCst);
+            ssh.mark_state_without_event(first.connection_id(), ConnectionState::LinkDown);
+            let second = connect().await.unwrap();
+            service
+                .node_router
+                .bind_connection(&node, second.connection_id())
+                .unwrap();
+            service.restore_session_for_node(&node).await;
+            let mut inbound = tokio::net::TcpStream::connect(("127.0.0.1", rule.bind_port))
+                .await
+                .expect("both failed commands must leave the rule eligible for restore");
+            inbound.write_all(b"restored").await.unwrap();
+            let received = tokio::time::timeout(Duration::from_secs(3), async {
+                let (mut forwarded, _) = target.accept().await.unwrap();
+                let mut bytes = [0; 8];
+                forwarded.read_exact(&mut bytes).await.unwrap();
+                bytes
+            })
+            .await
+            .unwrap();
+            assert_eq!(&received, b"restored");
+            service
+                .manager_for_node(&node)
+                .unwrap()
+                .delete_forward(&rule.id)
+                .await
+                .unwrap();
+        });
+    }
+
+    #[test]
+    fn reconnect_restores_mcp_restart_but_not_a_rule_deleted_after_capture() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = oxideterm_forwarding::SavedForwardStore::load(dir.path().join("forwards.json"))
+            .unwrap();
+        let ssh = SshConnectionRegistry::default();
+        let service = ForwardingRuntimeService::test_fixture_with_registries(
+            ForwardingRegistry::new_with_store(store),
+            ssh.clone(),
         );
-        state.remove_exact(&session_id, "connection-a", &second_consumer);
-        assert_eq!(
-            state.connection_id(&session_id).as_deref(),
-            Some("connection-b")
+        let node = NodeId::new("forward-reconnect");
+        let config = oxideterm_ssh::SshConfig::default();
+        let connection = ssh.acquire(
+            config.clone(),
+            ConnectionConsumer::NodeRouter(node.0.clone()),
         );
-        assert_eq!(
-            state.remove(&session_id),
-            Some(("connection-b".to_string(), second_consumer))
+        connection.set_physical(Arc::new(()));
+        ssh.mark_state(connection.connection_id(), ConnectionState::Active)
+            .unwrap();
+        service.node_router.upsert_node(node.clone(), config);
+        service
+            .node_router
+            .bind_connection(&node, connection.connection_id())
+            .unwrap();
+
+        service.task_runtime.block_on(async {
+            let create = |id: &str| {
+                let mut rule = ForwardRule::dynamic("127.0.0.1", 0);
+                rule.id = id.to_string();
+                service.public_mcp_open_forward(&node, Some("host"), rule, false, true)
+            };
+            let keep = create("restart").await.unwrap().rule;
+            ssh.set_idle_timeout(Some(Duration::ZERO));
+            let (stopped, handoff) = service
+                .public_mcp_stop_forward(&node, Some("host"), &keep.id)
+                .await
+                .unwrap();
+            // The listener has released its lease; revocation may be delivered on a later turn.
+            tokio::task::yield_now().await;
+            assert_eq!(connection.state(), ConnectionState::Active);
+            assert!(
+                service
+                    .public_mcp_restore_forward_after_revocation(
+                        &node,
+                        Some("host"),
+                        &keep,
+                        &stopped,
+                        Some(&handoff),
+                        false,
+                        true
+                    )
+                    .await
+            );
+            let remove = create("remove").await.unwrap().rule;
+            let (tx, rx) = delivery::ActiveDeliverySender::channel();
+            let wake = tx.wake();
+            service.submit_operation(
+                TabId(1),
+                node.clone(),
+                Some("host".into()),
+                "",
+                false,
+                ForwardingRuntimeOperation::Stop {
+                    forward_id: keep.id.clone(),
+                },
+                tx,
+            );
+            wake.wait().await;
+            assert!(matches!(
+                rx.try_recv().unwrap(),
+                ForwardingWorkerResult::Operation { result: Ok(()), .. }
+            ));
+            // A revoked stop cannot undo a later independent stop, even when the rules look identical.
+            assert!(
+                !service
+                    .public_mcp_restore_forward_after_revocation(
+                        &node,
+                        Some("host"),
+                        &keep,
+                        &stopped,
+                        Some(&handoff),
+                        false,
+                        true
+                    )
+                    .await
+            );
+            drop(handoff);
+            let occupied = std::net::TcpListener::bind(("127.0.0.1", keep.bind_port)).unwrap();
+            assert!(
+                service
+                    .public_mcp_restart_forward(&node, Some("host"), &keep.id, true)
+                    .await
+                    .is_err()
+            );
+            assert!(matches!(
+                service.restore_block(&keep.id),
+                Some(ForwardRestoreBlock::Stopped)
+            ));
+            drop(occupied);
+            let restarted = service
+                .public_mcp_restart_forward(&node, Some("host"), &keep.id, true)
+                .await
+                .unwrap();
+            assert_eq!(restarted.rule.status, ForwardStatus::Active);
+
+            let snapshot_reader = service.track_forward_restore();
+            let rules = vec![
+                reconnect_forward_rule_from_rule(restarted.rule),
+                reconnect_forward_rule_from_rule(remove.clone()),
+            ];
+            assert!(
+                service
+                    .public_mcp_remove_forward(&node, Some("host"), &remove.id, true)
+                    .await
+                    .unwrap()
+            );
+            let replacement = ssh.acquire(
+                oxideterm_ssh::SshConfig {
+                    port: 2222,
+                    ..Default::default()
+                },
+                ConnectionConsumer::NodeRouter(node.0.clone()),
+            );
+            replacement.set_physical(Arc::new(()));
+            ssh.mark_state(replacement.connection_id(), ConnectionState::Active)
+                .unwrap();
+            let reconnected = service
+                .node_router
+                .bind_established_connection(&node, replacement.connection_id())
+                .unwrap();
+            let (tx, rx) = delivery::ActiveDeliverySender::channel();
+            let wake = tx.wake();
+            service.submit_reconnect_restore(
+                ReconnectForwardRestoreRequest {
+                    root_node_id: node.clone(),
+                    snapshots: vec![ReconnectForwardRuleSnapshot {
+                        node_id: node.0.clone(),
+                        rules,
+                    }],
+                    snapshot_reader,
+                    old_connection_ids_by_node: HashMap::new(),
+                    owner_connection_ids: HashMap::from([(node.0.clone(), Some("host".into()))]),
+                    cancellation: Arc::new(AtomicBool::new(true)),
+                    job_id: "reconnect".into(),
+                },
+                tx,
+            );
+            drop(reconnected);
+            assert_eq!(replacement.state(), ConnectionState::Active);
+            wake.wait().await;
+            assert!(matches!(
+                rx.try_recv().unwrap(),
+                ForwardingWorkerResult::ReconnectRestore {
+                    restored: 1,
+                    result: PhaseResult::Ok,
+                    ..
+                }
+            ));
+            let manager = service.manager_for_node(&node).unwrap();
+            assert_eq!(
+                manager.ssh_connection_handle().connection_id(),
+                replacement.connection_id()
+            );
+            let active: Vec<_> = manager
+                .list_forwards()
+                .into_iter()
+                .map(|rule| (rule.id, rule.status))
+                .collect();
+            assert_eq!(active, [(keep.id.clone(), ForwardStatus::Active)]);
+            let saved: Vec<_> =
+                oxideterm_forwarding::SavedForwardStore::load(dir.path().join("forwards.json"))
+                    .unwrap()
+                    .load_owned_forwards("host")
+                    .into_iter()
+                    .map(|item| item.id)
+                    .collect();
+            assert_eq!(saved, [keep.id]);
+            assert!(std::net::TcpListener::bind(("127.0.0.1", remove.bind_port)).is_ok());
+            assert!(
+                service.forward_intent(&remove.id).is_none(),
+                "completed snapshots must release their deletion markers"
+            );
+        });
+    }
+
+    #[test]
+    fn forwarding_usage_tracks_listeners_across_shared_nodes_and_final_delete() {
+        let ssh = SshConnectionRegistry::default();
+        let service = ForwardingRuntimeService::test_fixture_with_registries(
+            ForwardingRegistry::new(),
+            ssh.clone(),
         );
+        let node = NodeId::new("a");
+        let sibling = NodeId::new("b");
+        let owner = ConnectionConsumer::NodeRouter(node.0.clone());
+        let config = oxideterm_ssh::SshConfig::default();
+        let handle = ssh.acquire(config.clone(), owner.clone());
+        let connection = handle.connection_id();
+        ssh.mark_state(connection, ConnectionState::Active).unwrap();
+        service.node_router.upsert_node(node.clone(), config);
+        service
+            .node_router
+            .bind_connection(&node, connection)
+            .unwrap();
+        service.task_runtime.block_on(async {
+            // An empty restore must not even probe a transport or create a manager.
+            // The pool entry has no transport, so a needless probe would mark it link-down.
+            service.submit_session_restore(node.clone());
+            tokio::task::yield_now().await;
+            assert_eq!(handle.state(), ConnectionState::Active);
+            assert!(service.manager_for_node(&node).is_none());
+            let first = service.registry.register(
+                ForwardingRuntimeService::session_id_for_node(&node),
+                handle.clone(),
+            );
+            let second = service.registry.register(
+                ForwardingRuntimeService::session_id_for_node(&sibling),
+                handle.clone(),
+            );
+            let running = first
+                .create_forward(ForwardRule::local("127.0.0.1", 0, "localhost", 80))
+                .await
+                .unwrap();
+            let other = second
+                .create_forward(ForwardRule::dynamic("127.0.0.1", 0))
+                .await
+                .unwrap();
+            let collision = ForwardRule::dynamic("127.0.0.1", running.bind_port);
+            assert!(second.create_forward(collision).await.is_err());
+            assert_eq!(
+                service.registry.active_forward_counts_by_connection(),
+                HashMap::from([(connection.to_owned(), 2)])
+            );
+            assert_eq!(
+                handle
+                    .info()
+                    .consumers
+                    .iter()
+                    .filter(|consumer| matches!(consumer, ConnectionConsumer::PortForward(_)))
+                    .count(),
+                2
+            );
+
+            service
+                .execute_operation(
+                    node,
+                    None,
+                    ForwardingRuntimeOperation::Stop {
+                        forward_id: running.id,
+                    },
+                    None,
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                service.registry.active_forward_counts_by_connection(),
+                HashMap::from([(connection.to_owned(), 1)])
+            );
+            assert!(second.get_stats(&other.id).is_ok());
+            assert_eq!(
+                handle
+                    .info()
+                    .consumers
+                    .iter()
+                    .filter(|consumer| matches!(consumer, ConnectionConsumer::PortForward(_)))
+                    .count(),
+                1
+            );
+
+            service
+                .execute_operation(
+                    sibling,
+                    None,
+                    ForwardingRuntimeOperation::Delete {
+                        forward_id: other.id,
+                    },
+                    None,
+                )
+                .await
+                .unwrap();
+            assert!(
+                service
+                    .registry
+                    .active_forward_counts_by_connection()
+                    .is_empty()
+            );
+            assert_eq!(handle.info().consumers, vec![owner]);
+        });
     }
 
     #[test]
     fn workspace_session_service_shutdown_is_exactly_once() {
-        let service = ForwardingRuntimeService::test_fixture();
+        let ssh = SshConnectionRegistry::default();
+        let (events, _rx) = std::sync::mpsc::channel();
+        let service = ForwardingRuntimeService::test_fixture_with_registries(
+            ForwardingRegistry::new_with_event_sender(events),
+            ssh.clone(),
+        );
         let task_runtime = service.task_runtime.clone();
+        let owner = ConnectionConsumer::Terminal("unrelated".into());
+        let handle = ssh.acquire(oxideterm_ssh::SshConfig::default(), owner.clone());
+        let profiler = {
+            let _entered = task_runtime.enter();
+            service
+                .registry
+                .start_port_profiler(handle.connection_id(), handle.clone())
+                .unwrap()
+        };
+        assert!(
+            handle
+                .info()
+                .consumers
+                .iter()
+                .any(|consumer| matches!(consumer, ConnectionConsumer::Monitor(_)))
+        );
+        assert!(
+            service
+                .registry
+                .active_forward_counts_by_connection()
+                .is_empty()
+        );
+        service.registry.register("node:first", handle.clone());
+        service.registry.register("node:sibling", handle.clone());
+        task_runtime.block_on(service.registry.remove("node:first"));
+        assert!(
+            service
+                .registry
+                .detected_ports(handle.connection_id())
+                .is_some()
+        );
         let transfers = oxideterm_sftp::SftpTransferManager::new();
 
         let first = shutdown_workspace_session_services_blocking(
@@ -1795,8 +2735,11 @@ mod tests {
 
         assert!(first.sftp.started);
         assert!(first.forwarding.started);
+        assert!(profiler.is_stopped());
+        // The current-thread runtime runs the aborted sampler's destructor on its next turn.
+        task_runtime.block_on(tokio::task::yield_now());
+        assert_eq!(handle.info().consumers, vec![owner]);
         assert!(!second.sftp.started);
         assert!(!second.forwarding.started);
-        assert_eq!(second.released_forwarding_bindings, 0);
     }
 }

@@ -249,6 +249,10 @@ impl WorkspaceApp {
                 .into_any_element();
         };
 
+        let forward_counts = self
+            .forwarding_service
+            .registry()
+            .active_forward_counts_by_connection();
         let mut attention_connections = self
             .host_tools
             .read(cx)
@@ -256,6 +260,9 @@ impl WorkspaceApp {
             .into_iter()
             .filter(|summary| connection_runtime_state_needs_attention(&summary.state))
             .collect::<Vec<_>>();
+        for summary in &mut attention_connections {
+            summary.forward_count = forward_counts.get(&summary.id).copied().unwrap_or(0);
+        }
         attention_connections.sort_by_key(|summary| {
             (
                 connection_runtime_attention_rank(&summary.state),
@@ -288,7 +295,11 @@ impl WorkspaceApp {
                             .items_stretch()
                             .gap_3()
                             .child(self.render_connection_runtime_pool_panel(&stats, cx))
-                            .child(self.render_connection_runtime_consumer_panel(&stats, cx)),
+                            .child(self.render_connection_runtime_consumer_panel(
+                                &stats,
+                                forward_counts.values().sum(),
+                                cx,
+                            )),
                     )
                     .child(self.render_connection_runtime_attention_panel(&attention_connections))
                     .child(self.render_connection_runtime_overview_summary(&stats, cx)),
@@ -331,13 +342,13 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let has_background = self.background_surface_active("runtime");
-        let timeout_minutes = stats.idle_timeout_secs.saturating_add(59) / 60;
-        let timeout_label = if stats.idle_timeout_secs == 0 {
-            self.i18n.t("connections.monitor.idle_timeout_never")
-        } else {
-            self.i18n
+        let timeout_label = match stats.idle_timeout_secs {
+            None => self.i18n.t("connections.monitor.idle_timeout_never"),
+            Some(0) => self.i18n.t("connections.monitor.idle_timeout_immediate"),
+            Some(seconds) => self
+                .i18n
                 .t("connections.monitor.idle_timeout")
-                .replace("{{min}}", &timeout_minutes.to_string())
+                .replace("{{min}}", &seconds.div_ceil(60).to_string()),
         };
 
         self.connection_runtime_panel(has_background)
@@ -476,6 +487,7 @@ impl WorkspaceApp {
     fn render_connection_runtime_consumer_panel(
         &self,
         stats: &ConnectionPoolMonitorStats,
+        active_forwards: usize,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let has_background = self.background_surface_active("runtime");
@@ -506,7 +518,7 @@ impl WorkspaceApp {
             ))
             .child(self.render_connection_runtime_consumer_row(
                 self.i18n.t("connections.monitor.forwards"),
-                stats.total_forwards,
+                active_forwards,
                 LucideIcon::ArrowLeftRight,
                 MONITOR_BLUE,
                 true,

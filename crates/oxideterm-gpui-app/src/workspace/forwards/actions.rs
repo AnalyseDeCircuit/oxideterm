@@ -87,10 +87,7 @@ impl WorkspaceApp {
         if self.forwarding.read(cx).operation_pending(tab_id, cx) {
             return;
         }
-        let can_save = self
-            .ssh_nodes
-            .get(&node_id)
-            .is_some_and(|node| node.saved_connection_id.is_some());
+        let can_save = self.forward_owner_for_node(&node_id).is_some();
         let operation = if can_save {
             let deferred = start.then(|| ForwardingRuntimeOperation::Create {
                 rule: rule.clone(),
@@ -156,10 +153,7 @@ impl WorkspaceApp {
             });
             return;
         }
-        let owner_connection_id = self
-            .ssh_nodes
-            .get(&node_id)
-            .and_then(|node| node.saved_connection_id.clone());
+        let owner_connection_id = self.forward_owner_for_node(&node_id);
         page.update(cx, |page, cx| {
             page.begin_operation();
             cx.notify();
@@ -258,10 +252,7 @@ impl WorkspaceApp {
         for node_id in nodes {
             if !self.forwards_node_has_visible_tab(&node_id, cx) {
                 if let Some(connection_id) = self.forwarding_connection_id_for_node(&node_id) {
-                    // Hidden forwarding pages stop their profiler without touching tunnel owners.
-                    self.forwarding_service
-                        .registry()
-                        .stop_port_profiler(&connection_id);
+                    self.stop_hidden_port_profiler(&connection_id, cx);
                 }
                 self.forwarding.update(cx, |forwarding, _cx| {
                     forwarding.reset_hidden_port_scan_schedule(&node_id);
@@ -330,6 +321,25 @@ impl WorkspaceApp {
         }
     }
 
+    pub(in crate::workspace) fn stop_hidden_port_profiler(&self, connection_id: &str, cx: &App) {
+        // Several logical nodes can share a physical profiler, including while a scan completes.
+        let visible = self
+            .forwarding
+            .read(cx)
+            .tab_node_mappings()
+            .iter()
+            .any(|(tab_id, node)| {
+                self.forwards_tab_is_visible(*tab_id, cx)
+                    && self.node_router.connection_id_for_node(node).as_deref()
+                        == Some(connection_id)
+            });
+        if !visible {
+            self.forwarding_service
+                .registry()
+                .stop_port_profiler(connection_id);
+        }
+    }
+
     pub(in crate::workspace) fn start_port_scan(
         &mut self,
         node_id: NodeId,
@@ -350,10 +360,7 @@ impl WorkspaceApp {
             return;
         }
 
-        let owner_connection_id = self
-            .ssh_nodes
-            .get(&node_id)
-            .and_then(|node| node.saved_connection_id.clone());
+        let owner_connection_id = self.forward_owner_for_node(&node_id);
         self.forwarding.update(cx, |forwarding, cx| {
             forwarding.request_port_scan(
                 node_id.clone(),
@@ -409,10 +416,8 @@ impl WorkspaceApp {
                     tab_id,
                     message_key,
                     sync_saved_forwards_on_success,
-                    binding,
                     result,
                 } => {
-                    self.remember_forwarding_binding(binding);
                     let visible = self.forwards_tab_is_visible(tab_id, cx);
                     let delay = motion::duration(&self.tokens, MotionDuration::Overlay);
                     if let Some(page) = self.forwarding.read(cx).page_state(tab_id) {
@@ -456,11 +461,8 @@ impl WorkspaceApp {
                         self.resume_ssh_tunnel_starts(&node, &NodeReadiness::Ready, cx);
                     }
                 }
-                ForwardingDeliveryIntent::Binding { binding } => {
-                    self.remember_forwarding_binding(binding);
-                }
-                ForwardingDeliveryIntent::PortScan { binding } => {
-                    self.remember_forwarding_binding(binding)
+                ForwardingDeliveryIntent::PortScan { connection_id } => {
+                    self.stop_hidden_port_profiler(&connection_id, cx);
                 }
                 ForwardingDeliveryIntent::ReconnectRestore {
                     node_id,
@@ -469,7 +471,6 @@ impl WorkspaceApp {
                     detail,
                     job_id,
                     created_forwards,
-                    bindings,
                 } => {
                     changed |= self.apply_reconnect_forward_restore_completion(
                         node_id,
@@ -478,7 +479,6 @@ impl WorkspaceApp {
                         detail,
                         job_id,
                         created_forwards,
-                        bindings,
                         cx,
                     );
                 }
@@ -525,30 +525,7 @@ impl WorkspaceApp {
                         cx,
                     );
                 }
-                ForwardingDeliveryIntent::Runtime(ForwardEvent::PortDetected {
-                    connection_id,
-                    new_ports,
-                    closed_ports,
-                    all_ports,
-                }) => {
-                    let Some(node_id) = self.forwarding_node_for_connection_id(&connection_id)
-                    else {
-                        continue;
-                    };
-                    self.forwarding.update(cx, |forwarding, cx| {
-                        forwarding.apply_port_detection_result(
-                            &node_id,
-                            Some(connection_id),
-                            Ok(PortDetectionSnapshot {
-                                new_ports,
-                                closed_ports,
-                                all_ports,
-                                has_scanned: true,
-                            }),
-                            cx,
-                        );
-                    });
-                }
+                ForwardingDeliveryIntent::Runtime(ForwardEvent::PortDetected { .. }) => {}
             }
         }
         if changed {
@@ -597,34 +574,19 @@ impl WorkspaceApp {
         &self,
         node_id: &NodeId,
     ) -> Option<String> {
-        self.forwarding_service.connection_id_for_node(node_id)
-    }
-
-    fn forwarding_node_for_connection_id(&self, connection_id: &str) -> Option<NodeId> {
+        // Teardown targets the manager that actually started the profiler, even after a rebind.
         self.forwarding_service
-            .node_for_connection_id(connection_id)
+            .manager_for_node(node_id)
+            .map(|manager| manager.ssh_connection_handle().connection_id().to_owned())
+            .or_else(|| self.node_router.connection_id_for_node(node_id))
     }
 
-    pub(in crate::workspace) fn release_forwarding_binding_for_node(
-        &mut self,
-        node_id: &NodeId,
-    ) -> Option<String> {
-        self.forwarding_service.release_binding_for_node(node_id)
-    }
-
-    pub(in crate::workspace) fn remember_forwarding_binding(
-        &mut self,
-        binding: Option<(String, String, ConnectionConsumer)>,
-    ) {
-        let node_is_disconnected = binding
-            .as_ref()
-            .and_then(|(session_id, _, _)| {
-                super::ForwardingRuntimeService::node_id_for_session(session_id)
-            })
-            .and_then(|node_id| self.ssh_nodes.get(&node_id))
-            .is_some_and(|node| node.readiness == NodeReadiness::Disconnected);
-        self.forwarding_service
-            .remember_binding(binding, node_is_disconnected);
+    pub(in crate::workspace) fn forward_owner_for_node(&self, node_id: &NodeId) -> Option<String> {
+        let origin = self.node_router.node_metadata(node_id)?.origin;
+        if matches!(origin, oxideterm_ssh::NodeOrigin::DrillDown { .. }) {
+            return self.ssh_nodes.get(node_id)?.saved_connection_id.clone();
+        }
+        origin.saved_target_id().map(str::to_owned)
     }
 
     pub(in crate::workspace) fn forwarding_session_id_for_node(&self, node_id: &NodeId) -> String {

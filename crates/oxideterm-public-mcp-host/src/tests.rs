@@ -46,7 +46,7 @@ impl PublicMcpForwardPort for NoForwards {
         _node_id: &NodeId,
         _owner_connection_id: Option<&str>,
         _forward_id: &str,
-    ) -> Result<ForwardRule, String> {
+    ) -> Result<(ForwardRule, PublicMcpForwardStopHandoff), String> {
         unreachable!("the request must not reach forwarding")
     }
 
@@ -101,6 +101,7 @@ impl PublicMcpForwardPort for NoForwards {
         _owner_connection_id: Option<&str>,
         _original_rule: &ForwardRule,
         _revoked_rule: &ForwardRule,
+        _stop_handoff: Option<&PublicMcpForwardStopHandoff>,
         _created_by_client: bool,
         _persisted: bool,
     ) -> bool {
@@ -122,6 +123,7 @@ async fn cold_jump_chain_returns_only_the_ready_target_lease() {
     let (_dir, host, mut backend, client, mut requests) =
         dispatch_fixture(&[ToolGroup::NodeSession]);
     let registry = SshConnectionRegistry::default();
+    registry.set_idle_timeout(Some(Duration::ZERO));
     backend.node_router = NodeRouter::new(registry.clone());
     let jump = NodeId::new("jump");
     let target = NodeId::new("target");
@@ -162,6 +164,12 @@ async fn cold_jump_chain_returns_only_the_ready_target_lease() {
     tx.send_replace(ConnectionChainProgress::queued(2));
     assert!(tokio::time::timeout(pending, &mut response).await.is_err());
     let target_handle = bind(&target, "target.invalid");
+    let delivery = router
+        .lease_connection_handoff(target_handle.connection_id())
+        .unwrap();
+    backend.rebind_node_leases(&target, target_handle.connection_id());
+    drop(delivery);
+    assert_eq!(target_handle.state(), ConnectionState::Active);
     tx.send_replace(ConnectionChainProgress {
         hop: 2,
         stage: ConnectionTraceStage::Ready,
@@ -180,10 +188,17 @@ async fn cold_jump_chain_returns_only_the_ready_target_lease() {
         parent_handle.info().consumers,
         vec![ConnectionConsumer::NodeRouter(jump.0)]
     );
+    let retained = vec![
+        ConnectionConsumer::NodeRouter(target.0.clone()),
+        lease.consumer.clone(),
+    ];
+    assert_eq!(target_handle.info().consumers, retained);
 
     let (request, response) = queued_request(&host, &mut requests, &client, call()).await;
     let (tx, rx) = tokio::sync::watch::channel(ConnectionChainProgress::queued(1));
     backend.acquire_node_lease(request, target.clone(), "saved".into(), Some(rx));
+    // An already-ready target also needs protection while the new request waits on its chain.
+    assert_eq!(target_handle.info().ref_count, 3);
     tx.send_replace(ConnectionChainProgress {
         hop: 1,
         stage: ConnectionTraceStage::Authentication,
@@ -194,7 +209,301 @@ async fn cold_jump_chain_returns_only_the_ready_target_lease() {
         Some("SSH hop 1 failed during Authentication")
     );
     assert_eq!(host.runtime_handles.lock().nodes.len(), 1);
-    assert!(target_handle.info().consumers.contains(&lease.consumer));
+    assert_eq!(target_handle.info().consumers, retained);
+
+    let replacement = bind(&target, "reconnected.invalid");
+    let delivery = router
+        .lease_connection_handoff(replacement.connection_id())
+        .unwrap();
+    backend.rebind_node_leases(&target, replacement.connection_id());
+    backend.rebind_node_leases(&target, target_handle.connection_id());
+    drop(delivery);
+    assert_eq!(replacement.info().consumers, retained);
+    assert!(!target_handle.info().consumers.contains(&lease.consumer));
+    let (request, response) = queued_request(
+        &host,
+        &mut requests,
+        &client,
+        PublicToolCall::ReleaseNode(oxideterm_public_mcp::calls::ReleaseNodeArgs { node_ref }),
+    )
+    .await;
+    assert!(backend.dispatch(request).is_ok());
+    assert_eq!(response.await.unwrap().data.unwrap()["released"], true);
+    assert_eq!(
+        replacement.info().consumers,
+        [ConnectionConsumer::NodeRouter(target.0)]
+    );
+}
+
+#[tokio::test]
+async fn disconnecting_one_shared_node_releases_its_mcp_and_sftp_consumers() {
+    use oxideterm_ssh::{ConnectionState, SshConfig};
+    let (_dir, host, mut backend, client, mut receiver) = dispatch_fixture(&[
+        ToolGroup::NodeSession,
+        ToolGroup::FileRead,
+        ToolGroup::CommandExecute,
+    ]);
+    let registry = SshConnectionRegistry::default();
+    registry.set_idle_timeout(Some(Duration::ZERO));
+    backend.node_router = NodeRouter::new(registry.clone());
+    let router = &backend.node_router;
+    let a = NodeId::new("disconnect");
+    let b = NodeId::new("keep");
+    let config = SshConfig::default();
+    let handle = registry.acquire(config.clone(), ConnectionConsumer::NodeRouter(a.0.clone()));
+    let id = handle.connection_id();
+    handle.set_physical(Arc::new(()));
+    registry.mark_state(id, ConnectionState::Active);
+    registry.acquire(config.clone(), ConnectionConsumer::NodeRouter(b.0.clone()));
+    for node in [&a, &b] {
+        router.upsert_node(node.clone(), config.clone());
+        router.bind_connection(node, id).unwrap();
+    }
+    let terminal = ConnectionConsumer::Terminal("other-shell".into());
+    let sibling = registry.lease_consumer(id, terminal.clone()).unwrap();
+    let (request, response) = queued_request(
+        &host,
+        &mut receiver,
+        &client,
+        PublicToolCall::ConnectNode(oxideterm_public_mcp::calls::ConnectNodeArgs {
+            connection_ref: ConnectionRef::new(),
+        }),
+    )
+    .await;
+    backend.acquire_node_lease(request, a.clone(), "saved-a".into(), None);
+    let node_ref: NodeRef =
+        serde_json::from_value(response.await.unwrap().data.unwrap()["node_ref"].clone()).unwrap();
+    let file_ref = FileSessionRef::new();
+    let consumer = ConnectionConsumer::Sftp(file_ref.to_string());
+    let route = router.lease_connection_now(&a, consumer).unwrap();
+    host.runtime_handles.lock().file_sessions.insert(
+        file_ref.clone(),
+        PublicMcpFileSessionRecord {
+            client_ref: client.clone(),
+            node_id: a.clone(),
+            root: None,
+            session: None,
+            route: Some(Arc::new(route)),
+        },
+    );
+    assert_eq!(registry.monitor_stats().total_sftp_sessions, 1);
+
+    // Both requests have entered the broker before the desktop invalidates the node.
+    let mut pending = Vec::new();
+    for call in [
+        PublicToolCall::FilesOpen(oxideterm_public_mcp::calls::FilesOpenArgs {
+            node_ref: node_ref.clone(),
+            root: None,
+        }),
+        PublicToolCall::StartCommand(oxideterm_public_mcp::calls::StartCommandArgs {
+            node_ref: node_ref.clone(),
+            command: Zeroizing::new("pwd".into()),
+            working_directory: None,
+        }),
+    ] {
+        pending.push(queued_request(&host, &mut receiver, &client, call).await);
+    }
+    router
+        .disconnect_node_runtime(&a, "explicit disconnect")
+        .unwrap();
+    router.release_consumer(id, &ConnectionConsumer::NodeRouter(a.0.clone()));
+    assert_eq!(backend.invalidate_disconnected_nodes(&[a]), 1);
+    for (request, response) in pending {
+        assert!(backend.dispatch(request).is_ok());
+        assert_eq!(
+            response.await.unwrap().error.as_deref(),
+            Some("The node handle is unavailable")
+        );
+    }
+    assert!(host.node_lease(&client, &node_ref).is_none());
+    assert_eq!(router.resolve_connection_now(&b).unwrap().connection_id, id);
+    assert_eq!(
+        handle.info().consumers,
+        [ConnectionConsumer::NodeRouter(b.0), terminal]
+    );
+    assert_eq!(registry.monitor_stats().total_sftp_sessions, 0);
+    assert!(
+        !host
+            .runtime_handles
+            .lock()
+            .file_sessions
+            .contains_key(&file_ref)
+    );
+    drop(sibling);
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while registry.get(id).is_some() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the final terminal must permit idle retirement");
+}
+
+#[allow(
+    dead_code,
+    reason = "Only the SSH protocol tests inspect home-resolution events."
+)]
+#[path = "../../oxideterm-ssh/tests/support/peer.rs"]
+mod ssh_peer;
+
+#[tokio::test]
+async fn file_handle_survives_node_release_and_immediate_idle_reconnect() {
+    use oxideterm_public_mcp::calls::{
+        ConnectNodeArgs, FilesCloseArgs, FilesOpenArgs, ReleaseNodeArgs, StartTransferArgs,
+        TransferHandleArgs,
+    };
+    use oxideterm_ssh::{ConnectionState, SshTransportClient};
+
+    let (_dir, host, mut backend, client, mut receiver) = dispatch_fixture(&[
+        ToolGroup::NodeSession,
+        ToolGroup::FileRead,
+        ToolGroup::ArtifactTransfer,
+    ]);
+    let (config, _, server, _) = ssh_peer::start_peer(false).await;
+    let registry = SshConnectionRegistry::default();
+    registry.set_idle_timeout(Some(Duration::ZERO));
+    backend.node_router = NodeRouter::new(registry.clone());
+    let router = &backend.node_router;
+    let node = NodeId::new("files");
+    router.upsert_node(node.clone(), config.clone());
+    let connect = || {
+        SshTransportClient::new(config.clone()).connect_node_with_registry(
+            registry.clone(),
+            ConnectionConsumer::NodeRouter(node.0.clone()),
+        )
+    };
+    let first = connect().await.unwrap();
+    let delivery = router
+        .bind_established_connection(&node, first.connection_id())
+        .unwrap();
+    let (request, response) = queued_request(
+        &host,
+        &mut receiver,
+        &client,
+        PublicToolCall::ConnectNode(ConnectNodeArgs {
+            connection_ref: ConnectionRef::new(),
+        }),
+    )
+    .await;
+    backend.acquire_node_lease(request, node.clone(), "saved".into(), None);
+    let node_ref: NodeRef =
+        serde_json::from_value(response.await.unwrap().data.unwrap()["node_ref"].clone()).unwrap();
+    drop(delivery);
+    async fn dispatch(
+        backend: &PublicMcpBackground,
+        host: &PublicMcpHost,
+        receiver: &mut DomainRequestReceiver,
+        client: &ClientRef,
+        call: PublicToolCall,
+    ) -> ToolEnvelope {
+        let (request, response) = queued_request(host, receiver, client, call).await;
+        assert!(backend.dispatch(request).is_ok());
+        response.await.unwrap()
+    }
+    let open = PublicToolCall::FilesOpen(FilesOpenArgs {
+        node_ref: node_ref.clone(),
+        root: Some("/fixture".into()),
+    });
+    let files = dispatch(&backend, &host, &mut receiver, &client, open).await;
+    assert_eq!(files.error, None);
+    let file_ref: FileSessionRef =
+        serde_json::from_value(files.data.expect("open SFTP")["file_session_ref"].clone()).unwrap();
+    let released = dispatch(
+        &backend,
+        &host,
+        &mut receiver,
+        &client,
+        PublicToolCall::ReleaseNode(ReleaseNodeArgs {
+            node_ref: node_ref.clone(),
+        }),
+    )
+    .await;
+    assert_eq!(released.data.unwrap()["released"], true);
+    registry.mark_state_without_event(first.connection_id(), ConnectionState::LinkDown);
+    let second = connect().await.unwrap();
+    let delivery = router
+        .bind_established_connection(&node, second.connection_id())
+        .unwrap();
+    backend.rebind_node_leases(&node, second.connection_id());
+    drop(delivery);
+    tokio::task::yield_now().await;
+    assert!(
+        second
+            .info()
+            .consumers
+            .iter()
+            .any(|consumer| matches!(consumer, ConnectionConsumer::Sftp(_)))
+    );
+    let started = dispatch(
+        &backend,
+        &host,
+        &mut receiver,
+        &client,
+        PublicToolCall::TransferStart(StartTransferArgs::Download {
+            file_session_ref: file_ref.clone(),
+            remote_path: "sample".into(),
+            resume: false,
+        }),
+    )
+    .await;
+    let transfer: TransferRef = serde_json::from_value(
+        started.data.expect("download after reconnect")["transfer_ref"].clone(),
+    )
+    .unwrap();
+    let artifact = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let status = dispatch(
+                &backend,
+                &host,
+                &mut receiver,
+                &client,
+                PublicToolCall::TransferStatus(TransferHandleArgs {
+                    transfer_ref: transfer.clone(),
+                }),
+            )
+            .await
+            .data
+            .unwrap();
+            match status["state"].as_str() {
+                Some("completed") => {
+                    break serde_json::from_value(status["artifact"]["artifact_ref"].clone())
+                        .unwrap();
+                }
+                Some("pending" | "running") => tokio::task::yield_now().await,
+                _ => panic!("download failed: {status}"),
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        host.state
+            .artifacts
+            .read_all(&client, &artifact, 2)
+            .unwrap()
+            .bytes
+            .as_slice(),
+        &[2, 2]
+    );
+    let closed = dispatch(
+        &backend,
+        &host,
+        &mut receiver,
+        &client,
+        PublicToolCall::FilesClose(FilesCloseArgs {
+            file_session_ref: file_ref,
+        }),
+    )
+    .await;
+    assert_eq!(closed.data.unwrap()["closed"], true);
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while registry.get(second.connection_id()).is_some() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("closing the last SFTP consumer retires the connection");
+    server.abort();
 }
 
 fn dispatch_fixture(
@@ -264,12 +573,11 @@ async fn node_lease_quota_and_revocation_are_client_scoped() {
     );
     let alice = ClientRef::new();
     let bob = ClientRef::new();
-    let lease = |client_ref: ClientRef, node: &str| PublicMcpNodeLease {
+    let lease = |client_ref: ClientRef, node: &str| PublicMcpNodeRegistration {
         client_ref,
         node_id: NodeId::new(node),
         saved_connection_id: None,
-        physical_connection_id: None,
-        consumer: ConnectionConsumer::PublicMcp(node.to_owned()),
+        connection: None,
     };
     let first = NodeRef::new();
     {
@@ -286,7 +594,7 @@ async fn node_lease_quota_and_revocation_are_client_scoped() {
         NodeId::new("alice-first")
     );
     assert!(host.node_lease(&bob, &first).is_none());
-    host.revoke_client_runtime(&alice, &router());
+    host.revoke_client_runtime(&alice);
     assert!(host.node_lease(&alice, &first).is_none());
     let handles = host.runtime_handles.lock();
     assert_eq!(

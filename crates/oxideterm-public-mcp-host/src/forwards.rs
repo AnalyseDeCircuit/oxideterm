@@ -14,7 +14,10 @@ use super::{
     PublicMcpBackground, PublicMcpForwardRecord, PublicMcpRuntimeHandles, finish_serialized,
     node_lease_for_client,
 };
-use super::{PublicMcpForwardMutation, PublicMcpForwardPort, PublicMcpHostEffect};
+use super::{
+    PublicMcpForwardMutation, PublicMcpForwardPort, PublicMcpForwardStopHandoff,
+    PublicMcpHostEffect,
+};
 
 const PUBLIC_MCP_FORWARD_CAPACITY: usize = 512;
 const PUBLIC_MCP_FORWARD_CAPACITY_PER_CLIENT: usize = 128;
@@ -316,6 +319,7 @@ impl PublicMcpBackground {
                 record,
                 original_rule,
                 mutation.rule,
+                None,
                 request.audit_context.clone(),
             );
             request.finish(ToolEnvelope::failed(
@@ -410,6 +414,7 @@ impl PublicMcpBackground {
                 record,
                 original_rule,
                 mutation.rule,
+                None,
                 request.audit_context.clone(),
             );
             request.finish(ToolEnvelope::failed(
@@ -427,6 +432,7 @@ impl PublicMcpBackground {
         record: PublicMcpForwardRecord,
         original_rule: ForwardRule,
         revoked_rule: ForwardRule,
+        stop_handoff: Option<PublicMcpForwardStopHandoff>,
         audit_context: Option<oxideterm_audit::AuditContext>,
     ) {
         let service = self.forwarding_service.clone();
@@ -442,6 +448,7 @@ impl PublicMcpBackground {
                             record.owner_connection_id.as_deref(),
                             &original_rule,
                             &revoked_rule,
+                            stop_handoff.as_ref(),
                             record.created_by_client,
                             persisted,
                         )
@@ -463,6 +470,12 @@ impl PublicMcpBackground {
             request.finish(ToolEnvelope::failed("The forward handle is unavailable"));
             return;
         };
+        let Some(original_rule) = current_forward_rule(self.forwarding_service.as_ref(), &record)
+        else {
+            request.finish(ToolEnvelope::failed("The forward no longer exists"));
+            return;
+        };
+        let host = self.clone();
         let service = self.forwarding_service.clone();
         let handles = self.runtime_handles.clone();
         let owner_connection_id = record.owner_connection_id.clone();
@@ -479,13 +492,23 @@ impl PublicMcpBackground {
                         )
                         .await;
                     match result {
-                        Ok(rule) => {
+                        Ok((rule, stop_handoff)) => {
                             let handles = handles.lock();
                             let Some(live) = handles
                                 .forwards
                                 .get(&forward_ref)
                                 .filter(|live| live.client_ref == request.client_ref)
                             else {
+                                drop(handles);
+                                if !record.created_by_client {
+                                    host.compensate_revoked_forward_mutation(
+                                        record,
+                                        original_rule,
+                                        rule,
+                                        Some(stop_handoff),
+                                        request.audit_context.clone(),
+                                    );
+                                }
                                 request.finish(ToolEnvelope::failed(
                                     "The forward grant was revoked during the operation",
                                 ));

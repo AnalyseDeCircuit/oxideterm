@@ -753,6 +753,37 @@ mod tests {
     }
 
     #[test]
+    fn immediate_timeout_requires_an_explicit_persisted_value() {
+        let defaults = sanitize_settings_value(json!({})).unwrap().settings;
+        assert_eq!(defaults.sidebar_ui.closed_session_retention_secs, -1);
+        assert_eq!(defaults.connection_pool.idle_timeout_secs, 1800);
+
+        for (stored, expected) in [
+            (0, Some(std::time::Duration::ZERO)),
+            (-1, None),
+            (-2, None),
+            (60, Some(std::time::Duration::from_secs(60))),
+        ] {
+            let settings = sanitize_settings_value(json!({
+                "sidebarUI": { "closedSessionRetentionSecs": stored },
+                "connectionPool": { "idleTimeoutSecs": stored },
+            }))
+            .unwrap()
+            .settings;
+            assert_eq!(
+                crate::configured_timeout(settings.sidebar_ui.closed_session_retention_secs),
+                expected,
+                "sidebar retention {stored}"
+            );
+            assert_eq!(
+                crate::configured_timeout(settings.connection_pool.idle_timeout_secs),
+                expected,
+                "SSH idle timeout {stored}"
+            );
+        }
+    }
+
+    #[test]
     fn serde_round_trip_preserves_stable_and_future_fields() {
         let raw = json!({
             "terminal": {

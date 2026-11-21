@@ -63,6 +63,7 @@ mod selectable_text;
 mod selection_motion;
 mod session_icons;
 mod session_manager;
+mod session_retention;
 mod settings;
 mod sftp;
 mod sidebar;
@@ -196,17 +197,17 @@ use oxideterm_sftp::{
     StoredTransferProgress,
 };
 use oxideterm_ssh::{
-    AuthMethod, ConnectionConsumer, ConnectionPoolConfig, ConnectionProgressReporter,
-    ConnectionState, ConnectionTraceEvent, ConnectionTraceMode, ConnectionTracePlan,
-    ConnectionTraceStage, ConnectionTraceState, ConnectionTraceStatus, DedicatedConnectionLease,
-    MAX_RETAINED_RECONNECT_JOBS, ManagedKeyResolver, NodeEventReceiver, NodeEventSubscription,
-    NodeId, NodeOrigin, NodeReadiness, NodeRouter, NodeRuntimeStore, NodeState, NodeStateEvent,
-    NodeTreeExpansion, NodeTreePersistenceSnapshot, NodeTreeSnapshot, NodeTreeSnapshotNode,
-    PhaseResult, ProbeConnectionStatus, ProxyHopConfig, ReconnectForwardRuleSnapshot,
-    ReconnectNodeConnectionSnapshot, ReconnectNodeTerminalSnapshot, ReconnectNodeTransferSnapshot,
-    ReconnectOrchestratorStore, ReconnectPhase, ReconnectProgress, ReconnectSnapshot,
-    SshAlgorithmDiagnosticKind, SshConfig, SshConnectionHandle, SshConnectionRegistry,
-    SshPromptHandler, SshTransportClient, TerminalEndpoint,
+    AuthMethod, ConnectionConsumer, ConnectionConsumerLease, ConnectionPoolConfig,
+    ConnectionProgressReporter, ConnectionState, ConnectionTraceEvent, ConnectionTraceMode,
+    ConnectionTracePlan, ConnectionTraceStage, ConnectionTraceState, ConnectionTraceStatus,
+    DedicatedConnectionLease, MAX_RETAINED_RECONNECT_JOBS, ManagedKeyResolver, NodeEventReceiver,
+    NodeEventSubscription, NodeId, NodeOrigin, NodeReadiness, NodeRouter, NodeRuntimeStore,
+    NodeState, NodeStateEvent, NodeTreeExpansion, NodeTreePersistenceSnapshot, NodeTreeSnapshot,
+    NodeTreeSnapshotNode, PhaseResult, ProbeConnectionStatus, ProxyHopConfig,
+    ReconnectForwardRuleSnapshot, ReconnectNodeConnectionSnapshot, ReconnectNodeTerminalSnapshot,
+    ReconnectNodeTransferSnapshot, ReconnectOrchestratorStore, ReconnectPhase, ReconnectProgress,
+    ReconnectSnapshot, SshAlgorithmDiagnosticKind, SshConfig, SshConnectionHandle,
+    SshConnectionRegistry, SshPromptHandler, SshTransportClient, TerminalEndpoint,
 };
 use oxideterm_ssh_launch::{
     NativeConnectionLaunch, TemporaryMoshLaunch, TemporarySshLaunch, TemporaryTelnetLaunch,
@@ -528,6 +529,7 @@ pub(crate) struct WorkspaceApp {
     serial_terminal_configs: HashMap<TerminalSessionId, SerialSessionConfig>,
     // A Telnet pane keeps only the stable profile owner needed for toolbar persistence.
     telnet_terminal_profile_ids: HashMap<TerminalSessionId, String>,
+    session_retention: session_retention::RetentionRuntime,
     // Non-SSH connection records outlive their current terminal or desktop surface.
     standalone_connections: standalone_connections::StandaloneConnectionRegistry,
     detached_local_terminals_popover_open: bool,
@@ -675,11 +677,12 @@ pub(crate) struct WorkspaceApp {
     _forwarding_subscription: Subscription,
     file_manager: FileManagerViews,
     sftp_tab_nodes: HashMap<TabId, NodeId>,
+    sftp_surface_leases: HashMap<sftp::SftpSurfaceId, sftp::SftpSurfaceLease>,
     standalone_sftp_tabs: HashMap<TabId, sftp::StandaloneSftpTabBinding>,
     standalone_sftp_sessions: HashMap<String, sftp::StandaloneSftpRuntime>,
     ftp_sessions: HashMap<String, Arc<sftp::ftp::FtpRuntime>>,
     dedicated_sftp_connections:
-        Arc<parking_lot::Mutex<HashMap<NodeId, sftp::DedicatedSftpConnectionSlot>>>,
+        Arc<parking_lot::Mutex<HashMap<NodeId, sftp::DedicatedSftpRouteSlot>>>,
     ssh_consumer_prompt_handler: Arc<dyn SshPromptHandler>,
     ssh_consumer_managed_key_resolver: ManagedKeyResolver,
     embedded_sftp_node_id: Option<NodeId>,

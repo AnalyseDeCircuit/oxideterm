@@ -265,7 +265,7 @@ async fn write_remote_file(
 async fn run_sftp_transfer(
     services: &AiLiveToolServices,
     owner: &crate::AiSftpRuntimeOwner<NodeId>,
-    owner_session: std::sync::Arc<tokio::sync::Mutex<oxideterm_ssh::SftpSession>>,
+    owner_session: oxideterm_ssh::RoutedSftpSession,
     request: &AiFileTransfer<'_>,
 ) -> Result<AiTransferOutcome, AiSftpTransferError> {
     if request.directory {
@@ -303,7 +303,7 @@ async fn run_sftp_transfer(
 async fn start_sftp_directory_transfer(
     services: &AiLiveToolServices,
     owner: &crate::AiSftpRuntimeOwner<NodeId>,
-    owner_session: std::sync::Arc<tokio::sync::Mutex<oxideterm_ssh::SftpSession>>,
+    owner_session: oxideterm_ssh::RoutedSftpSession,
     request: &AiFileTransfer<'_>,
 ) -> Result<AiTransferOutcome, AiSftpTransferError> {
     let (local_path, remote_path, direction_enum) = match request.direction {
