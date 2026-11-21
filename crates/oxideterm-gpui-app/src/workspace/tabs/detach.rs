@@ -262,6 +262,7 @@ impl WorkspaceApp {
                 .authority
                 .update(cx, |runtime, _| runtime.revoke_app_surface(id));
         }
+        self.sync_collapsed_workspace_tabs(cx);
         self.register_tab_surface(&tab, cx);
         self.dismiss_terminal_broadcast_menu(cx);
         self.close_tab_context_menu();
@@ -314,7 +315,7 @@ impl WorkspaceApp {
         let tab = Tab {
             id: tab_id,
             kind,
-            title: self.terminal_pane_label(pane_id, cx),
+            title: self.terminal_tab_title_for_pane(pane_id, cx),
             title_source: TabTitleSource::Static,
             root_pane: Some(PaneNode::leaf(pane_id, session_id)),
             active_pane_id: Some(pane_id),
@@ -324,6 +325,7 @@ impl WorkspaceApp {
         }) {
             return;
         }
+        self.sync_collapsed_workspace_tabs(cx);
         self.register_tab_surface(&tab, cx);
         self.set_main_window_active_tab(Some(tab_id), cx);
         self.sync_active_tab_surface(cx);
@@ -1328,11 +1330,44 @@ impl WorkspaceApp {
         }
         menu_height += merge_targets.len() as f32 * TAB_CONTEXT_MENU_SPLIT_HEIGHT;
         menu_height = menu_height.min(f32::from(viewport.height) - TAB_CONTEXT_MENU_MARGIN * 2.0);
-        let menu_width = if can_split_into_active || !merge_targets.is_empty() {
+        let detached = self.tab_host.read(cx).is_detached(menu.tab_id);
+        let base_menu_width = if can_split_into_active || !merge_targets.is_empty() {
             TAB_CONTEXT_MENU_SPLIT_WIDTH
         } else {
             TAB_CONTEXT_MENU_WIDTH
         };
+        let mut menu_labels = vec![
+            self.i18n.t(if detached {
+                "tabbar.return_to_main_window"
+            } else {
+                "tabbar.detach_to_window"
+            }),
+            self.i18n.t("tabbar.close_tab"),
+        ];
+        if renamable {
+            menu_labels.push(self.i18n.t("tabbar.rename_tab"));
+        }
+        if can_split_into_active {
+            menu_labels.push(self.i18n.t("tabbar.split_into_active_horizontal"));
+            menu_labels.push(self.i18n.t("tabbar.split_into_active_vertical"));
+        }
+        for (_, title) in &merge_targets {
+            menu_labels.push(
+                self.i18n_replace("tabbar.merge_into_horizontal", &[("title", title.clone())]),
+            );
+            menu_labels
+                .push(self.i18n_replace("tabbar.merge_into_vertical", &[("title", title.clone())]));
+        }
+        if is_session_manager {
+            menu_labels.push(self.i18n.t("tabbar.switch_to_sidebar"));
+        }
+        let menu_width = oxideterm_gpui_ui::estimate_menu_width(
+            &self.tokens,
+            base_menu_width,
+            380.0,
+            true,
+            menu_labels.iter().map(String::as_str),
+        );
         let placement = browser_behavior::clamp_context_menu_position(
             menu.x,
             menu.y,
@@ -1342,7 +1377,6 @@ impl WorkspaceApp {
             menu_height,
             TAB_CONTEXT_MENU_MARGIN,
         );
-        let detached = self.tab_host.read(cx).is_detached(menu.tab_id);
         let menu_body = context_menu_event_boundary(
             div().child(
                 context_menu_content(&self.tokens)
@@ -2042,5 +2076,193 @@ mod tests {
             detached_tab_surface_route(tab_id, &TabKind::Forwards),
             DetachedTabSurfaceRoute::Forwards(tab_id)
         );
+    }
+
+    fn detach_workspace_fixture(
+        cx: &mut gpui::TestAppContext,
+    ) -> Option<(Entity<WorkspaceApp>, &mut gpui::VisualTestContext)> {
+        let executable = std::env::current_exe().unwrap();
+        let fixture_key = "OXIDETERM_TAB_DETACH_TEST_DIR";
+        let Some(directory) = std::env::var_os(fixture_key) else {
+            // Workspace storage is process-wide; isolate settings per test run.
+            let directory = tempfile::tempdir_in(executable.parent().unwrap()).unwrap();
+            let child = directory.path().join(executable.file_name().unwrap());
+            std::fs::hard_link(&executable, &child).unwrap();
+            std::fs::write(directory.path().join("portable"), []).unwrap();
+            let output = std::process::Command::new(child)
+                .arg(cx.test_function_name().unwrap())
+                .arg("--nocapture")
+                .env(fixture_key, directory.path())
+                .env_remove("APPIMAGE")
+                .current_dir(directory.path())
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return None;
+        };
+        assert!(default_settings_path().starts_with(PathBuf::from(directory)));
+        let mut settings = SettingsStore::load_from_path(default_settings_path()).unwrap();
+        settings.settings_mut().ssh_config.auto_load_hosts = false;
+        settings.settings_mut().onboarding_completed = true;
+        settings.save().unwrap();
+        cx.executor().allow_parking();
+        let (shell, cx) = cx.add_window_view(|window, cx| {
+            let workspace = cx.new(|cx| WorkspaceApp::new(window, cx, None, None).unwrap());
+            workspace.update(cx, |workspace, _| {
+                workspace.tokens.motion.enabled = false;
+            });
+            window_shell::WorkspaceWindowShell::new(workspace, window, cx)
+        });
+        let workspace = shell.read_with(cx, |shell, _| shell.session_entity());
+        Some((workspace, cx))
+    }
+
+    #[gpui::test]
+    fn combined_terminal_tab_restores_remaining_title_and_clean_detached_title(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let Some((workspace, cx)) = detach_workspace_fixture(cx) else {
+            return;
+        };
+
+        let (ciallo_tab, dero_tab, ciallo_pane, dero_pane, dero_session) =
+            cx.update(|window, cx| {
+                workspace.update(cx, |workspace, cx| {
+                    let mut make_ssh_terminal = |node_name: &str, host: &str, title: &str| {
+                        let node_id = NodeId::new(node_name);
+                        let mut config = SshConfig::default();
+                        config.host = host.into();
+                        config.port = 22;
+                        config.username = "root".into();
+                        workspace.ssh_nodes.insert(
+                            node_id.clone(),
+                            WorkspaceSshNode::new(
+                                None,
+                                &config,
+                                title.into(),
+                                Vec::new(),
+                                NodeReadiness::Ready,
+                            ),
+                        );
+                        let tab_id = workspace.alloc_tab_id(cx);
+                        let pane_id = workspace.alloc_pane_id(cx);
+                        let session_id = workspace.alloc_session_id(cx);
+                        let pane = cx.new(|cx| {
+                            TerminalPane::new_recording_playback(
+                                80,
+                                24,
+                                Default::default(),
+                                window,
+                                cx,
+                            )
+                            .unwrap()
+                        });
+                        workspace.register_terminal_pane(pane_id, session_id, pane, window, cx);
+                        assert!(workspace.workspace_runtime.update(cx, |runtime, _| {
+                            runtime.register_ssh_terminal_session(session_id, node_id)
+                        }));
+                        workspace.insert_tab(
+                            Tab {
+                                id: tab_id,
+                                kind: TabKind::SshTerminal,
+                                title: title.into(),
+                                title_source: TabTitleSource::Static,
+                                root_pane: Some(PaneNode::leaf(pane_id, session_id)),
+                                active_pane_id: Some(pane_id),
+                            },
+                            cx,
+                        );
+                        workspace.bind_terminal_location(tab_id, pane_id, session_id, cx);
+                        (tab_id, pane_id, session_id)
+                    };
+
+                    let (ciallo_tab, ciallo_pane, _) =
+                        make_ssh_terminal("ciallo-node", "10.0.0.1", "Ciallo | DE | 1C1G");
+                    let (dero_tab, dero_pane, dero_session) =
+                        make_ssh_terminal("dero-node", "10.0.0.2", "DERO | DE | 4C12G");
+                    (ciallo_tab, dero_tab, ciallo_pane, dero_pane, dero_session)
+                })
+            });
+
+        let combined_id = cx.update(|window, cx| {
+            workspace.update(cx, |workspace, cx| {
+                assert!(workspace.combine_tabs_at(
+                    dero_tab,
+                    ciallo_tab,
+                    None,
+                    SplitDirection::Horizontal,
+                    false,
+                    window,
+                    cx,
+                ));
+                workspace.active_tab_id(cx).unwrap()
+            })
+        });
+
+        workspace.read_with(cx, |workspace, cx| {
+            let combined = workspace.tab_by_id(combined_id, cx).unwrap();
+            assert_eq!(combined.kind, TabKind::Workspace);
+            assert_eq!(combined.title, "Ciallo | DE | 1C1G");
+            // Pane labels keep endpoint details for split headers / broadcast UI.
+            assert_eq!(
+                workspace.terminal_pane_label(ciallo_pane, cx),
+                "Ciallo | DE | 1C1G · root@10.0.0.1:22"
+            );
+        });
+
+        // Detaching the first pane restores the surviving tab and gives the
+        // detached tab the clean SSH node title without endpoint details.
+        let detached_id = cx.update(|window, cx| {
+            workspace.update(cx, |workspace, cx| {
+                workspace.move_terminal_pane_out(combined_id, ciallo_pane, false, window, cx);
+                workspace.active_tab_id(cx).unwrap()
+            })
+        });
+
+        workspace.read_with(cx, |workspace, cx| {
+            let detached = workspace.tab_by_id(detached_id, cx).unwrap();
+            assert_eq!(detached.title, "Ciallo | DE | 1C1G");
+
+            let surviving = workspace.tab_by_id(combined_id, cx).unwrap();
+            assert_ne!(surviving.kind, TabKind::Workspace);
+            assert_eq!(surviving.title, "DERO | DE | 4C12G");
+            assert_eq!(
+                surviving.root_pane,
+                Some(PaneNode::leaf(dero_pane, dero_session))
+            );
+        });
+
+        // Re-combining and closing one pane must also restore the surviving tab.
+        let recombined_id = cx.update(|window, cx| {
+            workspace.update(cx, |workspace, cx| {
+                assert!(workspace.combine_tabs_at(
+                    combined_id,
+                    detached_id,
+                    None,
+                    SplitDirection::Horizontal,
+                    false,
+                    window,
+                    cx,
+                ));
+                let recombined_id = workspace.active_tab_id(cx).unwrap();
+                workspace.close_terminal_pane_in_tab(recombined_id, ciallo_pane, window, cx);
+                recombined_id
+            })
+        });
+
+        workspace.read_with(cx, |workspace, cx| {
+            let surviving = workspace.tab_by_id(recombined_id, cx).unwrap();
+            assert_ne!(surviving.kind, TabKind::Workspace);
+            assert_eq!(surviving.title, "DERO | DE | 4C12G");
+            assert_eq!(
+                surviving.root_pane,
+                Some(PaneNode::leaf(dero_pane, dero_session))
+            );
+        });
     }
 }

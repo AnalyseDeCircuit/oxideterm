@@ -1350,6 +1350,7 @@ impl WorkspaceApp {
             );
         }
 
+        self.sync_collapsed_workspace_tabs(cx);
         self.sync_active_tab_surface(cx);
         cx.notify();
     }

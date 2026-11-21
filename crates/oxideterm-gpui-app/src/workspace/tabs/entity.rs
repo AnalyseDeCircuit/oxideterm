@@ -967,6 +967,26 @@ impl WorkspaceTabHostEntity {
         Some(next_active_pane_id)
     }
 
+    /// Restores a collapsed merged `TabKind::Workspace` container back to a
+    /// single terminal tab once only one `PaneNode::Leaf` remains.
+    pub(in crate::workspace) fn restore_single_terminal_workspace_tab(
+        &mut self,
+        tab_id: TabId,
+        kind: TabKind,
+        title: String,
+    ) -> Option<Tab> {
+        let tab = self.tab_mut_by_id(tab_id)?;
+        if tab.kind != TabKind::Workspace || !matches!(tab.root_pane, Some(PaneNode::Leaf { .. })) {
+            return None;
+        }
+        tab.kind = kind;
+        if !title.trim().is_empty() {
+            tab.title = title;
+            tab.title_source = TabTitleSource::Static;
+        }
+        Some(tab.clone())
+    }
+
     pub(in crate::workspace) fn update_group_sizes(
         &mut self,
         tab_id: Option<TabId>,
@@ -2555,6 +2575,141 @@ mod tests {
             assert_eq!(host.focused_page_id(combined.id), source);
             assert_eq!(host.tab_by_id(source).unwrap().kind, kind);
         }
+    }
+
+    #[gpui::test]
+    fn restore_single_terminal_workspace_tab_updates_only_collapsed_terminal_workspaces(
+        cx: &mut TestAppContext,
+    ) {
+        let main = cx.add_window(|_, _| TabHostTestRoot);
+        let mut host = WorkspaceTabHostEntity::new();
+        let ciallo_tab = host.alloc_tab_id();
+        let dero_tab = host.alloc_tab_id();
+        let ciallo_pane = host.alloc_pane_id();
+        let dero_pane = host.alloc_pane_id();
+        let ciallo_session = host.alloc_session_id();
+        let dero_session = host.alloc_session_id();
+
+        host.insert_and_select_main_tab(Tab {
+            id: ciallo_tab,
+            kind: TabKind::SshTerminal,
+            title: "Ciallo | DE | 1C1G".into(),
+            title_source: TabTitleSource::Static,
+            root_pane: Some(PaneNode::leaf(ciallo_pane, ciallo_session)),
+            active_pane_id: Some(ciallo_pane),
+        });
+        host.insert_and_select_main_tab(Tab {
+            id: dero_tab,
+            kind: TabKind::SshTerminal,
+            title: "DERO | DE | 4C12G".into(),
+            title_source: TabTitleSource::Static,
+            root_pane: Some(PaneNode::leaf(dero_pane, dero_session)),
+            active_pane_id: Some(dero_pane),
+        });
+
+        let (combined, _) = host
+            .combine_pages(dero_tab, ciallo_tab, SplitDirection::Horizontal)
+            .unwrap();
+        assert_eq!(combined.kind, TabKind::Workspace);
+        assert_eq!(combined.title, "Ciallo | DE | 1C1G");
+
+        // Multi-pane workspaces stay Workspace containers and keep their title.
+        assert!(
+            host.restore_single_terminal_workspace_tab(
+                combined.id,
+                TabKind::SshTerminal,
+                "DERO | DE | 4C12G".into(),
+            )
+            .is_none()
+        );
+        assert_eq!(
+            host.tab_by_id(combined.id).unwrap().kind,
+            TabKind::Workspace
+        );
+        assert_eq!(
+            host.tab_by_id(combined.id).unwrap().title,
+            "Ciallo | DE | 1C1G"
+        );
+
+        let detached_tab = host.alloc_tab_id();
+        assert!(host.move_terminal_pane_to_tab(
+            combined.id,
+            ciallo_pane,
+            Tab {
+                id: detached_tab,
+                kind: TabKind::SshTerminal,
+                title: "Ciallo | DE | 1C1G".into(),
+                title_source: TabTitleSource::Static,
+                root_pane: Some(PaneNode::leaf(ciallo_pane, ciallo_session)),
+                active_pane_id: Some(ciallo_pane),
+            },
+            main.into(),
+        ));
+
+        let restored = host
+            .restore_single_terminal_workspace_tab(
+                combined.id,
+                TabKind::SshTerminal,
+                "DERO | DE | 4C12G".into(),
+            )
+            .unwrap();
+        assert_eq!(restored.kind, TabKind::SshTerminal);
+        assert_eq!(restored.title, "DERO | DE | 4C12G");
+
+        // Regular non-Workspace terminal tabs are not overwritten.
+        assert!(
+            host.restore_single_terminal_workspace_tab(
+                combined.id,
+                TabKind::LocalTerminal,
+                "Overwritten".into(),
+            )
+            .is_none()
+        );
+        assert_eq!(
+            host.tab_by_id(combined.id).unwrap().kind,
+            TabKind::SshTerminal
+        );
+        assert_eq!(
+            host.tab_by_id(combined.id).unwrap().title,
+            "DERO | DE | 4C12G"
+        );
+
+        // Workspace tabs wrapping an embedded page keep Workspace container semantics.
+        let sftp_tab = host.alloc_tab_id();
+        let settings_tab = host.alloc_tab_id();
+        host.insert_and_select_main_tab(Tab {
+            id: sftp_tab,
+            kind: TabKind::Sftp,
+            title: "SFTP".into(),
+            title_source: TabTitleSource::Static,
+            root_pane: None,
+            active_pane_id: None,
+        });
+        host.insert_and_select_main_tab(Tab {
+            id: settings_tab,
+            kind: TabKind::Settings,
+            title: "Settings".into(),
+            title_source: TabTitleSource::Static,
+            root_pane: None,
+            active_pane_id: None,
+        });
+        let (page_workspace, _) = host
+            .combine_pages(settings_tab, sftp_tab, SplitDirection::Horizontal)
+            .unwrap();
+        assert_eq!(host.unembed_page(settings_tab), Some(page_workspace.id));
+        assert!(
+            host.restore_single_terminal_workspace_tab(
+                page_workspace.id,
+                TabKind::LocalTerminal,
+                "Wrong".into(),
+            )
+            .is_none()
+        );
+        assert_eq!(
+            host.tab_by_id(page_workspace.id).unwrap().kind,
+            TabKind::Workspace
+        );
+        assert_eq!(host.tab_by_id(page_workspace.id).unwrap().title, "SFTP");
     }
 
     #[gpui::test]

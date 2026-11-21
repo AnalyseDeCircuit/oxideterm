@@ -1015,6 +1015,7 @@ impl WorkspaceApp {
             })
             .is_some()
         {
+            self.sync_collapsed_workspace_tabs(cx);
             if self.active_tab_id(cx) == Some(tab_id) {
                 self.sync_active_tab_surface(cx);
             }
@@ -1337,6 +1338,7 @@ impl WorkspaceApp {
         {
             self.close_tab_by_id(container, window, cx);
         }
+        self.sync_collapsed_workspace_tabs(cx);
         self.set_main_window_active_tab(Some(page), cx);
         self.sync_active_tab_surface(cx);
         self.sync_ide_surface_mount(page, cx);

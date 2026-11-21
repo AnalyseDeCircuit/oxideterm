@@ -1215,6 +1215,7 @@ impl WorkspaceApp {
             }
         }
 
+        self.sync_collapsed_workspace_tabs(cx);
         self.sync_session_retention(cx);
         self.apply_main_window_active_tab_change(previous_active_tab_id, next_active_tab_id, cx);
         self.sync_active_tab_surface(cx);

@@ -123,6 +123,8 @@ impl WorkspaceApp {
         self.tab_host.update(cx, |tab_host, _| {
             tab_host.close_pane(tab_id, active_pane_id);
         });
+        self.sync_collapsed_workspace_tabs(cx);
+        self.sync_active_tab_surface(cx);
         self.needs_active_pane_focus = true;
         self.focus_active_pane(window, cx);
     }

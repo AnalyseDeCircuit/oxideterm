@@ -226,6 +226,54 @@ impl WorkspaceApp {
             .unwrap_or_default()
     }
 
+    /// Returns the concise tab-strip title for a terminal pane, matching normal
+    /// terminal tab creation rather than the verbose split-pane endpoint label.
+    pub(in crate::workspace) fn terminal_tab_title_for_pane(
+        &self,
+        pane_id: PaneId,
+        cx: &App,
+    ) -> String {
+        if let Some(session_id) = self.session_id_for_pane(pane_id, cx) {
+            if let Some(node) = self
+                .workspace_runtime
+                .read(cx)
+                .ssh_terminal_node_id(session_id)
+                .and_then(|id| self.ssh_nodes.get(&id))
+                && !node.title.trim().is_empty()
+            {
+                return node.title.clone();
+            }
+            if let Some(title) = self
+                .standalone_connections
+                .connection_id_for_surface(
+                    standalone_connections::StandaloneConnectionSurface::Terminal(session_id),
+                )
+                .as_deref()
+                .and_then(|id| self.standalone_connections.record(id))
+                .map(|record| record.title.as_str())
+                .filter(|title| !title.trim().is_empty())
+            {
+                return title.to_string();
+            }
+            if let Some(title) = self
+                .tab_host
+                .read(cx)
+                .local_sessions
+                .get(&session_id)
+                .map(|instance| instance.title.as_str())
+                .filter(|title| !title.trim().is_empty())
+            {
+                return title.to_string();
+            }
+        }
+        self.tab_host
+            .read(cx)
+            .panes()
+            .get(&pane_id)
+            .map(|pane| pane.read(cx).title().to_string())
+            .unwrap_or_default()
+    }
+
     pub(in crate::workspace) fn terminal_tab_kind_for_pane(
         &self,
         pane_id: PaneId,
@@ -238,6 +286,31 @@ impl WorkspaceApp {
                 TerminalSessionKind::Mosh => TabKind::MoshTerminal,
                 _ => TabKind::LocalTerminal,
             })
+    }
+
+    /// Restores any merged `TabKind::Workspace` tab that has collapsed down to
+    /// a single terminal leaf so its tab kind, icon, and title match the
+    /// surviving terminal without remounting its stable `AppSurface` owner.
+    pub(in crate::workspace) fn sync_collapsed_workspace_tabs(&mut self, cx: &mut App) {
+        let collapsed = self
+            .tabs(cx)
+            .iter()
+            .filter_map(|tab| match (&tab.kind, &tab.root_pane) {
+                (TabKind::Workspace, Some(PaneNode::Leaf { pane_id, .. })) => {
+                    Some((tab.id, *pane_id))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        for (tab_id, pane_id) in collapsed {
+            let Some(kind) = self.terminal_tab_kind_for_pane(pane_id, cx) else {
+                continue;
+            };
+            let title = self.terminal_tab_title_for_pane(pane_id, cx);
+            self.tab_host.update(cx, |host, _| {
+                host.restore_single_terminal_workspace_tab(tab_id, kind, title);
+            });
+        }
     }
 
     pub(in crate::workspace) fn terminal_tab_has_kind(
