@@ -99,9 +99,28 @@ fn standalone_sftp_keeps_transport_switcher_and_scrolls_vertically(cx: &mut gpui
     };
     cx.simulate_resize(gpui::size(px(1000.0), px(750.0)));
     draw(cx);
+    let rail = view.read_with(cx, |view, cx| {
+        view.views
+            .form_scroll("new-connection-transport-scroll", cx)
+    });
+    let sftp_selector = "new-connection-transport-StandaloneSftp";
     let sftp = cx
-        .debug_bounds("new-connection-transport-StandaloneSftp")
+        .debug_bounds(sftp_selector)
         .expect("protocol rail contains standalone SFTP");
+    let rail_center = rail.bounds().center();
+    cx.simulate_event(gpui::ScrollEvent {
+        position: rail_center,
+        delta: gpui::ScrollDelta::Pixels(gpui::point(rail_center.x - sftp.center().x, px(0.0))),
+        ..Default::default()
+    });
+    draw(cx);
+    let sftp = cx
+        .debug_bounds(sftp_selector)
+        .expect("protocol rail contains standalone SFTP after scrolling");
+    assert!(
+        rail.bounds().contains(&sftp.center()),
+        "horizontal scrolling brings the SFTP button into view"
+    );
     cx.simulate_click(sftp.center(), gpui::Modifiers::default());
 
     let fields = view.read_with(cx, |view, cx| {
