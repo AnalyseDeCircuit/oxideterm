@@ -506,6 +506,27 @@ impl Element for SelectAnchorProbe {
     }
 }
 
+/// Computes a select trigger width that respects `min_width` while expanding
+/// up to `max_width` so longer localized option labels do not truncate.
+pub fn estimate_select_trigger_width<'a>(
+    tokens: &ThemeTokens,
+    min_width: f32,
+    max_width: f32,
+    labels: impl IntoIterator<Item = &'a str>,
+) -> f32 {
+    let chrome = tokens.metrics.ui_control_padding_x * 2.0
+        + tokens.spacing.two
+        + tokens.metrics.ui_select_check_size
+        + 12.0;
+    let widest = labels
+        .into_iter()
+        .map(|label| crate::menu::estimate_text_width(label, tokens.metrics.ui_text_sm))
+        .fold(0.0_f32, f32::max);
+    (widest + chrome)
+        .ceil()
+        .clamp(min_width, max_width.max(min_width))
+}
+
 pub fn select_trigger(
     tokens: &ThemeTokens,
     value: impl Into<String>,

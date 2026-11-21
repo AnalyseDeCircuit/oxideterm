@@ -43,6 +43,8 @@
     },
     "panels": {
       "sessions": "使用中的工作階段",
+      "sessions_header": "活動工作階段",
+      "connections_header": "工作階段管理",
       "saved": "已儲存的連線",
       "saved_title": "已儲存的連線",
       "sftp": "SFTP",

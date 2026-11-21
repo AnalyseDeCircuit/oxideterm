@@ -134,7 +134,7 @@
       "help": "Help & About",
       "keybindings": "Keybindings",
       "graphics": "Graphics",
-      "network": "Network & External Access"
+      "network": "Network & Access"
     },
     "general": {
       "portable_status_unlocked": "Unlocked",

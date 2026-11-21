@@ -760,6 +760,25 @@ impl KnowledgeDocumentEditor {
             KnowledgeEditorMode::Preview => 1,
             KnowledgeEditorMode::Split => 2,
         };
+        let min_width = if self.is_markdown {
+            KNOWLEDGE_EDITOR_MODE_SWITCHER_WIDTH * 1.5
+        } else {
+            KNOWLEDGE_EDITOR_MODE_SWITCHER_WIDTH
+        };
+        let mut width_labels: Vec<(&str, Option<&str>)> = vec![
+            (self.labels.source.as_str(), None),
+            (self.labels.preview.as_str(), None),
+        ];
+        if self.is_markdown {
+            width_labels.push((self.labels.split.as_str(), None));
+        }
+        let switcher_width = oxideterm_gpui_ui::estimate_segmented_control_width(
+            &self.tokens,
+            min_width,
+            420.0,
+            false,
+            width_labels,
+        );
         oxideterm_gpui_ui::segmented_control(
             &self.tokens,
             "knowledge-editor-mode-switcher",
@@ -774,11 +793,7 @@ impl KnowledgeDocumentEditor {
             )
             .user_transition_active(self.mode_transition.is_some())
             .has_background_image(self.has_background_image)
-            .compact(if self.is_markdown {
-                KNOWLEDGE_EDITOR_MODE_SWITCHER_WIDTH * 1.5
-            } else {
-                KNOWLEDGE_EDITOR_MODE_SWITCHER_WIDTH
-            }),
+            .compact(switcher_width),
             vec![
                 self.render_mode_button(
                     KnowledgeEditorMode::Source,

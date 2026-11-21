@@ -857,21 +857,35 @@ impl WorkspaceApp {
                 manager.previous_tab,
             )
         };
+        let installed_label = self.i18n.t("plugin.tab_installed");
+        let installed_badge = plugin_count.to_string();
+        let marketplace_label = self.i18n.t("plugin.tab_marketplace");
+        let marketplace_badge =
+            (update_count > 0).then(|| format!("{update_count} {}", self.i18n.t("plugin.updates")));
+        let tab_bar_width = oxideterm_gpui_ui::estimate_segmented_control_width(
+            &self.tokens,
+            PLUGIN_MANAGER_TAB_BAR_WIDTH,
+            540.0,
+            true,
+            [
+                (installed_label.as_str(), Some(installed_badge.as_str())),
+                (marketplace_label.as_str(), marketplace_badge.as_deref()),
+            ],
+        );
         let items = vec![
             self.render_native_plugin_tab_button(
                 NativePluginManagerTab::Installed,
                 LucideIcon::Puzzle,
-                self.i18n.t("plugin.tab_installed"),
-                Some(plugin_count.to_string()),
+                installed_label,
+                Some(installed_badge),
                 has_background,
                 cx,
             ),
             self.render_native_plugin_tab_button(
                 NativePluginManagerTab::Marketplace,
                 LucideIcon::Network,
-                self.i18n.t("plugin.tab_marketplace"),
-                (update_count > 0)
-                    .then(|| format!("{update_count} {}", self.i18n.t("plugin.updates"))),
+                marketplace_label,
+                marketplace_badge,
                 has_background,
                 cx,
             ),
@@ -887,7 +901,7 @@ impl WorkspaceApp {
                     active_index,
                 ))
                 .has_background_image(has_background)
-                .compact(PLUGIN_MANAGER_TAB_BAR_WIDTH),
+                .compact(tab_bar_width),
             items,
         )
         .into_any_element()
@@ -1219,16 +1233,38 @@ impl WorkspaceApp {
                         .min_w(px(200.0))
                         .flex_1(),
                     )
-                    .child(self.settings_select_control(
-                        SettingsSelect::PluginMarketplaceSort,
-                        self.i18n.t("plugin.marketplace_sort").replace(
-                            "{{order}}",
-                            &self.i18n.t(plugin_marketplace_sort_label(sort)),
-                        ),
-                        false,
-                        Some(self.tokens.metrics.settings_select_width),
-                        cx,
-                    )),
+                    .child({
+                        let sort_template = self.i18n.t("plugin.marketplace_sort");
+                        let sort_labels = [
+                            oxideterm_settings::PluginMarketplaceSort::Name,
+                            oxideterm_settings::PluginMarketplaceSort::RecentUpdates,
+                            oxideterm_settings::PluginMarketplaceSort::NewestListings,
+                        ]
+                        .map(|option| {
+                            sort_template.replace(
+                                "{{order}}",
+                                &self.i18n.t(plugin_marketplace_sort_label(option)),
+                            )
+                        });
+                        // Keep one stable width across all sort options so
+                        // switching order never shifts the search bar.
+                        let sort_width = oxideterm_gpui_ui::select::estimate_select_trigger_width(
+                            &self.tokens,
+                            self.tokens.metrics.settings_select_width,
+                            360.0,
+                            sort_labels.iter().map(String::as_str),
+                        );
+                        self.settings_select_control(
+                            SettingsSelect::PluginMarketplaceSort,
+                            sort_template.replace(
+                                "{{order}}",
+                                &self.i18n.t(plugin_marketplace_sort_label(sort)),
+                            ),
+                            false,
+                            Some(sort_width),
+                            cx,
+                        )
+                    }),
             )
             .child(
                 div()

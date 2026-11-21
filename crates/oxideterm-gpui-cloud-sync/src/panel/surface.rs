@@ -312,6 +312,19 @@ impl CloudSyncPageRenderer {
                 self,
             ),
         ];
+        let tab_bar_width = oxideterm_gpui_ui::estimate_segmented_control_width(
+            &self.tokens,
+            CLOUD_SYNC_TAB_BAR_WIDTH,
+            540.0,
+            true,
+            [
+                (self.i18n.t("plugin.cloud_sync.tabs.overview"), None),
+                (self.i18n.t("plugin.cloud_sync.tabs.configure"), None),
+                (self.i18n.t("plugin.cloud_sync.tabs.history"), None),
+            ]
+            .iter()
+            .map(|(label, badge)| (label.as_str(), *badge)),
+        );
         let active_index = cloud_sync_tab_index(self.cloud_sync.read(cx).view.active_tab);
         oxideterm_gpui_ui::segmented_control(
             &self.tokens,
@@ -323,7 +336,7 @@ impl CloudSyncPageRenderer {
             )
             .user_transition_active(self.tab_transition_active)
             .has_background_image(self.cloud_sync_has_background())
-            .compact(CLOUD_SYNC_TAB_BAR_WIDTH),
+            .compact(tab_bar_width),
             items,
         )
         .into_any_element()

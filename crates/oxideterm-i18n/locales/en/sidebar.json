@@ -43,6 +43,8 @@
     },
     "panels": {
       "sessions": "Active Sessions",
+      "sessions_header": "Sessions",
+      "connections_header": "Connections",
       "saved": "Saved Connections",
       "saved_title": "Saved Connections",
       "sftp": "SFTP",

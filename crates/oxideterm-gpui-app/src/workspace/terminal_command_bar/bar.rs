@@ -710,24 +710,46 @@ impl WorkspaceApp {
     fn render_terminal_recording_menu(&self, cx: &mut Context<Self>) -> AnyElement {
         let session_log_status = self.active_terminal_session_log_status(cx);
         let session_log_available = self.active_terminal_session_log_available(cx);
+        let start_label = self.i18n.t("terminal.recording.start");
+        let open_label = self.i18n.t("terminal.recording.open_cast");
+        let log_labels: Vec<String> = match session_log_status.state {
+            TerminalSessionLogState::Idle => vec![self.i18n.t("terminal.session_log.start")],
+            TerminalSessionLogState::Logging => vec![
+                self.i18n.t("terminal.session_log.pause"),
+                self.i18n.t("terminal.session_log.stop"),
+            ],
+            TerminalSessionLogState::Paused => vec![
+                self.i18n.t("terminal.session_log.resume"),
+                self.i18n.t("terminal.session_log.stop"),
+            ],
+        };
+        let menu_width = oxideterm_gpui_ui::estimate_menu_width(
+            &self.tokens,
+            TERMINAL_RECORDING_MENU_WIDTH,
+            340.0,
+            false,
+            [start_label.as_str(), open_label.as_str()]
+                .into_iter()
+                .chain(log_labels.iter().map(String::as_str)),
+        );
         let menu = context_menu_event_boundary(
             dropdown_menu_content(&self.tokens)
                 .absolute()
                 .bottom(px(TERMINAL_RECORDING_MENU_BOTTOM))
                 .right(px(0.0))
-                .w(px(TERMINAL_RECORDING_MENU_WIDTH))
+                .w(px(menu_width))
                 .occlude(),
         );
         let start_item = dropdown_menu_item(
             &self.tokens,
-            self.i18n.t("terminal.recording.start"),
+            start_label,
             DropdownMenuItemKind::Plain,
             false,
             false,
         );
         let open_item = dropdown_menu_item(
             &self.tokens,
-            self.i18n.t("terminal.recording.open_cast"),
+            open_label,
             DropdownMenuItemKind::Plain,
             false,
             false,

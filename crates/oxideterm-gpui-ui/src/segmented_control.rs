@@ -193,12 +193,51 @@ pub fn selection_indicator(
         .into_any_element()
 }
 
+/// Computes a total width for an equal-width compact/underline segmented
+/// control in `[min_total_width, max_total_width]` so the widest localized
+/// segment (including optional leading icon and trailing badge) fits without
+/// clipping inside its `1 / item_count` cell.
+pub fn estimate_segmented_control_width<'a>(
+    tokens: &ThemeTokens,
+    min_total_width: f32,
+    max_total_width: f32,
+    has_icon: bool,
+    items: impl IntoIterator<Item = (&'a str, Option<&'a str>)>,
+) -> f32 {
+    let mut count = 0usize;
+    let mut widest_item = 0.0_f32;
+    let font_size = tokens.metrics.ui_text_sm;
+    let badge_font = tokens.metrics.ui_text_xs;
+    // Match segmented_control_item_content horizontal padding (px(12) * 2),
+    // optional 16px icon + 8px gap, and breathing room around text.
+    let icon_chrome = if has_icon { 24.0 } else { 0.0 };
+    let base_chrome = 24.0 + icon_chrome + 16.0;
+
+    for (label, badge) in items {
+        count += 1;
+        let label_w = crate::estimate_text_width(label, font_size);
+        let badge_w = badge
+            .filter(|text| !text.is_empty())
+            .map(|text| 4.0 + 16.0 + crate::estimate_text_width(text, badge_font))
+            .unwrap_or(0.0);
+        widest_item = widest_item.max((label_w + badge_w + base_chrome).ceil());
+    }
+
+    if count == 0 {
+        return min_total_width;
+    }
+    let total = (widest_item * count as f32).ceil();
+    total.clamp(min_total_width, max_total_width.max(min_total_width))
+}
+
 pub fn segmented_control_item(tokens: &ThemeTokens, label: String, active: bool) -> Div {
     segmented_control_item_content(
         tokens,
         active,
         div()
             .w_full()
+            .min_w_0()
+            .truncate()
             .text_align(gpui::TextAlign::Center)
             .child(label)
             .into_any_element(),
@@ -346,5 +385,55 @@ mod tests {
 
         assert!(!should_animate_selection(settled, 3, 0));
         assert!(should_animate_selection(user_transition, 3, 0));
+    }
+
+    #[test]
+    fn estimate_segmented_control_width_scales_equal_cells_for_long_labels_and_badges() {
+        let tokens = oxideterm_theme::default_tokens();
+
+        let compact = estimate_segmented_control_width(
+            &tokens,
+            200.0,
+            420.0,
+            false,
+            [("Source", None), ("Split", None)],
+        );
+        assert_eq!(compact, 200.0);
+
+        let french = estimate_segmented_control_width(
+            &tokens,
+            260.0,
+            540.0,
+            true,
+            [("Installées", Some("18")), ("Marché des extensions", None)],
+        );
+        assert!(
+            french > 400.0 && french <= 540.0,
+            "expected French segmented control to widen for equal-width cells, got {french}"
+        );
+
+        let with_updates_badge = estimate_segmented_control_width(
+            &tokens,
+            260.0,
+            640.0,
+            true,
+            [
+                ("Installées", Some("18")),
+                ("Marché des extensions", Some("2 mises à jour")),
+            ],
+        );
+        assert!(with_updates_badge > french);
+
+        let capped = estimate_segmented_control_width(
+            &tokens,
+            260.0,
+            460.0,
+            true,
+            [
+                ("Installées", Some("18")),
+                ("Marché des extensions", Some("2 mises à jour")),
+            ],
+        );
+        assert_eq!(capped, 460.0);
     }
 }

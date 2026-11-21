@@ -347,19 +347,45 @@ impl FileManagerView {
                     &self.tokens,
                 )
             + vertical_chrome;
+        let menu_width = oxideterm_gpui_ui::estimate_menu_width(
+            &self.tokens,
+            FILE_MANAGER_CONTEXT_MENU_WIDTH,
+            300.0,
+            true,
+            [
+                self.i18n.t("fileManager.open"),
+                self.i18n.t("fileManager.openExternal"),
+                self.i18n.t("fileManager.preview"),
+                self.i18n.t("fileManager.extract"),
+                self.i18n.t("fileManager.compress"),
+                self.i18n.t("fileManager.copy"),
+                self.i18n.t("fileManager.cut"),
+                self.i18n.t("fileManager.paste"),
+                self.i18n.t("fileManager.rename"),
+                self.i18n.t("fileManager.properties"),
+                self.i18n.t("fileManager.delete"),
+                self.i18n.t("fileManager.newFolder"),
+                self.i18n.t("fileManager.newFile"),
+                self.i18n.t("fileManager.selectAll"),
+                self.i18n.t("fileManager.refresh"),
+                self.i18n.t("fileManager.showDrives"),
+            ]
+            .iter()
+            .map(String::as_str),
+        );
         let placement = browser_behavior::clamp_context_menu_position(
             menu.x,
             menu.y,
             f32::from(viewport.width),
             viewport_height,
-            FILE_MANAGER_CONTEXT_MENU_WIDTH,
+            menu_width,
             estimated_height.min(max_height),
             FILE_MANAGER_CONTEXT_MENU_VIEWPORT_MARGIN,
         );
         let inner_max_height = (max_height - vertical_chrome).max(120.0);
         let popup = context_menu_event_boundary(
             context_menu_content(&self.tokens)
-                .w(px(FILE_MANAGER_CONTEXT_MENU_WIDTH))
+                .w(px(menu_width))
                 .min_w_0()
                 .max_h(px(max_height))
                 .when(has_background, |surface| {

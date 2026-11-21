@@ -43,6 +43,8 @@
     },
     "panels": {
       "sessions": "Aktive Sitzungen",
+      "sessions_header": "Sitzungen",
+      "connections_header": "Verbindungen",
       "saved": "Gespeicherte Verbindungen",
       "saved_title": "Gespeicherte Verbindungen",
       "sftp": "SFTP",
@@ -916,14 +918,14 @@
         "sftp": "SFTP",
         "disconnect": "Trennen",
         "reconnect": "Erneut verbinden",
-        "edit_and_reconnect": "Bearbeiten & neu verbinden",
+        "edit_and_reconnect": "Bearbeiten & verbinden",
         "remove_session": "Sitzung entfernen",
         "cancel_reconnect": "Reconnect abbrechen",
         "port_forwarding": "Portweiterleitung",
-        "drill_in": "Hineinnavigieren (Nächster Hop)",
-        "saved_next_hop": "Gespeicherte Verbindung als nächsten Hop verwenden...",
+        "drill_in": "Nächster Hop",
+        "saved_next_hop": "Gespeicherter nächster Hop...",
         "connect": "Verbinden",
-        "save_as_connection": "Als Verbindung speichern..."
+        "save_as_connection": "Verbindung speichern"
       }
     },
     "actions": {
@@ -933,9 +935,9 @@
       "port_forwarding": "Portweiterleitung",
       "disconnect": "Trennen",
       "reconnect": "Erneut verbinden",
-      "drill_in": "Hineinnavigieren (Nächster Hop)",
-      "saved_next_hop": "Gespeicherte Verbindung als nächsten Hop verwenden...",
-      "save_as_connection": "Als Verbindung speichern..."
+      "drill_in": "Nächster Hop",
+      "saved_next_hop": "Gespeicherter nächster Hop...",
+      "save_as_connection": "Verbindung speichern"
     },
     "saved_next_hop": {
       "title": "Gespeicherte Verbindung als nächsten Hop verwenden",

@@ -132,9 +132,9 @@
       "privilege": "Credenziali",
       "reconnect": "Riconnessione",
       "help": "Aiuto e Info",
-      "keybindings": "Scorciatoie da tastiera",
+      "keybindings": "Scorciatoie",
       "graphics": "Grafica",
-      "network": "Rete e accesso esterno"
+      "network": "Rete e accesso"
     },
     "general": {
       "portable_status_unlocked": "Sbloccato",

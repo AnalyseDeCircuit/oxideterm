@@ -1730,10 +1730,16 @@ impl WorkspaceApp {
             .map(|category| category.name.clone())
             .unwrap_or_else(|| self.i18n.t("terminal.quick_commands.all_groups"));
         let workspace = cx.entity().downgrade();
+        let selector_width = oxideterm_gpui_ui::select::estimate_select_trigger_width(
+            &self.tokens,
+            160.0,
+            260.0,
+            [label.as_str()],
+        );
         let selector =
             oxideterm_gpui_ui::select::select_trigger(&self.tokens, label.clone(), false, false)
                 .id("quick-bar-category")
-                .w(px(160.0))
+                .w(px(selector_width))
                 .h(px(28.0))
                 .flex_none()
                 .role(gpui::Role::Button)

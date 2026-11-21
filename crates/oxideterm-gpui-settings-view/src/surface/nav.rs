@@ -137,8 +137,10 @@ impl SettingsSurfaceView {
         let mut nav = div()
             .w(px(settings_nav_width))
             .min_w(px(settings_nav_width))
+            .max_w(px(settings_nav_width))
             .h_full()
             .flex_none()
+            .overflow_hidden()
             // Mirrors Tauri's `min-h-0` settings sidebar contract: the title
             // stays fixed and the tab list owns vertical overflow instead of
             // forcing the sidebar to grow with every added settings category.
@@ -153,8 +155,11 @@ impl SettingsSurfaceView {
         nav = nav.child(
             div()
                 .flex_none()
+                .w_full()
+                .min_w_0()
                 .h(px(48.0))
-                .px(px(20.0))
+                .px(px(16.0))
+                .gap_2()
                 .when(!settings_search_open, |header| header.mb(px(12.0)))
                 .flex()
                 .items_center()
@@ -164,9 +169,16 @@ impl SettingsSurfaceView {
                 .text_size(px(frame.tokens.metrics.ui_text_sm))
                 .font_weight(gpui::FontWeight::SEMIBOLD)
                 .text_color(rgb(theme.text_heading))
-                .child(frame.i18n.t("settings_view.title"))
                 .child(
                     div()
+                        .min_w_0()
+                        .flex_1()
+                        .truncate()
+                        .child(frame.i18n.t("settings_view.title")),
+                )
+                .child(
+                    div()
+                        .flex_none()
                         .flex()
                         .items_center()
                         .gap_1()
@@ -218,10 +230,11 @@ impl SettingsSurfaceView {
         let mut list = div()
             .id("settings-nav-scroll")
             .size_full()
+            .min_w_0()
             .min_h(px(0.0))
             .overflow_y_scroll()
             .track_scroll(&settings_nav_scroll)
-            .px_3()
+            .px_2()
             .flex()
             .flex_col();
 
@@ -245,9 +258,20 @@ impl SettingsSurfaceView {
             }
         }
 
-        nav.child(div().flex_1().min_h(px(0.0)).relative().child(list).child(
-            vertical_scrollbar_layer("settings-nav-scrollbar", &settings_nav_scroll),
-        ))
+        nav.child(
+            div()
+                .w_full()
+                .min_w_0()
+                .flex_1()
+                .min_h(px(0.0))
+                .overflow_hidden()
+                .relative()
+                .child(list)
+                .child(vertical_scrollbar_layer(
+                    "settings-nav-scrollbar",
+                    &settings_nav_scroll,
+                )),
+        )
         .into_any_element()
     }
 
@@ -291,13 +315,15 @@ impl SettingsSurfaceView {
             // window has spare vertical space.
             .h(px(frame.tokens.metrics.ui_button_lg_height))
             .w_full()
+            .min_w_0()
             .flex_none()
+            .overflow_hidden()
             .mb(px(4.0))
             .px_3()
             .relative()
             .flex()
             .items_center()
-            .gap_3()
+            .gap(px(10.0))
             .rounded(px(frame.tokens.radii.md))
             .bg(rgba(0x00000000))
             .text_size(px(frame.tokens.metrics.ui_text_sm))
@@ -405,6 +431,7 @@ impl SettingsSurfaceView {
         let mut result_list = div()
             .id("settings-search-results-scroll")
             .size_full()
+            .min_w_0()
             .min_h(px(0.0))
             .overflow_y_scroll()
             .track_scroll(&result_scroll)
@@ -423,8 +450,11 @@ impl SettingsSurfaceView {
             };
             result_list = result_list.child(
                 div()
+                    .w_full()
+                    .min_w_0()
                     .flex_1()
                     .min_h(px(120.0))
+                    .px_3()
                     .flex()
                     .flex_col()
                     .items_center()
@@ -437,7 +467,12 @@ impl SettingsSurfaceView {
                         20.0,
                         rgb(frame.tokens.ui.text_muted),
                     ))
-                    .child(frame.i18n.t(message_key)),
+                    .child(
+                        div()
+                            .w_full()
+                            .text_center()
+                            .child(frame.i18n.t(message_key)),
+                    ),
             );
         } else {
             for result in results {
@@ -483,15 +518,21 @@ impl SettingsSurfaceView {
         }
 
         div()
+            .w_full()
+            .min_w_0()
             .flex_1()
             .min_h(px(0.0))
+            .overflow_hidden()
             .flex()
             .flex_col()
             .child(search_input)
             .child(
                 div()
+                    .w_full()
+                    .min_w_0()
                     .flex_1()
                     .min_h(px(0.0))
+                    .overflow_hidden()
                     .relative()
                     .child(result_list)
                     .child(vertical_scrollbar_layer(

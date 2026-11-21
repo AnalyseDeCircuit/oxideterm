@@ -595,9 +595,23 @@ impl AiAssistantSidebarView {
             .into_any_element()
     }
 
+    pub fn ai_chat_menu_width(&self) -> f32 {
+        let archived = self.i18n.t("ai.chat.archived_conversations");
+        let settings = self.i18n.t("ai.chat.settings");
+        let clear_all = self.i18n.t("ai.chat.clear_all");
+        oxideterm_gpui_ui::estimate_menu_width(
+            &self.tokens,
+            AI_CHAT_MENU_WIDTH,
+            280.0,
+            true,
+            [archived.as_str(), settings.as_str(), clear_all.as_str()],
+        )
+    }
+
     pub fn render_ai_chat_menu(&self, cx: &mut Context<Self>) -> AnyElement {
+        let menu_width = self.ai_chat_menu_width();
         material_surface(&self.tokens, div(), MaterialRole::Popover)
-            .w(px(AI_CHAT_MENU_WIDTH))
+            .w(px(menu_width))
             .py(px(2.0))
             .rounded(px(self.tokens.radii.md))
             .border_1()

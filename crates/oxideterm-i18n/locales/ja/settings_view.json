@@ -134,7 +134,7 @@
       "help": "ヘルプと詳細",
       "keybindings": "キーバインド",
       "graphics": "グラフィックス",
-      "network": "ネットワークと外部アクセス"
+      "network": "ネットワーク・外部"
     },
     "general": {
       "portable_status_unlocked": "ロック解除済み",

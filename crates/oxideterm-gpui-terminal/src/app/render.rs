@@ -2621,9 +2621,16 @@ impl TerminalPane {
             self.context_menu_presence.phase() == oxideterm_gpui_ui::motion::ExitPhase::Visible;
         let telnet_line_endings = self.terminal.lock().telnet_line_endings();
         let popup = if let Some(trigger) = menu.trigger.as_ref() {
+            let trigger_menu_width = oxideterm_gpui_ui::estimate_menu_width(
+                tokens,
+                TERMINAL_CONTEXT_MENU_WIDTH,
+                360.0,
+                true,
+                trigger.labels.iter().map(|label| label.as_str()),
+            );
             context_menu_event_boundary(
                 context_menu_content(tokens)
-                    .w(px(TERMINAL_CONTEXT_MENU_WIDTH))
+                    .w(px(trigger_menu_width))
                     .children(trigger.labels.iter().enumerate().map(|(index, label)| {
                         self.render_terminal_context_menu_item(
                             "lucide/zap.svg",
@@ -2639,9 +2646,56 @@ impl TerminalPane {
         } else if menu.serial_transfer_menu {
             self.render_serial_transfer_menu(cx)
         } else {
+            let mut label_rows: Vec<(&str, Option<&str>)> = vec![
+                (copy_label.as_str(), None),
+                (copy_command_label.as_str(), None),
+                (paste_label.as_str(), None),
+                (self.preferences.paste_labels.edit_title.as_str(), None),
+                (insert_selection_label.as_str(), None),
+                (replace_command_label.as_str(), None),
+                (send_to_ai_label.as_str(), None),
+                (fill_command_bar_label.as_str(), None),
+                (find_label.as_str(), None),
+                (manage_triggers_label.as_str(), None),
+                (select_command_label.as_str(), None),
+                (previous_command_label.as_str(), None),
+                (next_command_label.as_str(), None),
+                (
+                    clear_screen_label.as_str(),
+                    clear_screen_shortcut.as_deref(),
+                ),
+            ];
+            if self.session_kind == TerminalSessionKind::SshPty {
+                label_rows.push((
+                    self.preferences.command_selection_labels.shell_ide.as_str(),
+                    None,
+                ));
+            }
+            if self.kitty_file_transmission.is_some() {
+                label_rows.push((
+                    self.preferences
+                        .kitty_file_transmission_labels
+                        .title
+                        .as_str(),
+                    None,
+                ));
+            }
+            if let Some((_, fold_label)) = fold_action.as_ref() {
+                label_rows.push((fold_label.as_str(), None));
+            }
+            for action in &self.plugin_text_actions {
+                label_rows.push((action.label.as_str(), None));
+            }
+            let menu_width = oxideterm_gpui_ui::estimate_menu_width_with_shortcuts(
+                tokens,
+                TERMINAL_CONTEXT_MENU_WIDTH,
+                360.0,
+                true,
+                label_rows,
+            );
             context_menu_event_boundary(
                 context_menu_content(tokens)
-                    .w(px(TERMINAL_CONTEXT_MENU_WIDTH))
+                    .w(px(menu_width))
                     .children(self.plugin_text_actions.iter().cloned().map(|action| {
                         self.render_terminal_context_menu_item(
                             "lucide/puzzle.svg",
@@ -2942,9 +2996,23 @@ impl TerminalPane {
     fn render_serial_transfer_menu(&self, cx: &mut Context<Self>) -> gpui::Div {
         let tokens = &self.theme.tokens;
         let modem_labels = self.preferences.modem_labels.clone();
+        let menu_width = oxideterm_gpui_ui::estimate_menu_width(
+            tokens,
+            TERMINAL_CONTEXT_MENU_WIDTH,
+            340.0,
+            true,
+            [
+                modem_labels.xmodem_upload.as_str(),
+                modem_labels.xmodem_receive.as_str(),
+                modem_labels.ymodem_upload.as_str(),
+                modem_labels.ymodem_receive.as_str(),
+                modem_labels.zmodem_upload.as_str(),
+                modem_labels.zmodem_receive.as_str(),
+            ],
+        );
         context_menu_event_boundary(
             context_menu_content(tokens)
-                .w(px(TERMINAL_CONTEXT_MENU_WIDTH))
+                .w(px(menu_width))
                 .child(self.render_terminal_modem_context_menu_item(
                     modem_labels.xmodem_upload,
                     DetectedModemProtocol::Xmodem,

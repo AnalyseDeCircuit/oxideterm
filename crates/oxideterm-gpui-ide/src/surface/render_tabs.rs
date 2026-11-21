@@ -250,15 +250,6 @@ impl IdeSurface {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let viewport = window.viewport_size();
-        let x = menu
-            .x
-            .min(f32::from(viewport.width) - IDE_TAB_CONTEXT_MENU_WIDTH - 8.0)
-            .max(8.0);
-        let y = menu
-            .y
-            .min(f32::from(viewport.height) - IDE_TAB_CONTEXT_MENU_ITEM_HEIGHT * 2.0 - 16.0)
-            .max(8.0);
         let pinned = self
             .workspace
             .tabs()
@@ -266,10 +257,31 @@ impl IdeSurface {
             .find(|tab| tab.id == menu.tab_id)
             .map(|tab| tab.is_pinned)
             .unwrap_or(false);
+        let pin_label = if pinned {
+            self.labels.unpin_tab.as_str()
+        } else {
+            self.labels.pin_tab.as_str()
+        };
+        let menu_width = oxideterm_gpui_ui::estimate_menu_width(
+            &self.tokens,
+            IDE_TAB_CONTEXT_MENU_WIDTH,
+            280.0,
+            true,
+            [pin_label, self.labels.close_tab.as_str()],
+        );
+        let viewport = window.viewport_size();
+        let x = menu
+            .x
+            .min(f32::from(viewport.width) - menu_width - 8.0)
+            .max(8.0);
+        let y = menu
+            .y
+            .min(f32::from(viewport.height) - IDE_TAB_CONTEXT_MENU_ITEM_HEIGHT * 2.0 - 16.0)
+            .max(8.0);
 
         let popup = context_menu_event_boundary(
             context_menu_content(&self.tokens)
-                .w(px(IDE_TAB_CONTEXT_MENU_WIDTH))
+                .w(px(menu_width))
                 .min_w_0()
                 .child(self.render_tab_context_menu_item(
                     "lucide/pin.svg",
@@ -379,10 +391,26 @@ impl IdeSurface {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let menu_width = oxideterm_gpui_ui::estimate_menu_width_with_shortcuts(
+            &self.tokens,
+            IDE_TREE_CONTEXT_MENU_WIDTH,
+            320.0,
+            true,
+            [
+                (self.labels.context_new_file.as_str(), None),
+                (self.labels.context_new_folder.as_str(), None),
+                (self.labels.context_rename.as_str(), Some("F2")),
+                (self.labels.context_delete.as_str(), None),
+                (self.labels.context_copy.as_str(), None),
+                (self.labels.context_cut.as_str(), None),
+                (self.labels.context_paste.as_str(), None),
+                (self.labels.context_copy_path.as_str(), None),
+            ],
+        );
         let viewport = window.viewport_size();
         let x = menu
             .x
-            .min(f32::from(viewport.width) - IDE_TREE_CONTEXT_MENU_WIDTH - 8.0)
+            .min(f32::from(viewport.width) - menu_width - 8.0)
             .max(8.0);
         let y = menu
             .y
@@ -394,183 +422,173 @@ impl IdeSurface {
 
         let popup = context_menu_event_boundary(
             context_menu_content(&self.tokens)
-                .w(px(IDE_TREE_CONTEXT_MENU_WIDTH))
+                .w(px(menu_width))
                 .min_w_0(),
         )
-            .child(self.render_tree_context_menu_item(
-                "lucide/file-plus.svg",
-                self.labels.context_new_file.clone(),
-                None,
-                false,
-                remote_disabled,
-                cx.listener({
-                    let location = menu.location.clone();
-                    let name = menu.name.clone();
-                    let is_directory = menu.is_directory;
-                    move |this, _event, _window, cx| {
-                        this.request_tree_name_input(
-                            TreeNameInputKind::NewFile,
-                            location.clone(),
-                            name.clone(),
-                            is_directory,
-                            cx,
-                        );
-                        this.tree_context_menu = None;
-                        cx.stop_propagation();
-                    }
-                }),
-            ))
-            .child(self.render_tree_context_menu_item(
-                "lucide/folder-plus.svg",
-                self.labels.context_new_folder.clone(),
-                None,
-                false,
-                remote_disabled,
-                cx.listener({
-                    let location = menu.location.clone();
-                    let name = menu.name.clone();
-                    let is_directory = menu.is_directory;
-                    move |this, _event, _window, cx| {
-                        this.request_tree_name_input(
-                            TreeNameInputKind::NewFolder,
-                            location.clone(),
-                            name.clone(),
-                            is_directory,
-                            cx,
-                        );
-                        this.tree_context_menu = None;
-                        cx.stop_propagation();
-                    }
-                }),
-            ))
-            .child(self.render_tree_context_menu_divider())
-            .child(self.render_tree_context_menu_item(
-                "lucide/edit-3.svg",
-                self.labels.context_rename.clone(),
-                Some("F2"),
-                false,
-                remote_disabled || multiple,
-                cx.listener({
-                    let location = menu.location.clone();
-                    let name = menu.name.clone();
-                    let is_directory = menu.is_directory;
-                    move |this, _event, _window, cx| {
-                        this.request_tree_name_input(
-                            TreeNameInputKind::Rename,
-                            location.clone(),
-                            name.clone(),
-                            is_directory,
-                            cx,
-                        );
-                        this.tree_context_menu = None;
-                        cx.stop_propagation();
-                    }
-                }),
-            ))
-            .child(self.render_tree_context_menu_item(
-                "lucide/trash-2.svg",
-                self.labels.context_delete.clone(),
-                None,
-                true,
-                remote_disabled,
-                cx.listener({
-                    let location = menu.location.clone();
-                    let name = menu.name.clone();
-                    let is_directory = menu.is_directory;
-                    move |this, _event, _window, cx| {
-                        this.request_delete_tree_item(location.clone(), name.clone(), is_directory, cx);
-                        this.tree_context_menu = None;
-                        cx.stop_propagation();
-                    }
-                }),
-            ))
-            .child(self.render_tree_context_menu_divider())
-            .child(self.render_tree_context_menu_item(
-                "lucide/copy.svg",
-                self.labels.context_copy.clone(),
-                None,
-                false,
-                remote_disabled,
-                cx.listener({
-                    let location = menu.location.clone();
-                    let name = menu.name.clone();
-                    let is_directory = menu.is_directory;
-                    move |this, _event, _window, cx| {
-                        this.request_copy_tree_item(
-                            location.clone(),
-                            name.clone(),
-                            is_directory,
-                            cx,
-                        );
-                        this.tree_context_menu = None;
-                        cx.stop_propagation();
-                    }
-                }),
-            ))
-            .child(self.render_tree_context_menu_item(
-                "lucide/scissors.svg",
-                self.labels.context_cut.clone(),
-                None,
-                false,
-                remote_disabled,
-                cx.listener({
-                    let location = menu.location.clone();
-                    let name = menu.name.clone();
-                    let is_directory = menu.is_directory;
-                    move |this, _event, _window, cx| {
-                        this.request_cut_tree_item(
-                            location.clone(),
-                            name.clone(),
-                            is_directory,
-                            cx,
-                        );
-                        this.tree_context_menu = None;
-                        cx.stop_propagation();
-                    }
-                }),
-            ))
-            .child(self.render_tree_context_menu_item(
-                "lucide/file-text.svg",
-                self.labels.context_paste.clone(),
-                None,
-                false,
-                paste_disabled,
-                cx.listener({
-                    let location = menu.location.clone();
-                    let is_directory = menu.is_directory;
-                    move |this, _event, _window, cx| {
-                        this.paste_tree_clipboard(location.clone(), is_directory, cx);
-                        this.tree_context_menu = None;
-                        cx.stop_propagation();
-                    }
-                }),
-            ))
-            .child(self.render_tree_context_menu_divider())
-            .child(self.render_tree_context_menu_item(
-                "lucide/copy.svg",
-                self.labels.context_copy_path.clone(),
-                None,
-                false,
-                false,
-                cx.listener({
-                    let path = self
-                        .workspace
-                        .file_tree()
-                        .selection()
-                        .iter()
-                        .cloned()
-                        .map(location_path)
-                        .collect::<Vec<_>>()
-                        .join("\n");
-                    move |this, _event, _window, cx| {
-                        cx.write_to_clipboard(ClipboardItem::new_string(path.clone()));
-                        this.tree_context_menu = None;
-                        cx.stop_propagation();
-                        cx.notify();
-                    }
-                }),
-            ))
-            .into_any_element();
+        .child(self.render_tree_context_menu_item(
+            "lucide/file-plus.svg",
+            self.labels.context_new_file.clone(),
+            None,
+            false,
+            remote_disabled,
+            cx.listener({
+                let location = menu.location.clone();
+                let name = menu.name.clone();
+                let is_directory = menu.is_directory;
+                move |this, _event, _window, cx| {
+                    this.request_tree_name_input(
+                        TreeNameInputKind::NewFile,
+                        location.clone(),
+                        name.clone(),
+                        is_directory,
+                        cx,
+                    );
+                    this.tree_context_menu = None;
+                    cx.stop_propagation();
+                }
+            }),
+        ))
+        .child(self.render_tree_context_menu_item(
+            "lucide/folder-plus.svg",
+            self.labels.context_new_folder.clone(),
+            None,
+            false,
+            remote_disabled,
+            cx.listener({
+                let location = menu.location.clone();
+                let name = menu.name.clone();
+                let is_directory = menu.is_directory;
+                move |this, _event, _window, cx| {
+                    this.request_tree_name_input(
+                        TreeNameInputKind::NewFolder,
+                        location.clone(),
+                        name.clone(),
+                        is_directory,
+                        cx,
+                    );
+                    this.tree_context_menu = None;
+                    cx.stop_propagation();
+                }
+            }),
+        ))
+        .child(self.render_tree_context_menu_divider())
+        .child(self.render_tree_context_menu_item(
+            "lucide/edit-3.svg",
+            self.labels.context_rename.clone(),
+            Some("F2"),
+            false,
+            remote_disabled || multiple,
+            cx.listener({
+                let location = menu.location.clone();
+                let name = menu.name.clone();
+                let is_directory = menu.is_directory;
+                move |this, _event, _window, cx| {
+                    this.request_tree_name_input(
+                        TreeNameInputKind::Rename,
+                        location.clone(),
+                        name.clone(),
+                        is_directory,
+                        cx,
+                    );
+                    this.tree_context_menu = None;
+                    cx.stop_propagation();
+                }
+            }),
+        ))
+        .child(self.render_tree_context_menu_item(
+            "lucide/trash-2.svg",
+            self.labels.context_delete.clone(),
+            None,
+            true,
+            remote_disabled,
+            cx.listener({
+                let location = menu.location.clone();
+                let name = menu.name.clone();
+                let is_directory = menu.is_directory;
+                move |this, _event, _window, cx| {
+                    this.request_delete_tree_item(location.clone(), name.clone(), is_directory, cx);
+                    this.tree_context_menu = None;
+                    cx.stop_propagation();
+                }
+            }),
+        ))
+        .child(self.render_tree_context_menu_divider())
+        .child(self.render_tree_context_menu_item(
+            "lucide/copy.svg",
+            self.labels.context_copy.clone(),
+            None,
+            false,
+            remote_disabled,
+            cx.listener({
+                let location = menu.location.clone();
+                let name = menu.name.clone();
+                let is_directory = menu.is_directory;
+                move |this, _event, _window, cx| {
+                    this.request_copy_tree_item(location.clone(), name.clone(), is_directory, cx);
+                    this.tree_context_menu = None;
+                    cx.stop_propagation();
+                }
+            }),
+        ))
+        .child(self.render_tree_context_menu_item(
+            "lucide/scissors.svg",
+            self.labels.context_cut.clone(),
+            None,
+            false,
+            remote_disabled,
+            cx.listener({
+                let location = menu.location.clone();
+                let name = menu.name.clone();
+                let is_directory = menu.is_directory;
+                move |this, _event, _window, cx| {
+                    this.request_cut_tree_item(location.clone(), name.clone(), is_directory, cx);
+                    this.tree_context_menu = None;
+                    cx.stop_propagation();
+                }
+            }),
+        ))
+        .child(self.render_tree_context_menu_item(
+            "lucide/file-text.svg",
+            self.labels.context_paste.clone(),
+            None,
+            false,
+            paste_disabled,
+            cx.listener({
+                let location = menu.location.clone();
+                let is_directory = menu.is_directory;
+                move |this, _event, _window, cx| {
+                    this.paste_tree_clipboard(location.clone(), is_directory, cx);
+                    this.tree_context_menu = None;
+                    cx.stop_propagation();
+                }
+            }),
+        ))
+        .child(self.render_tree_context_menu_divider())
+        .child(self.render_tree_context_menu_item(
+            "lucide/copy.svg",
+            self.labels.context_copy_path.clone(),
+            None,
+            false,
+            false,
+            cx.listener({
+                let path = self
+                    .workspace
+                    .file_tree()
+                    .selection()
+                    .iter()
+                    .cloned()
+                    .map(location_path)
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                move |this, _event, _window, cx| {
+                    cx.write_to_clipboard(ClipboardItem::new_string(path.clone()));
+                    this.tree_context_menu = None;
+                    cx.stop_propagation();
+                    cx.notify();
+                }
+            }),
+        ))
+        .into_any_element();
 
         popover_backdrop()
             .on_mouse_down(
@@ -672,11 +690,7 @@ impl IdeSurface {
             .gap_2()
             .bg(self.ide_editor_content_bg(self.tokens.ui.bg))
             .text_color(rgb(self.tokens.ui.text_muted))
-            .child(self.spinner_icon(
-                "ide-editor-file-loading",
-                24.0,
-                self.tokens.ui.text_muted,
-            ))
+            .child(self.spinner_icon("ide-editor-file-loading", 24.0, self.tokens.ui.text_muted))
             .child(
                 div()
                     .text_size(px(self.tokens.metrics.ui_text_xs))
@@ -684,7 +698,6 @@ impl IdeSurface {
             )
             .into_any_element()
     }
-
 }
 
 #[cfg(test)]
@@ -728,9 +741,8 @@ mod tab_scroll_tests {
             window.draw(cx).clear(cx);
         });
 
-        let max_offset_x = view.read_with(cx, |view, _| {
-            f32::from(view.scroll_handle.max_offset().x)
-        });
+        let max_offset_x =
+            view.read_with(cx, |view, _| f32::from(view.scroll_handle.max_offset().x));
         assert_eq!(max_offset_x, 160.0);
     }
 }

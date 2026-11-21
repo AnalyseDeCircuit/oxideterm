@@ -593,7 +593,7 @@ impl WorkspaceApp {
                 .bg(rgba((theme.bg << 8) | 0x80))
                 .child(
                     div()
-                        .max_w(px(TOPOLOGY_MENU_WIDTH - 24.0))
+                        .max_w(px(280.0))
                         .truncate()
                         .text_size(px(12.0))
                         .font_weight(gpui::FontWeight::SEMIBOLD)

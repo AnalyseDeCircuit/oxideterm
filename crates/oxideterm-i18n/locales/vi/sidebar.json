@@ -43,6 +43,8 @@
     },
     "panels": {
       "sessions": "Phiên hoạt động",
+      "sessions_header": "Phiên",
+      "connections_header": "Kết nối",
       "saved": "Kết nối đã lưu",
       "saved_title": "Kết nối đã lưu",
       "sftp": "SFTP",

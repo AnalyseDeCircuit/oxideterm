@@ -13,12 +13,30 @@ impl SftpBrowserView {
         let ui = self.sftp_ui_metrics();
         let theme = self.tokens.ui;
         let viewport = window.viewport_size();
+        let menu_width = oxideterm_gpui_ui::estimate_menu_width(
+            &self.tokens,
+            ui.size(SFTP_CONTEXT_MENU_WIDTH),
+            ui.size(300.0),
+            true,
+            [
+                self.i18n.t("sftp.context.upload"),
+                self.i18n.t("sftp.context.download"),
+                self.i18n.t("sftp.context.preview"),
+                self.i18n.t("sftp.context.extract"),
+                self.i18n.t("sftp.context.rename"),
+                self.i18n.t("sftp.context.copy_path"),
+                self.i18n.t("sftp.context.delete"),
+                self.i18n.t("sftp.context.new_folder"),
+            ]
+            .iter()
+            .map(String::as_str),
+        );
         let placement = oxideterm_gpui_ui::context_menu::clamp_context_menu_position(
             menu.x,
             menu.y,
             f32::from(viewport.width),
             f32::from(viewport.height),
-            ui.size(SFTP_CONTEXT_MENU_WIDTH),
+            menu_width,
             ui.size(SFTP_CONTEXT_MENU_MAX_HEIGHT),
             8.0,
         );
@@ -63,7 +81,7 @@ impl SftpBrowserView {
         };
         let popup = context_menu_event_boundary(
             context_menu_content(&self.tokens)
-                .w(px(ui.size(SFTP_CONTEXT_MENU_WIDTH)))
+                .w(px(menu_width))
                 .min_w_0()
                 .when(has_background, |surface| {
                     surface.border_color(sftp_border(theme.border, has_background))
@@ -353,12 +371,24 @@ impl SftpBrowserView {
         let ui = self.sftp_ui_metrics();
         let theme = self.tokens.ui;
         let viewport = window.viewport_size();
+        let menu_width = oxideterm_gpui_ui::estimate_menu_width(
+            &self.tokens,
+            ui.size(SFTP_CONTEXT_MENU_WIDTH),
+            ui.size(320.0),
+            true,
+            [
+                self.i18n.t("sftp.bookmarks.save_current"),
+                self.i18n.t("sftp.bookmarks.empty"),
+            ]
+            .iter()
+            .map(String::as_str),
+        );
         let placement = oxideterm_gpui_ui::context_menu::clamp_context_menu_position(
             menu.x,
             menu.y,
             f32::from(viewport.width),
             f32::from(viewport.height),
-            ui.size(SFTP_CONTEXT_MENU_WIDTH),
+            menu_width,
             ui.size(SFTP_CONTEXT_MENU_MAX_HEIGHT),
             8.0,
         );
@@ -439,7 +469,7 @@ impl SftpBrowserView {
 
         let popup = context_menu_event_boundary(
             context_menu_content(&self.tokens)
-                .w(px(ui.size(SFTP_CONTEXT_MENU_WIDTH)))
+                .w(px(menu_width))
                 .min_w_0()
                 .max_h(px(ui.size(SFTP_CONTEXT_MENU_MAX_HEIGHT)))
                 .when(has_background, |surface| {

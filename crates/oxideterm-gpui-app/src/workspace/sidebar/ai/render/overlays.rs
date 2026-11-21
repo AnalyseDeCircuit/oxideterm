@@ -1,4 +1,6 @@
-use oxideterm_gpui_ai::sidebar::transcript::{has_floating_sidebar_overlay, render_floating_sidebar_overlay};
+use oxideterm_gpui_ai::sidebar::transcript::{
+    has_floating_sidebar_overlay, render_floating_sidebar_overlay,
+};
 
 impl WorkspaceApp {
     pub(in crate::workspace) fn update_ai_sidebar_overlay_for_window_bounds(
@@ -8,7 +10,8 @@ impl WorkspaceApp {
     ) {
         let next_size = current_window_size(window);
         let previous_size = self
-            .ai.state
+            .ai
+            .state
             .update(cx, |ai, _cx| ai.replace_overlay_window_size(next_size));
         let Some(previous_size) = previous_size else {
             return;
@@ -64,6 +67,7 @@ impl WorkspaceApp {
             &self.ai.model_picker,
             &self.select_anchors,
             &self.tokens,
+            cx,
             || self.ai_chat_autocomplete_items(cx),
             move |window, cx| {
                 let _ = owner.update(cx, |app, cx| {
@@ -74,6 +78,8 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn has_ai_sidebar_floating_overlay(&self, cx: &App) -> bool {
-        has_floating_sidebar_overlay(self.ai.state.read(cx), || !self.ai_chat_autocomplete_items(cx).is_empty())
+        has_floating_sidebar_overlay(self.ai.state.read(cx), || {
+            !self.ai_chat_autocomplete_items(cx).is_empty()
+        })
     }
 }

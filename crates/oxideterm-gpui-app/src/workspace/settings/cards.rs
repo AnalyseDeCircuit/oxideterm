@@ -44,12 +44,20 @@ impl WorkspaceApp {
         trigger_style: impl FnOnce(Div) -> Div,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let resolved_width = width.map(|min_width| {
+            oxideterm_gpui_ui::select::estimate_select_trigger_width(
+                &self.tokens,
+                min_width,
+                360.0,
+                [value.as_str()],
+            )
+        });
         let trigger =
             trigger_style(self.settings_select_trigger(select_id, value, false, disabled));
         self.settings_components().select_control(
             select_id,
             disabled,
-            width,
+            resolved_width,
             trigger,
             Self::settings_window_dispatch(cx),
         )

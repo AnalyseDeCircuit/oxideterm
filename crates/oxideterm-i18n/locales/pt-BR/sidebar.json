@@ -43,6 +43,8 @@
     },
     "panels": {
       "sessions": "Sessões ativas",
+      "sessions_header": "Sessões",
+      "connections_header": "Conexões",
       "saved": "Conexões salvas",
       "saved_title": "Conexões salvas",
       "sftp": "SFTP",
@@ -919,23 +921,23 @@
         "edit_and_reconnect": "Editar e reconectar",
         "remove_session": "Remover sessão",
         "cancel_reconnect": "Cancelar reconexão",
-        "port_forwarding": "Encaminhamento de portas",
-        "drill_in": "Navegar (próximo salto)",
-        "saved_next_hop": "Usar conexão salva como próximo salto...",
+        "port_forwarding": "Redirecionar portas",
+        "drill_in": "Próximo salto",
+        "saved_next_hop": "Próximo salto salvo...",
         "connect": "Conectar",
-        "save_as_connection": "Salvar como conexão..."
+        "save_as_connection": "Salvar conexão"
       }
     },
     "actions": {
       "connect": "Conectar",
       "new_terminal": "Novo terminal",
       "sftp_explorer": "Explorador SFTP",
-      "port_forwarding": "Encaminhamento de portas",
+      "port_forwarding": "Redirecionar portas",
       "disconnect": "Desconectar",
       "reconnect": "Reconectar",
-      "drill_in": "Navegar (próximo salto)",
-      "saved_next_hop": "Usar conexão salva como próximo salto...",
-      "save_as_connection": "Salvar como conexão..."
+      "drill_in": "Próximo salto",
+      "saved_next_hop": "Próximo salto salvo...",
+      "save_as_connection": "Salvar conexão"
     },
     "saved_next_hop": {
       "title": "Usar conexão salva como próximo salto",

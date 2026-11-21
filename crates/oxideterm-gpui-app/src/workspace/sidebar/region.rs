@@ -460,8 +460,8 @@ impl WorkspaceApp {
             SidebarSection::Extensions => "sidebar.panels.plugins",
             SidebarSection::CloudSync => "plugin.cloud_sync.panel_title",
             SidebarSection::Notifications => "sidebar.panels.event_log",
-            SidebarSection::Connections => "sidebar.panels.session_manager",
-            _ => "sidebar.panels.sessions",
+            SidebarSection::Connections => "sidebar.panels.connections_header",
+            _ => "sidebar.panels.sessions_header",
         };
         let title = plugin_panel_title.unwrap_or_else(|| self.i18n.t(title_key));
         let transition_gen = self
@@ -507,7 +507,8 @@ impl WorkspaceApp {
             .bg(self.workspace_chrome_background(theme.shell_bg()))
             .border_b_1()
             .border_color(self.workspace_chrome_divider())
-            .px_3()
+            .px(px(10.0))
+            .gap(px(4.0))
             .child(self.render_window_drag_content_region(
                 "sidebar-header-title-drag-region",
                 title_element,
@@ -650,7 +651,7 @@ impl WorkspaceApp {
             host_view_active || sort_active || selection_active || manager_selection_active;
 
         div()
-            .ml_1()
+            .ml(px(2.0))
             .child(self.workspace_tooltip_icon_button(
                 icon,
                 self.tokens.metrics.sidebar_action_icon_size,

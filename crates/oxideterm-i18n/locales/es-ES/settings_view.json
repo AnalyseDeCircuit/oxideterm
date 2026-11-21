@@ -134,7 +134,7 @@
       "help": "Ayuda e Info",
       "keybindings": "Atajos de teclado",
       "graphics": "Gráficos",
-      "network": "Red y acceso externo"
+      "network": "Red y acceso"
     },
     "general": {
       "portable_status_unlocked": "Desbloqueado",
@@ -1491,7 +1491,7 @@
       "execution_profiles_hint": "Agrupa modelo, política de herramientas, chips de contexto y preferencias de memoria/RAG.",
       "profile_add": "Nuevo perfil",
       "profile_default": "Predeterminado",
-      "profile_set_default": "Establecer como predeterminado",
+      "profile_set_default": "Usar por defecto",
       "profile_inherit_provider": "Usar proveedor activo",
       "profile_inherit_model": "Usar modelo predeterminado del proveedor",
       "tool_use_max_calls_per_round": "Llamadas máximas por ronda",

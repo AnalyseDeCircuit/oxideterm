@@ -816,7 +816,7 @@ impl WorkspaceApp {
         );
         let workspace = cx.entity();
         div()
-            .ml_1()
+            .ml(px(2.0))
             .child(oxideterm_gpui_ui::select::select_anchor_probe(
                 SelectAnchorId::ActiveSessionSort,
                 button,
@@ -1370,16 +1370,19 @@ impl WorkspaceApp {
         let inactive = self.inactive_session_node_ids(&rows, cx);
 
         let mut items = Vec::new();
+        let mut item_labels: Vec<String> = Vec::new();
         if let Some(node_ids) = remove_selected {
             let count = node_ids.len();
+            let label = self.i18n_replace(
+                "sessions.menu.remove_selected",
+                &[("count", count.to_string())],
+            );
+            item_labels.push(label.clone());
             items.push(
                 dropdown_menu_item_with_icon(
                     &self.tokens,
                     "lucide/trash-2.svg",
-                    self.i18n_replace(
-                        "sessions.menu.remove_selected",
-                        &[("count", count.to_string())],
-                    ),
+                    label,
                     true,
                     false,
                 )
@@ -1394,11 +1397,13 @@ impl WorkspaceApp {
             );
         }
         let this_node = menu.node_id.clone();
+        let remove_label = self.i18n.t("sessions.tree.actions.remove_session");
+        item_labels.push(remove_label.clone());
         items.push(
             dropdown_menu_item_with_icon(
                 &self.tokens,
                 "lucide/trash-2.svg",
-                self.i18n.t("sessions.tree.actions.remove_session"),
+                remove_label,
                 true,
                 false,
             )
@@ -1414,14 +1419,16 @@ impl WorkspaceApp {
         items.push(dropdown_menu_separator(&self.tokens));
 
         let others_count = others.len();
+        let others_label = self.i18n_replace(
+            "sessions.menu.remove_others",
+            &[("count", others_count.to_string())],
+        );
+        item_labels.push(others_label.clone());
         items.push(
             dropdown_menu_item_with_icon(
                 &self.tokens,
                 "lucide/list-filter.svg",
-                self.i18n_replace(
-                    "sessions.menu.remove_others",
-                    &[("count", others_count.to_string())],
-                ),
+                others_label,
                 true,
                 others_count == 0,
             )
@@ -1437,14 +1444,16 @@ impl WorkspaceApp {
             }),
         );
         let inactive_count = inactive.len();
+        let inactive_label = self.i18n_replace(
+            "sessions.menu.remove_inactive",
+            &[("count", inactive_count.to_string())],
+        );
+        item_labels.push(inactive_label.clone());
         items.push(
             dropdown_menu_item_with_icon(
                 &self.tokens,
                 "lucide/wifi-off.svg",
-                self.i18n_replace(
-                    "sessions.menu.remove_inactive",
-                    &[("count", inactive_count.to_string())],
-                ),
+                inactive_label,
                 true,
                 inactive_count == 0,
             )
@@ -1460,6 +1469,13 @@ impl WorkspaceApp {
             }),
         );
 
+        let menu_width = oxideterm_gpui_ui::estimate_menu_width(
+            &self.tokens,
+            SESSION_ROW_MENU_WIDTH,
+            320.0,
+            true,
+            item_labels.iter().map(String::as_str),
+        );
         let menu_height = items.len() as f32 * SESSION_ROW_MENU_ITEM_HEIGHT
             + self.tokens.metrics.ui_menu_padding * 2.0;
         let viewport = window.viewport_size();
@@ -1468,14 +1484,14 @@ impl WorkspaceApp {
             menu.y,
             f32::from(viewport.width),
             f32::from(viewport.height),
-            SESSION_ROW_MENU_WIDTH,
+            menu_width,
             menu_height,
             8.0,
         );
         let menu_body = context_menu_event_boundary(
             div().child(
                 dropdown_menu_content(&self.tokens)
-                    .w(px(SESSION_ROW_MENU_WIDTH))
+                    .w(px(menu_width))
                     .id("session-row-menu-content")
                     .max_h(px(menu_height))
                     .overflow_y_scroll()

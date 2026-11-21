@@ -146,6 +146,18 @@ impl WorkspaceApp {
         has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let overview_label = self.i18n.t("sidebar.panels.runtime_overview");
+        let matrix_label = self.i18n.t("sidebar.panels.connection_matrix");
+        let tab_bar_width = oxideterm_gpui_ui::estimate_segmented_control_width(
+            &self.tokens,
+            RUNTIME_TAB_BAR_WIDTH,
+            520.0,
+            true,
+            [
+                (overview_label.as_str(), None),
+                (matrix_label.as_str(), None),
+            ],
+        );
         let items = vec![
             self.render_connection_runtime_section_tab(
                 ConnectionRuntimeSection::Overview,
@@ -175,7 +187,7 @@ impl WorkspaceApp {
                 active_index,
             ))
             .has_background_image(has_background)
-            .compact(RUNTIME_TAB_BAR_WIDTH),
+            .compact(tab_bar_width),
             items,
         )
         .into_any_element()

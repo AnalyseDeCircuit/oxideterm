@@ -135,11 +135,24 @@ impl WorkspaceApp {
         } else {
             self.notification_center.notifications.unread_count
         };
+        let notifications_label = self.i18n.t("event_log.audit.notifications");
+        let audit_label = self.i18n.t("event_log.audit.title");
+        let notifications_badge = (notification_count > 0).then(|| notification_count.to_string());
+        let tab_bar_width = oxideterm_gpui_ui::estimate_segmented_control_width(
+            &self.tokens,
+            NOTIFICATION_CENTER_TAB_BAR_WIDTH,
+            480.0,
+            true,
+            [
+                (notifications_label.as_str(), notifications_badge.as_deref()),
+                (audit_label.as_str(), None),
+            ],
+        );
         let items = vec![
             self.render_notification_center_tab(
                 WorkspaceActivityView::Notifications,
                 LucideIcon::Bell,
-                self.i18n.t("event_log.audit.notifications"),
+                notifications_label,
                 notification_count,
                 !self.notification_center.notifications.dnd_enabled
                     && self.notification_center.notifications.unread_critical_count > 0,
@@ -148,7 +161,7 @@ impl WorkspaceApp {
             self.render_notification_center_tab(
                 WorkspaceActivityView::EventLog,
                 LucideIcon::History,
-                self.i18n.t("event_log.audit.title"),
+                audit_label,
                 0,
                 false,
                 cx,
@@ -172,7 +185,7 @@ impl WorkspaceApp {
             oxideterm_gpui_ui::SegmentedControlOptions::new(active_index, previous_index, 2)
                 .user_transition_active(user_transition_active)
                 .has_background_image(has_background)
-                .compact(NOTIFICATION_CENTER_TAB_BAR_WIDTH),
+                .compact(tab_bar_width),
             items,
         )
         .into_any_element()

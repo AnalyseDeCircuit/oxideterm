@@ -43,6 +43,8 @@
     },
     "panels": {
       "sessions": "Sessioni Attive",
+      "sessions_header": "Sessioni",
+      "connections_header": "Connessioni",
       "saved": "Connessioni Salvate",
       "saved_title": "Connessioni Salvate",
       "sftp": "SFTP",
@@ -920,10 +922,10 @@
         "remove_session": "Rimuovi sessione",
         "cancel_reconnect": "Annulla riconnessione",
         "port_forwarding": "Port Forwarding",
-        "drill_in": "Drill In (Prossimo Hop)",
-        "saved_next_hop": "Usa connessione salvata come prossimo hop...",
+        "drill_in": "Prossimo hop",
+        "saved_next_hop": "Prossimo hop salvato...",
         "connect": "Connetti",
-        "save_as_connection": "Salva come connessione..."
+        "save_as_connection": "Salva connessione"
       }
     },
     "actions": {
@@ -933,9 +935,9 @@
       "port_forwarding": "Port Forwarding",
       "disconnect": "Disconnetti",
       "reconnect": "Riconnetti",
-      "drill_in": "Drill In (Prossimo Hop)",
-      "saved_next_hop": "Usa connessione salvata come prossimo hop...",
-      "save_as_connection": "Salva come connessione..."
+      "drill_in": "Prossimo hop",
+      "saved_next_hop": "Prossimo hop salvato...",
+      "save_as_connection": "Salva connessione"
     },
     "saved_next_hop": {
       "title": "Usa connessione salvata come prossimo hop",

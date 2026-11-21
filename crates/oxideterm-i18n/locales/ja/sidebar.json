@@ -43,6 +43,8 @@
     },
     "panels": {
       "sessions": "アクティブセッション",
+      "sessions_header": "セッション",
+      "connections_header": "接続管理",
       "saved": "保存済み接続",
       "saved_title": "保存済み接続",
       "sftp": "SFTP",

@@ -66,7 +66,7 @@ fn render_file_manager_archive_row(
         )
         .child(
             div()
-                .w(px(80.0))
+                .w(px(104.0))
                 .text_align(gpui::TextAlign::Right)
                 .text_color(rgb(muted_text_color))
                 .child(if entry.is_dir {
@@ -77,7 +77,7 @@ fn render_file_manager_archive_row(
         )
         .child(
             div()
-                .w(px(80.0))
+                .w(px(104.0))
                 .text_align(gpui::TextAlign::Right)
                 .text_color(rgb(muted_text_color))
                 .child(if entry.is_dir {
@@ -783,7 +783,7 @@ impl FileManagerView {
                         cx,
                     )),
             )
-            .child(div().w(px(80.0)).text_align(gpui::TextAlign::Right).child(
+            .child(div().w(px(104.0)).text_align(gpui::TextAlign::Right).child(
                 self.render_selectable_display_text(
                     "file-manager-archive-header",
                     "size",
@@ -792,7 +792,7 @@ impl FileManagerView {
                     cx,
                 ),
             ))
-            .child(div().w(px(80.0)).text_align(gpui::TextAlign::Right).child(
+            .child(div().w(px(104.0)).text_align(gpui::TextAlign::Right).child(
                 self.render_selectable_display_text(
                     "file-manager-archive-header",
                     "compressed",

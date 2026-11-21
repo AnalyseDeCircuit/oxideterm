@@ -43,6 +43,8 @@
     },
     "panels": {
       "sessions": "활성 세션",
+      "sessions_header": "세션",
+      "connections_header": "연결 관리",
       "saved": "저장된 연결",
       "saved_title": "저장된 연결",
       "sftp": "SFTP",

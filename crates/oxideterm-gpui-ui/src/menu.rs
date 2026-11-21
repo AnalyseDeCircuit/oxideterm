@@ -260,11 +260,106 @@ pub fn menu_item_with_shortcut(
     menu_item(tokens, label, MenuItemKind::Plain, false, false).child(shortcut)
 }
 
+/// Estimates the horizontal advance width in pixels of single-line UI text at
+/// `font_size_px`, distinguishing wide East Asian glyphs from Latin glyphs.
+pub fn estimate_text_width(text: &str, font_size_px: f32) -> f32 {
+    let mut units = 0.0_f32;
+    for ch in text.chars() {
+        units += if is_wide_glyph(ch) {
+            1.02
+        } else if matches!(
+            ch,
+            'i' | 'l' | 'I' | '1' | '|' | '!' | '.' | ',' | ';' | ':' | '\'' | '`' | ' '
+        ) {
+            0.36
+        } else if matches!(ch, 'm' | 'w' | 'M' | 'W' | '@' | '—' | '–') {
+            0.84
+        } else if ch.is_uppercase() {
+            0.68
+        } else {
+            0.57
+        };
+    }
+    units * font_size_px
+}
+
+fn is_wide_glyph(ch: char) -> bool {
+    matches!(
+        ch as u32,
+        0x1100..=0x115F
+            | 0x2E80..=0x303E
+            | 0x3041..=0x33FF
+            | 0x3400..=0x4DBF
+            | 0x4E00..=0xA4CF
+            | 0xAC00..=0xD7A3
+            | 0xF900..=0xFAFF
+            | 0xFE10..=0xFE6F
+            | 0xFF01..=0xFF60
+            | 0xFFE0..=0xFFE6
+            | 0x20000..=0x2FFFD
+    )
+}
+
+/// Computes a popover menu width in `[min_width, max_width]` that fits the
+/// widest localized item label plus menu chrome without truncating longer
+/// European or CJK translations.
+pub fn estimate_menu_width<'a>(
+    tokens: &ThemeTokens,
+    min_width: f32,
+    max_width: f32,
+    has_leading_slot: bool,
+    labels: impl IntoIterator<Item = &'a str>,
+) -> f32 {
+    estimate_menu_width_with_shortcuts(
+        tokens,
+        min_width,
+        max_width,
+        has_leading_slot,
+        labels.into_iter().map(|label| (label, None)),
+    )
+}
+
+/// Variant of [`estimate_menu_width`] for menus whose rows include trailing
+/// shortcut hints alongside the primary item label.
+pub fn estimate_menu_width_with_shortcuts<'a>(
+    tokens: &ThemeTokens,
+    min_width: f32,
+    max_width: f32,
+    has_leading_slot: bool,
+    rows: impl IntoIterator<Item = (&'a str, Option<&'a str>)>,
+) -> f32 {
+    let label_font = tokens.metrics.ui_text_xs;
+    let shortcut_font = tokens.metrics.ui_text_2xs;
+    let menu_chrome = tokens.metrics.ui_menu_padding * 2.0 + 2.0;
+    let item_padding = tokens.metrics.ui_menu_item_padding_x * 2.0;
+    let leading = if has_leading_slot {
+        tokens.metrics.ui_menu_indicator_size + tokens.spacing.two
+    } else {
+        0.0
+    };
+    let shortcut_gap = tokens.spacing.three;
+    let extra_chrome = menu_chrome + item_padding + leading + 12.0;
+    let widest = rows
+        .into_iter()
+        .map(|(label, shortcut)| {
+            let shortcut_w = shortcut
+                .filter(|s| !s.is_empty())
+                .map(|s| shortcut_gap + estimate_text_width(s, shortcut_font))
+                .unwrap_or(0.0);
+            (estimate_text_width(label, label_font) + shortcut_w + extra_chrome).ceil()
+        })
+        .fold(min_width, f32::max);
+    widest.clamp(min_width, max_width.max(min_width))
+}
+
 #[cfg(test)]
 mod tests {
     use oxideterm_theme::default_tokens;
 
-    use super::{MENU_DANGER_HOVER_BG_ALPHA, menu_chrome_spec, menu_item_hover_bg};
+    use super::{
+        MENU_DANGER_HOVER_BG_ALPHA, estimate_menu_width, estimate_menu_width_with_shortcuts,
+        menu_chrome_spec, menu_item_hover_bg,
+    };
 
     #[test]
     fn menu_chrome_uses_concentric_rounded_radii_and_semantic_danger_tint() {
@@ -282,5 +377,50 @@ mod tests {
             (danger_hover.a - (MENU_DANGER_HOVER_BG_ALPHA as f32 / 255.0)).abs() < 0.01,
             "danger hover should keep a subtle tinted background instead of solid fill"
         );
+    }
+
+    #[test]
+    fn estimate_menu_width_grows_for_long_localized_labels_and_clamps_bounds() {
+        let tokens = default_tokens();
+
+        let compact = estimate_menu_width(&tokens, 160.0, 320.0, true, ["Copy", "Paste"]);
+        assert_eq!(compact, 160.0);
+
+        let german = estimate_menu_width(
+            &tokens,
+            160.0,
+            320.0,
+            true,
+            ["Archivierte Unterhaltungen", "Einstellungen"],
+        );
+        assert!(
+            german > 200.0 && german < 320.0,
+            "expected German menu width to grow beyond 200px without hitting cap, got {german}"
+        );
+
+        let capped = estimate_menu_width(
+            &tokens,
+            160.0,
+            320.0,
+            true,
+            ["Utiliser une connexion enregistrée comme saut suivant dans une nouvelle fenêtre"],
+        );
+        assert_eq!(capped, 320.0);
+
+        let without_shortcut = estimate_menu_width_with_shortcuts(
+            &tokens,
+            160.0,
+            360.0,
+            true,
+            [("Archivierte Unterhaltungen", None)],
+        );
+        let with_shortcut = estimate_menu_width_with_shortcuts(
+            &tokens,
+            160.0,
+            360.0,
+            true,
+            [("Archivierte Unterhaltungen", Some("Ctrl+Shift+A"))],
+        );
+        assert!(with_shortcut > without_shortcut);
     }
 }

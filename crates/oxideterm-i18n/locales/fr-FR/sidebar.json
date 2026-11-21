@@ -43,6 +43,8 @@
     },
     "panels": {
       "sessions": "Sessions actives",
+      "sessions_header": "Sessions",
+      "connections_header": "Connexions",
       "saved": "Connexions enregistrées",
       "saved_title": "Connexions enregistrées",
       "sftp": "SFTP",
@@ -916,14 +918,14 @@
         "sftp": "SFTP",
         "disconnect": "Déconnecter",
         "reconnect": "Reconnecter",
-        "edit_and_reconnect": "Modifier et reconnecter",
+        "edit_and_reconnect": "Modifier & reconnecter",
         "remove_session": "Supprimer la session",
-        "cancel_reconnect": "Annuler la reconnexion",
+        "cancel_reconnect": "Annuler reconnexion",
         "port_forwarding": "Transfert de ports",
-        "drill_in": "Drill In (saut suivant)",
-        "saved_next_hop": "Utiliser une connexion enregistrée comme saut suivant...",
+        "drill_in": "Saut suivant",
+        "saved_next_hop": "Saut suivant enregistré...",
         "connect": "Connecter",
-        "save_as_connection": "Enregistrer comme connexion..."
+        "save_as_connection": "Enregistrer l'hôte"
       }
     },
     "actions": {
@@ -933,9 +935,9 @@
       "port_forwarding": "Transfert de ports",
       "disconnect": "Déconnecter",
       "reconnect": "Reconnecter",
-      "drill_in": "Drill In (saut suivant)",
-      "saved_next_hop": "Utiliser une connexion enregistrée comme saut suivant...",
-      "save_as_connection": "Enregistrer comme connexion..."
+      "drill_in": "Saut suivant",
+      "saved_next_hop": "Saut suivant enregistré...",
+      "save_as_connection": "Enregistrer l'hôte"
     },
     "saved_next_hop": {
       "title": "Utiliser une connexion enregistrée comme saut suivant",

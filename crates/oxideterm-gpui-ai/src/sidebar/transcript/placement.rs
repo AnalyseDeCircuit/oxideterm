@@ -23,6 +23,7 @@ pub fn render_floating_sidebar_overlay(
     model_picker: &crate::model_picker::AiModelPickerViews,
     anchors: &HashMap<SelectAnchorId, OverlayAnchor>,
     tokens: &ThemeTokens,
+    cx: &App,
     autocomplete: impl FnOnce() -> Vec<AiAutocompleteCandidate>,
     dismiss: impl Fn(&mut Window, &mut App) + Clone + 'static,
 ) -> Option<AnyElement> {
@@ -54,9 +55,10 @@ pub fn render_floating_sidebar_overlay(
         )
     } else if state.chat_ui().menu_open {
         let anchor = anchors.get(&SelectAnchorId::AiChatMenu).copied()?;
+        let chat_menu_width = transcript.read(cx).ai_chat_menu_width();
         let left = ai_sidebar_popup_left(
-            f32::from(anchor.bounds.right()) - AI_CHAT_MENU_WIDTH,
-            AI_CHAT_MENU_WIDTH,
+            f32::from(anchor.bounds.right()) - chat_menu_width,
+            chat_menu_width,
             panel_left,
             panel_right,
         );

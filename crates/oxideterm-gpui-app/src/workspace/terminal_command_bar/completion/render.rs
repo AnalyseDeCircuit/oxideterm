@@ -47,43 +47,52 @@ impl WorkspaceApp {
                 .unwrap_or(active_scope);
             let transition_active =
                 self.segmented_control_user_transition_active(control_id, active_scope);
-            let scope_items = [
-                (false, "terminal.history.current"),
-                (true, "terminal.history.all"),
-            ]
-            .into_iter()
-            .enumerate()
-            .map(|(index, (all, label))| {
-                oxideterm_gpui_ui::segmented_control_item(
-                    &self.tokens,
-                    self.i18n.t(label),
-                    index == active_scope,
-                )
-                .rounded_none()
-                .px(px(8.0))
-                .py(px(4.0))
-                .text_size(px(self.tokens.metrics.ui_text_xs))
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _, _, cx| {
-                        if index != active_scope {
-                            this.begin_user_segmented_control_transition_from(
-                                control_id,
-                                active_scope,
-                                index,
-                                cx,
-                            );
-                        }
-                        this.terminal_history_all_connections = all;
-                        this.terminal_command_sender
-                            .update(cx, |sender, cx| sender.show_compact_history(cx));
-                        cx.stop_propagation();
-                        cx.notify();
-                    }),
-                )
-                .into_any_element()
-            })
-            .collect::<Vec<_>>();
+            let current_scope_label = self.i18n.t("terminal.history.current");
+            let all_scope_label = self.i18n.t("terminal.history.all");
+            let scope_width = oxideterm_gpui_ui::estimate_segmented_control_width(
+                &self.tokens,
+                240.0,
+                360.0,
+                false,
+                [
+                    (current_scope_label.as_str(), None),
+                    (all_scope_label.as_str(), None),
+                ],
+            );
+            let scope_items = [(false, current_scope_label), (true, all_scope_label)]
+                .into_iter()
+                .enumerate()
+                .map(|(index, (all, label))| {
+                    oxideterm_gpui_ui::segmented_control_item(
+                        &self.tokens,
+                        label,
+                        index == active_scope,
+                    )
+                    .rounded_none()
+                    .px(px(8.0))
+                    .py(px(4.0))
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _, _, cx| {
+                            if index != active_scope {
+                                this.begin_user_segmented_control_transition_from(
+                                    control_id,
+                                    active_scope,
+                                    index,
+                                    cx,
+                                );
+                            }
+                            this.terminal_history_all_connections = all;
+                            this.terminal_command_sender
+                                .update(cx, |sender, cx| sender.show_compact_history(cx));
+                            cx.stop_propagation();
+                            cx.notify();
+                        }),
+                    )
+                    .into_any_element()
+                })
+                .collect::<Vec<_>>();
             let paused = self
                 .active_command_history(cx)
                 .is_some_and(|history| history.is_paused());
@@ -105,7 +114,7 @@ impl WorkspaceApp {
                                 2,
                             )
                             .user_transition_active(transition_active)
-                            .underline(240.0),
+                            .underline(scope_width),
                             scope_items,
                         ))
                         .child(self.command_history_icon_button(

@@ -43,6 +43,8 @@
     },
     "panels": {
       "sessions": "活动会话",
+      "sessions_header": "活动会话",
+      "connections_header": "会话管理",
       "saved": "保存的连接",
       "saved_title": "保存的连接",
       "sftp": "文件传输 (SFTP)",

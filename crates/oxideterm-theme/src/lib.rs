@@ -479,7 +479,8 @@ impl UiMetrics {
             settings_content_padding: 40.0,
             settings_content_max_width: 896.0,
             settings_content_wide_max_width: 1280.0,
-            settings_nav_width: 224.0,
+            // Wide enough for longer European category names (e.g. German/Italian) without truncation.
+            settings_nav_width: 228.0,
             settings_row_gap: 16.0,
             settings_page_gap: 20.0,
             settings_card_padding: 16.0,

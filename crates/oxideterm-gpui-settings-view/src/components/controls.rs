@@ -119,6 +119,14 @@ impl SettingsControls<'_> {
         width: Option<f32>,
         _: &App,
     ) -> AnyElement {
+        let resolved_width = width.map(|min_width| {
+            oxideterm_gpui_ui::select::estimate_select_trigger_width(
+                self.tokens,
+                min_width,
+                360.0,
+                [value.as_str()],
+            )
+        });
         let trigger = self.select_trigger(
             value,
             false,
@@ -126,7 +134,13 @@ impl SettingsControls<'_> {
             self.open_select == Some(select),
             self.select_origin,
         );
-        self.select_control(select, disabled, width, trigger, self.dispatch.clone())
+        self.select_control(
+            select,
+            disabled,
+            resolved_width,
+            trigger,
+            self.dispatch.clone(),
+        )
     }
 
     pub fn setting_row(

@@ -1021,9 +1021,19 @@ impl TextEditorView {
         cx: &mut Context<Self>,
     ) -> Div {
         let viewport = window.viewport_size();
+        let menu_width = [
+            self.context_menu_labels.copy.as_str(),
+            self.context_menu_labels.cut.as_str(),
+            self.context_menu_labels.paste.as_str(),
+            self.context_menu_labels.select_all.as_str(),
+        ]
+        .into_iter()
+        .map(|label| (oxideterm_gpui_ui::estimate_text_width(label, 12.0) + 56.0).ceil())
+        .fold(CM_CONTEXT_MENU_WIDTH, f32::max)
+        .clamp(CM_CONTEXT_MENU_WIDTH, 280.0);
         let x = menu
             .x
-            .min(f32::from(viewport.width) - CM_CONTEXT_MENU_WIDTH - 8.0)
+            .min(f32::from(viewport.width) - menu_width - 8.0)
             .max(8.0);
         let y = menu
             .y
@@ -1037,7 +1047,7 @@ impl TextEditorView {
         let has_selection = self.has_primary_or_secondary_selection();
         let can_edit = !self.read_only;
         let popup = div()
-            .w(px(CM_CONTEXT_MENU_WIDTH))
+            .w(px(menu_width))
             .p(px(CM_CONTEXT_MENU_PADDING))
             .rounded(px(10.0))
             .border_1()
