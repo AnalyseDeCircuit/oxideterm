@@ -126,6 +126,7 @@ pub enum SettingsSelect {
     LocalPrivilegeResponseMode,
     LocalPrivilegeTotpCredential,
     ConnectionIdleTimeout,
+    ClosedSessionRetention,
     ReconnectMaxAttempts,
     ReconnectBaseDelay,
     ReconnectMaxDelay,

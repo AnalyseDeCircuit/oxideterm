@@ -42,6 +42,7 @@
       "title": "Nhóm kết nối",
       "loading": "Đang tải thống kê...",
       "idle_timeout": "Rảnh: {{min}} phút",
+      "idle_timeout_immediate": "Rảnh: ngắt kết nối ngay",
       "idle_timeout_never": "Rảnh: không giới hạn",
       "active": "Hoạt động",
       "idle": "Rảnh",

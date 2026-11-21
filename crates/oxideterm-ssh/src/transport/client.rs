@@ -72,7 +72,6 @@ fn commit_child_registry_ownership(
     connection_id: &str,
     parent_connection_id: &str,
     parent_consumer: &ConnectionConsumer,
-    child_release_guard: &mut RegistryConsumerGuard,
     parent_release_guard: &mut RegistryConsumerGuard,
 ) -> Result<(), SshTransportError> {
     let child_still_registered = registry
@@ -88,13 +87,11 @@ fn commit_child_registry_ownership(
     if !child_still_registered {
         // A retired child cannot own the ancestor consumer acquired for its tunnel.
         parent_release_guard.release_now();
-        child_release_guard.release_now();
         return Err(SshTransportError::ConnectionFailed(
             CHILD_CONNECTION_RETIRED_DURING_CONNECT.to_string(),
         ));
     }
 
-    child_release_guard.disarm();
     parent_release_guard.disarm();
     Ok(())
 }
@@ -318,7 +315,9 @@ async fn open_interactive_shell_channel(
                 let _ = channel.close().await;
                 return Err(("request-agent-forwarding", error));
             }
-            pooled.agent_forwarding_accepted.store(true, Ordering::Release);
+            pooled
+                .agent_forwarding_accepted
+                .store(true, Ordering::Release);
         }
     }
     Ok((channel, x11_route_guard, x11_status))
@@ -596,36 +595,12 @@ impl SshTransportClient {
         let mut release_guard =
             RegistryConsumerGuard::new(registry.clone(), connection_id.clone(), consumer.clone());
 
-        let pooled = if let Some(existing) = connection.physical::<PooledSshConnection>() {
-            if existing.is_closed().await {
-                connection.clear_physical().await;
-                match self.connect_authenticated_connection().await {
-                    Ok(pooled) => {
-                        connection.set_physical_with_audit(pooled.clone(), pooled.audit.clone());
-                        pooled
-                    }
-                    Err(error) => {
-                        let _ = registry
-                            .mark_state(&connection_id, ConnectionState::Error(error.to_string()));
-                        release_guard.release_now();
-                        return Err(error);
-                    }
-                }
-            } else {
-                existing
-            }
-        } else {
-            match self.connect_authenticated_connection().await {
-                Ok(pooled) => {
-                    connection.set_physical_with_audit(pooled.clone(), pooled.audit.clone());
-                    pooled
-                }
-                Err(error) => {
-                    let _ = registry
-                        .mark_state(&connection_id, ConnectionState::Error(error.to_string()));
-                    release_guard.release_now();
-                    return Err(error);
-                }
+        let pooled = match self.connect_direct_transport(&registry, &connection).await {
+            Ok(pooled) => pooled,
+            Err(error) => {
+                release_guard.disarm();
+                registry.release_failed_attempt(&connection_id, &consumer, &error.to_string());
+                return Err(error);
             }
         };
 
@@ -852,9 +827,12 @@ impl SshTransportClient {
             return Ok(());
         }
         if let Some(command) = self.config.pre_connect_command.as_deref() {
-            oxideterm_local_command::run(command, oxideterm_local_command::PRE_CONNECT_COMMAND_TIMEOUT)
-                .await
-                .map_err(|failure| SshTransportError::ConnectionFailed(failure.to_string()))?;
+            oxideterm_local_command::run(
+                command,
+                oxideterm_local_command::PRE_CONNECT_COMMAND_TIMEOUT,
+            )
+            .await
+            .map_err(|failure| SshTransportError::ConnectionFailed(failure.to_string()))?;
         }
         Ok(())
     }
@@ -898,74 +876,159 @@ impl SshTransportClient {
     }
 
     pub async fn connect_existing_node_with_registry(
-        mut self,
+        self,
         registry: SshConnectionRegistry,
         consumer: ConnectionConsumer,
         connection: SshConnectionHandle,
     ) -> Result<SshConnectionHandle, SshTransportError> {
-        self.audit = node_connection_audit(
-            connection.base_audit_context(),
-            &consumer,
-            connection.connection_id(),
-        );
-        let connection_id = connection.connection_id().to_string();
-        let mut release_guard =
-            RegistryConsumerGuard::new(registry.clone(), connection_id.clone(), consumer.clone());
-
-        // Tauri's connect_tree_node establishes the SSH transport before any
-        // terminal is created. Native uses the same registry physical slot so
-        // SFTP, forwarding, and later terminal panes all consume the node
-        // connection instead of bootstrapping from a terminal shell.
-        let pooled = if let Some(existing) = connection.physical::<PooledSshConnection>() {
-            if existing.is_closed().await {
-                connection.clear_physical().await;
-                self.connect_authenticated_connection().await
-            } else {
-                Ok(existing)
-            }
-        } else {
-            self.connect_authenticated_connection().await
-        };
-
-        match pooled {
-            Ok(pooled) => {
-                connection.set_physical_with_audit(pooled.clone(), pooled.audit.clone());
-                let _ = registry.set_parent_connection_id(&connection_id, None);
-                let _ = registry.mark_state(&connection_id, ConnectionState::Active);
-                release_guard.disarm();
-                Ok(connection)
-            }
-            Err(error) => {
-                let _ =
-                    registry.mark_state(&connection_id, ConnectionState::Error(error.to_string()));
-                release_guard.release_now();
-                Err(error)
-            }
-        }
+        self.connect_registered_node(registry, consumer, connection, None)
+            .await
     }
 
     pub async fn connect_child_node_via_parent_with_registry(
-        mut self,
+        self,
         registry: SshConnectionRegistry,
         consumer: ConnectionConsumer,
         connection: SshConnectionHandle,
         parent: SshConnectionHandle,
         parent_consumer: ConnectionConsumer,
     ) -> Result<SshConnectionHandle, SshTransportError> {
+        self.connect_registered_node(
+            registry,
+            consumer,
+            connection,
+            Some((parent, parent_consumer)),
+        )
+        .await
+    }
+
+    async fn connect_registered_node(
+        self,
+        registry: SshConnectionRegistry,
+        consumer: ConnectionConsumer,
+        connection: SshConnectionHandle,
+        parent: Option<(SshConnectionHandle, ConnectionConsumer)>,
+    ) -> Result<SshConnectionHandle, SshTransportError> {
+        let connection_id = connection.connection_id().to_owned();
+        let mut owner =
+            RegistryConsumerGuard::new(registry.clone(), connection_id.clone(), consumer.clone());
+        let result = self
+            .establish_node_transport(&registry, &consumer, &connection, parent)
+            .await;
+        owner.disarm();
+        if let Err(error) = result {
+            registry.release_failed_attempt(&connection_id, &consumer, &error.to_string());
+            return Err(error);
+        }
+        Ok(connection)
+    }
+
+    /// The caller owns the node consumer across cancellation and completion.
+    /// Each jump attempt transfers its independently acquired parent consumer on success.
+    pub async fn establish_node_transport(
+        mut self,
+        registry: &SshConnectionRegistry,
+        consumer: &ConnectionConsumer,
+        connection: &SshConnectionHandle,
+        parent: Option<(SshConnectionHandle, ConnectionConsumer)>,
+    ) -> Result<(), SshTransportError> {
         self.audit = node_connection_audit(
             connection.base_audit_context(),
-            &consumer,
+            consumer,
             connection.connection_id(),
         );
+        if let Some((parent, parent_consumer)) = parent {
+            self.establish_child_transport(registry, connection, parent, parent_consumer)
+                .await
+        } else {
+            self.connect_direct_transport(registry, connection).await?;
+            Ok(())
+        }
+    }
+
+    async fn connect_direct_transport(
+        &self,
+        registry: &SshConnectionRegistry,
+        connection: &SshConnectionHandle,
+    ) -> Result<Arc<PooledSshConnection>, SshTransportError> {
+        let _setup = connection.lock_transport_setup().await;
+        if let Some(existing) = self.reusable_transport(registry, connection)? {
+            return Ok(existing);
+        }
+        let pooled = self.connect_authenticated_connection().await?;
+        connection.set_physical_with_audit(pooled.clone(), pooled.audit.clone());
+        if registry
+            .mark_state(connection.connection_id(), ConnectionState::Active)
+            .is_none()
+        {
+            connection.clear_physical().await;
+            return Err(SshTransportError::ConnectionFailed(
+                "SSH connection retired during authentication".into(),
+            ));
+        }
+        Ok(pooled)
+    }
+
+    fn reusable_transport(
+        &self,
+        registry: &SshConnectionRegistry,
+        connection: &SshConnectionHandle,
+    ) -> Result<Option<Arc<PooledSshConnection>>, SshTransportError> {
+        // A caller supplying a handle must honor the same policy as pool admission.
+        if self.config.connection_key() != connection.config().connection_key() {
+            return Err(SshTransportError::ConnectionFailed(
+                "SSH route does not match the acquired connection".into(),
+            ));
+        }
+        let state = connection.state();
+        if !state.accepts_connection_attempt() {
+            return Err(SshTransportError::ConnectionFailed(
+                "SSH connection became unavailable during setup".into(),
+            ));
+        }
+        let pooled = connection.physical::<PooledSshConnection>();
+        if pooled.is_none() && state == ConnectionState::Connecting {
+            return Ok(None);
+        }
+        let Some(pooled) = pooled.filter(|pooled| !pooled.target.is_closed()) else {
+            // This handle may already belong to queued callers. Never publish a different
+            // socket under the ID still addressed by their terminal and heartbeat events.
+            registry.mark_link_down_cascade(connection.connection_id());
+            return Err(SshTransportError::ConnectionFailed(
+                "SSH transport closed before setup completed".into(),
+            ));
+        };
+        if !matches!(state, ConnectionState::Active | ConnectionState::Idle) {
+            return Err(SshTransportError::ConnectionFailed(
+                "SSH transport is not ready for reuse".into(),
+            ));
+        }
+        Ok(Some(pooled))
+    }
+
+    async fn establish_child_transport(
+        &self,
+        registry: &SshConnectionRegistry,
+        connection: &SshConnectionHandle,
+        parent: SshConnectionHandle,
+        parent_consumer: ConnectionConsumer,
+    ) -> Result<(), SshTransportError> {
         let connection_id = connection.connection_id().to_string();
         let parent_connection_id = parent.connection_id().to_string();
-        let mut child_release_guard =
-            RegistryConsumerGuard::new(registry.clone(), connection_id.clone(), consumer.clone());
         let mut parent_release_guard = RegistryConsumerGuard::new(
             registry.clone(),
             parent_connection_id.clone(),
             parent_consumer.clone(),
         );
+        let _setup = connection.lock_transport_setup().await;
+        if self.reusable_transport(registry, connection)?.is_some() {
+            if connection.info().parent_connection_id.as_deref() != Some(&parent_connection_id) {
+                return Err(SshTransportError::ConnectionFailed(
+                    "SSH connection belongs to another jump host".into(),
+                ));
+            }
+            return Ok(());
+        }
         let remote_forward_handler = Arc::new(RwLock::new(None));
         let x11_forward_handler = Arc::new(RwLock::new(None));
 
@@ -1051,31 +1114,19 @@ impl SshTransportClient {
         .await;
         operation.result(&pooled);
 
-        match pooled {
-            Ok(pooled) => {
-                connection.set_physical_with_audit(pooled.clone(), pooled.audit.clone());
-                if let Err(error) = commit_child_registry_ownership(
-                    &registry,
-                    &connection_id,
-                    &parent_connection_id,
-                    &parent_consumer,
-                    &mut child_release_guard,
-                    &mut parent_release_guard,
-                ) {
-                    // The unregistered authenticated transport has no remaining owner.
-                    connection.clear_physical().await;
-                    return Err(error);
-                }
-                Ok(connection)
-            }
-            Err(error) => {
-                let _ =
-                    registry.mark_state(&connection_id, ConnectionState::Error(error.to_string()));
-                parent_release_guard.release_now();
-                child_release_guard.release_now();
-                Err(error)
-            }
+        let pooled = pooled?;
+        connection.set_physical_with_audit(pooled.clone(), pooled.audit.clone());
+        if let Err(error) = commit_child_registry_ownership(
+            registry,
+            &connection_id,
+            &parent_connection_id,
+            &parent_consumer,
+            &mut parent_release_guard,
+        ) {
+            connection.clear_physical().await;
+            return Err(error);
         }
+        Ok(())
     }
 
     async fn connect_shell_inner(
@@ -1927,11 +1978,6 @@ mod agent_forwarding_tests {
         registry
             .acquire_consumer_for_connection(&parent_connection_id, ancestor_consumer.clone())
             .expect("parent ancestor consumer");
-        let mut child_guard = RegistryConsumerGuard::new(
-            registry.clone(),
-            child_connection_id.clone(),
-            child_consumer,
-        );
         let mut parent_guard = RegistryConsumerGuard::new(
             registry.clone(),
             parent_connection_id.clone(),
@@ -1946,7 +1992,6 @@ mod agent_forwarding_tests {
             &child_connection_id,
             &parent_connection_id,
             &ancestor_consumer,
-            &mut child_guard,
             &mut parent_guard,
         );
 
@@ -1983,11 +2028,6 @@ mod agent_forwarding_tests {
         registry
             .acquire_consumer_for_connection(&parent_connection_id, ancestor_consumer.clone())
             .expect("parent ancestor consumer");
-        let mut child_guard = RegistryConsumerGuard::new(
-            registry.clone(),
-            child_connection_id.clone(),
-            child_consumer,
-        );
         let mut parent_guard = RegistryConsumerGuard::new(
             registry.clone(),
             parent_connection_id.clone(),
@@ -1999,7 +2039,6 @@ mod agent_forwarding_tests {
             &child_connection_id,
             &parent_connection_id,
             &ancestor_consumer,
-            &mut child_guard,
             &mut parent_guard,
         )
         .expect("child ownership handoff");

@@ -33,6 +33,7 @@ const SOCKS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(15);
 
 pub(crate) struct DynamicForward {
     rule: ForwardRule,
+    connection_id: String,
     stats: BridgeStatsRecorder,
     shutdown_tx: watch::Sender<bool>,
     task: JoinHandle<()>,
@@ -42,6 +43,7 @@ impl DynamicForward {
     pub(crate) async fn start(
         mut rule: ForwardRule,
         ssh_connection: SshConnectionHandle,
+        lease: Option<oxideterm_ssh::ConnectionConsumerLease>,
     ) -> Result<Self, ForwardingError> {
         validate_dynamic_rule(&rule)?;
         let listener = TcpListener::bind((rule.bind_address.as_str(), rule.bind_port))
@@ -58,7 +60,9 @@ impl DynamicForward {
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let task_rule = rule.clone();
         let task_stats = stats.clone();
+        let connection_id = ssh_connection.connection_id().to_owned();
         let task = tokio::spawn(async move {
+            let _lease = lease;
             accept_dynamic_connections(
                 listener,
                 ssh_connection,
@@ -71,6 +75,7 @@ impl DynamicForward {
 
         Ok(Self {
             rule,
+            connection_id,
             stats,
             shutdown_tx,
             task,
@@ -79,6 +84,10 @@ impl DynamicForward {
 
     pub(crate) fn rule(&self) -> ForwardRule {
         self.rule.clone()
+    }
+
+    pub(crate) fn connection_id(&self) -> &str {
+        &self.connection_id
     }
 
     pub(crate) fn stats(&self) -> ForwardStats {

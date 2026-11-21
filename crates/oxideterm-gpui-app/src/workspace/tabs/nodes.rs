@@ -26,6 +26,7 @@ impl WorkspaceApp {
                     self.apply_workspace_runtime_effect(effect, window, cx) || changed
                 });
                 self.start_waiting_tunnel_connections(cx);
+                self.sync_session_retention(cx);
                 if changed {
                     self.refresh_ssh_terminal_input_locks(cx);
                     cx.notify();
@@ -47,9 +48,10 @@ impl WorkspaceApp {
             runtime_entity::WorkspaceRuntimeEffect::Node(effect) => {
                 self.apply_node_runtime_effect(effect, window, cx)
             }
-            runtime_entity::WorkspaceRuntimeEffect::OpenReadySshTerminals { requests } => {
-                self.open_ready_ssh_terminal_requests(requests, window, cx)
-            }
+            runtime_entity::WorkspaceRuntimeEffect::OpenReadySshTerminals {
+                requests,
+                handoffs: _handoffs,
+            } => self.open_ready_ssh_terminal_requests(requests, window, cx),
             runtime_entity::WorkspaceRuntimeEffect::StartReconnectRoot { node_id }
             | runtime_entity::WorkspaceRuntimeEffect::StartReconnectPipeline { node_id } => {
                 self.start_grace_period_reconnect(&node_id, cx);
@@ -67,8 +69,8 @@ impl WorkspaceApp {
                     false
                 }
             }
-            runtime_entity::WorkspaceRuntimeEffect::ContinueReconnectCascade => {
-                self.start_next_reconnect_cascade_node(cx)
+            runtime_entity::WorkspaceRuntimeEffect::ContinueReconnectCascade { generation } => {
+                self.start_next_reconnect_cascade_node(generation, cx)
             }
             runtime_entity::WorkspaceRuntimeEffect::ResumeReconnectAfterChain {
                 node_id,
@@ -145,7 +147,17 @@ impl WorkspaceApp {
         })
     }
 
-    fn cleanup_temporary_session_tree_node(
+    pub(in crate::workspace) fn remove_ssh_node_record(&mut self, node_id: &NodeId) {
+        self.forwarding_service
+            .registry()
+            .forget_inactive_session(&self.forwarding_session_id_for_node(node_id));
+        self.forget_closed_ssh_session(node_id);
+        self.ssh_nodes.remove(node_id);
+        self.ssh_terminal_command_histories.remove(node_id);
+        self.expanded_ssh_nodes.remove(node_id);
+    }
+
+    pub(in crate::workspace) fn cleanup_temporary_session_tree_node(
         &mut self,
         cleanup_root: &NodeId,
         cx: &mut Context<Self>,
@@ -153,12 +165,13 @@ impl WorkspaceApp {
         let removed_nodes = self.workspace_runtime.update(cx, |runtime, cx| {
             runtime.remove_node_runtime_subtree(cleanup_root, cx)
         });
+        self.public_mcp
+            .invalidate_disconnected_nodes(&removed_nodes);
         for node_id in removed_nodes {
             self.workspace_runtime.update(cx, |runtime, _cx| {
                 runtime.remove_pending_ssh_terminal_opens_for_node(&node_id);
             });
-            self.ssh_nodes.remove(&node_id);
-            self.expanded_ssh_nodes.remove(&node_id);
+            self.remove_ssh_node_record(&node_id);
             self.saved_ssh_nodes
                 .retain(|_, saved_node_id| saved_node_id != &node_id);
         }
@@ -187,6 +200,7 @@ impl WorkspaceApp {
         }
         self.cleanup_temporary_session_tree_node(cleanup_root, cx);
         self.persist_session_tree_snapshot();
+        self.sync_session_retention(cx);
         cx.notify();
     }
 
@@ -201,14 +215,22 @@ impl WorkspaceApp {
             match result {
                 runtime_entity::ReconnectRuntimeEffect::NodeConnected {
                     node_id,
-                    connection_id,
+                    connection,
                     reconnecting,
                 } => {
+                    let connection_id = connection.connection_id();
+                    if self.node_router.connection_id_for_node(&node_id).as_deref()
+                        != Some(connection_id)
+                    {
+                        continue;
+                    }
+                    self.rebind_sftp_surfaces_for_node(&node_id, cx);
+                    self.public_mcp.rebind_node_leases(&node_id, connection_id);
                     let mut resume_transfers_without_forwards = false;
                     if reconnecting {
                         self.log_connection_event(
                             &node_id,
-                            Some(connection_id.clone()),
+                            Some(connection_id.to_owned()),
                             "event_log.events.connected",
                             WorkspaceEventSeverity::Info,
                             None,
@@ -244,8 +266,13 @@ impl WorkspaceApp {
                         .map(|snapshot| snapshot.state.readiness)
                         .unwrap_or(NodeReadiness::Disconnected);
                     if let Some(node) = self.ssh_nodes.get_mut(&node_id) {
-                        node.readiness = projected_readiness;
+                        let became_ready = node_readiness_became_ready(Some(&node.readiness), &projected_readiness);
+                        node.readiness = projected_readiness.clone();
+                        if became_ready {
+                            self.restore_forwarding_session_for_node(&node_id, cx);
+                        }
                     }
+                    self.resume_forward_starts(&node_id, &projected_readiness, cx);
                     self.persist_session_tree_snapshot();
                     let connection_chain_node = self
                         .workspace_runtime
@@ -257,7 +284,7 @@ impl WorkspaceApp {
                         self.workspace_runtime.update(cx, |runtime, _cx| {
                             runtime.unlock_connecting_node(&node_id);
                         });
-                        self.schedule_next_reconnect_cascade_node(cx);
+                        self.schedule_next_reconnect_cascade_node(&node_id, cx);
                     }
                     if self.active_proxy_connect_waits_for_node(&node_id, cx) {
                         self.advance_active_proxy_connect_after_node_connected(
@@ -342,10 +369,6 @@ impl WorkspaceApp {
                         self.workspace_runtime.update(cx, |runtime, _cx| {
                             runtime.unlock_connecting_node(&node_id);
                         });
-                    } else {
-                        self.workspace_runtime.update(cx, |runtime, _cx| {
-                            runtime.clear_reconnect_cascade();
-                        });
                     }
                     self.fail_active_proxy_connect_for_node(&node_id, error.clone(), cx);
                     if active_reconnect_job {
@@ -424,7 +447,7 @@ impl WorkspaceApp {
                     if let Some(cleanup_node_id) = cleanup_node_id {
                         self.cleanup_temporary_session_tree_node(&cleanup_node_id, cx);
                         if !connection_chain_node {
-                            self.schedule_next_reconnect_cascade_node(cx);
+                            self.schedule_next_reconnect_cascade_node(&node_id, cx);
                         }
                         self.persist_session_tree_snapshot();
                         changed = true;
@@ -434,7 +457,7 @@ impl WorkspaceApp {
                         node.readiness = NodeReadiness::Error;
                     }
                     if !connection_chain_node {
-                        self.schedule_next_reconnect_cascade_node(cx);
+                        self.schedule_next_reconnect_cascade_node(&node_id, cx);
                     }
                     self.persist_session_tree_snapshot();
                     changed = true;
@@ -520,6 +543,42 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> bool {
         match event {
+            runtime_entity::NodeRuntimeEffect::IdleRetired {
+                node_id,
+                connection_id,
+                reason,
+            } => {
+                // The UI effect may arrive after the router accepted a new connection attempt.
+                if !self
+                    .node_router
+                    .node_metadata(&node_id)
+                    .is_some_and(|node| {
+                        node.connection_id.is_none()
+                            && node.readiness == NodeReadiness::Disconnected
+                    })
+                    || self
+                        .workspace_runtime
+                        .read(cx)
+                        .has_session_connection_work(&node_id)
+                {
+                    return false;
+                }
+                self.note_closed_ssh_session(&node_id);
+                self.dedicated_sftp_connections.lock().remove(&node_id);
+                self.apply_sftp_ready_event(&node_id, false, None, cx);
+                self.apply_node_runtime_effect(
+                    runtime_entity::NodeRuntimeEffect::ConnectionStatusChanged {
+                        node_id,
+                        connection_id,
+                        status: "disconnected".to_owned(),
+                        state: NodeReadiness::Disconnected,
+                        reason,
+                        affected_children: Vec::new(),
+                    },
+                    window,
+                    cx,
+                )
+            }
             runtime_entity::NodeRuntimeEffect::ConnectionStatusChanged {
                 node_id,
                 connection_id,
@@ -609,12 +668,11 @@ impl WorkspaceApp {
                     let _ = self.interrupt_sftp_transfers_by_node(&node_id, message, cx);
                     let session_id = self.forwarding_session_id_for_node(&node_id);
                     let forwarding_connection_id = self.forwarding_connection_id_for_node(&node_id);
-                    let forwarding_registry = self.forwarding_service.registry().clone();
+                    let service = self.forwarding_service.clone();
                     self.forwarding_runtime.spawn(async move {
-                        if let Some(connection_id) = forwarding_connection_id {
-                            forwarding_registry.stop_port_profiler(&connection_id);
-                        }
-                        let _ = forwarding_registry.suspend_session(&session_id).await;
+                        service
+                            .suspend_session(&session_id, forwarding_connection_id.as_deref())
+                            .await;
                     });
                 }
                 if status == "link_down" {
@@ -736,12 +794,11 @@ impl WorkspaceApp {
                     let _ = self.interrupt_sftp_transfers_by_node(&node_id, message, cx);
                     let session_id = self.forwarding_session_id_for_node(&node_id);
                     let connection_id = self.forwarding_connection_id_for_node(&node_id);
-                    let forwarding_registry = self.forwarding_service.registry().clone();
+                    let service = self.forwarding_service.clone();
                     self.forwarding_runtime.spawn(async move {
-                        if let Some(connection_id) = connection_id {
-                            forwarding_registry.stop_port_profiler(&connection_id);
-                        }
-                        let _ = forwarding_registry.suspend_session(&session_id).await;
+                        service
+                            .suspend_session(&session_id, connection_id.as_deref())
+                            .await;
                     });
                     if matches!(state, NodeReadiness::Error)
                         && reason.to_ascii_lowercase().contains("link")
@@ -950,12 +1007,11 @@ impl WorkspaceApp {
             let _ = self.interrupt_sftp_transfers_by_node(affected_node_id, message, cx);
             let session_id = self.forwarding_session_id_for_node(affected_node_id);
             let connection_id = self.forwarding_connection_id_for_node(affected_node_id);
-            let forwarding_registry = self.forwarding_service.registry().clone();
+            let service = self.forwarding_service.clone();
             self.forwarding_runtime.spawn(async move {
-                if let Some(connection_id) = connection_id {
-                    forwarding_registry.stop_port_profiler(&connection_id);
-                }
-                let _ = forwarding_registry.suspend_session(&session_id).await;
+                service
+                    .suspend_session(&session_id, connection_id.as_deref())
+                    .await;
             });
         }
         affected.len()
@@ -1203,7 +1259,17 @@ impl WorkspaceApp {
             .iter()
             .map(|entry| entry.old_connection_id.clone())
             .collect::<Vec<_>>();
+        let snapshot_reader = self.forwarding_service.track_forward_restore();
         let forward_rules = self.forward_rules_snapshot_for_nodes(&affected_nodes);
+        self.workspace_runtime.update(cx, |runtime, _| {
+            if forward_rules.is_empty() {
+                runtime.reconnect_forward_snapshot_readers.remove(node_id);
+            } else {
+                runtime
+                    .reconnect_forward_snapshot_readers
+                    .insert(node_id.clone(), snapshot_reader);
+            }
+        });
         let active_port_forward_ids = forward_rules
             .iter()
             .flat_map(|entry| entry.rules.iter().map(|rule| rule.id.clone()))
@@ -1295,10 +1361,10 @@ impl WorkspaceApp {
         if self.connection_trace_node_is_ready(root_node_id) {
             // The preceding chain may already have restored this node.
             self.workspace_runtime.update(cx, |runtime, _| {
-                runtime.replace_reconnect_cascade(cascade_node_ids)
+                runtime.replace_reconnect_cascade(root_node_id, cascade_node_ids)
             });
             self.finish_reconnect_job(root_node_id, Ok(0), cx);
-            self.schedule_next_reconnect_cascade_node(cx);
+            self.schedule_next_reconnect_cascade_node(root_node_id, cx);
             return;
         }
         if !self.ensure_node_connection_started(root_node_id, cx) {
@@ -1306,20 +1372,30 @@ impl WorkspaceApp {
             return;
         }
         self.workspace_runtime.update(cx, |runtime, _| {
-            runtime.replace_reconnect_cascade(cascade_node_ids)
+            runtime.replace_reconnect_cascade(root_node_id, cascade_node_ids)
         });
     }
 
-    fn schedule_next_reconnect_cascade_node(&self, cx: &mut Context<Self>) {
+    fn schedule_next_reconnect_cascade_node(&self, node_id: &NodeId, cx: &mut Context<Self>) {
         self.workspace_runtime.update(cx, |runtime, cx| {
-            runtime.schedule_next_reconnect_cascade(RECONNECT_CASCADE_DELAY, cx);
+            runtime.schedule_next_reconnect_cascade(node_id, RECONNECT_CASCADE_DELAY, cx);
         });
     }
 
-    fn start_next_reconnect_cascade_node(&mut self, cx: &mut Context<Self>) -> bool {
-        while let Some(node_id) = self.workspace_runtime.update(cx, |runtime, _cx| {
-            runtime.take_next_reconnect_cascade_node()
-        }) {
+    fn start_next_reconnect_cascade_node(
+        &mut self,
+        generation: u64,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        while let Some((node_id, _parent_handoff)) =
+            self.workspace_runtime.update(cx, |runtime, _cx| {
+                runtime.take_next_reconnect_cascade_node(generation)
+            })
+        {
+            // An independently recovered child will not deliver a second connection completion.
+            if self.node_is_ready_for_terminal(&node_id) {
+                continue;
+            }
             let parent_ready = self
                 .node_router
                 .node_metadata(&node_id)
@@ -1375,11 +1451,10 @@ impl WorkspaceApp {
                 Some(error.clone()),
             )),
         };
-        if let Some(job) = self.workspace_runtime.read(cx).finish_reconnect_job_state(
-            node_id,
-            result,
-            verification_detail,
-        ) {
+        let job = self.workspace_runtime.update(cx, |runtime, _| {
+            runtime.finish_reconnect_job_state(node_id, result, verification_detail)
+        });
+        if let Some(job) = job {
             if let Some((title, variant, phase, detail)) = notice {
                 self.log_reconnect_phase(node_id, phase, detail.clone());
                 if let Some(error) = detail.clone() {
@@ -1437,16 +1512,6 @@ impl WorkspaceApp {
         });
     }
 
-    fn release_stale_reconnect_forward_bindings(
-        &mut self,
-        bindings: Vec<(String, String, ConnectionConsumer)>,
-    ) {
-        for (session_id, connection_id, consumer) in bindings {
-            self.forwarding_service
-                .discard_binding(&session_id, &connection_id, &consumer);
-        }
-    }
-
     pub(in crate::workspace) fn apply_reconnect_forward_restore_completion(
         &mut self,
         node_id: NodeId,
@@ -1455,20 +1520,15 @@ impl WorkspaceApp {
         detail: String,
         job_id: String,
         created_forwards: Vec<(Arc<oxideterm_forwarding::ForwardingManager>, String)>,
-        bindings: Vec<(String, String, ConnectionConsumer)>,
         cx: &mut Context<Self>,
     ) -> bool {
         if !self.reconnect_worker_result_is_current(&node_id, &job_id, cx) {
-            self.release_stale_reconnect_forward_bindings(bindings);
             self.cleanup_stale_reconnect_forward_restores(created_forwards);
             return true;
         }
         self.workspace_runtime.update(cx, |runtime, _cx| {
             runtime.complete_forward_restore(&node_id, restored);
         });
-        for binding in bindings {
-            self.remember_forwarding_binding(Some(binding));
-        }
         match self
             .workspace_runtime
             .read(cx)
@@ -1577,7 +1637,10 @@ impl WorkspaceApp {
         node_id: &NodeId,
     ) -> bool {
         let Some(connection_id) = self.node_router.connection_id_for_node(node_id) else {
-            return false;
+            return self
+                .node_router
+                .node_state(node_id)
+                .is_ok_and(|state| state.state.readiness == NodeReadiness::Connecting);
         };
         self.ssh_registry.get(&connection_id).is_some_and(|handle| {
             matches!(
@@ -1666,7 +1729,7 @@ impl WorkspaceApp {
     fn abort_failed_connection_chain(&mut self, failed: &NodeId, cx: &mut Context<Self>) {
         let step = self.workspace_runtime.read(cx).connection_chain_next_step();
         if self.workspace_runtime.update(cx, |runtime, cx| {
-            runtime.abort_connection_chain_for_node(failed, cx)
+            runtime.abort_failed_connection_chain_for_node(failed, cx)
         }) && let Some(step) = step
             && let Some(index) = step
                 .trace_plan
@@ -1729,7 +1792,7 @@ impl WorkspaceApp {
                 });
             }
             runtime_entity::ConnectionChainAdvance::Complete => {
-                self.schedule_next_reconnect_cascade_node(cx);
+                self.schedule_next_reconnect_cascade_node(node_id, cx);
             }
         }
     }
@@ -1743,6 +1806,7 @@ impl WorkspaceApp {
         if !self.ssh_nodes.contains_key(node_id) {
             return false;
         }
+        self.forget_closed_ssh_session(node_id);
         let projected_readiness = self
             .node_router
             .node_state(node_id)
@@ -1835,14 +1899,21 @@ impl WorkspaceApp {
             .iter()
             .map(|entry| {
                 let entry_node_id = NodeId::new(entry.node_id.clone());
-                let owner = self
-                    .ssh_nodes
-                    .get(&entry_node_id)
-                    .and_then(|node| node.saved_connection_id.clone());
+                let owner = self.forward_owner_for_node(&entry_node_id);
                 (entry.node_id.clone(), owner)
             })
             .collect::<HashMap<_, _>>();
+        let Some(snapshot_reader) = self
+            .workspace_runtime
+            .read(cx)
+            .reconnect_forward_snapshot_readers
+            .get(node_id)
+            .cloned()
+        else {
+            return;
+        };
         let restore_request = forwards::ReconnectForwardRestoreRequest {
+            snapshot_reader,
             root_node_id: node_id.clone(),
             snapshots,
             old_connection_ids_by_node,
@@ -1952,5 +2023,273 @@ impl WorkspaceApp {
         for node_id in node_ids {
             self.schedule_grace_period_reconnect(&node_id, cx);
         }
+    }
+}
+
+#[cfg(test)]
+mod session_retention_tests {
+    use super::*;
+    use crate::workspace::session_manager::tests::isolated_workspace_fixture;
+    use gpui::TestAppContext;
+    use oxideterm_connections::SshChannelStrategy;
+
+    #[gpui::test]
+    async fn deleting_the_only_tunnel_during_connect_retires_the_unused_session(
+        cx: &mut TestAppContext,
+    ) {
+        use oxideterm_connections::{SshConfigHost, saved_connection_from_ssh_host};
+        use oxideterm_forwarding::{ForwardRule, PersistedForward, SshTunnelProfile};
+
+        let Some(_dir) = isolated_workspace_fixture(cx, "OXIDETERM_PENDING_TUNNEL_RETENTION_DIR")
+        else {
+            return;
+        };
+        cx.executor().allow_parking();
+        let (shell, cx) = cx.add_window_view(|window, cx| {
+            let ws = cx.new(|cx| WorkspaceApp::new(window, cx, None, None).unwrap());
+            WorkspaceWindowShell::new(ws, window, cx)
+        });
+        let ws = shell.read_with(cx, |shell, _| shell.session_entity());
+        let (node, owner, tunnel, handle) = cx.update(|window, cx| {
+            ws.update(cx, |ws, cx| {
+                ws.edit_settings(
+                    |settings| {
+                        settings.connection_pool.idle_timeout_secs = 0;
+                        settings.sidebar_ui.closed_session_retention_secs = 5;
+                    },
+                    cx,
+                );
+                let saved = saved_connection_from_ssh_host(SshConfigHost {
+                    alias: "pending-tunnel.invalid".into(),
+                    user: Some("operator".into()),
+                    ..Default::default()
+                })
+                .unwrap();
+                let config = SshConfig {
+                    host: saved.host.clone(),
+                    username: saved.username.clone(),
+                    ..Default::default()
+                };
+                let owner = ws.connection_store.import_ssh_connection(saved).unwrap().id;
+                let node = ws.materialize_ssh_root_node(
+                    config.clone(),
+                    "Tunnel".into(),
+                    Some(owner.clone()),
+                );
+                let handle = ws
+                    .ssh_registry
+                    .acquire(config, ConnectionConsumer::NodeRouter(node.0.clone()));
+                ws.node_router
+                    .sync_node_readiness_event(&node, NodeReadiness::Connecting, "connecting")
+                    .unwrap();
+                let rule = ForwardRule::dynamic("127.0.0.1", 1080);
+                let tunnel = rule.id.clone();
+                let mut saved = PersistedForward::new(
+                    tunnel.clone(),
+                    String::new(),
+                    Some(owner.clone()),
+                    rule.forward_type,
+                    rule,
+                    false,
+                );
+                saved.tunnel = Some(SshTunnelProfile {
+                    name: "Only tunnel".into(),
+                    group: None,
+                    connect_on_startup: false,
+                });
+                ws.forwarding_service
+                    .registry()
+                    .saved_store()
+                    .unwrap()
+                    .persist_forward(saved)
+                    .unwrap();
+                ws.open_ssh_tunnel(&tunnel, false, window, cx);
+                assert_eq!(ws.ssh_tunnel_status(&tunnel), ForwardStatus::Starting);
+                ws.stop_ssh_tunnel(&tunnel, true, cx);
+                (node, owner, tunnel, handle)
+            })
+        });
+        cx.condition(&ws, |ws, _| {
+            ws.ssh_tunnel_status(&tunnel) == ForwardStatus::Stopped
+                && ws.saved_ssh_tunnels().iter().all(|rule| rule.id != tunnel)
+        })
+        .await;
+
+        cx.update(|window, cx| {
+            ws.update(cx, |ws, cx| {
+                handle.set_physical(Arc::new(()));
+                ws.ssh_registry
+                    .mark_state(handle.connection_id(), ConnectionState::Active);
+                let handoff = ws
+                    .node_router
+                    .bind_established_connection(&node, handle.connection_id())
+                    .unwrap();
+                ws.apply_reconnect_worker_effect(
+                    runtime_entity::ReconnectRuntimeEffect::NodeConnected {
+                        node_id: node.clone(),
+                        connection: handoff,
+                        reconnecting: false,
+                    },
+                    window,
+                    cx,
+                );
+            })
+        });
+        cx.condition(&ws, |ws, _| {
+            ws.ssh_registry.get(handle.connection_id()).is_none()
+                && ws
+                    .ssh_nodes
+                    .get(&node)
+                    .is_some_and(|entry| entry.readiness == NodeReadiness::Disconnected)
+        })
+        .await;
+        cx.executor().advance_clock(Duration::from_secs(4));
+        ws.read_with(cx, |ws, _| assert!(ws.ssh_nodes.contains_key(&node)));
+        cx.executor().advance_clock(Duration::from_secs(1));
+        cx.run_until_parked();
+        ws.read_with(cx, |ws, _| {
+            assert!(!ws.ssh_nodes.contains_key(&node));
+            assert!(!ws.node_router.contains_node(&node));
+            assert!(ws.connection_store.get(&owner).is_some());
+        });
+    }
+
+    fn dedicated_browsing_transport(
+        ws: &WorkspaceApp,
+        config: &SshConfig,
+    ) -> (Arc<DedicatedConnectionLease>, String, std::sync::Weak<()>) {
+        let setup = ConnectionConsumer::Sftp("setup".into());
+        let registry = &ws.ssh_registry;
+        let handle = registry.acquire_dedicated(config.clone(), setup.clone());
+        let transport = Arc::new(());
+        let physical = Arc::downgrade(&transport);
+        handle.set_physical(transport);
+        registry.mark_state(handle.connection_id(), ConnectionState::Active);
+        let lease = registry
+            .lease_consumer(
+                handle.connection_id(),
+                ConnectionConsumer::Sftp("browse".into()),
+            )
+            .unwrap();
+        registry.release(handle.connection_id(), &setup);
+        (Arc::new(lease), handle.connection_id().to_owned(), physical)
+    }
+
+    #[gpui::test]
+    async fn reconnect_preserves_background_sftp_until_its_last_surface_closes(
+        cx: &mut TestAppContext,
+    ) {
+        let Some(_dir) = isolated_workspace_fixture(cx, "OXIDETERM_SFTP_RECONNECT_RETENTION_DIR")
+        else {
+            return;
+        };
+        cx.executor().allow_parking();
+        let (shell, cx) = cx.add_window_view(|window, cx| {
+            let ws = cx.new(|cx| WorkspaceApp::new(window, cx, None, None).unwrap());
+            WorkspaceWindowShell::new(ws, window, cx)
+        });
+        let ws = shell.read_with(cx, |shell, _| shell.session_entity());
+        let (node, connection) = cx.update(|window, cx| {
+            ws.update(cx, |ws, cx| {
+                ws.edit_settings(
+                    |settings| {
+                        settings.connection_pool.idle_timeout_secs = 0;
+                        settings.sidebar_ui.closed_session_retention_secs = 0;
+                    },
+                    cx,
+                );
+                let config = SshConfig {
+                    host: "sftp-retention.invalid".into(),
+                    proxy_command: Some(oxideterm_ssh::ProxyCommandConfig::Unavailable),
+                    ..Default::default()
+                };
+                let node = ws.materialize_ssh_root_node(config.clone(), "SFTP".into(), None);
+                ws.ssh_nodes.get_mut(&node).unwrap().ssh_channel_strategy =
+                    SshChannelStrategy::DedicatedPerConsumer;
+                let connected_transport = |ws: &WorkspaceApp| {
+                    let handle = ws.ssh_registry.acquire(
+                        config.clone(),
+                        ConnectionConsumer::NodeRouter(node.0.clone()),
+                    );
+                    handle.set_physical(Arc::new(()));
+                    ws.ssh_registry
+                        .mark_state(handle.connection_id(), ConnectionState::Active);
+                    handle
+                };
+                let old = connected_transport(ws);
+                ws.node_router
+                    .bind_connection(&node, old.connection_id())
+                    .unwrap();
+                ws.open_sftp_sidebar_surface(node.clone(), None, cx);
+                ws.open_sftp_tab_surface(node.clone(), None, cx);
+                let old_request = ws.dedicated_sftp_connections.lock()[&node]
+                    .slot
+                    .upgrade()
+                    .unwrap();
+                let tab = ws.active_tab_id(cx).unwrap();
+                ws.open_settings_tab(window, cx);
+                assert_ne!(ws.active_tab_id(cx), Some(tab));
+                ws.ssh_registry
+                    .retire_connection(old.connection_id())
+                    .unwrap();
+                let new = connected_transport(ws);
+                let terminal = ws
+                    .ssh_registry
+                    .lease_consumer(
+                        new.connection_id(),
+                        ConnectionConsumer::Terminal("shell".into()),
+                    )
+                    .unwrap();
+                let handoff = ws
+                    .node_router
+                    .bind_established_connection(&node, new.connection_id())
+                    .unwrap();
+                drop(terminal);
+                assert_eq!(new.state(), ConnectionState::Active);
+                ws.apply_reconnect_worker_effect(
+                    runtime_entity::ReconnectRuntimeEffect::NodeConnected {
+                        node_id: node.clone(),
+                        connection: handoff,
+                        reconnecting: true,
+                    },
+                    window,
+                    cx,
+                );
+                assert_eq!(ws.ssh_registry.monitor_stats().total_sftp_sessions, 0);
+                let browse_request = ws.dedicated_sftp_connections.lock()[&node]
+                    .slot
+                    .upgrade()
+                    .unwrap();
+                assert!(!Arc::ptr_eq(&old_request, &browse_request));
+                drop(old_request);
+                let (browse_lease, dedicated_id, physical) =
+                    dedicated_browsing_transport(ws, &config);
+                *browse_request.try_lock().unwrap() = Some(browse_lease);
+                assert_eq!(ws.ssh_registry.monitor_stats().total_sftp_sessions, 1);
+                ws.close_embedded_sftp_for_node(&node, cx);
+                assert_eq!(ws.ssh_registry.monitor_stats().total_sftp_sessions, 1);
+                assert_eq!(new.state(), ConnectionState::Active);
+                ws.close_tab_by_id(tab, window, cx);
+                assert_eq!(
+                    ws.ssh_registry.get(&dedicated_id).unwrap().state(),
+                    ConnectionState::Active
+                );
+                drop(browse_request);
+                assert!(ws.ssh_registry.get(&dedicated_id).is_none());
+                assert!(physical.upgrade().is_none());
+                (node, new.connection_id().to_owned())
+            })
+        });
+        cx.condition(&ws, |ws, _| !ws.ssh_nodes.contains_key(&node))
+            .await;
+        ws.read_with(cx, |ws, _| {
+            assert!(ws.ssh_registry.get(&connection).is_none());
+            assert_eq!(ws.ssh_registry.monitor_stats().total_sftp_sessions, 0);
+            assert!(!ws.node_router.contains_node(&node));
+        });
+        let saved: NodeTreePersistenceSnapshot =
+            serde_json::from_slice(&std::fs::read(default_session_tree_path()).unwrap()).unwrap();
+        assert!(!saved.nodes.iter().any(|entry| entry.id == node));
+        assert!(!saved.root_ids.contains(&node));
     }
 }

@@ -112,6 +112,8 @@ embed-resource = "3.0.9"
 zstd = "0.13"
 
 [dev-dependencies]
+rand10.workspace = true
+russh.workspace = true
 gpui = { workspace = true, features = ["test-support"] }
 ttf-parser = "0.25"
 

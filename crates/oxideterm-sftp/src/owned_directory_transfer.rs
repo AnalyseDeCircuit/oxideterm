@@ -16,7 +16,7 @@ impl SftpTransferManager {
     pub async fn start_owned_directory_transfer(
         self: &Arc<Self>,
         runtime: &Runtime,
-        owner_session: Arc<Mutex<SftpSession>>,
+        owner_session: impl std::ops::Deref<Target = Mutex<SftpSession>> + Send + Sync + 'static,
         connection_handle: impl SftpExecChannelOpener,
         connection_id: &str,
         node_id: &str,

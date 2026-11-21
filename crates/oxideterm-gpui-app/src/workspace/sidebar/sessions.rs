@@ -1320,6 +1320,7 @@ impl WorkspaceApp {
                     .is_some_and(|node| !node.terminal_ids.is_empty())
                 || dedicated_sftp
                     .get(id)
+                    .and_then(|entry| entry.slot.upgrade())
                     .is_some_and(|slot| slot.try_lock().map_or(true, |lease| lease.is_some()))
         })
     }

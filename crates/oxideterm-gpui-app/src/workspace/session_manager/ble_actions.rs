@@ -36,8 +36,7 @@ impl WorkspaceApp {
             .standalone_connections
             .released_saved_ble_record(&profile.id)
             .and_then(|record_id| {
-                self.standalone_connections
-                    .begin_reconnect(&record_id)
+                self.begin_standalone_reconnect(&record_id, cx)
                     .map(|attempt_id| BleStandaloneTarget::Reconnect { attempt_id })
             });
         self.start_ble_open_flow(
@@ -189,6 +188,7 @@ impl WorkspaceApp {
                 {
                     self.abandon_ble_resolved_link(resolved_link);
                     self.standalone_connections.cancel_attempt(&attempt_id);
+                    self.sync_session_retention(cx);
                     return;
                 }
                 let created = self.create_ble_terminal_tab(
@@ -263,6 +263,7 @@ impl WorkspaceApp {
             } => {
                 if matches!(error, oxideterm_terminal::BleResolveError::Cancelled) {
                     self.standalone_connections.cancel_attempt(&attempt_id);
+                    self.sync_session_retention(cx);
                     return;
                 }
                 tracing::warn!(

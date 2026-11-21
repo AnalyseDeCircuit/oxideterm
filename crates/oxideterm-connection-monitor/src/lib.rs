@@ -123,8 +123,8 @@ pub use service::{
     service_state_label_key, visible_service_rows,
 };
 pub use stats::{
-    ConnectionMonitorConsumerKind, ConnectionPoolEntryState, ConnectionPoolEntrySummary,
-    ConnectionPoolMonitorStats, PoolConnectionMonitorSnapshot, PoolConnectionSummarySnapshot,
+    ConnectionPoolEntryState, ConnectionPoolEntrySummary, ConnectionPoolMonitorStats,
+    PoolConnectionMonitorSnapshot, PoolConnectionSummarySnapshot,
 };
 pub use summary::{
     CompactMonitorOptions, CompactMonitorRow, GpuMemorySummary, MonitorCpuCoreCell,

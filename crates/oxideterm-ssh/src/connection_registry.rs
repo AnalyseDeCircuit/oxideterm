@@ -14,8 +14,8 @@ use std::{
 
 use dashmap::DashMap;
 use oxideterm_connection_monitor::{
-    ConnectionMonitorConsumerKind, ConnectionPoolEntryState, ConnectionPoolEntrySummary,
-    ConnectionPoolMonitorStats, PoolConnectionMonitorSnapshot, PoolConnectionSummarySnapshot,
+    ConnectionPoolEntryState, ConnectionPoolEntrySummary, ConnectionPoolMonitorStats,
+    PoolConnectionMonitorSnapshot, PoolConnectionSummarySnapshot,
 };
 use oxideterm_sftp::{SftpError, SftpSession};
 use oxideterm_topology::{
@@ -25,7 +25,7 @@ use oxideterm_topology::{
 use parking_lot::{Mutex as ParkingMutex, RwLock};
 use serde::{Deserialize, Serialize};
 use tokio::runtime::Handle as TokioHandle;
-use tokio::sync::{Mutex, Notify};
+use tokio::sync::{Mutex, Semaphore, oneshot};
 use tokio::time::sleep;
 use uuid::Uuid;
 
@@ -57,6 +57,12 @@ pub enum ConnectionState {
     Disconnecting,
     Disconnected,
     Error(String),
+}
+
+impl ConnectionState {
+    pub(crate) fn accepts_connection_attempt(&self) -> bool {
+        matches!(self, Self::Active | Self::Idle | Self::Connecting)
+    }
 }
 
 fn connection_state_label(state: &ConnectionState) -> &'static str {
@@ -184,10 +190,23 @@ pub struct AcquiredSftpMeta {
 enum SharedSftpState {
     Empty,
     Initializing {
-        notify: Arc<Notify>,
+        gate: Arc<Semaphore>,
         generation: u64,
     },
     Ready(Arc<Mutex<SftpSession>>),
+}
+
+impl SharedSftpState {
+    fn clear(&mut self) -> bool {
+        match std::mem::replace(self, Self::Empty) {
+            Self::Empty => false,
+            Self::Initializing { gate, .. } => {
+                gate.close();
+                true
+            }
+            Self::Ready(_) => true,
+        }
+    }
 }
 
 impl fmt::Debug for SharedSftpState {
@@ -235,6 +254,18 @@ struct PhysicalConnection {
     audit: Option<oxideterm_audit::AuditContext>,
 }
 
+enum RetirementCondition {
+    Unconditional,
+    Idle(u64),
+    Unowned(u64),
+}
+
+enum ConsumerRelease<'a> {
+    Normal,
+    FailedAttempt(&'a str),
+    CancelledAttempt,
+}
+
 #[derive(Debug)]
 struct ConnectionEntry {
     audit: Option<oxideterm_audit::AuditContext>,
@@ -242,6 +273,7 @@ struct ConnectionEntry {
     key: String,
     config: SshConfig,
     ownership_transition: ParkingMutex<()>,
+    transport_setup: Mutex<()>,
     parent_connection_id: RwLock<Option<String>>,
     parent_connection_consumer: RwLock<Option<ConnectionConsumer>>,
     state: RwLock<ConnectionState>,
@@ -258,27 +290,19 @@ struct ConnectionEntry {
     first_visible_terminal_started: AtomicBool,
     heartbeat_failures: AtomicU64,
     idle_generation: AtomicU64,
+    idle_timer_cancel: ParkingMutex<Option<oneshot::Sender<()>>>,
     last_emitted_status: RwLock<Option<String>>,
     created_at: SystemTime,
     last_active_at: RwLock<SystemTime>,
-    idle_timeout: Option<Duration>,
+    pool_config: Arc<RwLock<ConnectionPoolConfig>>,
     retire_when_unused: bool,
 }
 
 impl ConnectionEntry {
-    fn new(
-        config: SshConfig,
-        pool_config: ConnectionPoolConfig,
-        audit: Option<&oxideterm_audit::AuditContext>,
-    ) -> Self {
-        let key = config.connection_key();
-        Self::new_with_key(config, key, pool_config, false, audit)
-    }
-
     fn new_with_key(
         config: SshConfig,
         key: String,
-        pool_config: ConnectionPoolConfig,
+        pool_config: Arc<RwLock<ConnectionPoolConfig>>,
         retire_when_unused: bool,
         audit: Option<&oxideterm_audit::AuditContext>,
     ) -> Self {
@@ -298,6 +322,7 @@ impl ConnectionEntry {
             key,
             config,
             ownership_transition: ParkingMutex::new(()),
+            transport_setup: Mutex::new(()),
             parent_connection_id: RwLock::new(None),
             parent_connection_consumer: RwLock::new(None),
             state: RwLock::new(ConnectionState::Connecting),
@@ -314,10 +339,11 @@ impl ConnectionEntry {
             first_visible_terminal_started: AtomicBool::new(false),
             heartbeat_failures: AtomicU64::new(0),
             idle_generation: AtomicU64::new(0),
+            idle_timer_cancel: ParkingMutex::new(None),
             last_emitted_status: RwLock::new(None),
             created_at: SystemTime::now(),
             last_active_at: RwLock::new(SystemTime::now()),
-            idle_timeout: pool_config.idle_timeout,
+            pool_config,
             retire_when_unused,
         }
     }
@@ -382,19 +408,18 @@ impl ConnectionEntry {
             consumers: self.consumers.read().clone(),
             created_at: self.created_at,
             last_active_at: *self.last_active_at.read(),
-            idle_timeout_secs: self.idle_timeout.map(|duration| duration.as_secs()),
+            idle_timeout_secs: self
+                .pool_config
+                .read()
+                .idle_timeout
+                .map(|duration| duration.as_secs()),
             remote_env: self.remote_env(),
         }
     }
 
     fn monitor_snapshot(&self) -> PoolConnectionMonitorSnapshot {
         let state = self.state.read().clone();
-        let consumers = self
-            .consumers
-            .read()
-            .iter()
-            .map(ConnectionMonitorConsumerKind::from)
-            .collect();
+        let counts = topology_consumer_summary(&self.consumers.read());
 
         PoolConnectionMonitorSnapshot {
             is_active: matches!(state, ConnectionState::Active),
@@ -402,16 +427,13 @@ impl ConnectionEntry {
             is_reconnecting: matches!(state, ConnectionState::Reconnecting),
             is_link_down: matches!(state, ConnectionState::LinkDown),
             ref_count: self.ref_count.load(Ordering::SeqCst),
-            // Tauri counts one SFTP session per connection when the backend
-            // entry owns a ready session, not one count per SFTP UI consumer.
-            has_sftp_session: self.sftp_state.read().ready,
-            consumers,
+            has_sftp_session: counts.sftp > 0,
+            terminal_count: counts.terminals,
         }
     }
 
     fn summary_snapshot(&self) -> PoolConnectionSummarySnapshot {
-        let consumers = self.consumers.read().clone();
-        let counts = topology_consumer_summary(&consumers);
+        let counts = topology_consumer_summary(&self.consumers.read());
         PoolConnectionSummarySnapshot {
             id: self.connection_id.clone(),
             host: self.config.host.clone(),
@@ -423,7 +445,7 @@ impl ConnectionEntry {
             created_at: self.created_at,
             last_active_at: *self.last_active_at.read(),
             terminal_count: counts.terminals,
-            has_sftp_session: self.sftp_state.read().ready,
+            has_sftp_session: counts.sftp > 0,
             forward_count: counts.port_forwards,
             parent_connection_id: self.parent_connection_id.read().clone(),
         }
@@ -486,8 +508,26 @@ impl ConnectionEntry {
         self.heartbeat_failures.fetch_add(1, Ordering::Relaxed) + 1
     }
 
+    fn attach_consumer(&self, consumer: &ConnectionConsumer) -> bool {
+        let mut consumers = self.consumers.write();
+        if consumers.contains(consumer) {
+            return false;
+        }
+        consumers.push(consumer.clone());
+        self.ref_count.fetch_add(1, Ordering::SeqCst);
+        drop(consumers);
+        self.cancel_idle_timer();
+        if matches!(*self.state.read(), ConnectionState::Idle)
+            && self.physical.read().transport.is_some()
+        {
+            self.set_state(ConnectionState::Active);
+        }
+        true
+    }
+
     fn cancel_idle_timer(&self) {
         self.idle_generation.fetch_add(1, Ordering::AcqRel);
+        self.idle_timer_cancel.lock().take();
     }
 
     fn idle_generation(&self) -> u64 {
@@ -500,14 +540,24 @@ pub struct SshConnectionHandle {
     entry: Arc<ConnectionEntry>,
 }
 
-/// Owns one registry-managed physical connection for a single logical consumer.
-pub struct DedicatedConnectionLease {
+/// Releases the exact registry consumer when its last owner finishes.
+pub struct ConnectionConsumerLease {
     registry: SshConnectionRegistry,
     handle: SshConnectionHandle,
     consumer: ConnectionConsumer,
 }
 
-impl DedicatedConnectionLease {
+pub use ConnectionConsumerLease as DedicatedConnectionLease;
+
+impl std::fmt::Debug for ConnectionConsumerLease {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConnectionConsumerLease")
+            .field("connection_id", &self.connection_id())
+            .finish_non_exhaustive()
+    }
+}
+
+impl ConnectionConsumerLease {
     pub(crate) fn new(
         registry: SshConnectionRegistry,
         handle: SshConnectionHandle,
@@ -529,16 +579,18 @@ impl DedicatedConnectionLease {
     }
 }
 
-impl Drop for DedicatedConnectionLease {
+impl Drop for ConnectionConsumerLease {
     fn drop(&mut self) {
-        // The lease is the consumer lifetime boundary; the registry retires the
-        // isolated transport without changing the parent node's readiness.
         self.registry
             .release(self.handle.connection_id(), &self.consumer);
     }
 }
 
 impl SshConnectionHandle {
+    pub(crate) async fn lock_transport_setup(&self) -> tokio::sync::MutexGuard<'_, ()> {
+        self.entry.transport_setup.lock().await
+    }
+
     pub fn audit_context(&self) -> Option<oxideterm_audit::AuditContext> {
         self.entry
             .physical
@@ -635,13 +687,10 @@ impl SshConnectionHandle {
 
     pub async fn clear_physical(&self) {
         // Keep the retired transport identity for its final lifecycle observations.
+        let mut guard = self.entry.sftp.lock().await;
         self.entry.physical.write().transport = None;
         self.entry.sftp_generation.fetch_add(1, Ordering::AcqRel);
-        let mut guard = self.entry.sftp.lock().await;
-        match std::mem::replace(&mut *guard, SharedSftpState::Empty) {
-            SharedSftpState::Initializing { notify, .. } => notify.notify_waiters(),
-            SharedSftpState::Empty | SharedSftpState::Ready(_) => {}
-        }
+        guard.clear();
         *self.entry.sftp_state.write() = SftpSessionState::default();
         self.entry.touch();
     }
@@ -668,7 +717,7 @@ impl SshConnectionHandle {
 
     pub async fn acquire_sftp_with_meta(&self) -> Result<AcquiredSftpMeta, SftpError> {
         loop {
-            let initializing = {
+            let (gate, generation) = {
                 let mut guard = self.entry.sftp.lock().await;
                 match &*guard {
                     SharedSftpState::Ready(session) => {
@@ -686,76 +735,52 @@ impl SshConnectionHandle {
                             generation,
                         });
                     }
-                    SharedSftpState::Initializing { notify, .. } => Some(notify.clone()),
+                    SharedSftpState::Initializing { gate, generation } => {
+                        (gate.clone(), *generation)
+                    }
                     SharedSftpState::Empty => {
                         let generation = self.entry.sftp_generation.load(Ordering::Acquire);
-                        let notify = Arc::new(Notify::new());
+                        let gate = Arc::new(Semaphore::new(1));
                         *guard = SharedSftpState::Initializing {
-                            notify: notify.clone(),
+                            gate: gate.clone(),
                             generation,
                         };
-                        None
+                        (gate, generation)
                     }
                 }
             };
 
-            if let Some(notify) = initializing {
-                notify.notified().await;
+            // Cancellation releases the permit, so another caller can finish this generation.
+            let Ok(_initializer) = gate.acquire().await else {
+                continue;
+            };
+            let created = tokio::select! {
+                result = self.acquire_transfer_sftp() => result,
+                // The only permit is ours. Closing the gate revokes even an in-flight open.
+                _ = gate.acquire() => continue,
+            };
+
+            let mut guard = self.entry.sftp.lock().await;
+            // Invalidation closes the old generation under this same lock before replacing it.
+            if gate.is_closed() {
                 continue;
             }
-
-            let created = self.acquire_transfer_sftp().await;
-            let mut guard = self.entry.sftp.lock().await;
+            gate.close();
             match created {
                 Ok(sftp) => {
                     let cwd = Some(sftp.cwd().to_string());
                     let session = Arc::new(Mutex::new(sftp));
-                    match &*guard {
-                        SharedSftpState::Ready(existing) => {
-                            let generation = self.entry.sftp_generation.load(Ordering::Acquire);
-                            let existing = Arc::clone(existing);
-                            drop(guard);
-                            let cwd = {
-                                let sftp = existing.lock().await;
-                                Some(sftp.cwd().to_string())
-                            };
-                            return Ok(AcquiredSftpMeta {
-                                session: existing,
-                                was_new: false,
-                                cwd,
-                                generation,
-                            });
-                        }
-                        SharedSftpState::Initializing { notify, generation }
-                            if *generation
-                                == self.entry.sftp_generation.load(Ordering::Acquire) =>
-                        {
-                            let generation = *generation;
-                            let notify = notify.clone();
-                            *guard = SharedSftpState::Ready(Arc::clone(&session));
-                            notify.notify_waiters();
-                            self.entry.touch();
-                            return Ok(AcquiredSftpMeta {
-                                session,
-                                was_new: true,
-                                cwd,
-                                generation,
-                            });
-                        }
-                        SharedSftpState::Initializing { notify, .. } => {
-                            notify.clone().notify_waiters();
-                            *guard = SharedSftpState::Empty;
-                            continue;
-                        }
-                        SharedSftpState::Empty => continue,
-                    }
+                    *guard = SharedSftpState::Ready(session.clone());
+                    self.entry.touch();
+                    return Ok(AcquiredSftpMeta {
+                        session,
+                        was_new: true,
+                        cwd,
+                        generation,
+                    });
                 }
                 Err(error) => {
-                    if let SharedSftpState::Initializing { notify, .. } = &*guard {
-                        let notify = notify.clone();
-                        *guard = SharedSftpState::Empty;
-                        notify.notify_waiters();
-                    }
+                    *guard = SharedSftpState::Empty;
                     return Err(error);
                 }
             }
@@ -814,11 +839,7 @@ impl SshConnectionHandle {
     pub async fn clear_sftp(&self) {
         let mut guard = self.entry.sftp.lock().await;
         self.entry.sftp_generation.fetch_add(1, Ordering::AcqRel);
-        if let SharedSftpState::Initializing { notify, .. } =
-            std::mem::replace(&mut *guard, SharedSftpState::Empty)
-        {
-            notify.notify_waiters();
-        }
+        guard.clear();
         *self.entry.sftp_state.write() = SftpSessionState::default();
         self.entry.touch();
     }
@@ -826,14 +847,7 @@ impl SshConnectionHandle {
     pub async fn invalidate_sftp(&self) -> bool {
         let mut guard = self.entry.sftp.lock().await;
         self.entry.sftp_generation.fetch_add(1, Ordering::AcqRel);
-        let had_sftp = match std::mem::replace(&mut *guard, SharedSftpState::Empty) {
-            SharedSftpState::Empty => false,
-            SharedSftpState::Initializing { notify, .. } => {
-                notify.notify_waiters();
-                true
-            }
-            SharedSftpState::Ready(_) => true,
-        };
+        let had_sftp = guard.clear();
         if had_sftp {
             *self.entry.sftp_state.write() = SftpSessionState::default();
             self.entry.touch();
@@ -844,17 +858,33 @@ impl SshConnectionHandle {
 
 #[derive(Clone, Debug)]
 pub struct SshConnectionRegistry {
+    inner: Arc<ConnectionRegistryState>,
+}
+
+#[derive(Debug)]
+struct ConnectionRegistryState {
     audit: Option<oxideterm_audit::AuditContext>,
     config: Arc<RwLock<ConnectionPoolConfig>>,
-    by_key: Arc<DashMap<String, Arc<ConnectionEntry>>>,
-    by_id: Arc<DashMap<String, String>>,
-    idle_task_runtime: Arc<RwLock<Option<TokioHandle>>>,
-    node_event_emitter: Arc<RwLock<Option<NodeEventEmitter>>>,
+    // A route chooses the current shared transport. Older generations remain
+    // addressable by ID until their own consumers have finished.
+    by_key: DashMap<String, String>,
+    by_id: DashMap<String, Arc<ConnectionEntry>>,
+    idle_task_runtime: RwLock<Option<TokioHandle>>,
+    node_event_emitter: RwLock<Option<NodeEventEmitter>>,
+}
+
+impl Drop for ConnectionRegistryState {
+    fn drop(&mut self) {
+        // An outstanding connection handle can outlive the pool that owns its timer.
+        for entry in self.by_id.iter() {
+            entry.cancel_idle_timer();
+        }
+    }
 }
 
 impl SshConnectionRegistry {
     pub fn audit_context(&self) -> Option<oxideterm_audit::AuditContext> {
-        self.audit.clone()
+        self.inner.audit.clone()
     }
 
     pub fn new(config: ConnectionPoolConfig) -> Self {
@@ -866,25 +896,27 @@ impl SshConnectionRegistry {
         audit: Option<oxideterm_audit::AuditContext>,
     ) -> Self {
         Self {
-            audit,
-            config: Arc::new(RwLock::new(config)),
-            by_key: Arc::new(DashMap::new()),
-            by_id: Arc::new(DashMap::new()),
-            idle_task_runtime: Arc::new(RwLock::new(None)),
-            node_event_emitter: Arc::new(RwLock::new(None)),
+            inner: Arc::new(ConnectionRegistryState {
+                audit,
+                config: Arc::new(RwLock::new(config)),
+                by_key: DashMap::new(),
+                by_id: DashMap::new(),
+                idle_task_runtime: RwLock::new(None),
+                node_event_emitter: RwLock::new(None),
+            }),
         }
     }
 
     pub fn set_task_runtime(&self, runtime: TokioHandle) {
-        *self.idle_task_runtime.write() = Some(runtime);
+        *self.inner.idle_task_runtime.write() = Some(runtime);
     }
 
     pub fn set_idle_timeout(&self, idle_timeout: Option<Duration>) {
-        self.config.write().idle_timeout = idle_timeout;
-        for entry in self.by_key.iter() {
+        self.inner.config.write().idle_timeout = idle_timeout;
+        for entry in self.inner.by_id.iter_mut() {
             entry.cancel_idle_timer();
             if matches!(*entry.state.read(), ConnectionState::Idle)
-                && entry.ref_count.load(Ordering::SeqCst) == 0
+                && self.has_only_idle_owners(&entry)
                 && !entry.is_keep_alive()
             {
                 self.start_idle_timer_for_entry(entry.clone());
@@ -893,45 +925,80 @@ impl SshConnectionRegistry {
     }
 
     pub fn set_node_event_emitter(&self, emitter: NodeEventEmitter) {
-        *self.node_event_emitter.write() = Some(emitter);
+        *self.inner.node_event_emitter.write() = Some(emitter);
     }
 
     pub fn acquire(&self, config: SshConfig, consumer: ConnectionConsumer) -> SshConnectionHandle {
         let key = config.connection_key();
-        let entry = self
-            .by_key
-            .entry(key.clone())
-            .or_insert_with(|| {
-                let entry = Arc::new(ConnectionEntry::new(
-                    config,
-                    *self.config.read(),
-                    self.audit.as_ref(),
-                ));
-                self.by_id.insert(entry.connection_id.clone(), key);
-                entry
-            })
-            .clone();
+        self.acquire_with_key(config, consumer, key)
+    }
 
-        entry.cancel_idle_timer();
-        entry.touch();
-        let added = {
-            let mut consumers = entry.consumers.write();
-            if consumers.contains(&consumer) {
-                false
-            } else {
-                consumers.push(consumer.clone());
-                entry.ref_count.fetch_add(1, Ordering::SeqCst);
-                true
+    pub fn acquire_via_parent(
+        &self,
+        config: SshConfig,
+        consumer: ConnectionConsumer,
+        parent_connection_id: &str,
+    ) -> SshConnectionHandle {
+        // Identical target addresses reached through different parents can name different hosts.
+        let key = format!("{}|parent={parent_connection_id}", config.connection_key());
+        self.acquire_with_key(config, consumer, key)
+    }
+
+    fn acquire_with_key(
+        &self,
+        config: SshConfig,
+        consumer: ConnectionConsumer,
+        key: String,
+    ) -> SshConnectionHandle {
+        let mut route = self.inner.by_key.entry(key.clone()).or_default();
+        let mut lost = None;
+        if let Some(entry) = self.inner.by_id.get_mut(route.value()) {
+            let handle = SshConnectionHandle {
+                entry: entry.clone(),
+            };
+            let state = handle.state();
+            if state.accepts_connection_attempt() {
+                // A peer can close its socket before heartbeat publishes LinkDown. Only an
+                // unestablished attempt may still install a physical transport under this ID.
+                let physical = handle.transport_status_now();
+                if physical == ConnectionTransportStatus::Open
+                    || (state == ConnectionState::Connecting
+                        && physical == ConnectionTransportStatus::Missing)
+                {
+                    entry.touch();
+                    if entry.attach_consumer(&consumer) {
+                        entry.audit_consumer("ssh_consumer_attached", &consumer);
+                    }
+                    return handle;
+                }
+                lost = Some(handle);
             }
-        };
-        if added {
-            entry.audit_consumer("ssh_consumer_attached", &consumer);
         }
-        // `acquire` only records a logical consumer. The physical SSH transport
-        // is established by connect_tree_node / terminal connect paths and
-        // marks the state Active after authentication succeeds. Marking Active
-        // here made SFTP/forwarding believe a closed terminal-owned transport
-        // was reusable, which diverges from Tauri's node-owned pool semantics.
+        let entry = Arc::new(ConnectionEntry::new_with_key(
+            config,
+            key,
+            self.inner.config.clone(),
+            false,
+            self.inner.audit.as_ref(),
+        ));
+        entry.attach_consumer(&consumer);
+        entry.audit_consumer("ssh_consumer_attached", &consumer);
+        *route = entry.connection_id.clone();
+        self.inner
+            .by_id
+            .insert(entry.connection_id.clone(), entry.clone());
+        drop(route);
+        if let Some(old) = lost {
+            self.mark_link_down_cascade(old.connection_id());
+            // An unowned idle slot has no later release to retire its parent lease.
+            if self.detach_connection(
+                &old,
+                RetirementCondition::Unowned(old.entry.idle_generation()),
+            ) && let Some(emitter) = self.inner.node_event_emitter.read().as_ref()
+            {
+                emitter.unregister(old.connection_id());
+            }
+        }
         SshConnectionHandle { entry }
     }
 
@@ -945,56 +1012,133 @@ impl SshConnectionRegistry {
         // node pool. Their transport retires when the explicit owner releases it.
         let entry = Arc::new(ConnectionEntry::new_with_key(
             config,
-            pool_key.clone(),
-            *self.config.read(),
+            pool_key,
+            self.inner.config.clone(),
             true,
-            self.audit.as_ref(),
+            self.inner.audit.as_ref(),
         ));
         entry.consumers.write().push(consumer.clone());
         entry.ref_count.store(1, Ordering::SeqCst);
-        self.by_id
-            .insert(entry.connection_id.clone(), pool_key.clone());
-        self.by_key.insert(pool_key, entry.clone());
+        self.inner
+            .by_id
+            .insert(entry.connection_id.clone(), entry.clone());
         entry.audit_consumer("ssh_consumer_attached", &consumer);
         SshConnectionHandle { entry }
     }
 
     pub fn release(&self, connection_id: &str, consumer: &ConnectionConsumer) {
-        let Some(key) = self.by_id.get(connection_id).map(|key| key.value().clone()) else {
-            return;
-        };
-        let Some(entry) = self.by_key.get(&key).map(|entry| entry.clone()) else {
-            return;
-        };
+        let _ = self.release_consumer(connection_id, consumer, ConsumerRelease::Normal);
+    }
 
-        let removed = {
+    pub fn release_failed_attempt(
+        &self,
+        connection_id: &str,
+        consumer: &ConnectionConsumer,
+        reason: &str,
+    ) {
+        let _ = self.release_consumer(
+            connection_id,
+            consumer,
+            ConsumerRelease::FailedAttempt(reason),
+        );
+    }
+
+    /// Returns the retired handle for teardown only if the attempt was its last owner.
+    pub fn release_cancelled_attempt(
+        &self,
+        connection_id: &str,
+        consumer: &ConnectionConsumer,
+    ) -> Option<SshConnectionHandle> {
+        self.release_consumer(connection_id, consumer, ConsumerRelease::CancelledAttempt)
+    }
+
+    fn release_consumer(
+        &self,
+        connection_id: &str,
+        consumer: &ConnectionConsumer,
+        release: ConsumerRelease<'_>,
+    ) -> Option<SshConnectionHandle> {
+        // Serialize the last release with admission and deadline validation on this slot.
+        let entry = self.inner.by_id.get_mut(connection_id)?;
+        {
             let mut consumers = entry.consumers.write();
-            let before = consumers.len();
-            consumers.retain(|existing| existing != consumer);
-            consumers.len() != before
-        };
-        if removed {
-            entry
-                .ref_count
-                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |count| {
-                    Some(count.saturating_sub(1))
-                })
-                .ok();
-            entry.audit_consumer("ssh_consumer_detached", consumer);
+            let index = consumers.iter().position(|existing| existing == consumer)?;
+            consumers.remove(index);
+            entry.ref_count.fetch_sub(1, Ordering::SeqCst);
         }
+        entry.audit_consumer("ssh_consumer_detached", consumer);
         entry.touch();
-        if entry.ref_count.load(Ordering::SeqCst) == 0 {
-            if entry.retire_when_unused {
-                let _ = self.retire_connection(connection_id);
-                return;
-            }
-            if entry.is_keep_alive() {
-                entry.cancel_idle_timer();
-                entry.set_state(ConnectionState::Idle);
-            } else {
-                self.start_idle_timer_for_entry(entry);
+        // An attempt can fail locally while another node is using or establishing this transport.
+        let unowned = entry.ref_count.load(Ordering::SeqCst) == 0;
+        if let ConsumerRelease::FailedAttempt(reason) = release
+            && unowned
+            && entry.physical.read().transport.is_none()
+        {
+            entry.set_state(ConnectionState::Error(reason.to_owned()));
+            if let Some(emitter) = self.inner.node_event_emitter.read().as_ref() {
+                emitter.emit_state_from_connection(connection_id, &entry.state.read(), "");
             }
         }
+        let state = entry.state.read().clone();
+        if unowned
+            && (!state.accepts_connection_attempt()
+                || matches!(release, ConsumerRelease::CancelledAttempt))
+        {
+            let handle = SshConnectionHandle {
+                entry: entry.clone(),
+            };
+            let generation = entry.idle_generation();
+            drop(entry);
+            // A broken transport with no owners must never re-enter the shared pool as Idle.
+            if self.detach_connection(&handle, RetirementCondition::Unowned(generation)) {
+                if let Some(emitter) = self.inner.node_event_emitter.read().as_ref() {
+                    emitter.unregister(connection_id);
+                }
+                return Some(handle);
+            }
+            return None;
+        }
+        if matches!(state, ConnectionState::Error(_))
+            || !self.has_only_idle_owners(&entry)
+            || (entry.ref_count.load(Ordering::SeqCst) > 0
+                && !matches!(
+                    *entry.state.read(),
+                    ConnectionState::Active | ConnectionState::Idle
+                ))
+        {
+            return None;
+        }
+        if entry.retire_when_unused {
+            let handle = SshConnectionHandle {
+                entry: entry.clone(),
+            };
+            entry.set_state(ConnectionState::Idle);
+            let generation = entry.idle_generation();
+            drop(entry);
+            self.detach_connection(&handle, RetirementCondition::Idle(generation));
+        } else if entry.is_keep_alive() {
+            entry.cancel_idle_timer();
+            entry.set_state(ConnectionState::Idle);
+        } else {
+            self.start_idle_timer_for_entry(entry.clone());
+        }
+        None
+    }
+
+    fn has_only_idle_owners(&self, entry: &ConnectionEntry) -> bool {
+        let consumers = entry.consumers.read();
+        // Route bindings keep a shared connection addressable while idle. A
+        // jump child holds a separate consumer for its use of the parent.
+        consumers.is_empty()
+            || (!entry.retire_when_unused
+                && self
+                    .inner
+                    .node_event_emitter
+                    .read()
+                    .as_ref()
+                    .is_some_and(|emitter| {
+                        emitter.only_bound_node_consumers(&entry.connection_id, &consumers)
+                    }))
     }
 
     pub fn mark_state(
@@ -1020,16 +1164,12 @@ impl SshConnectionRegistry {
         emit_node_event: bool,
         reason: &str,
     ) -> Option<ConnectionInfo> {
-        let key = self
-            .by_id
-            .get(connection_id)
-            .map(|key| key.value().clone())?;
-        let entry = self.by_key.get(&key)?.clone();
+        let entry = self.get(connection_id)?.entry;
         let became_active = matches!(state, ConnectionState::Active);
         entry.set_state(state);
         entry.touch();
         let info = entry.info();
-        if emit_node_event && let Some(emitter) = self.node_event_emitter.read().clone() {
+        if emit_node_event && let Some(emitter) = self.inner.node_event_emitter.read().clone() {
             // Match Tauri's registry-to-node event flow: low-level connection
             // state changes are translated through the shared NodeEventEmitter
             // whenever the connection has been registered to a node.
@@ -1045,11 +1185,7 @@ impl SshConnectionRegistry {
     }
 
     pub fn mark_visible_terminal_ready(&self, connection_id: &str) -> Option<bool> {
-        let key = self
-            .by_id
-            .get(connection_id)
-            .map(|key| key.value().clone())?;
-        let entry = self.by_key.get(&key)?.clone();
+        let entry = self.inner.by_id.get(connection_id)?.clone();
         let first = entry.mark_first_visible_terminal_started();
         if first && !entry.retire_when_unused {
             // A one-terminal connection must not start an environment probe
@@ -1071,6 +1207,7 @@ impl SshConnectionRegistry {
 
     fn maybe_spawn_remote_env_detection(&self, entry: Arc<ConnectionEntry>) {
         let runtime = self
+            .inner
             .idle_task_runtime
             .read()
             .clone()
@@ -1110,7 +1247,7 @@ impl SshConnectionRegistry {
             }
             *last_status = Some(status.to_string());
         }
-        if let Some(emitter) = self.node_event_emitter.read().clone() {
+        if let Some(emitter) = self.inner.node_event_emitter.read().clone() {
             emitter.emit_connection_status_changed(
                 connection_id.to_string(),
                 status.to_string(),
@@ -1125,13 +1262,9 @@ impl SshConnectionRegistry {
         connection_id: &str,
         parent_connection_id: Option<String>,
     ) -> Option<ConnectionInfo> {
-        let key = self
-            .by_id
-            .get(connection_id)
-            .map(|key| key.value().clone())?;
-        let entry = self.by_key.get(&key)?.clone();
+        let entry = self.inner.by_id.get(connection_id)?.clone();
         let _ownership_transition = entry.ownership_transition.lock();
-        if !self.connection_entry_is_registered(connection_id, &key) {
+        if !self.inner.by_id.contains_key(connection_id) {
             return None;
         }
         let released_parent_ownership = if parent_connection_id.is_none() {
@@ -1158,30 +1291,27 @@ impl SshConnectionRegistry {
         parent_connection_id: String,
         parent_consumer: ConnectionConsumer,
     ) -> Option<ConnectionInfo> {
-        let key = self
-            .by_id
-            .get(connection_id)
-            .map(|key| key.value().clone())?;
-        let entry = self.by_key.get(&key)?.clone();
+        let entry = self.inner.by_id.get(connection_id)?.clone();
         let _ownership_transition = entry.ownership_transition.lock();
-        if !self.connection_entry_is_registered(connection_id, &key) {
+        if !self.inner.by_id.contains_key(connection_id) {
             return None;
         }
         // Parent ownership is linked under the same lifecycle lock used by retirement.
-        *entry.parent_connection_id.write() = Some(parent_connection_id);
-        *entry.parent_connection_consumer.write() = Some(parent_consumer);
+        let old_parent = entry
+            .parent_connection_id
+            .write()
+            .replace(parent_connection_id.clone());
+        let old_consumer = entry
+            .parent_connection_consumer
+            .write()
+            .replace(parent_consumer.clone());
+        if let Some((old_parent, old_consumer)) = old_parent.zip(old_consumer)
+            && (old_parent != parent_connection_id || old_consumer != parent_consumer)
+        {
+            self.release(&old_parent, &old_consumer);
+        }
         entry.touch();
         Some(entry.info())
-    }
-
-    fn connection_entry_is_registered(&self, connection_id: &str, key: &str) -> bool {
-        self.by_id
-            .get(connection_id)
-            .is_some_and(|registered_key| registered_key.value() == key)
-            && self
-                .by_key
-                .get(key)
-                .is_some_and(|registered_entry| registered_entry.connection_id == connection_id)
     }
 
     pub fn descendant_connection_infos(&self, root_connection_id: &str) -> Vec<ConnectionInfo> {
@@ -1192,7 +1322,8 @@ impl SshConnectionRegistry {
         let mut stack = vec![root_connection_id.to_string()];
         while let Some(parent_id) = stack.pop() {
             let children = self
-                .by_key
+                .inner
+                .by_id
                 .iter()
                 .filter(|entry| entry.parent_connection_id.read().as_deref() == Some(&parent_id))
                 .map(|entry| entry.connection_id.clone())
@@ -1208,31 +1339,55 @@ impl SshConnectionRegistry {
     }
 
     pub fn retire_connection(&self, connection_id: &str) -> Option<ConnectionInfo> {
-        let key = self
-            .by_id
-            .get(connection_id)
-            .map(|key| key.value().clone())?;
-        let entry = self.by_key.get(&key).map(|entry| entry.clone())?;
+        let handle = self.get(connection_id)?;
+        self.detach_connection(&handle, RetirementCondition::Unconditional)
+            .then(|| handle.info())
+    }
+
+    fn detach_connection(
+        &self,
+        handle: &SshConnectionHandle,
+        condition: RetirementCondition,
+    ) -> bool {
+        let entry = &handle.entry;
         let _ownership_transition = entry.ownership_transition.lock();
-        if !self.connection_entry_is_registered(connection_id, &key) {
-            return None;
+        // Check eligibility while removing the slot so a new consumer either wins the
+        // old transport or obtains a new one before asynchronous teardown starts.
+        let removed = self.inner.by_id.remove_if(&entry.connection_id, |_, slot| {
+            Arc::ptr_eq(slot, entry)
+                && match condition {
+                    RetirementCondition::Unconditional => true,
+                    RetirementCondition::Unowned(generation) => {
+                        entry.idle_generation() == generation
+                            && entry.ref_count.load(Ordering::SeqCst) == 0
+                    }
+                    RetirementCondition::Idle(generation) => {
+                        entry.idle_generation() == generation
+                            && self.has_only_idle_owners(entry)
+                            && (entry.retire_when_unused || !entry.is_keep_alive())
+                            && matches!(*entry.state.read(), ConnectionState::Idle)
+                    }
+                }
+        });
+        if removed.is_none() {
+            return false;
+        }
+        if !entry.retire_when_unused {
+            self.inner
+                .by_key
+                .remove_if(&entry.key, |_, current| current == &entry.connection_id);
         }
         entry.cancel_idle_timer();
-        let info = entry.info();
         let parent_consumer = entry.parent_connection_consumer.write().take();
         let parent_ownership = entry
             .parent_connection_id
             .read()
             .clone()
             .zip(parent_consumer);
-        if entry.connection_id == connection_id {
-            self.by_key.remove(&key);
-        }
-        self.by_id.remove(connection_id);
         if let Some((parent_id, parent_consumer)) = parent_ownership {
             self.release(&parent_id, &parent_consumer);
         }
-        Some(info)
+        true
     }
 
     pub fn mark_link_down_cascade(&self, root_connection_id: &str) -> Vec<ConnectionInfo> {
@@ -1277,7 +1432,7 @@ impl SshConnectionRegistry {
                 "link_down",
                 affected_children,
             );
-            if emitted_status && let Some(emitter) = self.node_event_emitter.read().clone() {
+            if emitted_status && let Some(emitter) = self.inner.node_event_emitter.read().clone() {
                 let _ = emitter.emit_state_from_connection(
                     root_connection_id,
                     &ConnectionState::LinkDown,
@@ -1304,7 +1459,7 @@ impl SshConnectionRegistry {
                 handle.clear_physical().await;
             }
         }
-        if let Some(emitter) = self.node_event_emitter.read().clone() {
+        if let Some(emitter) = self.inner.node_event_emitter.read().clone() {
             let _ = emitter.emit_state_from_connection(
                 root_connection_id,
                 &ConnectionState::LinkDown,
@@ -1484,29 +1639,36 @@ impl SshConnectionRegistry {
         )
     }
 
+    pub fn lease_consumer(
+        &self,
+        connection_id: &str,
+        consumer: ConnectionConsumer,
+    ) -> Option<ConnectionConsumerLease> {
+        let handle = self.attach_consumer_for_connection(connection_id, consumer.clone(), true)?;
+        Some(ConnectionConsumerLease::new(self.clone(), handle, consumer))
+    }
+
     pub fn acquire_consumer_for_connection(
         &self,
         connection_id: &str,
         consumer: ConnectionConsumer,
     ) -> Option<SshConnectionHandle> {
-        let handle = self.get(connection_id)?;
-        {
-            let mut consumers = handle.entry.consumers.write();
-            if !consumers.contains(&consumer) {
-                consumers.push(consumer);
-                let previous = handle.entry.ref_count.fetch_add(1, Ordering::SeqCst);
-                if previous == 0 {
-                    handle.entry.cancel_idle_timer();
-                    if matches!(*handle.entry.state.read(), ConnectionState::Idle)
-                        && handle.has_physical()
-                    {
-                        handle.entry.set_state(ConnectionState::Active);
-                    }
-                }
-            }
+        self.attach_consumer_for_connection(connection_id, consumer, false)
+    }
+
+    fn attach_consumer_for_connection(
+        &self,
+        connection_id: &str,
+        consumer: ConnectionConsumer,
+        require_new: bool,
+    ) -> Option<SshConnectionHandle> {
+        let slot = self.inner.by_id.get_mut(connection_id)?;
+        let handle = SshConnectionHandle {
+            entry: slot.clone(),
+        };
+        if !handle.entry.attach_consumer(&consumer) && require_new {
+            return None;
         }
-        // Adding a consumer must not resurrect a dead transport. The caller has
-        // already checked/waited for Active state before borrowing the handle.
         handle.entry.touch();
         Some(handle)
     }
@@ -1530,21 +1692,19 @@ impl SshConnectionRegistry {
     }
 
     pub fn get(&self, connection_id: &str) -> Option<SshConnectionHandle> {
-        let key = self
-            .by_id
-            .get(connection_id)
-            .map(|key| key.value().clone())?;
-        let entry = self.by_key.get(&key)?.clone();
-        Some(SshConnectionHandle { entry })
+        Some(SshConnectionHandle {
+            entry: self.inner.by_id.get(connection_id)?.clone(),
+        })
     }
 
     pub fn list(&self) -> Vec<ConnectionInfo> {
-        self.by_key.iter().map(|entry| entry.info()).collect()
+        self.inner.by_id.iter().map(|entry| entry.info()).collect()
     }
 
     pub fn list_connection_summaries(&self) -> Vec<ConnectionPoolEntrySummary> {
         let mut summaries = self
-            .by_key
+            .inner
+            .by_id
             .iter()
             .map(|entry| ConnectionPoolEntrySummary::from_snapshot(entry.summary_snapshot()))
             .collect::<Vec<_>>();
@@ -1559,16 +1719,12 @@ impl SshConnectionRegistry {
     }
 
     pub fn set_keep_alive(&self, connection_id: &str, keep_alive: bool) -> Option<ConnectionInfo> {
-        let key = self
-            .by_id
-            .get(connection_id)
-            .map(|key| key.value().clone())?;
-        let entry = self.by_key.get(&key)?.clone();
+        let entry = self.inner.by_id.get_mut(connection_id)?;
         entry.set_keep_alive(keep_alive);
         if keep_alive {
             entry.cancel_idle_timer();
         } else if matches!(*entry.state.read(), ConnectionState::Idle)
-            && entry.ref_count.load(Ordering::SeqCst) == 0
+            && self.has_only_idle_owners(&entry)
         {
             self.start_idle_timer_for_entry(entry.clone());
         }
@@ -1577,7 +1733,8 @@ impl SshConnectionRegistry {
     }
 
     fn idle_runtime(&self) -> Option<TokioHandle> {
-        self.idle_task_runtime
+        self.inner
+            .idle_task_runtime
             .read()
             .clone()
             .or_else(|| TokioHandle::try_current().ok())
@@ -1589,7 +1746,7 @@ impl SshConnectionRegistry {
         let generation = entry.idle_generation();
         entry.set_state(ConnectionState::Idle);
         entry.touch();
-        if let Some(emitter) = self.node_event_emitter.read().clone() {
+        if let Some(emitter) = self.inner.node_event_emitter.read().clone() {
             // Tauri immediately exposes Active -> Idle before the timeout
             // starts; the eventual timeout is a separate disconnected event.
             let _ = emitter.emit_state_from_connection(
@@ -1599,22 +1756,28 @@ impl SshConnectionRegistry {
             );
         }
 
-        let Some(timeout) = entry.idle_timeout else {
+        let Some(timeout) = entry.pool_config.read().idle_timeout else {
             return;
         };
-        if timeout.is_zero() {
-            return;
-        }
         let Some(runtime) = self.idle_runtime() else {
             return;
         };
 
-        let registry = self.clone();
+        let registry = Arc::downgrade(&self.inner);
+        let (cancel, cancelled) = oneshot::channel();
+        *entry.idle_timer_cancel.lock() = Some(cancel);
         runtime.spawn(async move {
-            sleep(timeout).await;
-            registry
-                .disconnect_if_idle_timeout(&connection_id, generation)
-                .await;
+            if !timeout.is_zero() {
+                tokio::select! {
+                    _ = cancelled => return,
+                    _ = sleep(timeout) => {}
+                }
+            }
+            if let Some(inner) = registry.upgrade() {
+                SshConnectionRegistry { inner }
+                    .disconnect_if_idle_timeout(&connection_id, generation)
+                    .await;
+            }
         });
     }
 
@@ -1623,7 +1786,7 @@ impl SshConnectionRegistry {
             return;
         };
         if root.entry.idle_generation() != generation
-            || root.entry.ref_count.load(Ordering::SeqCst) != 0
+            || !self.has_only_idle_owners(&root.entry)
             || root.entry.is_keep_alive()
             || !matches!(root.state(), ConnectionState::Idle)
         {
@@ -1635,67 +1798,44 @@ impl SshConnectionRegistry {
             .into_iter()
             .map(|info| info.connection_id)
             .collect::<Vec<_>>();
-        for connection_id in affected_children.iter().rev() {
-            self.disconnect_idle_timed_out_connection(
-                connection_id,
-                "ancestor idle timeout cascade",
-            )
-            .await;
+        if !self.detach_connection(&root, RetirementCondition::Idle(generation)) {
+            return;
         }
-        if let Some(emitter) = self.node_event_emitter.read().clone() {
+        for connection_id in affected_children.iter().rev() {
+            if let Some(child) = self.get(connection_id)
+                && self.detach_connection(&child, RetirementCondition::Unconditional)
+            {
+                self.finish_idle_retirement(child, "ancestor idle timeout cascade")
+                    .await;
+            }
+        }
+        self.finish_idle_retirement(root, "idle timeout").await;
+        if let Some(emitter) = self.inner.node_event_emitter.read().clone() {
             emitter.emit_connection_status_changed(
                 root_connection_id.to_string(),
                 "disconnected".to_string(),
                 affected_children,
             );
         }
-        self.disconnect_idle_timed_out_connection(root_connection_id, "idle timeout")
-            .await;
     }
 
-    async fn disconnect_idle_timed_out_connection(&self, connection_id: &str, reason: &str) {
-        let Some(handle) = self.get(connection_id) else {
-            return;
-        };
-        if matches!(
-            handle.state(),
-            ConnectionState::Disconnected | ConnectionState::Disconnecting
-        ) {
-            return;
-        }
-        handle.entry.cancel_idle_timer();
-        let info = handle.info();
-        let emitter = self.node_event_emitter.read().clone();
-        if let (Some(parent_connection_id), Some(emitter)) =
-            (info.parent_connection_id.as_ref(), emitter.as_ref())
-            && let Some(node_id) = emitter.node_id_for_connection(connection_id)
-        {
-            self.release(
-                parent_connection_id,
-                &ConnectionConsumer::NodeRouter(format!("{}:ancestor", node_id.0)),
-            );
-        }
-
+    async fn finish_idle_retirement(&self, handle: SshConnectionHandle, reason: &str) {
+        let connection_id = handle.connection_id();
+        let emitter = self.inner.node_event_emitter.read().clone();
         handle.clear_physical().await;
-        let _ = self.mark_state_without_event(connection_id, ConnectionState::Disconnected);
+        handle.entry.set_state(ConnectionState::Disconnected);
         if let Some(emitter) = emitter {
-            emitter.emit_sftp_ready(connection_id, false, None);
-            let _ = emitter.emit_state_from_connection(
-                connection_id,
-                &ConnectionState::Disconnected,
-                reason,
-            );
+            emitter.emit_idle_retirement(connection_id, reason);
             emitter.unregister(connection_id);
         }
-        let _ = self.retire_connection(connection_id);
     }
 
     pub fn stats(&self) -> ConnectionPoolStats {
         let mut stats = ConnectionPoolStats {
-            total: self.by_key.len(),
+            total: self.inner.by_id.len(),
             ..ConnectionPoolStats::default()
         };
-        for entry in self.by_key.iter() {
+        for entry in self.inner.by_id.iter() {
             match &*entry.state.read() {
                 ConnectionState::Active => stats.active += 1,
                 ConnectionState::Idle => stats.idle += 1,
@@ -1713,13 +1853,14 @@ impl SshConnectionRegistry {
 
     pub fn monitor_stats(&self) -> ConnectionPoolMonitorStats {
         let idle_timeout_secs = self
+            .inner
             .config
             .read()
             .idle_timeout
-            .map(|duration| duration.as_secs())
-            .unwrap_or(0);
+            .map(|duration| duration.as_secs());
         let snapshots = self
-            .by_key
+            .inner
+            .by_id
             .iter()
             .map(|entry| entry.monitor_snapshot())
             .collect::<Vec<_>>();
@@ -2126,23 +2267,6 @@ impl From<&ConnectionState> for ConnectionPoolEntryState {
             ConnectionState::Disconnecting => Self::Disconnecting,
             ConnectionState::Disconnected => Self::Disconnected,
             ConnectionState::Error(error) => Self::Error(error.clone()),
-        }
-    }
-}
-
-impl From<&ConnectionConsumer> for ConnectionMonitorConsumerKind {
-    fn from(consumer: &ConnectionConsumer) -> Self {
-        match consumer {
-            ConnectionConsumer::Terminal(_) => Self::Terminal,
-            ConnectionConsumer::Sftp(_) => Self::Sftp,
-            ConnectionConsumer::PortForward(_) | ConnectionConsumer::X11Forward(_) => {
-                Self::PortForward
-            }
-            ConnectionConsumer::Monitor(_) => Self::Other,
-            ConnectionConsumer::Ide(_)
-            | ConnectionConsumer::NodeRouter(_)
-            | ConnectionConsumer::PublicMcp(_)
-            | ConnectionConsumer::MoshBootstrap(_) => Self::Other,
         }
     }
 }
@@ -2872,6 +2996,30 @@ mod tests {
     }
 
     #[test]
+    fn monitor_counts_connections_with_live_sftp_users() {
+        let registry = SshConnectionRegistry::default();
+        let node = registry.acquire(
+            SshConfig::default(),
+            ConnectionConsumer::NodeRouter("node".into()),
+        );
+        let connection = node.connection_id();
+        registry.mark_sftp_session(connection, true, None).unwrap();
+        let page = registry
+            .lease_consumer(connection, ConnectionConsumer::Sftp("page".into()))
+            .unwrap();
+        let transfer = registry
+            .lease_consumer(connection, ConnectionConsumer::Sftp("transfer".into()))
+            .unwrap();
+
+        assert_eq!(registry.monitor_stats().total_sftp_sessions, 1);
+        drop(page);
+        assert_eq!(registry.monitor_stats().total_sftp_sessions, 1);
+        drop(transfer);
+        assert_eq!(registry.monitor_stats().total_sftp_sessions, 0);
+        assert!(!registry.list_connection_summaries()[0].has_sftp_session);
+    }
+
+    #[test]
     fn acquire_dedicated_isolates_a_terminal_from_the_shared_pool_entry() {
         let registry = SshConnectionRegistry::default();
         let config = SshConfig::password("dedicated.example", 22, "alice", "pw");
@@ -2991,27 +3139,236 @@ mod tests {
         assert_eq!(status, ProbeConnectionStatus::NotApplicable);
     }
 
-    #[tokio::test]
-    async fn idle_timeout_updates_across_registry_clones() {
-        let registry = SshConnectionRegistry::new(ConnectionPoolConfig {
-            idle_timeout: Some(Duration::from_secs(60)),
-            protect_on_exit: true,
-        });
-        registry.set_task_runtime(tokio::runtime::Handle::current());
-        let clone = registry.clone();
-        clone.set_idle_timeout(Some(Duration::from_millis(10)));
-
-        let consumer = ConnectionConsumer::Terminal("term-1".into());
-        let handle = registry.acquire(
-            SshConfig::password("dynamic-timeout.example", 22, "alice", "pw"),
-            consumer.clone(),
-        );
+    #[tokio::test(start_paused = true)]
+    async fn idle_timer_tasks_end_on_reuse_and_pool_drop() {
+        let registry = SshConnectionRegistry::default();
+        let metrics = TokioHandle::current().metrics();
+        let active_tasks = metrics.num_alive_tasks();
+        let consumer = ConnectionConsumer::Terminal("shell".into());
+        let handle = registry.acquire(SshConfig::default(), consumer.clone());
+        handle.set_physical(Arc::new(()));
         registry.mark_state(handle.connection_id(), ConnectionState::Active);
 
-        clone.release(handle.connection_id(), &consumer);
-        sleep(Duration::from_millis(40)).await;
+        registry.release(handle.connection_id(), &consumer);
+        tokio::task::yield_now().await;
+        assert_eq!(metrics.num_alive_tasks(), active_tasks + 1);
+        for _ in 0..3 {
+            let lease = registry
+                .lease_consumer(handle.connection_id(), consumer.clone())
+                .unwrap();
+            tokio::task::yield_now().await;
+            assert_eq!(metrics.num_alive_tasks(), active_tasks);
+            drop(lease);
+            tokio::task::yield_now().await;
+            assert_eq!(metrics.num_alive_tasks(), active_tasks + 1);
+        }
 
-        assert!(registry.get(handle.connection_id()).is_none());
+        // A surviving handle must not keep a sleeping task or its pool alive.
+        drop(registry);
+        tokio::task::yield_now().await;
+        assert_eq!(metrics.num_alive_tasks(), active_tasks);
+        drop(handle);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn idle_timeout_change_retires_an_existing_idle_connection_before_async_cleanup() {
+        let registry = SshConnectionRegistry::default();
+        let consumer = ConnectionConsumer::Terminal("term-1".into());
+        let config = SshConfig {
+            host: "dynamic-timeout.example".into(),
+            ..SshConfig::default()
+        };
+        let handle = registry.acquire(config.clone(), consumer.clone());
+        registry.mark_state(handle.connection_id(), ConnectionState::Active);
+        registry.release(handle.connection_id(), &consumer);
+
+        let clone = registry.clone();
+        clone.set_idle_timeout(None);
+        tokio::time::advance(DEFAULT_IDLE_TIMEOUT * 2).await;
+        assert_eq!(
+            registry.get(handle.connection_id()).unwrap().state(),
+            ConnectionState::Idle
+        );
+
+        // Hold channel cleanup open while a new consumer requests the same pool key.
+        let channel = handle.entry.sftp.lock().await;
+        clone.set_idle_timeout(Some(Duration::ZERO));
+        tokio::task::yield_now().await;
+        let replacement = registry.acquire(config, consumer.clone());
+        assert_ne!(replacement.connection_id(), handle.connection_id());
+        drop(channel);
+        tokio::task::yield_now().await;
+        assert_eq!(handle.state(), ConnectionState::Disconnected);
+        assert_eq!(
+            registry
+                .get(replacement.connection_id())
+                .unwrap()
+                .info()
+                .consumers,
+            vec![consumer]
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn idle_deadline_tracks_users_of_a_bound_node() {
+        let registry = SshConnectionRegistry::default();
+        registry.set_idle_timeout(Some(Duration::from_secs(5)));
+        let router = crate::NodeRouter::new(registry.clone());
+        let config = SshConfig::default();
+        let id = crate::NodeId::new("target");
+        router.upsert_node(id.clone(), config.clone());
+        let node = registry.acquire(config, ConnectionConsumer::NodeRouter(id.0.clone()));
+        node.set_physical(Arc::new(()));
+        let connection = node.connection_id();
+        registry.mark_state(connection, ConnectionState::Active);
+        router.bind_connection(&id, connection).unwrap();
+        let terminal = registry
+            .lease_consumer(connection, ConnectionConsumer::Terminal("shell".into()))
+            .unwrap();
+        let sftp = registry
+            .lease_consumer(connection, ConnectionConsumer::Sftp("transfer".into()))
+            .unwrap();
+        drop(terminal);
+        tokio::time::advance(Duration::from_secs(6)).await;
+        assert_eq!(
+            registry.get(connection).unwrap().state(),
+            ConnectionState::Active
+        );
+        drop(sftp);
+        tokio::task::yield_now().await;
+        tokio::time::advance(Duration::from_secs(4)).await;
+        let forward = registry
+            .lease_consumer(connection, ConnectionConsumer::PortForward("tunnel".into()))
+            .unwrap();
+        tokio::time::advance(Duration::from_secs(2)).await;
+        assert_eq!(
+            registry.get(connection).unwrap().state(),
+            ConnectionState::Active
+        );
+        drop(forward);
+        tokio::task::yield_now().await;
+        tokio::time::advance(Duration::from_secs(4)).await;
+        assert_eq!(
+            registry.get(connection).unwrap().state(),
+            ConnectionState::Idle
+        );
+        registry.release(
+            connection,
+            &ConnectionConsumer::Terminal("already closed".into()),
+        );
+        tokio::time::advance(Duration::from_secs(1)).await;
+        tokio::task::yield_now().await;
+        assert!(registry.get(connection).is_none());
+    }
+
+    #[tokio::test]
+    async fn idle_retirement_notifies_shared_routes_after_the_jump_child_releases() {
+        let registry = SshConnectionRegistry::default();
+        registry.set_idle_timeout(Some(Duration::ZERO));
+        let router = crate::NodeRouter::new(registry.clone());
+        let config = SshConfig::default();
+        let routes = [crate::NodeId::new("first"), crate::NodeId::new("second")];
+        let (sender, events) = std::sync::mpsc::channel();
+        router.emitter().subscribe(sender);
+        let handles = routes.each_ref().map(|id| {
+            router.upsert_node(id.clone(), config.clone());
+            let handle =
+                registry.acquire(config.clone(), ConnectionConsumer::NodeRouter(id.0.clone()));
+            router.bind_connection(id, handle.connection_id()).unwrap();
+            handle
+        });
+        let connection = handles[0].connection_id();
+        assert_eq!(handles[1].connection_id(), connection);
+        registry.mark_state(connection, ConnectionState::Active);
+        let child_consumer = ConnectionConsumer::Terminal("jumped-shell".into());
+        let child = registry.acquire_dedicated(config, child_consumer.clone());
+        let parent_lease =
+            ConnectionConsumer::NodeRouter(format!("{}:ancestor", child.connection_id()));
+        registry
+            .acquire_consumer_for_connection(connection, parent_lease.clone())
+            .unwrap();
+        registry
+            .set_parent_connection_ownership(child.connection_id(), connection.into(), parent_lease)
+            .unwrap();
+        let terminals = routes.each_ref().map(|id| {
+            registry
+                .lease_consumer(connection, ConnectionConsumer::Terminal(id.0.clone()))
+                .unwrap()
+        });
+        drop(terminals);
+        tokio::task::yield_now().await;
+        assert_eq!(
+            registry.get(connection).unwrap().state(),
+            ConnectionState::Active
+        );
+
+        registry.release(child.connection_id(), &child_consumer);
+        tokio::task::yield_now().await;
+        assert!(registry.get(connection).is_none());
+        let retired = events
+            .try_iter()
+            .filter_map(|event| match event {
+                crate::NodeStateEvent::ConnectionStateChanged {
+                    node_id,
+                    retired_connection_id: Some(id),
+                    ..
+                } if id == connection => Some(crate::NodeId::new(node_id)),
+                _ => None,
+            })
+            .collect::<std::collections::HashSet<_>>();
+        assert_eq!(retired, std::collections::HashSet::from(routes.clone()));
+        let store = router.runtime_store();
+        store.clear_retired_connection(&routes[1], connection);
+        assert_eq!(
+            router.node_id_for_connection(connection),
+            Some(routes[0].clone())
+        );
+        store.clear_retired_connection(&routes[0], connection);
+        assert_eq!(router.connection_id_for_node(&routes[0]), None);
+        assert_eq!(router.connection_id_for_node(&routes[1]), None);
+    }
+
+    #[tokio::test]
+    async fn idle_teardown_releases_only_the_retired_childs_parent_lease() {
+        let registry = SshConnectionRegistry::default();
+        let emitter = NodeEventEmitter::default();
+        registry.set_node_event_emitter(emitter.clone());
+        let parent_owner = ConnectionConsumer::NodeRouter("jump".into());
+        let parent = registry.acquire(SshConfig::default(), parent_owner.clone());
+        let target = SshConfig {
+            host: "target.invalid".into(),
+            ..Default::default()
+        };
+        let child_owner = ConnectionConsumer::NodeRouter("target".into());
+        let old = registry.acquire(target.clone(), child_owner.clone());
+        emitter.register(old.connection_id(), crate::NodeId::new("target"));
+        let bind_parent = |child: &SshConnectionHandle, consumer: ConnectionConsumer| {
+            registry
+                .acquire_consumer_for_connection(parent.connection_id(), consumer.clone())
+                .unwrap();
+            registry
+                .set_parent_connection_ownership(
+                    child.connection_id(),
+                    parent.connection_id().into(),
+                    consumer,
+                )
+                .unwrap();
+        };
+        bind_parent(
+            &old,
+            ConnectionConsumer::NodeRouter(old.connection_id().into()),
+        );
+        assert!(registry.detach_connection(&old, RetirementCondition::Unconditional));
+        let new = registry.acquire(target, child_owner);
+        let replacement_lease = ConnectionConsumer::NodeRouter("target:ancestor".into());
+        bind_parent(&new, replacement_lease.clone());
+        registry.finish_idle_retirement(old, "idle timeout").await;
+        assert_eq!(
+            parent.info().consumers,
+            vec![parent_owner.clone(), replacement_lease]
+        );
+        registry.retire_connection(new.connection_id()).unwrap();
+        assert_eq!(parent.info().consumers, vec![parent_owner]);
     }
 
     #[test]

@@ -387,7 +387,7 @@ pub struct RemoteForwardedTcpIp {
     pub stream: BoxedSshForwardStream,
 }
 
-pub trait RemoteForwardHandler: Send + Sync {
+pub trait RemoteForwardHandler: std::any::Any + Send + Sync {
     fn handle_remote_forward(
         &self,
         event: RemoteForwardedTcpIp,

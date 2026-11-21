@@ -1009,6 +1009,7 @@ impl TerminalSessionBackend for SshPtyCore {
         let _ = self.send_command(SshTransportCommand::Close);
         self.parser_state.command_tx = None;
         self.handle = None;
+        self.config.route_lease = None;
 
         self.lifecycle = TerminalLifecycle::Closed;
         self.parser_state.finish_transport();

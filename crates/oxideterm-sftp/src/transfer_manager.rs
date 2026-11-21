@@ -503,6 +503,18 @@ impl SftpTransferManager {
         self.background_state_changes.subscribe()
     }
 
+    pub fn has_unfinished_transfer_for_node(&self, node_id: &str) -> bool {
+        self.controls
+            .read()
+            .values()
+            .any(|item| item.node_id.as_deref() == Some(node_id))
+            || self
+                .background_transfers
+                .read()
+                .values()
+                .any(|item| item.node_id == node_id && !item.state.is_finished())
+    }
+
     pub fn registered_count(&self) -> usize {
         self.controls.read().len()
     }
@@ -553,6 +565,9 @@ impl SftpTransferManager {
             // A producer racing final session shutdown must not start new work.
             control.cancel();
         }
+        if node_id.is_some() {
+            self.background_state_changes.send_replace(());
+        }
         controls.insert(
             transfer_id.to_string(),
             RegisteredTransferControl {
@@ -578,7 +593,12 @@ impl SftpTransferManager {
             registered.owner_count == 0
         });
         if should_remove {
-            controls.remove(transfer_id);
+            if controls
+                .remove(transfer_id)
+                .is_some_and(|item| item.node_id.is_some())
+            {
+                self.background_state_changes.send_replace(());
+            }
             self.shutdown_notify.notify_waiters();
         }
     }

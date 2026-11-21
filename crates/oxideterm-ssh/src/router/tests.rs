@@ -112,10 +112,7 @@ mod tests {
         node_id: &NodeId,
         config: SshConfig,
     ) -> SshConnectionHandle {
-        let handle = registry.acquire(
-            config,
-            ConnectionConsumer::NodeRouter(node_id.0.clone()),
-        );
+        let handle = registry.acquire(config, ConnectionConsumer::NodeRouter(node_id.0.clone()));
         handle.set_physical(Arc::new(()));
         registry.mark_state(handle.connection_id(), ConnectionState::Active);
         router
@@ -166,10 +163,7 @@ mod tests {
         );
 
         let error = router
-            .acquire_connection(
-                &node_id,
-                ConnectionConsumer::Sftp("unmanaged".to_string()),
-            )
+            .acquire_connection(&node_id, ConnectionConsumer::Sftp("unmanaged".to_string()))
             .unwrap_err();
 
         assert!(matches!(error, RouteError::CapabilityUnavailable(_)));
@@ -179,12 +173,7 @@ mod tests {
     fn metadata_snapshot_omits_authentication_and_endpoint_tokens() {
         let store = NodeRuntimeStore::default();
         let node = NodeId::new("node-a");
-        let config = SshConfig::password(
-            "example.test",
-            22,
-            "deploy",
-            "representative-password",
-        );
+        let config = SshConfig::password("example.test", 22, "deploy", "representative-password");
         store.upsert_node(node.clone(), config);
         store
             .bind_terminal_endpoint(
@@ -257,12 +246,7 @@ mod tests {
         let saved_node = NodeId::new("saved-node");
         store.upsert_node_with_origin(
             saved_node.clone(),
-            SshConfig::password(
-                "saved.example.test",
-                22,
-                "deploy",
-                "saved-store-password",
-            ),
+            SshConfig::password("saved.example.test", 22, "deploy", "saved-store-password"),
             NodeOrigin::Restored {
                 saved_connection_id: "saved-connection".to_string(),
             },
@@ -354,7 +338,9 @@ mod tests {
                 ..
             }
         ));
-        router.bind_terminal_endpoint(&node, second.clone()).unwrap();
+        router
+            .bind_terminal_endpoint(&node, second.clone())
+            .unwrap();
         assert_eq!(router.terminal_url(&node).unwrap(), first);
 
         router.unbind_terminal_session(&node, "term-a").unwrap();
@@ -409,7 +395,10 @@ mod tests {
             .unwrap();
 
         let flat = store.flatten();
-        assert_eq!(flat.iter().map(|node| node.id.as_str()).collect::<Vec<_>>(), vec!["root", "child"]);
+        assert_eq!(
+            flat.iter().map(|node| node.id.as_str()).collect::<Vec<_>>(),
+            vec!["root", "child"]
+        );
         assert_eq!(flat[1].depth, 1);
     }
 
@@ -479,6 +468,7 @@ mod tests {
             NodeOrigin::ManualPreset {
                 saved_connection_id: "saved-a".to_string(),
                 hop_index: 0,
+                is_target: false,
             },
         );
         store
@@ -489,6 +479,7 @@ mod tests {
                 NodeOrigin::ManualPreset {
                     saved_connection_id: "saved-a".to_string(),
                     hop_index: 1,
+                    is_target: true,
                 },
             )
             .unwrap();
@@ -568,6 +559,7 @@ mod tests {
             NodeOrigin::ManualPreset {
                 saved_connection_id: "saved-a".to_string(),
                 hop_index: 2,
+                is_target: true,
             }
         );
     }
@@ -613,6 +605,7 @@ mod tests {
             NodeOrigin::ManualPreset {
                 saved_connection_id: "saved-a".to_string(),
                 hop_index: 2,
+                is_target: true,
             }
         );
     }
@@ -636,7 +629,10 @@ mod tests {
             )
             .unwrap();
         let parent = NodeId::new("unrelated-parent");
-        store.upsert_node(parent.clone(), SshConfig::password("parent", 22, "me", "pw"));
+        store.upsert_node(
+            parent.clone(),
+            SshConfig::password("parent", 22, "me", "pw"),
+        );
         store
             .apply_node_readiness(&parent, NodeReadiness::Ready, "")
             .unwrap();
@@ -658,7 +654,10 @@ mod tests {
             store.update_saved_connection_x11_forwarding("saved-a", x11_forwarding),
             3
         );
-        assert_eq!(store.x11_forwarding(&restored_target).unwrap(), x11_forwarding);
+        assert_eq!(
+            store.x11_forwarding(&restored_target).unwrap(),
+            x11_forwarding
+        );
         assert_eq!(
             store
                 .x11_forwarding(&proxy_expansion.target_node_id)
@@ -750,7 +749,6 @@ mod tests {
         assert!(store.flatten().is_empty());
         assert!(store.snapshot(&expansion.target_node_id).is_none());
     }
-
 
     #[test]
     fn reconcile_runtime_tree_clears_missing_runtime_connection() {
@@ -951,10 +949,8 @@ mod tests {
         runtime.spawn(async move {
             sleep(Duration::from_millis(50)).await;
             let _ = rebound_registry.retire_connection(&old_connection_id);
-            let new = rebound_registry.acquire(
-                config,
-                ConnectionConsumer::NodeRouter("node-a".into()),
-            );
+            let new =
+                rebound_registry.acquire(config, ConnectionConsumer::NodeRouter("node-a".into()));
             new.set_physical(Arc::new(()));
             rebound_registry.mark_state(new.connection_id(), ConnectionState::Active);
             rebound_router
@@ -1027,7 +1023,10 @@ mod tests {
         assert!(child.has_physical());
 
         let sftp = router
-            .acquire_connection(&child_id, ConnectionConsumer::Sftp("target:sftp".to_string()))
+            .acquire_connection(
+                &child_id,
+                ConnectionConsumer::Sftp("target:sftp".to_string()),
+            )
             .unwrap();
         let forward = router
             .acquire_connection(
@@ -1038,13 +1037,18 @@ mod tests {
 
         assert_eq!(sftp.connection_id, child.connection_id());
         assert_eq!(forward.connection_id, child.connection_id());
-        assert!(parent.info().consumers.contains(&ConnectionConsumer::NodeRouter(
-            "jump".to_string()
-        )));
-        assert!(!parent
-            .info()
-            .consumers
-            .contains(&ConnectionConsumer::Sftp("target:sftp".to_string())));
+        assert!(
+            parent
+                .info()
+                .consumers
+                .contains(&ConnectionConsumer::NodeRouter("jump".to_string()))
+        );
+        assert!(
+            !parent
+                .info()
+                .consumers
+                .contains(&ConnectionConsumer::Sftp("target:sftp".to_string()))
+        );
     }
 
     #[test]
@@ -1081,10 +1085,14 @@ mod tests {
             ),
             Err(RouteError::NotConnected(_))
         ));
-        assert!(!child
-            .info()
-            .consumers
-            .contains(&ConnectionConsumer::PortForward("target:forward".to_string())));
+        assert!(
+            !child
+                .info()
+                .consumers
+                .contains(&ConnectionConsumer::PortForward(
+                    "target:forward".to_string()
+                ))
+        );
         assert_eq!(child.state(), ConnectionState::LinkDown);
 
         let events = rx.try_iter().collect::<Vec<_>>();
@@ -1203,10 +1211,12 @@ mod tests {
             resolved.handle.info().parent_connection_id.as_deref(),
             Some(parent.connection_id())
         );
-        assert!(resolved
-            .handle
-            .info()
-            .consumers
-            .contains(&ConnectionConsumer::PortForward("target:forward".into())));
+        assert!(
+            resolved
+                .handle
+                .info()
+                .consumers
+                .contains(&ConnectionConsumer::PortForward("target:forward".into()))
+        );
     }
 }

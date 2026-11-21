@@ -122,7 +122,7 @@ impl PublicMcpHost {
         background.revoke_public_mcp_client_transfers(client);
         background.revoke_public_mcp_client_file_sessions(client);
         self.revoke_client_sync_handles(client);
-        self.revoke_client_runtime(client, &background.node_router);
+        self.revoke_client_runtime(client);
     }
 
     fn update_runtime_group(

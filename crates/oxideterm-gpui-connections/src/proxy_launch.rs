@@ -53,10 +53,10 @@ impl ProxyExpansion {
         }
     }
 
-    pub fn expansion_id(&self, next_node_id: u64) -> String {
+    pub fn saved_connection_id(&self) -> Option<&str> {
         match &self.intent {
-            SshConnectionIntent::ConnectSaved { id, .. } => id.clone(),
-            _ => format!("manual-{next_node_id}"),
+            SshConnectionIntent::ConnectSaved { id, .. } => Some(id),
+            _ => None,
         }
     }
 
@@ -92,6 +92,7 @@ impl ConnectionFlowEntity {
         };
         self.start_proxy_connect_run(
             NativeProxyConnectRun {
+                parent_lease: None,
                 generation: 0,
                 plan,
                 title,
@@ -153,6 +154,7 @@ impl ConnectionFlowEntity {
         let plan = NativeSessionTreeConnectPlan::from_expansion(&expansion, endpoints, None)?;
         self.start_proxy_connect_run(
             NativeProxyConnectRun {
+                parent_lease: None,
                 generation: 0,
                 plan,
                 title,

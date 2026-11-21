@@ -485,6 +485,9 @@ pub fn oxide_settings_field_label(field: &str, i18n: &oxideterm_i18n::I18n) -> S
         "reconnect.maxAttempts" => i18n.t("settings_view.reconnect.max_attempts"),
         "reconnect.baseDelayMs" => i18n.t("settings_view.reconnect.base_delay"),
         "reconnect.maxDelayMs" => i18n.t("settings_view.reconnect.max_delay"),
+        "sidebarUI.closedSessionRetentionSecs" => {
+            i18n.t("settings_view.connections.retention.label")
+        }
         "connectionPool.idleTimeoutSecs" => i18n.t("settings_view.connections.idle_timeout.label"),
         "sftp.maxConcurrentTransfers" => i18n.t("settings_view.sftp.concurrent"),
         "sftp.directoryParallelism" => i18n.t("settings_view.sftp.directory_parallelism"),

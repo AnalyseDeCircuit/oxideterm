@@ -105,7 +105,7 @@ impl WorkspaceApp {
             }
             Some(Effect::Mosh(mut open, reconnect_id)) => {
                 if let Some(id) = reconnect_id {
-                    let Some(attempt) = self.standalone_connections.begin_reconnect(&id) else {
+                    let Some(attempt) = self.begin_standalone_reconnect(&id, cx) else {
                         return;
                     };
                     open.options.runtime_connection_attempt_id = Some(attempt);
@@ -120,7 +120,7 @@ impl WorkspaceApp {
             }
             Some(Effect::Desktop(open)) => {
                 let attempt = if let Some(id) = open.reconnect_id {
-                    let Some(attempt) = self.standalone_connections.begin_reconnect(&id) else {
+                    let Some(attempt) = self.begin_standalone_reconnect(&id, cx) else {
                         return;
                     };
                     Some(attempt)

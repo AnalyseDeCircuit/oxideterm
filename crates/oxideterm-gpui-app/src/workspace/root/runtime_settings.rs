@@ -121,9 +121,19 @@ impl WorkspaceApp {
                 terminal.clear_selected_broadcast_group();
             }
         });
-        self.ssh_registry.set_idle_timeout(Some(Duration::from_secs(
-            settings.connection_pool.idle_timeout_secs as u64,
-        )));
+        if previous_settings.sidebar_ui.closed_session_retention_secs
+            != settings.sidebar_ui.closed_session_retention_secs
+        {
+            self.configure_session_retention(cx);
+        }
+        if previous_settings.connection_pool.idle_timeout_secs
+            != settings.connection_pool.idle_timeout_secs
+        {
+            self.ssh_registry
+                .set_idle_timeout(oxideterm_settings::configured_timeout(
+                    settings.connection_pool.idle_timeout_secs,
+                ));
+        }
         self.workspace_runtime.update(cx, |runtime, cx| {
             runtime.configure_ssh_latency(
                 settings.terminal.command_bar.enabled && settings.terminal.command_bar.ssh_latency,

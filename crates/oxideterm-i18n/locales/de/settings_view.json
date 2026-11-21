@@ -1187,13 +1187,20 @@
         "remove_failed": "Integrationsdateien konnten nicht entfernt werden. Prüfen Sie die Berechtigungen auf dem Server.",
         "installation_incomplete": "Die Shell-Integration wurde nicht vollständig installiert. Prüfen Sie ihren Status in den Einstellungen."
       },
+      "retention": {
+        "immediate": "Nach dem Schließen sofort entfernen",
+        "label": "Geschlossene Sitzungen behalten",
+        "hint": "Wie lange geschlossene Sitzungen unter „Aktive Sitzungen“ angezeigt werden.",
+        "never": "Nie automatisch entfernen"
+      },
       "idle_timeout": {
         "title": "SSH-Hintergrundverbindungen",
         "description": "Konfiguriert, wann ungenutzte SSH-Hintergrundverbindungen freigegeben werden.",
         "label": "Leerlauf-Freigabe",
+        "immediate": "Bei Inaktivität sofort trennen",
         "5min": "5 Minuten",
         "15min": "15 Minuten",
-        "30min": "30 Minuten (Standard)",
+        "30min": "30 Minuten",
         "1hr": "1 Stunde",
         "never": "Nie (Verbindung aufrechterhalten)",
         "hint": "SSH-Hintergrundverbindungen ohne offene Terminals, SFTP-Sitzungen oder Portweiterleitungen werden nach diesem Zeitraum freigegeben. Auf 'Nie' setzen, um sie dauerhaft aufrechtzuerhalten.",

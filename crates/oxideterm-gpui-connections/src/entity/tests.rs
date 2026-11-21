@@ -51,6 +51,7 @@ fn keyboard_interactive_request(flow_id: &str) -> KeyboardInteractivePromptReque
 
 fn proxy_connect_run() -> NativeProxyConnectRun {
     NativeProxyConnectRun {
+        parent_lease: None,
         generation: 0,
         plan: NativeSessionTreeConnectPlan {
             target_node_id: NodeId::new("target"),

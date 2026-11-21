@@ -54,20 +54,19 @@ impl StandaloneSftpTabBinding {
     }
 }
 
-pub(super) struct StandaloneSftpConsumerLease {
-    registry: SshConnectionRegistry,
-    connection_id: String,
-    consumer: ConnectionConsumer,
+pub(super) type DedicatedSftpConnectionSlot =
+    tokio::sync::Mutex<Option<Arc<DedicatedConnectionLease>>>;
+
+pub(super) struct DedicatedSftpRouteSlot {
+    pub(super) connection_id: String,
+    pub(super) slot: std::sync::Weak<DedicatedSftpConnectionSlot>,
 }
 
-pub(super) type DedicatedSftpConnectionSlot =
-    Arc<tokio::sync::Mutex<Option<Arc<DedicatedConnectionLease>>>>;
-
-impl Drop for StandaloneSftpConsumerLease {
-    fn drop(&mut self) {
-        // A background transfer owns this consumer independently from its tab.
-        self.registry.release(&self.connection_id, &self.consumer);
-    }
+pub(super) struct SftpSurfaceLease {
+    node_id: NodeId,
+    route: Arc<ConnectionConsumerLease>,
+    // Pages and in-flight operations share ownership of the browsing connection.
+    _dedicated_slot: Arc<DedicatedSftpConnectionSlot>,
 }
 
 #[derive(Clone)]
@@ -81,7 +80,8 @@ pub(super) enum SftpRemoteBackend {
         channel_strategy: SshChannelStrategy,
         prompt_handler: Arc<dyn SshPromptHandler>,
         managed_key_resolver: ManagedKeyResolver,
-        dedicated_slot: DedicatedSftpConnectionSlot,
+        dedicated_slot: Arc<DedicatedSftpConnectionSlot>,
+        _route_lease: Option<Arc<ConnectionConsumerLease>>,
     },
     Standalone {
         handle: SshConnectionHandle,
@@ -97,6 +97,7 @@ impl SftpRemoteBackend {
             prompt_handler,
             managed_key_resolver,
             dedicated_slot,
+            ..
         } = self
         else {
             return Err("SFTP backend is not node-backed".to_string());

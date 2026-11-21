@@ -42,6 +42,7 @@
       "title": "Verbindungspool",
       "loading": "Statistiken werden geladen...",
       "idle_timeout": "Inaktiv: {{min}} Min.",
+      "idle_timeout_immediate": "Inaktiv: Sofort trennen",
       "idle_timeout_never": "Inaktiv: Kein Timeout",
       "active": "Aktiv",
       "idle": "Inaktiv",

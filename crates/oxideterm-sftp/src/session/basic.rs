@@ -55,7 +55,10 @@ impl SftpSession {
     pub fn with_connection_owner(mut self, owner: Arc<dyn Send + Sync>) -> Self {
         // Short-lived dedicated transports must survive until the SFTP channel
         // and every sibling channel opened by this session have been dropped.
-        self._connection_owner = Some(owner);
+        self._connection_owner = Some(match self._connection_owner.take() {
+            Some(channel_owner) => Arc::new((channel_owner, owner)),
+            None => owner,
+        });
         self
     }
 

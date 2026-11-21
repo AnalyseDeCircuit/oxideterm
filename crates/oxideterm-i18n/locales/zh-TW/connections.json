@@ -42,6 +42,7 @@
       "title": "連線池",
       "loading": "載入統計資料...",
       "idle_timeout": "閒置：{{min}} 分鐘",
+      "idle_timeout_immediate": "閒置：立即中斷連線",
       "idle_timeout_never": "閒置：永不逾時",
       "active": "使用中",
       "idle": "閒置",

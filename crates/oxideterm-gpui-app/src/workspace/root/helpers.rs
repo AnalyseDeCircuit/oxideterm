@@ -1129,12 +1129,12 @@ impl WorkspaceApp {
         let mut restored_nodes = Vec::new();
         let mut restored_ids = HashSet::new();
 
-        for node in persisted.nodes {
+        for mut node in persisted.nodes {
             let config = node.config.or_else(|| {
                 saved_origin_config(
                     &self.connection_store,
                     self.settings_store.settings(),
-                    &node.origin,
+                    &mut node.origin,
                 )
             });
             let Some(config) = config else {
@@ -1183,7 +1183,7 @@ impl WorkspaceApp {
                 &node.config.username,
                 &node.config.host,
             );
-            if let Some(saved_connection_id) = node.origin.saved_connection_id() {
+            if let Some(saved_connection_id) = node.origin.saved_target_id() {
                 let rank = restored_saved_node_rank(&node.origin);
                 let entry = saved_targets
                     .entry(saved_connection_id.to_string())
@@ -1210,6 +1210,7 @@ impl WorkspaceApp {
             return;
         }
         for (node_id, node) in ui_nodes {
+            self.note_closed_ssh_session(&node_id);
             self.ssh_nodes.insert(node_id, node);
         }
         for (saved_connection_id, (_, node_id)) in saved_targets {
@@ -1316,7 +1317,7 @@ pub(in crate::workspace) fn connection_error_is_proxy_hop_unsupported(error: &st
 pub(in crate::workspace) fn saved_origin_config(
     store: &ConnectionStore,
     settings: &PersistedSettings,
-    origin: &NodeOrigin,
+    origin: &mut NodeOrigin,
 ) -> Option<SshConfig> {
     match origin {
         NodeOrigin::Restored {
@@ -1328,11 +1329,14 @@ pub(in crate::workspace) fn saved_origin_config(
         NodeOrigin::ManualPreset {
             saved_connection_id,
             hop_index,
+            is_target,
         } => {
             let connection = store.get(saved_connection_id)?;
-            oxideterm_session_adapter::ssh_config_for_saved_connection_hop(
+            let (config, target) = oxideterm_session_adapter::resolve_saved_connection_hop(
                 store, settings, connection, *hop_index,
-            )
+            )?;
+            *is_target = target;
+            Some(config)
         }
         NodeOrigin::AutoRoute { .. } | NodeOrigin::DrillDown { .. } | NodeOrigin::Direct => None,
     }

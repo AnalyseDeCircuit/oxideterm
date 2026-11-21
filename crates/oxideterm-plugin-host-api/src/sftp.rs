@@ -9,9 +9,9 @@ use std::{
 };
 
 use oxideterm_sftp::{
-    ListFilter, PreviewContent, SftpError, SftpSession, SftpTransferManager, TarCompression,
-    TarTransferOptions, encode_to_encoding, probe_tar_support, profile_local_directory,
-    tar_download_directory, tar_upload_directory,
+    ListFilter, PreviewContent, SftpError, SftpTransferManager, TarCompression, TarTransferOptions,
+    encode_to_encoding, probe_tar_support, profile_local_directory, tar_download_directory,
+    tar_upload_directory,
 };
 use oxideterm_ssh::{NodeId, NodeRouter};
 use serde_json::{Value, json};
@@ -23,7 +23,7 @@ use crate::capabilities::{
     NATIVE_PLUGIN_CAPABILITY_FILESYSTEM_WRITE,
 };
 
-type NativePluginSharedSftp = Arc<tokio::sync::Mutex<SftpSession>>;
+use oxideterm_ssh::RoutedSftpSession as NativePluginSharedSftp;
 type NativePluginSftpFuture<'a, T> =
     Pin<Box<dyn Future<Output = Result<T, SftpError>> + Send + 'a>>;
 

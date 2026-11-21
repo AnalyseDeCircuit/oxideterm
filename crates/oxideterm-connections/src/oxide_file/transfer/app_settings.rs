@@ -172,6 +172,12 @@ fn build_sectioned_app_settings_sections(
                     Some("connectionPool"),
                     &mut field_values,
                 );
+                add_preview_fields(
+                    settings.get("sidebarUI").and_then(Value::as_object),
+                    &["closedSessionRetentionSecs"],
+                    Some("sidebarUI"),
+                    &mut field_values,
+                );
             }
             "fileAndEditor" => {
                 add_preview_fields(

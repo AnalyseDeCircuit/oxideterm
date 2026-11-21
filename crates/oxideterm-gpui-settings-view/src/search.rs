@@ -526,6 +526,15 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
         ),
         settings_search_entry(
             SettingsTab::Connections,
+            SettingsSectionId::ConnectionsRetention,
+            "sidebar.active_sessions",
+            &[
+                "settings_view.connections.retention.label",
+                "settings_view.connections.retention.hint",
+            ],
+        ),
+        settings_search_entry(
+            SettingsTab::Connections,
             SettingsSectionId::ConnectionsReconnect,
             "settings_view.reconnect.title",
             &["settings_view.reconnect.description"],

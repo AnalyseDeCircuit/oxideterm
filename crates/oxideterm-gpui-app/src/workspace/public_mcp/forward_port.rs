@@ -1,6 +1,8 @@
 use crate::workspace::forwards::ForwardingRuntimeService;
 use oxideterm_forwarding::{ForwardRule, ForwardStats, ForwardUpdate, PortDetectionSnapshot};
-use oxideterm_public_mcp_host::{PublicMcpForwardMutation, PublicMcpForwardPort};
+use oxideterm_public_mcp_host::{
+    PublicMcpForwardMutation, PublicMcpForwardPort, PublicMcpForwardStopHandoff,
+};
 use oxideterm_ssh::NodeId;
 
 #[async_trait::async_trait]
@@ -65,7 +67,7 @@ impl PublicMcpForwardPort for ForwardingRuntimeService {
         node_id: &NodeId,
         owner_connection_id: Option<&str>,
         forward_id: &str,
-    ) -> Result<ForwardRule, String> {
+    ) -> Result<(ForwardRule, PublicMcpForwardStopHandoff), String> {
         ForwardingRuntimeService::public_mcp_stop_forward(
             self,
             node_id,
@@ -135,6 +137,7 @@ impl PublicMcpForwardPort for ForwardingRuntimeService {
         owner_connection_id: Option<&str>,
         original_rule: &ForwardRule,
         revoked_rule: &ForwardRule,
+        stop_handoff: Option<&PublicMcpForwardStopHandoff>,
         created_by_client: bool,
         persisted: bool,
     ) -> bool {
@@ -144,6 +147,7 @@ impl PublicMcpForwardPort for ForwardingRuntimeService {
             owner_connection_id,
             original_rule,
             revoked_rule,
+            stop_handoff,
             created_by_client,
             persisted,
         )

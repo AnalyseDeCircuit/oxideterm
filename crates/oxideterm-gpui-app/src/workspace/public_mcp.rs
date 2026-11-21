@@ -53,6 +53,25 @@ impl PublicMcpWorkspaceBridge {
             .as_ref()
             .expect("Public MCP delivery is initialized with the workspace")
     }
+
+    pub(in crate::workspace) fn rebind_node_leases(
+        &self,
+        node: &oxideterm_ssh::NodeId,
+        connection_id: &str,
+    ) {
+        if let Some(background) = &self.background {
+            background.rebind_node_leases(node, connection_id);
+        }
+    }
+
+    pub(in crate::workspace) fn invalidate_disconnected_nodes(
+        &self,
+        nodes: &[oxideterm_ssh::NodeId],
+    ) -> usize {
+        self.background.as_ref().map_or(0, |background| {
+            background.invalidate_disconnected_nodes(nodes)
+        })
+    }
 }
 
 impl Deref for PublicMcpWorkspaceBridge {
@@ -448,7 +467,7 @@ impl WorkspaceApp {
             .as_ref()
             .is_some_and(|chain| !chain.is_empty())
         {
-            match self.expand_saved_connection_tree(&connection_id, config, title) {
+            match self.expand_ssh_connection_tree(Some(&connection_id), config, title) {
                 Ok(expansion) => {
                     let (tx, rx) = tokio::sync::watch::channel(
                         oxideterm_ssh::ConnectionChainProgress::queued(1),
@@ -538,15 +557,15 @@ impl WorkspaceApp {
             request.finish(ToolEnvelope::failed("The node handle is unavailable"));
             return;
         };
-        let mut disconnected = self.node_router.subtree_postorder(&lease.node_id);
-        if disconnected.is_empty() {
-            disconnected.push(lease.node_id.clone());
-        }
         // Reuse the product disconnect path so visible tabs, forwarding owners,
         // runtime tasks, and the physical NodeRouter subtree close together.
-        self.disconnect_ssh_node(&lease.node_id, window, cx);
-        self.public_mcp
-            .background()
-            .finish_node_disconnect(request, disconnected);
+        let invalidated = self.disconnect_ssh_node(&lease.node_id, window, cx);
+        finish_serialized(
+            request,
+            serde_json::json!({
+                "disconnected": invalidated.is_some(),
+                "invalidated_node_handles": invalidated.unwrap_or(0),
+            }),
+        );
     }
 }

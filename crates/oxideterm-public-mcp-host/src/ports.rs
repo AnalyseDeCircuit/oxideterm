@@ -1,9 +1,15 @@
 use oxideterm_forwarding::{ForwardRule, ForwardStats, ForwardUpdate, PortDetectionSnapshot};
-use oxideterm_ssh::NodeId;
+use oxideterm_ssh::{ConnectionConsumerLease, NodeId};
 
 pub struct PublicMcpForwardMutation {
     pub rule: ForwardRule,
     pub persisted: bool,
+}
+
+/// Holds the last listener's transport through the grant check and any rollback.
+pub struct PublicMcpForwardStopHandoff {
+    pub revision: u64,
+    pub connection: ConnectionConsumerLease,
 }
 
 /// Node-owned forwarding stays in the runtime service. This port never looks up panes.
@@ -34,7 +40,7 @@ pub trait PublicMcpForwardPort: Send + Sync {
         node_id: &NodeId,
         owner_connection_id: Option<&str>,
         forward_id: &str,
-    ) -> Result<ForwardRule, String>;
+    ) -> Result<(ForwardRule, PublicMcpForwardStopHandoff), String>;
     async fn public_mcp_restart_forward(
         &self,
         node_id: &NodeId,
@@ -66,6 +72,7 @@ pub trait PublicMcpForwardPort: Send + Sync {
         owner_connection_id: Option<&str>,
         original_rule: &ForwardRule,
         revoked_rule: &ForwardRule,
+        stop_handoff: Option<&PublicMcpForwardStopHandoff>,
         created_by_client: bool,
         persisted: bool,
     ) -> bool;

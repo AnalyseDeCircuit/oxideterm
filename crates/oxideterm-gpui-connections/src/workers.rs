@@ -120,50 +120,53 @@ pub fn preflight(
 pub fn preflight_tree_step(
     router: NodeRouter,
     step: NativeSessionTreeConnectStep,
-    preflight_context: ProxyConnectPreflightContext,
+    mut preflight_context: ProxyConnectPreflightContext,
     tx: ActiveDeliverySender<SshConnectionWorkerResult>,
 ) {
-    let (connect_timeout_seconds, legacy_compatibility, algorithms) = router
+    let (parent_id, connect_timeout_seconds, legacy_compatibility, algorithms) = router
         .node_runtime_snapshot(&step.node_id)
         .map(|snapshot| {
             (
+                snapshot.parent_id,
                 snapshot.config.timeout_secs,
                 snapshot.config.legacy_ssh_compatibility,
                 snapshot.config.ssh_algorithms,
             )
         })
         .unwrap_or((
+            None,
             DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS,
             false,
             Default::default(),
         ));
-    let ProxyConnectPreflightContext {
-        generation,
-        step_index,
-        upstream_proxy,
-    } = preflight_context;
+    // The worker may start after the UI has finished handing off the preceding hop.
+    let parent_handoff = parent_id
+        .and_then(|parent| router.connection_id_for_node(&parent))
+        .and_then(|id| router.lease_connection_handoff(&id));
     std::thread::spawn(move || {
+        let _parent_handoff = parent_handoff;
         let status = match tokio::runtime::Runtime::new() {
             Ok(runtime) => runtime.block_on(async {
                 match router
-                    .node_runtime_snapshot(&step.node_id)
+                    .node_metadata(&step.node_id)
                     .and_then(|snapshot| snapshot.parent_id)
                 {
                     Some(parent_id) => {
-                        let consumer =
-                            ConnectionConsumer::NodeRouter(format!("{}:preflight", step.node_id.0));
+                        let consumer = ConnectionConsumer::NodeRouter(format!(
+                            "preflight:{}:{}",
+                            preflight_context.generation, step.node_id.0
+                        ));
                         match router
-                            .acquire_connection_wait(
+                            .lease_connection_wait(
                                 &parent_id,
-                                consumer.clone(),
+                                consumer,
                                 Duration::from_secs(connect_timeout_seconds),
                             )
                             .await
                         {
                             Ok(parent) => {
-                                let connection_id = parent.connection_id.clone();
                                 let status = parent
-                                    .handle
+                                    .handle()
                                     .preflight_host_key_via_direct_tcpip(
                                         &step.host,
                                         step.port,
@@ -172,7 +175,8 @@ pub fn preflight_tree_step(
                                         &algorithms,
                                     )
                                     .await;
-                                router.release_consumer(&connection_id, &consumer);
+                                // The plan keeps the jump alive across host-key confirmation and child authentication.
+                                preflight_context.parent_lease = Some(parent);
                                 status
                             }
                             Err(error) => HostKeyStatus::Error {
@@ -188,7 +192,7 @@ pub fn preflight_tree_step(
                             &step.host,
                             step.port,
                             connect_timeout_seconds,
-                            upstream_proxy.as_ref(),
+                            preflight_context.upstream_proxy.as_ref(),
                             legacy_compatibility,
                             &algorithms,
                         )
@@ -201,9 +205,7 @@ pub fn preflight_tree_step(
             },
         };
         let _ = tx.send(SshConnectionWorkerResult::SessionTreePreflight {
-            generation,
-            step_index,
-            upstream_proxy,
+            context: preflight_context,
             status,
         });
     });

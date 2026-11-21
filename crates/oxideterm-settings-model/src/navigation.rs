@@ -58,6 +58,7 @@ pub enum SettingsSectionId {
     TerminalHighlightRules,
     ConnectionsDefaults,
     ConnectionsIdleTimeout,
+    ConnectionsRetention,
     ConnectionsReconnect,
     ConnectionsSshKeys,
     ConnectionsKnownHosts,
@@ -391,6 +392,7 @@ pub fn settings_tab_sections(
         SettingsTab::Connections => vec![
             SettingsSectionId::ConnectionsDefaults,
             SettingsSectionId::ConnectionsIdleTimeout,
+            SettingsSectionId::ConnectionsRetention,
             SettingsSectionId::ConnectionsReconnect,
             SettingsSectionId::ConnectionsSshKeys,
             SettingsSectionId::ConnectionsKnownHosts,

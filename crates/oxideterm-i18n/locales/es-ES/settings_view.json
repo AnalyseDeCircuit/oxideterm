@@ -1187,13 +1187,20 @@
         "remove_failed": "No se pudieron eliminar los archivos de integración. Compruebe los permisos remotos.",
         "installation_incomplete": "La instalación de la integración de Shell no se completó. Compruebe su estado en Ajustes."
       },
+      "retention": {
+        "immediate": "Quitar al cerrar",
+        "label": "Conservar sesiones cerradas",
+        "hint": "Tiempo que una sesión cerrada permanece en la lista de sesiones activas.",
+        "never": "No quitar automáticamente"
+      },
       "idle_timeout": {
         "title": "Conexiones SSH en segundo plano",
         "description": "Configura cuándo se recuperan las conexiones SSH en segundo plano sin uso.",
         "label": "Recuperación por inactividad",
+        "immediate": "Desconectar en cuanto esté inactiva",
         "5min": "5 minutos",
         "15min": "15 minutos",
-        "30min": "30 minutos (predeterminado)",
+        "30min": "30 minutos",
         "1hr": "1 hora",
         "never": "Nunca (mantener conexión)",
         "hint": "Las conexiones SSH en segundo plano sin terminales abiertos, sesiones SFTP ni redirecciones de puertos se recuperarán después de este periodo. Establece en «Nunca» para mantenerlas indefinidamente.",

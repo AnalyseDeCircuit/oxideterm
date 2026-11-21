@@ -36,11 +36,11 @@ pub use capability::{
 };
 pub use config::{AuthMethod, ProxyCommandConfig, ProxyHopConfig, SshConfig};
 pub use connection_registry::{
-    AcquiredSftpMeta, ConnectionConsumer, ConnectionInfo, ConnectionPoolConfig,
-    ConnectionPoolStats, ConnectionState, ConnectionTransportStatus, DedicatedConnectionLease,
-    HEARTBEAT_FAIL_THRESHOLD, HEARTBEAT_INTERVAL, KeepaliveProbeResult, ProbeConnectionStatus,
-    RemoteEnvInfo, SftpSessionState, SshConnectionHandle, SshConnectionRegistry,
-    WS_BRIDGE_HEARTBEAT_INTERVAL, WS_BRIDGE_HEARTBEAT_TIMEOUT,
+    AcquiredSftpMeta, ConnectionConsumer, ConnectionConsumerLease, ConnectionInfo,
+    ConnectionPoolConfig, ConnectionPoolStats, ConnectionState, ConnectionTransportStatus,
+    DedicatedConnectionLease, HEARTBEAT_FAIL_THRESHOLD, HEARTBEAT_INTERVAL, KeepaliveProbeResult,
+    ProbeConnectionStatus, RemoteEnvInfo, SftpSessionState, SshConnectionHandle,
+    SshConnectionRegistry, WS_BRIDGE_HEARTBEAT_INTERVAL, WS_BRIDGE_HEARTBEAT_TIMEOUT,
 };
 pub use connection_trace::{
     ConnectionChainProgress, ConnectionProgressReporter, ConnectionTraceEvent, ConnectionTraceMode,
@@ -77,7 +77,7 @@ pub use router::{
     NodeId, NodeMetadataSnapshot, NodeOrigin, NodeReadiness, NodeRouter, NodeRuntimeStore,
     NodeState, NodeStateEvent, NodeStateSnapshot, NodeTreeExpansion, NodeTreePersistenceNode,
     NodeTreePersistenceSnapshot, NodeTreeSnapshot, NodeTreeSnapshotNode, ResolvedConnection,
-    RouteError, SessionTreeSummary, TerminalEndpoint,
+    RouteError, RoutedSftpSession, SessionTreeSummary, TerminalEndpoint,
 };
 pub use session_tree_plan::{
     NativeSessionTreeConnectAction, NativeSessionTreeConnectChallenge,

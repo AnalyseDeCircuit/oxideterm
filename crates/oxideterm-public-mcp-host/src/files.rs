@@ -11,7 +11,7 @@ use sha2::{Digest, Sha256};
 
 use super::{
     PublicMcpBackground, PublicMcpFileSessionRecord, PublicMcpRuntimeHandles, finish_serialized,
-    node_lease_for_client, workspaces,
+    workspaces,
 };
 
 const FILE_SESSION_CAPACITY: usize = 128;
@@ -40,16 +40,20 @@ impl PublicMcpBackground {
         let PublicToolCall::FilesOpen(args) = &request.call else {
             return;
         };
-        let Some(node_lease) =
-            node_lease_for_client(&self.runtime_handles, &request.client_ref, &args.node_ref)
-        else {
-            request.finish(ToolEnvelope::failed("The node handle is unavailable"));
-            return;
-        };
         let file_session_ref = FileSessionRef::new();
         let consumer = ConnectionConsumer::Sftp(file_session_ref.to_string());
-        {
+        let node_id = {
             let mut handles = self.runtime_handles.lock();
+            let Some(node_id) = handles
+                .nodes
+                .get(&args.node_ref)
+                .filter(|node| node.client_ref == request.client_ref)
+                .map(|node| node.node_id.clone())
+            else {
+                drop(handles);
+                request.finish(ToolEnvelope::failed("The node handle is unavailable"));
+                return;
+            };
             let client_count = handles
                 .file_sessions
                 .values()
@@ -67,48 +71,45 @@ impl PublicMcpBackground {
                 file_session_ref.clone(),
                 PublicMcpFileSessionRecord {
                     client_ref: request.client_ref.clone(),
-                    node_id: node_lease.node_id.clone(),
+                    node_id: node_id.clone(),
                     root: None,
                     session: None,
-                    physical_connection_id: None,
-                    consumer: consumer.clone(),
+                    route: None,
                 },
             );
-        }
+            node_id
+        };
 
         let router = self.node_router.clone();
         let handles = self.runtime_handles.clone();
         let requested_root = args.root.clone().unwrap_or_else(|| ".".to_owned());
         let client_ref = request.client_ref.clone();
         let cancellation = request.cancellation_token();
-        let node_id = node_lease.node_id;
         let audit_context = request.audit_context.clone();
         self.forwarding_runtime.spawn(oxideterm_audit::AuditContext::scope_optional(audit_context, async move {
-            let resolved = tokio::select! {
+            let route = tokio::select! {
                 _ = cancellation.cancelled() => {
                     remove_file_session_reservation(&handles, &file_session_ref, &client_ref);
                     return;
                 }
-                result = router.acquire_connection_wait(
+                result = router.lease_connection_wait(
                     &node_id,
-                    consumer.clone(),
+                    consumer,
                     FILE_SESSION_ACQUIRE_TIMEOUT,
                 ) => result,
             };
-            let resolved = match resolved {
-                Ok(resolved) => resolved,
+            let route = match route {
+                Ok(route) => route,
                 Err(_) => {
                     remove_file_session_reservation(&handles, &file_session_ref, &client_ref);
                     request.finish(ToolEnvelope::failed("The SSH node is not ready for SFTP"));
                     return;
                 }
             };
-            let physical_connection_id = resolved.connection_id;
             let session = match router.acquire_sftp(&node_id).await {
                 Ok(session) => session,
                 Err(_) => {
                     remove_file_session_reservation(&handles, &file_session_ref, &client_ref);
-                    router.release_consumer(&physical_connection_id, &consumer);
                     request.finish(ToolEnvelope::failed("The SFTP subsystem is unavailable"));
                     return;
                 }
@@ -120,7 +121,6 @@ impl PublicMcpBackground {
                     Err(_) => {
                         drop(session_guard);
                         remove_file_session_reservation(&handles, &file_session_ref, &client_ref);
-                        router.release_consumer(&physical_connection_id, &consumer);
                         request.finish(ToolEnvelope::failed("The SFTP root does not exist"));
                         return;
                     }
@@ -130,7 +130,6 @@ impl PublicMcpBackground {
                     _ => {
                         drop(session_guard);
                         remove_file_session_reservation(&handles, &file_session_ref, &client_ref);
-                        router.release_consumer(&physical_connection_id, &consumer);
                         request.finish(ToolEnvelope::failed("The SFTP root is not a directory"));
                         return;
                     }
@@ -138,11 +137,15 @@ impl PublicMcpBackground {
             };
             if cancellation.is_cancelled() {
                 remove_file_session_reservation(&handles, &file_session_ref, &client_ref);
-                router.release_consumer(&physical_connection_id, &consumer);
                 return;
             }
             let retained = {
                 let mut handles = handles.lock();
+                if router.connection_id_for_node(&node_id).as_deref() != Some(route.connection_id()) {
+                    handles.file_sessions.remove(&file_session_ref);
+                    request.finish(ToolEnvelope::failed("The SSH connection changed while opening SFTP"));
+                    return;
+                }
                 handles
                     .file_sessions
                     .get_mut(&file_session_ref)
@@ -150,12 +153,11 @@ impl PublicMcpBackground {
                     .map(|record| {
                         record.root = Some(root.clone());
                         record.session = Some(session);
-                        record.physical_connection_id = Some(physical_connection_id.clone());
+                        record.route = Some(Arc::new(route));
                     })
                     .is_some()
             };
             if !retained {
-                router.release_consumer(&physical_connection_id, &consumer);
                 request.finish(ToolEnvelope::failed(
                     "The SFTP grant was revoked while opening",
                 ));
@@ -195,10 +197,7 @@ impl PublicMcpBackground {
             workspace.revoke();
         }
         self.cancel_public_mcp_file_session_transfers(&args.file_session_ref);
-        if let Some(connection_id) = record.physical_connection_id {
-            self.node_router
-                .release_consumer(&connection_id, &record.consumer);
-        }
+        drop(record);
         finish_serialized(
             request,
             json!({ "closed": true, "physical_node_disconnected": false }),
@@ -595,13 +594,15 @@ pub(super) fn take_client_file_sessions(
         .collect()
 }
 
-pub(super) fn invalidate_for_disconnected_nodes(
+pub(super) fn take_disconnected_file_sessions(
     handles: &mut PublicMcpRuntimeHandles,
     disconnected: &[NodeId],
-) {
+) -> Vec<PublicMcpFileSessionRecord> {
     handles
         .file_sessions
-        .retain(|_, record| !disconnected.contains(&record.node_id));
+        .extract_if(|_, record| disconnected.contains(&record.node_id))
+        .map(|(_, record)| record)
+        .collect()
 }
 
 pub(super) async fn refresh_file_session(
@@ -617,53 +618,46 @@ pub(super) async fn refresh_file_session(
         .filter(|record| record.client_ref == *client_ref)
         .cloned()
         .ok_or("The SFTP handle is unavailable")?;
-    if record.root.is_none() || record.session.is_none() {
+    if record.root.is_none() {
         return Err("The SFTP handle is still opening");
     }
-    let resolved = router
-        .acquire_connection_wait(
-            &record.node_id,
-            record.consumer.clone(),
-            FILE_SESSION_ACQUIRE_TIMEOUT,
-        )
-        .await
-        .map_err(|_| "The SSH node is not ready for SFTP")?;
-    let physical_connection_id = resolved.connection_id;
-    let session = match router.acquire_sftp(&record.node_id).await {
-        Ok(session) => session,
-        Err(_) => {
-            if record.physical_connection_id.as_deref() != Some(&physical_connection_id) {
-                router.release_consumer(&physical_connection_id, &record.consumer);
-            }
-            return Err("The SFTP subsystem is unavailable");
+    let route = match record.route {
+        Some(route)
+            if router.connection_id_for_node(&record.node_id).as_deref()
+                == Some(route.connection_id()) =>
+        {
+            route
+        }
+        _ => {
+            // Concurrent refreshes after a reconnect can finish or be revoked independently.
+            Arc::new(
+                router
+                    .lease_connection_wait(
+                        &record.node_id,
+                        ConnectionConsumer::Sftp(FileSessionRef::new().to_string()),
+                        FILE_SESSION_ACQUIRE_TIMEOUT,
+                    )
+                    .await
+                    .map_err(|_| "The SSH node is not ready for SFTP")?,
+            )
         }
     };
-    let previous_connection_id = {
-        let mut handles = handles.lock();
-        let Some(live) = handles
-            .file_sessions
-            .get_mut(file_session_ref)
-            .filter(|live| live.client_ref == *client_ref)
-        else {
-            router.release_consumer(&physical_connection_id, &record.consumer);
-            return Err("The SFTP grant was revoked");
-        };
-        let previous = live
-            .physical_connection_id
-            .replace(physical_connection_id.clone());
-        live.session = Some(session);
-        previous.filter(|previous| previous != &physical_connection_id)
-    };
-    if let Some(previous_connection_id) = previous_connection_id {
-        router.release_consumer(&previous_connection_id, &record.consumer);
-    }
-    handles
-        .lock()
+    let session = router
+        .acquire_sftp(&record.node_id)
+        .await
+        .map_err(|_| "The SFTP subsystem is unavailable")?;
+    let mut handles = handles.lock();
+    let live = handles
         .file_sessions
-        .get(file_session_ref)
+        .get_mut(file_session_ref)
         .filter(|live| live.client_ref == *client_ref)
-        .cloned()
-        .ok_or("The SFTP grant was revoked")
+        .ok_or("The SFTP grant was revoked")?;
+    if router.connection_id_for_node(&record.node_id).as_deref() != Some(route.connection_id()) {
+        return Err("The SSH connection changed while opening SFTP");
+    }
+    live.session = Some(session);
+    live.route = Some(route);
+    Ok(live.clone())
 }
 
 fn remove_file_session_reservation(

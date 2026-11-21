@@ -452,6 +452,18 @@ impl PortDetectionViewState {
         connection_id: Option<String>,
         result: Result<PortDetectionSnapshot, String>,
     ) {
+        self.port_scan_pending = false;
+        match result {
+            Ok(snapshot) => self.apply_snapshot(connection_id, snapshot),
+            Err(_) => self.port_scan_error = None,
+        }
+    }
+
+    pub fn apply_snapshot(
+        &mut self,
+        connection_id: Option<String>,
+        snapshot: PortDetectionSnapshot,
+    ) {
         let state = self;
         if connection_id.is_some() && state.connection_id != connection_id {
             // Detection is connection-scoped. Reconnect must discard samples
@@ -462,39 +474,29 @@ impl PortDetectionViewState {
             state.has_scanned_ports = false;
             state.port_scan_error = None;
         }
-        state.port_scan_pending = false;
-        match result {
-            Ok(snapshot) => {
-                state.has_scanned_ports = snapshot.has_scanned;
-                state.detected_ports = snapshot.all_ports;
-                if !snapshot.new_ports.is_empty() {
-                    let existing = state
-                        .new_ports
-                        .iter()
-                        .map(|port| port.port)
-                        .collect::<std::collections::HashSet<_>>();
-                    state.new_ports.extend(
-                        snapshot
-                            .new_ports
-                            .into_iter()
-                            .filter(|port| !existing.contains(&port.port)),
-                    );
-                }
-                if !snapshot.closed_ports.is_empty() {
-                    let closed = snapshot
-                        .closed_ports
-                        .iter()
-                        .map(|port| port.port)
-                        .collect::<std::collections::HashSet<_>>();
-                    state.new_ports.retain(|port| !closed.contains(&port.port));
-                }
-                state.port_scan_error = None;
-            }
-            Err(_error) => {
-                // Sampling failures are retried while the surface is visible;
-                // they do not replace user-action errors in the form.
-                state.port_scan_error = None;
-            }
+        state.has_scanned_ports = snapshot.has_scanned;
+        state.detected_ports = snapshot.all_ports;
+        if !snapshot.new_ports.is_empty() {
+            let existing = state
+                .new_ports
+                .iter()
+                .map(|port| port.port)
+                .collect::<std::collections::HashSet<_>>();
+            state.new_ports.extend(
+                snapshot
+                    .new_ports
+                    .into_iter()
+                    .filter(|port| !existing.contains(&port.port)),
+            );
         }
+        if !snapshot.closed_ports.is_empty() {
+            let closed = snapshot
+                .closed_ports
+                .iter()
+                .map(|port| port.port)
+                .collect::<std::collections::HashSet<_>>();
+            state.new_ports.retain(|port| !closed.contains(&port.port));
+        }
+        state.port_scan_error = None;
     }
 }

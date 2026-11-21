@@ -189,6 +189,15 @@ impl NodeRouter {
         self.runtime.drill_down(parent_id, config)
     }
 
+    pub fn expand_temporary_chain(
+        &self,
+        hops: Vec<SshConfig>,
+        target: SshConfig,
+    ) -> Result<NodeTreeExpansion, RouteError> {
+        self.runtime
+            .expand_preset_chain_internal(hops, target, |_| NodeOrigin::Direct)
+    }
+
     pub fn expand_manual_preset(
         &self,
         saved_connection_id: &str,
@@ -302,6 +311,31 @@ impl NodeRouter {
             .await
     }
 
+    pub async fn lease_connection_wait(
+        &self,
+        node_id: &NodeId,
+        consumer: ConnectionConsumer,
+        max_wait: Duration,
+    ) -> Result<crate::ConnectionConsumerLease, RouteError> {
+        self.require_shared_consumer_allowed(node_id, &consumer)?;
+        let resolved = self.resolve_connection_wait(node_id, max_wait).await?;
+        self.registry
+            .lease_consumer(&resolved.connection_id, consumer)
+            .ok_or_else(|| RouteError::NotConnected(node_id.0.clone()))
+    }
+
+    pub fn lease_connection_now(
+        &self,
+        node_id: &NodeId,
+        consumer: ConnectionConsumer,
+    ) -> Result<crate::ConnectionConsumerLease, RouteError> {
+        self.require_shared_consumer_allowed(node_id, &consumer)?;
+        let resolved = self.resolve_connection_now(node_id)?;
+        self.registry
+            .lease_consumer(&resolved.connection_id, consumer)
+            .ok_or_else(|| RouteError::NotConnected(node_id.0.clone()))
+    }
+
     pub async fn acquire_dedicated_connection(
         &self,
         node_id: &NodeId,
@@ -354,19 +388,37 @@ impl NodeRouter {
             .get(&connection_id)
             .ok_or_else(|| RouteError::NotConnected(node_id.0.clone()))?;
         let connection = connection_info_for_runtime(&handle);
-        let event = self
-            .runtime
+        self.bind_connection_snapshot(node_id, connection)
+    }
+
+    fn bind_connection_snapshot(
+        &self,
+        node_id: &NodeId,
+        connection: ConnectionInfo,
+    ) -> Result<NodeStateEvent, RouteError> {
+        let connection_id = &connection.connection_id;
+        let previous = self.runtime.connection_id_for_node(node_id);
+        self.runtime
             .bind_connection(node_id, connection_id.clone(), &connection)?;
+        if let Some(previous) = previous.filter(|id| id != connection_id) {
+            self.emitter.unbind_node(&previous, node_id);
+            self.registry.release(
+                &previous,
+                &ConnectionConsumer::NodeRouter(node_id.0.clone()),
+            );
+        }
         // Tauri registers connectionId -> nodeId when the runtime tree binds a
         // connection. Native keeps the same translation point so lower-level
         // connection events can be consumed as node events without consulting
         // terminal panes.
         self.emitter
             .register(connection_id.clone(), node_id.clone());
-        let event = self
-            .emitter
-            .emit_state_from_connection(&connection_id, &connection.state, "connection bound")
-            .unwrap_or(event);
+        let event = self.emitter.emit_node_state(
+            node_id,
+            readiness_for_connection(&connection),
+            &NodeEventEmitter::connection_reason(&connection.state, "connection bound".into()),
+            None,
+        );
         if let NodeStateEvent::ConnectionStateChanged {
             generation, state, ..
         } = &event
@@ -389,7 +441,11 @@ impl NodeRouter {
         if let Ok(event) = self.runtime.set_sftp_ready(node_id, false, None) {
             self.emitter.dispatch(&event);
         }
+        let previous = self.runtime.connection_id_for_node(node_id);
         let event = self.runtime.disconnect_node(node_id, reason)?;
+        if let Some(connection_id) = previous {
+            self.emitter.unbind_node(&connection_id, node_id);
+        }
         if let NodeStateEvent::ConnectionStateChanged {
             generation, state, ..
         } = &event
@@ -409,12 +465,17 @@ impl NodeRouter {
             .runtime
             .disconnect_node(node_id, "connection attempt preparation")?;
         if let Some(connection_id) = previous_connection_id {
-            self.emitter.unregister(&connection_id);
+            self.emitter.unbind_node(&connection_id, node_id);
         }
         Ok(())
     }
 
     pub fn remove_runtime_subtree(&self, node_id: &NodeId) -> Vec<NodeId> {
+        for id in self.runtime.subtree_postorder(node_id) {
+            if let Some(connection_id) = self.runtime.connection_id_for_node(&id) {
+                self.emitter.unbind_node(&connection_id, &id);
+            }
+        }
         self.runtime.remove_subtree(node_id)
     }
 
@@ -464,6 +525,34 @@ impl NodeRouter {
         self.runtime.connection_id_for_node(node_id)
     }
 
+    /// Keeps the exact transport alive while work crosses a queue or an async ownership boundary.
+    pub fn lease_connection_handoff(
+        &self,
+        connection_id: &str,
+    ) -> Option<crate::ConnectionConsumerLease> {
+        self.registry.lease_consumer(
+            connection_id,
+            ConnectionConsumer::NodeRouter(format!("handoff:{}", Uuid::new_v4())),
+        )
+    }
+
+    pub fn bind_established_connection(
+        &self,
+        node_id: &NodeId,
+        connection_id: &str,
+    ) -> Result<crate::ConnectionConsumerLease, RouteError> {
+        // An unbound attempt already prevents idle retirement. Take over before publishing the route.
+        let handoff = self
+            .lease_connection_handoff(connection_id)
+            .ok_or_else(|| RouteError::NotConnected(node_id.0.clone()))?;
+        let connection = connection_info_for_runtime(handoff.handle());
+        if readiness_for_connection(&connection) != NodeReadiness::Ready {
+            return Err(RouteError::NotConnected(node_id.0.clone()));
+        }
+        self.bind_connection_snapshot(node_id, connection)?;
+        Ok(handoff)
+    }
+
     pub fn bind_sftp_session(
         &self,
         node_id: &NodeId,
@@ -474,13 +563,23 @@ impl NodeRouter {
             .bind_sftp_session(node_id, session_id.into(), cwd)
     }
 
-    pub async fn acquire_sftp(
+    fn lease_sftp_connection(
         &self,
-        node_id: &NodeId,
-    ) -> Result<Arc<Mutex<SftpSession>>, RouteError> {
+        connection_id: &str,
+    ) -> Result<crate::ConnectionConsumerLease, RouteError> {
+        self.registry
+            .lease_consumer(
+                connection_id,
+                ConnectionConsumer::Sftp(Uuid::new_v4().to_string()),
+            )
+            .ok_or_else(|| RouteError::NotConnected(connection_id.into()))
+    }
+
+    pub async fn acquire_sftp(&self, node_id: &NodeId) -> Result<RoutedSftpSession, RouteError> {
         let resolved = self
             .resolve_connection_wait(node_id, Duration::from_secs(15))
             .await?;
+        let lease = self.lease_sftp_connection(&resolved.connection_id)?;
         let AcquiredSftpMeta {
             session,
             was_new,
@@ -510,7 +609,10 @@ impl NodeRouter {
             )?;
             self.emitter.dispatch(&owner_event);
         }
-        Ok(session)
+        Ok(RoutedSftpSession {
+            session,
+            _lease: Arc::new(lease),
+        })
     }
 
     /// Resolves the exact shared SFTP owner validated by an upper-layer
@@ -520,7 +622,7 @@ impl NodeRouter {
         node_id: &NodeId,
         expected_connection_id: &str,
         expected_generation: u64,
-    ) -> Result<Arc<Mutex<SftpSession>>, RouteError> {
+    ) -> Result<RoutedSftpSession, RouteError> {
         let resolved = self
             .resolve_connection_wait(node_id, Duration::from_secs(15))
             .await?;
@@ -529,10 +631,15 @@ impl NodeRouter {
                 "Shared SFTP owner changed".to_string(),
             ));
         }
+        let lease = self.lease_sftp_connection(&resolved.connection_id)?;
         resolved
             .handle
             .acquire_existing_sftp_generation(expected_generation)
             .await
+            .map(|session| RoutedSftpSession {
+                session,
+                _lease: Arc::new(lease),
+            })
             .ok_or_else(|| {
                 RouteError::CapabilityUnavailable("Shared SFTP owner changed".to_string())
             })
@@ -550,6 +657,7 @@ impl NodeRouter {
         let resolved = self
             .resolve_connection_wait(node_id, Duration::from_secs(15))
             .await?;
+        let lease = self.lease_sftp_connection(&resolved.connection_id)?;
         let connection_id = resolved.connection_id;
         let session = resolved
             .handle
@@ -558,7 +666,9 @@ impl NodeRouter {
             .map_err(|error| sftp_route_error("Transfer SFTP init failed", error))?;
         Ok(AcquiredTransferSftp {
             connection_id,
-            session: session.with_resolved_node_audit(request.as_ref()),
+            session: session
+                .with_resolved_node_audit(request.as_ref())
+                .with_connection_owner(Arc::new(lease)),
         })
     }
 
@@ -581,10 +691,11 @@ impl NodeRouter {
     pub async fn invalidate_and_reacquire_sftp(
         &self,
         node_id: &NodeId,
-    ) -> Result<Arc<Mutex<SftpSession>>, RouteError> {
+    ) -> Result<RoutedSftpSession, RouteError> {
         let resolved = self
             .resolve_connection_wait(node_id, Duration::from_secs(15))
             .await?;
+        let lease = self.lease_sftp_connection(&resolved.connection_id)?;
         let had_sftp = resolved.handle.invalidate_sftp().await;
         if had_sftp {
             let _ = self
@@ -625,7 +736,10 @@ impl NodeRouter {
             true,
         )?;
         self.emitter.dispatch(&owner_event);
-        Ok(session)
+        Ok(RoutedSftpSession {
+            session,
+            _lease: Arc::new(lease),
+        })
     }
 
     pub fn node_state(&self, node_id: &NodeId) -> Result<NodeStateSnapshot, RouteError> {
@@ -680,13 +794,14 @@ impl NodeRouter {
             .get(&connection.connection_id)
             .map(|handle| connection_info_for_runtime(&handle))
             .unwrap_or_else(|| connection.clone());
-        let event = self
-            .runtime
+        self.runtime
             .update_connection_state(node_id, &connection, reason.clone())?;
-        let event = self
-            .emitter
-            .emit_state_from_connection(&connection.connection_id, &connection.state, reason)
-            .unwrap_or(event);
+        let event = self.emitter.emit_node_state(
+            node_id,
+            readiness_for_connection(&connection),
+            &NodeEventEmitter::connection_reason(&connection.state, reason),
+            None,
+        );
         if let NodeStateEvent::ConnectionStateChanged {
             generation, state, ..
         } = &event
@@ -793,9 +908,7 @@ impl NodeRouter {
                                     ConnectionTransportStatus::Missing => "transport is missing",
                                     ConnectionTransportStatus::Open => unreachable!(),
                                 };
-                                let _ = self
-                                    .registry
-                                    .mark_state(&connection_id, ConnectionState::LinkDown);
+                                self.registry.mark_link_down_cascade(&connection_id);
                                 return Err(RouteError::NotConnected(format!(
                                     "Connection {connection_id} is stale: {detail}"
                                 )));
@@ -879,12 +992,10 @@ impl NodeRouter {
         connection_id: &str,
         handle: &SshConnectionHandle,
     ) -> Result<(), RouteError> {
-        if handle.has_physical() {
+        if handle.transport_status_now() == ConnectionTransportStatus::Open {
             return Ok(());
         }
-        let _ = self
-            .registry
-            .mark_state(connection_id, ConnectionState::LinkDown);
+        self.registry.mark_link_down_cascade(connection_id);
         Err(RouteError::NotConnected(format!(
             "Connection {connection_id} for node {} has no active transport",
             node_id.0

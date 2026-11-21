@@ -7,11 +7,14 @@ fn connection_info_for_runtime(handle: &SshConnectionHandle) -> ConnectionInfo {
     if matches!(
         connection.state,
         ConnectionState::Active | ConnectionState::Idle
-    ) && !handle.has_physical()
-    {
-        // Registry state alone cannot make a node usable without a physical transport.
-        connection.state =
-            ConnectionState::Error("registry connection has no physical SSH transport".to_string());
+    ) {
+        connection.state = match handle.transport_status_now() {
+            ConnectionTransportStatus::Open => connection.state,
+            ConnectionTransportStatus::Closed => ConnectionState::LinkDown,
+            ConnectionTransportStatus::Missing => ConnectionState::Error(
+                "registry connection has no physical SSH transport".to_string(),
+            ),
+        };
     }
     connection
 }

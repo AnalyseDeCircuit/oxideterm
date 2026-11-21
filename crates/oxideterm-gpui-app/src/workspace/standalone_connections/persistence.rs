@@ -459,6 +459,7 @@ impl WorkspaceApp {
         };
         self.open_new_connection_form(window, cx);
         self.update_connection_form_state(cx, |state| state.form = Some(form));
+        self.sync_session_retention(cx);
         cx.notify();
         true
     }

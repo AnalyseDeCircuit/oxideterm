@@ -87,22 +87,49 @@ fn saved_node_route_matches_endpoints(
         )
 }
 
+fn saved_node_can_refresh_credentials(node_router: &NodeRouter, node_id: &NodeId) -> bool {
+    node_router.node_state(node_id).is_ok_and(|node| {
+        matches!(
+            node.state.readiness,
+            NodeReadiness::Disconnected | NodeReadiness::Error
+        )
+    })
+}
+
+fn copy_host_key_policy(config: &mut SshConfig, requested: &SshConfig) {
+    config.strict_host_key_checking = requested.strict_host_key_checking;
+    config.trust_host_key = requested.trust_host_key;
+    config
+        .expected_host_key_fingerprint
+        .clone_from(&requested.expected_host_key_fingerprint);
+    config
+        .host_key_replacement
+        .clone_from(&requested.host_key_replacement);
+}
+
+fn saved_node_matches_transport_policy(
+    node_router: &NodeRouter,
+    node_id: &NodeId,
+    requested: &SshConfig,
+) -> bool {
+    let Some(mut node) = node_router.node_runtime_snapshot(node_id) else {
+        return false;
+    };
+    if saved_node_can_refresh_credentials(node_router, node_id) {
+        // This logical node will run a fresh handshake under the user's current trust policy.
+        copy_host_key_policy(&mut node.config, requested);
+    }
+    node.config.connection_key() == requested.connection_key()
+}
+
 fn saved_node_route_matches_config(
     node_router: &NodeRouter,
     node_id: &NodeId,
     requested_config: &SshConfig,
 ) -> bool {
-    let Some(runtime_config) = node_router
-        .node_runtime_snapshot(node_id)
-        .map(|snapshot| snapshot.config)
-    else {
-        return false;
-    };
-    // A changed negotiation policy needs a new physical connection while the
-    // old node remains available to its existing terminal and tool consumers.
     let mut requested_target = requested_config.clone();
     let hops = requested_target.proxy_chain.take().unwrap_or_default();
-    if runtime_config.connection_key() != requested_target.connection_key() {
+    if !saved_node_matches_transport_policy(node_router, node_id, &requested_target) {
         return false;
     }
     let Ok(path) = node_router.path_to_node(node_id) else {
@@ -112,10 +139,11 @@ fn saved_node_route_matches_config(
     // Compare each hop's policy as well as the route's endpoint identities.
     if path.len() != hops.len() + 1
         || !path.iter().zip(hops).all(|(id, hop)| {
-            node_router.node_runtime_snapshot(id).is_some_and(|node| {
-                node.config.connection_key()
-                    == ssh_config_from_proxy_hop(hop, requested_config).connection_key()
-            })
+            saved_node_matches_transport_policy(
+                node_router,
+                id,
+                &ssh_config_from_proxy_hop(hop, requested_config),
+            )
         })
     {
         return false;
@@ -215,30 +243,39 @@ fn updated_saved_node_config_for_connect(
     node_id: &NodeId,
     accepted_config: &SshConfig,
 ) -> Option<SshConfig> {
+    if let Some(hops) = accepted_config
+        .proxy_chain
+        .as_ref()
+        .filter(|hops| !hops.is_empty())
+    {
+        let path = node_router.path_to_node(node_id).ok()?;
+        if path.len() != hops.len() + 1 {
+            return None;
+        }
+        for (id, hop) in path.iter().zip(hops) {
+            refresh_saved_node_credentials(
+                node_router,
+                id,
+                &ssh_config_from_proxy_hop(hop.clone(), accepted_config),
+            )?;
+        }
+    }
+    refresh_saved_node_credentials(node_router, node_id, accepted_config)
+}
+
+fn refresh_saved_node_credentials(
+    node_router: &NodeRouter,
+    node_id: &NodeId,
+    requested: &SshConfig,
+) -> Option<SshConfig> {
     let runtime_snapshot = node_router.node_runtime_snapshot(node_id)?;
     let mut config = runtime_snapshot.config;
-    let connection_in_use = node_router.node_state(node_id).is_ok_and(|snapshot| {
-        matches!(
-            snapshot.state.readiness,
-            NodeReadiness::Ready | NodeReadiness::Connecting
-        )
-    });
-    if !connection_in_use {
-        // Restored nodes own placeholder auth until the user supplies credentials.
-        // Refresh that owner before the transport clones its zeroizing config.
-        config.auth = accepted_config.auth.clone();
-    }
-    let accepted_host_key = accepted_config
-        .trust_host_key
-        .zip(accepted_config.expected_host_key_fingerprint.as_ref());
-    if let Some((trust_host_key, fingerprint)) = accepted_host_key {
-        config.strict_host_key_checking = true;
-        config.trust_host_key = Some(trust_host_key);
-        config.expected_host_key_fingerprint = Some(fingerprint.clone());
-    }
-    if connection_in_use && accepted_host_key.is_none() {
+    if !saved_node_can_refresh_credentials(node_router, node_id) {
         return Some(config);
     }
+    // An offline hop owns its own credentials; refresh them before the worker clones its config.
+    config.auth = requested.auth.clone();
+    copy_host_key_policy(&mut config, requested);
     let action_config = config.clone();
     node_router.upsert_node_with_origin(node_id.clone(), config, runtime_snapshot.origin);
     Some(action_config)
@@ -293,9 +330,8 @@ fn reusable_direct_root_node_for_saved_config(
                 .saved_connection_id()
                 .is_none_or(|owner| owner == saved_connection_id)
         });
-        let physical_policy_matches = node_router
-            .node_runtime_snapshot(&node_id)
-            .is_some_and(|snapshot| snapshot.config.connection_key() == config.connection_key());
+        let physical_policy_matches =
+            saved_node_matches_transport_policy(node_router, &node_id, config);
         (endpoint_matches && owner_matches && physical_policy_matches).then_some(node_id)
     })
 }
@@ -992,7 +1028,7 @@ impl WorkspaceApp {
             // with an embedded proxy_chain. It expands each hop into the
             // SessionTree and then connects the target through its ancestors.
             let expansion =
-                self.expand_saved_connection_tree(&saved_connection_id, config, title.clone())?;
+                self.expand_ssh_connection_tree(Some(&saved_connection_id), config, title.clone())?;
             let target_config = self
                 .node_router
                 .node_runtime_snapshot(&expansion.target_node_id)
@@ -1427,9 +1463,9 @@ impl WorkspaceApp {
         Ok(())
     }
 
-    pub(in crate::workspace) fn expand_saved_connection_tree(
+    pub(in crate::workspace) fn expand_ssh_connection_tree(
         &mut self,
-        saved_connection_id: &str,
+        saved_connection_id: Option<&str>,
         mut config: SshConfig,
         target_title: String,
     ) -> Result<NodeTreeExpansion> {
@@ -1439,10 +1475,11 @@ impl WorkspaceApp {
             .into_iter()
             .map(|hop| ssh_config_from_proxy_hop(hop, &config))
             .collect::<Vec<_>>();
-        let expansion = self
-            .node_router
-            .expand_manual_preset(saved_connection_id, hops, config)?;
-        self.register_expanded_tree_nodes(saved_connection_id, &expansion, target_title, true);
+        let expansion = match saved_connection_id {
+            Some(id) => self.node_router.expand_manual_preset(id, hops, config)?,
+            None => self.node_router.expand_temporary_chain(hops, config)?,
+        };
+        self.register_expanded_tree_nodes(saved_connection_id, &expansion, target_title);
         self.persist_session_tree_snapshot();
         Ok(expansion)
     }
@@ -1466,7 +1503,7 @@ impl WorkspaceApp {
             hops,
             config,
         )?;
-        self.register_expanded_tree_nodes(saved_connection_id, &expansion, target_title, false);
+        self.register_expanded_tree_nodes(None, &expansion, target_title);
         self.expanded_ssh_nodes.insert(parent_node_id);
         for node_id in &expansion.path_node_ids {
             self.expanded_ssh_nodes.insert(node_id.clone());
@@ -1480,10 +1517,9 @@ impl WorkspaceApp {
 
     fn register_expanded_tree_nodes(
         &mut self,
-        saved_connection_id: &str,
+        index_saved_target: Option<&str>,
         expansion: &NodeTreeExpansion,
         target_title: String,
-        update_saved_node_index: bool,
     ) {
         for node_id in &expansion.path_node_ids {
             let Some(snapshot) = self.node_router.node_metadata(node_id) else {
@@ -1518,7 +1554,7 @@ impl WorkspaceApp {
                 },
             );
         }
-        if update_saved_node_index {
+        if let Some(saved_connection_id) = index_saved_target {
             self.saved_ssh_nodes.insert(
                 saved_connection_id.to_string(),
                 expansion.target_node_id.clone(),
@@ -1597,6 +1633,13 @@ impl WorkspaceApp {
             .insert(node_id.clone(), preferences.command_history.clone());
         preference_overrides.apply_to(&mut preferences);
         let consumer = ConnectionConsumer::Terminal(session_id.0.to_string());
+        let route_lease = self
+            .ssh_registry
+            .lease_consumer(
+                &connection_id,
+                ConnectionConsumer::NodeRouter(format!("pane:{}", uuid::Uuid::new_v4())),
+            )
+            .ok_or_else(|| anyhow::anyhow!("SSH terminal route is no longer connected"))?;
         let session_config = if dedicated_new_terminal_connection {
             // This zeroizing, secret-bearing snapshot moves directly into the
             // terminal task and is never copied into WorkspaceSshNode UI state.
@@ -1631,6 +1674,7 @@ impl WorkspaceApp {
                 .with_x11_forwarding_override(node_x11_forwarding)
                 .with_registry(self.ssh_registry.clone(), consumer)
         }
+        .with_route_lease(route_lease)
         // Opening another terminal never replays a post-connect command unless
         // the caller explicitly supplies one.
         .with_post_connect_command(post_connect_command)
@@ -2318,13 +2362,18 @@ mod create_tests {
             let mut entered =
                 SshConfig::password("target.example.com", 22, "ops", "entered-test-secret");
             if accept_new_host_key {
+                entered.strict_host_key_checking = true;
                 entered.trust_host_key = Some(true);
                 entered.expected_host_key_fingerprint =
                     Some("SHA256:accepted-test-key".to_string());
             }
             assert!(saved_node_route_matches_config(&router, &node_id, &entered));
-            let launched = updated_saved_node_config_for_connect(&router, &node_id, &entered)
-                .unwrap_or_else(|| router.node_runtime_snapshot(&node_id).unwrap().config);
+            let launched =
+                updated_saved_node_config_for_connect(&router, &node_id, &entered).unwrap();
+            assert_eq!(
+                launched.expected_host_key_fingerprint.as_deref(),
+                accept_new_host_key.then_some("SHA256:accepted-test-key")
+            );
             assert_eq!(
                 launched.auth,
                 AuthMethod::password("entered-test-secret"),
@@ -2451,7 +2500,15 @@ mod create_tests {
                 .find(|saved| saved.id == node.id)
                 .unwrap();
             assert!(saved.config.is_none());
-            node.config = saved_origin_config(&store, &settings, &saved.origin).unwrap();
+            // Pre-role snapshots carry only the saved id and hop index.
+            let mut legacy = serde_json::to_value(&saved.origin).unwrap();
+            legacy.as_object_mut().unwrap().remove("is_target");
+            node.origin = serde_json::from_value(legacy).unwrap();
+            node.config = saved_origin_config(&store, &settings, &mut node.origin).unwrap();
+            assert_eq!(
+                node.origin.saved_target_id(),
+                (node.id == route.target_node_id).then_some("destination")
+            );
         }
         let restored = NodeRouter::new(SshConnectionRegistry::new(ConnectionPoolConfig::default()));
         restored.apply_tree_snapshot(snapshot).unwrap();
@@ -2492,11 +2549,16 @@ mod create_tests {
 
     #[test]
     fn saved_node_route_rejects_a_different_proxy_chain() {
-        let router = NodeRouter::new(SshConnectionRegistry::new(ConnectionPoolConfig::default()));
+        let registry = SshConnectionRegistry::default();
+        let router = NodeRouter::new(registry.clone());
+        let jump_config = SshConfig {
+            strict_host_key_checking: true,
+            ..SshConfig::password("old-jump.example.com", 22, "ops", "pw")
+        };
         let expansion = router
             .expand_manual_preset(
                 "saved-a",
-                vec![SshConfig::password("old-jump.example.com", 22, "ops", "pw")],
+                vec![jump_config],
                 SshConfig::password("target.example.com", 22, "ops", "pw"),
             )
             .unwrap();
@@ -2524,6 +2586,37 @@ mod create_tests {
             &expansion.target_node_id,
             &requested,
         ));
+        let hop_id = &expansion.path_node_ids[0];
+        let hop = &mut requested.proxy_chain.as_mut().unwrap()[0];
+        hop.trust_host_key = Some(false);
+        hop.expected_host_key_fingerprint = Some("SHA256:accepted-jump".into());
+        assert!(saved_node_route_matches_config(
+            &router,
+            &expansion.target_node_id,
+            &requested
+        ));
+        updated_saved_node_config_for_connect(&router, &expansion.target_node_id, &requested)
+            .unwrap();
+        let approved = router.node_runtime_snapshot(hop_id).unwrap().config;
+        assert_eq!(
+            approved.expected_host_key_fingerprint.as_deref(),
+            Some("SHA256:accepted-jump")
+        );
+        let active = registry.acquire(approved, ConnectionConsumer::NodeRouter(hop_id.0.clone()));
+        active.set_physical(Arc::new(()));
+        registry.mark_state(active.connection_id(), ConnectionState::Active);
+        router
+            .bind_connection(hop_id, active.connection_id())
+            .unwrap();
+        requested.proxy_chain.as_mut().unwrap()[0].expected_host_key_fingerprint =
+            Some("SHA256:different-jump".into());
+        assert!(!saved_node_route_matches_config(
+            &router,
+            &expansion.target_node_id,
+            &requested
+        ));
+        requested.proxy_chain.as_mut().unwrap()[0].expected_host_key_fingerprint =
+            Some("SHA256:accepted-jump".into());
         requested.proxy_chain.as_mut().unwrap()[0].legacy_ssh_compatibility = true;
         assert!(!saved_node_route_matches_config(
             &router,

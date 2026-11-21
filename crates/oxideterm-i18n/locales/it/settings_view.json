@@ -1187,13 +1187,20 @@
         "remove_failed": "Impossibile rimuovere i file di integrazione. Controllare i permessi remoti.",
         "installation_incomplete": "L’installazione dell’integrazione Shell non è stata completata. Controllarne lo stato nelle impostazioni."
       },
+      "retention": {
+        "immediate": "Rimuovi alla chiusura",
+        "label": "Conservazione delle sessioni chiuse",
+        "hint": "Per quanto tempo una sessione chiusa rimane nella lista delle sessioni attive.",
+        "never": "Non rimuovere mai automaticamente"
+      },
       "idle_timeout": {
         "title": "Connessioni SSH in background",
         "description": "Configura quando recuperare le connessioni SSH in background non usate.",
         "label": "Recupero inattività",
+        "immediate": "Disconnetti appena inattiva",
         "5min": "5 minuti",
         "15min": "15 minuti",
-        "30min": "30 minuti (predefinito)",
+        "30min": "30 minuti",
         "1hr": "1 ora",
         "never": "Mai (mantieni connessione)",
         "hint": "Le connessioni SSH in background senza terminali aperti, sessioni SFTP o port forwarding verranno recuperate dopo questo periodo. Imposta su «Mai» per mantenerle a tempo indeterminato.",

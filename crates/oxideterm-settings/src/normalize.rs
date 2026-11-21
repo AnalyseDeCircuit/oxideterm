@@ -816,6 +816,12 @@ pub fn sanitize_settings_value(raw: Value) -> Result<SanitizedSettings> {
         ("appearance.borderRadius", 6, 0, 16),
         ("appearance.uiFontSize", DEFAULT_UI_FONT_SIZE, 11, 20),
         ("connectionDefaults.port", 22, 1, 65_535),
+        (
+            "sidebarUI.closedSessionRetentionSecs",
+            NO_TIMEOUT_SECS,
+            NO_TIMEOUT_SECS,
+            86_400,
+        ),
         ("sidebarUI.width", 300, 200, 600),
         ("sidebarUI.aiSidebarWidth", 340, 280, 500),
         (
@@ -830,7 +836,12 @@ pub fn sanitize_settings_value(raw: Value) -> Result<SanitizedSettings> {
         ("reconnect.maxAttempts", 5, 1, 20),
         ("reconnect.baseDelayMs", 1000, 500, 10_000),
         ("reconnect.maxDelayMs", 15_000, 5_000, 60_000),
-        ("connectionPool.idleTimeoutSecs", 1800, 0, 86_400),
+        (
+            "connectionPool.idleTimeoutSecs",
+            1800,
+            NO_TIMEOUT_SECS,
+            86_400,
+        ),
         (
             "ai.toolUse.maxRounds",
             DEFAULT_AI_TOOL_MAX_ROUNDS,
