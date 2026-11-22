@@ -2337,7 +2337,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn combined_terminal_tab_restores_remaining_title_and_clean_detached_title(
+    fn combined_terminal_tab_restores_titles_and_ssh_target_after_detach(
         cx: &mut gpui::TestAppContext,
     ) {
         let Some((workspace, cx)) = detach_workspace_fixture(cx) else {
@@ -2449,6 +2449,17 @@ mod tests {
                 surviving.root_pane,
                 Some(PaneNode::leaf(dero_pane, dero_session))
             );
+        });
+
+        cx.update(|window, cx| {
+            workspace.update(cx, |workspace, cx| {
+                workspace.set_active_tab(combined_id, window, cx);
+                assert_eq!(
+                    workspace.active_ssh_node_id,
+                    Some(NodeId::new("dero-node")),
+                    "switching to the surviving SSH tab must select its host"
+                );
+            });
         });
 
         // Re-combining and closing one pane must also restore the surviving tab.

@@ -348,37 +348,26 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        self.active_ssh_node_id = None;
-        match self.active_content_tab(cx).map(|tab| tab.kind.clone()) {
-            Some(TabKind::Sftp) => {
-                self.active_ssh_node_id = self
-                    .active_content_tab_id(cx)
-                    .and_then(|id| self.sftp_tab_nodes.get(&id).cloned());
-            }
-            Some(TabKind::Ide) => {
-                self.active_ssh_node_id = self
-                    .active_content_tab_id(cx)
-                    .and_then(|id| self.ide_workspace.read(cx).node_for_tab(id))
-                    .cloned();
-            }
-            Some(TabKind::Forwards) => {
-                self.active_ssh_node_id = self
-                    .active_content_tab_id(cx)
-                    .and_then(|id| self.forwarding.read(cx).node_for_tab(id));
-            }
-            // Workspace shells and plain terminal tabs re-derive ownership
-            // from the active terminal session; standalone SFTP bindings own
-            // no SSH node, so their arm falls through to the empty default.
-            None | Some(TabKind::Workspace) => {
-                if let Some(session_id) = self.active_terminal_session_id(cx) {
-                    self.active_ssh_node_id = self
-                        .workspace_runtime
+        self.active_ssh_node_id = match self.active_content_tab(cx).map(|tab| &tab.kind) {
+            Some(TabKind::Sftp) => self
+                .active_content_tab_id(cx)
+                .and_then(|id| self.sftp_tab_nodes.get(&id).cloned()),
+            Some(TabKind::Ide) => self
+                .active_content_tab_id(cx)
+                .and_then(|id| self.ide_workspace.read(cx).node_for_tab(id))
+                .cloned(),
+            Some(TabKind::Forwards) => self
+                .active_content_tab_id(cx)
+                .and_then(|id| self.forwarding.read(cx).node_for_tab(id)),
+            Some(kind) if is_terminal_tab_kind(kind) => {
+                self.active_terminal_session_id(cx).and_then(|session_id| {
+                    self.workspace_runtime
                         .read(cx)
-                        .ssh_terminal_node_id(session_id);
-                }
+                        .ssh_terminal_node_id(session_id)
+                })
             }
-            _ => {}
-        }
+            _ => None,
+        };
         if let Some(node_id) = self.active_ssh_node_id.as_ref() {
             self.expanded_ssh_nodes.insert(node_id.clone());
         }
