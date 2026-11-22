@@ -91,7 +91,6 @@
       "packages": "Paquets"
     },
     "tooltips": {
-      "select_sessions": "Sélectionner les nœuds de session",
       "switch_to_light": "Passer au thème clair",
       "switch_to_dark": "Passer au thème sombre",
       "settings": "Paramètres",
@@ -105,11 +104,11 @@
       "sort": "Trier",
       "lock_app": "Verrouiller OxideTerm",
       "setup_app_lock": "Configurer le verrouillage",
-      "collapse": "Réduire",
-      "select_connections": "Sélectionner des connexions"
+      "collapse": "Réduire"
     },
     "active_sessions": "Sessions actives",
-    "active_session_count": "Sessions actives : {{count}}",
+    "session_removed_count": "Supprimées : {{count}}",
+    "session_removed_count_skipped": "Supprimées : {{removed}} · Ignorées : {{skipped}}",
     "no_sessions": "Aucune session",
     "add_new_connection": "Cliquez sur + pour ajouter une connexion",
     "host_connection": {
@@ -889,25 +888,10 @@
         "partial_support": "L'inspection des paquets est en lecture seule sur {{os}}.",
         "unknown_error": "Erreur inconnue lors de l'analyse des paquets."
       }
-    }
+    },
+    "session_footer_counts": "Actives : {{active}} · Sélectionnées : {{selected}}"
   },
   "sessions": {
-    "selection": {
-      "count": "Sélectionnées : {{count}} / {{total}}",
-      "select_all": "Tout sélectionner",
-      "remove": "Supprimer",
-      "exit": "Quitter"
-    },
-    "remove": {
-      "title": "Supprimer les nœuds de session",
-      "body": "Cela ferme {{count}} sessions actives.",
-      "warning": "Cette action est irréversible. L'historique de défilement de ces sessions sera perdu."
-    },
-    "menu": {
-      "remove_selected": "Supprimer la sélection ({{count}})",
-      "remove_others": "Supprimer les autres ({{count}})",
-      "remove_inactive": "Supprimer les inactives ({{count}})"
-    },
     "tree": {
       "terminal": "Terminal #{{number}}",
       "no_sessions": "Aucune session",
@@ -920,7 +904,8 @@
         "reconnect": "Reconnecter",
         "edit_and_reconnect": "Modifier & reconnecter",
         "remove_session": "Supprimer la session",
-        "cancel_reconnect": "Annuler reconnexion",
+        "remove_selected": "Supprimer la sélection",
+        "cancel_reconnect": "Annuler la reconnexion",
         "port_forwarding": "Transfert de ports",
         "drill_in": "Saut suivant",
         "saved_next_hop": "Saut suivant enregistré...",

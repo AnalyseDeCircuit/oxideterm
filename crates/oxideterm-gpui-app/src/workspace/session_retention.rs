@@ -188,8 +188,6 @@ impl WorkspaceApp {
             }
             self.saved_ssh_nodes
                 .retain(|_, id| !removed_nodes.contains(id));
-            self.session_node_selection
-                .set_selected_many(removed_nodes.iter().cloned(), false);
             self.persist_session_tree_snapshot();
         }
         if !standalone.is_empty() {
@@ -203,6 +201,9 @@ impl WorkspaceApp {
                     .forget(&TabAffinity::Standalone(id.clone()));
             }
         }
+        // Retired records must not linger as sidebar selection targets; the
+        // prune reads the live row list, which no longer contains them.
+        self.prune_active_session_selection(cx);
         let removed_scope = match self.tab_host.read(cx).scope() {
             TabScope::Affinity(TabAffinity::Ssh(id)) => removed_nodes.contains(id),
             TabScope::Affinity(TabAffinity::Standalone(id)) => standalone.contains(id),

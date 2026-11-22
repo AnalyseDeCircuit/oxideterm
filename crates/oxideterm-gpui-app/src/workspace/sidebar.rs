@@ -11,10 +11,8 @@ const SESSION_TREE_CHILD_ICON_SIZE: f32 = 12.0;
 // first interactive surface does not visually merge with workspace chrome.
 pub(super) const PRIMARY_SIDEBAR_CONTENT_TOP_INSET: f32 = 4.0;
 pub(super) const SESSION_ROW_SELECTED_BG_ALPHA: u32 = 0x1a;
-// Fixed leading gutter for the Active Sessions multi-select column. Keeping one
-// width for selectable and non-selectable rows holds every title on the same
-// text baseline while the mode is open.
-pub(super) const SESSION_SELECTION_SLOT_WIDTH: f32 = 16.0;
+pub(super) const ACTIVE_SESSION_SELECTION_MENU_WIDTH: f32 = 220.0;
+pub(super) const ACTIVE_SESSION_SELECTION_MENU_HEIGHT: f32 = 36.0;
 // Tauri EventLogPanel rows use `min-h-[24px]` with `px-3 py-1`; keep the
 // native estimate next to the shared virtual-list call so scroll-to-index and
 // sticky-bottom behavior stay browser-like.
@@ -195,10 +193,10 @@ mod ai_model_picker;
 mod ai_transcript;
 mod helpers;
 mod region;
-mod session_selection;
-pub(in crate::workspace) use session_selection::SessionNodeSelection;
 mod sessions;
-pub(in crate::workspace) use sessions::SessionRowMenu;
+pub(in crate::workspace) use sessions::{
+    ActiveSessionRemovalOutcome, ActiveSessionSelectionTarget,
+};
 mod state;
 mod titlebar;
 mod tools;

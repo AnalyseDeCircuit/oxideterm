@@ -358,9 +358,6 @@ impl CatalogView {
             selection_target.is_some(),
             event.modifiers.control,
             event.modifiers.shift,
-            // The checkbox mode belongs to the sidebar list; the tab keeps its
-            // original open/select contract.
-            false,
         ) {
             SessionManagerItemPointerAction::SelectReplace => {
                 if let Some(target) = selection_target {
@@ -436,10 +433,11 @@ impl CatalogView {
                     .items_center()
                     .justify_center()
                     .bg(rgba((theme.accent << 8) | 0x1a))
-                    .child(
-                        item.icon()
-                            .render(MANAGER_RECENT_ICON_GLYPH_SIZE, rgb(theme.accent)),
-                    ),
+                    .child(item.icon().render(
+                        MANAGER_RECENT_ICON_GLYPH_SIZE,
+                        rgb(theme.accent),
+                        true,
+                    )),
             )
             .child(
                 div()
@@ -1287,16 +1285,7 @@ impl CatalogView {
         let theme = self.tokens.ui;
         let open_target = item.open_target();
         let selection_target = item.selection_target();
-        let selectable = selection_target.is_some();
         let last_used = item.last_used();
-        // The checkbox mode exists only in the sidebar list; the tab keeps its
-        // original click contract.
-        let selection_mode = sidebar && self.session_manager.read(cx).selection_mode;
-        let checkbox_id = format!(
-            "session-manager-select-{}-{}",
-            if sidebar { "sidebar" } else { "main" },
-            item.id()
-        );
         let subtitle = if matches!(item, SessionManagerDisplayItem::SshConfig(_)) {
             format!(
                 "{} · {}",
@@ -1404,12 +1393,8 @@ impl CatalogView {
                 cx.listener(move |this, event: &MouseDownEvent, window, cx| {
                     // Double-click opens immediately on press; single-click
                     // selection waits for release so the drag payload above
-                    // stays intact (see the payload comment). Selection mode
-                    // never opens, so a double click there stays a checkbox
-                    // gesture.
-                    if event.click_count == 2
-                        && !(sidebar && this.session_manager.read(cx).selection_mode)
-                    {
+                    // stays intact (see the payload comment).
+                    if event.click_count == 2 {
                         this.open_session_manager_target_with_sftp(
                             open_target.clone(),
                             event.modifiers.control,
@@ -1432,7 +1417,6 @@ impl CatalogView {
                         selection_target.is_some(),
                         click.down.modifiers.control,
                         click.down.modifiers.shift,
-                        sidebar && this.session_manager.read(cx).selection_mode,
                     ) {
                         SessionManagerItemPointerAction::SelectReplace => {
                             if let Some(target) = selection_target.clone() {
@@ -1468,19 +1452,6 @@ impl CatalogView {
                     }
                 }),
             )
-            .when(selection_mode && selectable, |row| {
-                // Purely visual: the row's click handler owns the toggle, so
-                // pressing the box cannot toggle twice.
-                row.child(
-                    checkbox(
-                        &self.tokens,
-                        checkbox_id.clone(),
-                        String::new(),
-                        is_selected,
-                    )
-                    .flex_none(),
-                )
-            })
             .child(if sidebar {
                 self.render_session_manager_item_icon_sized(
                     item,
@@ -1617,7 +1588,7 @@ impl CatalogView {
             .items_center()
             .justify_center()
             .bg(bg)
-            .child(item.icon().render(glyph_size, fg))
+            .child(item.icon().render(glyph_size, fg, true))
             .when(
                 matches!(item, SessionManagerDisplayItem::Connection(_)),
                 |icon| icon.border_1().border_color(rgba((text << 8) | 0x1a)),

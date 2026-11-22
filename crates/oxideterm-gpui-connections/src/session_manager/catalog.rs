@@ -381,22 +381,12 @@ pub enum SessionManagerItemPointerAction {
 /// Keeps card and list-row pointer behavior aligned across Session Manager layouts.
 /// Double-click always opens; a single click on a selectable row replaces the
 /// selection, Ctrl toggles it, and Shift extends from the anchor to this row.
-/// Inside the explicit selection mode a click only toggles, and the second
-/// click of a double click is ignored so it cannot undo the first one.
 pub fn session_manager_item_pointer_action(
     click_count: usize,
     selectable: bool,
     control: bool,
     shift: bool,
-    selection_mode: bool,
 ) -> SessionManagerItemPointerAction {
-    if selection_mode {
-        return match click_count {
-            1 if selectable && shift => SessionManagerItemPointerAction::SelectRange,
-            1 if selectable => SessionManagerItemPointerAction::SelectToggle,
-            _ => SessionManagerItemPointerAction::None,
-        };
-    }
     match click_count {
         2 => SessionManagerItemPointerAction::Open,
         1 if selectable && shift => SessionManagerItemPointerAction::SelectRange,

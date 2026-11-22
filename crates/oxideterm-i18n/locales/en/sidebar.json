@@ -91,7 +91,6 @@
       "packages": "Packages"
     },
     "tooltips": {
-      "select_sessions": "Select session nodes",
       "switch_to_light": "Switch to light theme",
       "switch_to_dark": "Switch to dark theme",
       "settings": "Settings",
@@ -105,11 +104,11 @@
       "sort": "Sort",
       "lock_app": "Lock OxideTerm",
       "setup_app_lock": "Set Up Application Lock",
-      "collapse": "Collapse",
-      "select_connections": "Select connections"
+      "collapse": "Collapse"
     },
     "active_sessions": "Active Sessions",
-    "active_session_count": "Active sessions: {{count}}",
+    "session_removed_count": "{{count}} removed",
+    "session_removed_count_skipped": "Removed {{removed}} · Skipped {{skipped}}",
     "no_sessions": "No Sessions",
     "add_new_connection": "Click + to add a new connection",
     "host_connection": {
@@ -889,25 +888,10 @@
         "partial_support": "Package inspection is read-only on {{os}}.",
         "unknown_error": "Unknown package scan error."
       }
-    }
+    },
+    "session_footer_counts": "Active: {{active}} · Selected: {{selected}}"
   },
   "sessions": {
-    "selection": {
-      "count": "Selected {{count}} / {{total}}",
-      "select_all": "Select all",
-      "remove": "Remove",
-      "exit": "Exit"
-    },
-    "remove": {
-      "title": "Remove Session Nodes",
-      "body": "This closes {{count}} active sessions.",
-      "warning": "This cannot be undone. Terminal scrollback for these sessions is discarded."
-    },
-    "menu": {
-      "remove_selected": "Remove selected ({{count}})",
-      "remove_others": "Remove others ({{count}})",
-      "remove_inactive": "Remove inactive ({{count}})"
-    },
     "tree": {
       "terminal": "Terminal #{{number}}",
       "no_sessions": "No Sessions",
@@ -921,6 +905,7 @@
         "reconnect": "Reconnect",
         "edit_and_reconnect": "Edit & Reconnect",
         "remove_session": "Remove Session",
+        "remove_selected": "Delete Selected",
         "cancel_reconnect": "Cancel Reconnect",
         "drill_in": "Drill In (Next Hop)",
         "saved_next_hop": "Use Saved Next Hop...",

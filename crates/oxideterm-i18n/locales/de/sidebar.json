@@ -91,7 +91,6 @@
       "packages": "Pakete"
     },
     "tooltips": {
-      "select_sessions": "Sitzungsknoten auswählen",
       "switch_to_light": "Zum hellen Design wechseln",
       "switch_to_dark": "Zum dunklen Design wechseln",
       "settings": "Einstellungen",
@@ -105,11 +104,11 @@
       "sort": "Sortieren",
       "lock_app": "OxideTerm sperren",
       "setup_app_lock": "Anwendungssperre einrichten",
-      "collapse": "Einklappen",
-      "select_connections": "Verbindungen auswählen"
+      "collapse": "Einklappen"
     },
     "active_sessions": "Aktive Sitzungen",
-    "active_session_count": "Aktive Sitzungen: {{count}}",
+    "session_removed_count": "{{count}} entfernt",
+    "session_removed_count_skipped": "Entfernt: {{removed}} · Übersprungen: {{skipped}}",
     "no_sessions": "Keine Sitzungen",
     "add_new_connection": "Klicken Sie + um eine neue Verbindung hinzuzufügen",
     "host_connection": {
@@ -889,25 +888,10 @@
         "partial_support": "Paketprüfung ist auf {{os}} nur lesend unterstützt.",
         "unknown_error": "Unbekannter Paket-Scan-Fehler."
       }
-    }
+    },
+    "session_footer_counts": "Aktive: {{active}} · Ausgewählt: {{selected}}"
   },
   "sessions": {
-    "selection": {
-      "count": "Ausgewählt: {{count}} / {{total}}",
-      "select_all": "Alle auswählen",
-      "remove": "Entfernen",
-      "exit": "Beenden"
-    },
-    "remove": {
-      "title": "Sitzungsknoten entfernen",
-      "body": "Dadurch werden {{count}} aktive Sitzungen geschlossen.",
-      "warning": "Dies kann nicht rückgängig gemacht werden. Der Scrollback dieser Sitzungen geht verloren."
-    },
-    "menu": {
-      "remove_selected": "Ausgewählte entfernen ({{count}})",
-      "remove_others": "Andere entfernen ({{count}})",
-      "remove_inactive": "Inaktive entfernen ({{count}})"
-    },
     "tree": {
       "terminal": "Terminal #{{number}}",
       "no_sessions": "Keine Sitzungen",
@@ -920,6 +904,7 @@
         "reconnect": "Erneut verbinden",
         "edit_and_reconnect": "Bearbeiten & verbinden",
         "remove_session": "Sitzung entfernen",
+        "remove_selected": "Auswahl entfernen",
         "cancel_reconnect": "Reconnect abbrechen",
         "port_forwarding": "Portweiterleitung",
         "drill_in": "Nächster Hop",

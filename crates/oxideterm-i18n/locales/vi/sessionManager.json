@@ -334,12 +334,6 @@
       "preset_aws_name": "Mẫu có sẵn - AWS",
       "apply_blocked_issues": "Hãy sửa các vấn đề đã liệt kê trước khi thêm",
       "templates_load_failed": "Không đọc được mẫu đã lưu"
-    },
-    "selection": {
-      "count": "Đã chọn {{count}} / {{total}}",
-      "select_all": "Chọn tất cả",
-      "delete": "Xóa",
-      "exit": "Thoát"
     }
   }
 }

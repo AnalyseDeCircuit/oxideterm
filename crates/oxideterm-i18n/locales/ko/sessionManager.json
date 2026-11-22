@@ -334,12 +334,6 @@
       "preset_aws_name": "프리셋 템플릿-aws",
       "apply_blocked_issues": "목록의 문제를 해결한 뒤 추가하세요",
       "templates_load_failed": "저장된 템플릿을 읽을 수 없습니다"
-    },
-    "selection": {
-      "count": "{{count}} / {{total}}개 선택됨",
-      "select_all": "모두 선택",
-      "delete": "삭제",
-      "exit": "종료"
     }
   }
 }

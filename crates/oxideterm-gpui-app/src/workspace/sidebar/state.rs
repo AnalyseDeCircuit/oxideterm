@@ -244,17 +244,6 @@ impl WorkspaceApp {
         let was_collapsed = self.sidebar_collapsed;
         let previous_panel = self.effective_sidebar_panel_section();
         self.active_sidebar_section = section;
-        if section != SidebarSection::Sessions {
-            // The selection toolbar belongs to the Active Sessions panel only.
-            self.exit_session_node_selection(cx);
-        }
-        if section != SidebarSection::Connections {
-            // Same rule for the session manager's checkbox mode: it only exists
-            // while its own list is on screen.
-            self.connections.session_manager.update(cx, |manager, cx| {
-                manager.exit_session_selection_mode(cx);
-            });
-        }
         let next_panel = self.effective_sidebar_panel_section();
         if !was_collapsed && previous_panel != next_panel && self.tokens.motion.enabled {
             self.sidebar_section_motion_generation =

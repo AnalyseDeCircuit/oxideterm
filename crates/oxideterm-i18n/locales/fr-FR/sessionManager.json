@@ -334,12 +334,6 @@
       "preset_aws_name": "Modèle prédéfini - AWS",
       "apply_blocked_issues": "Corrigez d'abord les problèmes listés",
       "templates_load_failed": "Impossible de lire les modèles enregistrés"
-    },
-    "selection": {
-      "count": "{{count}} / {{total}} sélectionnés",
-      "select_all": "Tout sélectionner",
-      "delete": "Supprimer",
-      "exit": "Quitter"
     }
   }
 }

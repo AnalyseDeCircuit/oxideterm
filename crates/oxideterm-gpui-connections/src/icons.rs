@@ -13,8 +13,13 @@ impl From<LucideIcon> for SessionIcon {
     }
 }
 
+/// Dimming applied to distro brand artwork when its row is unlit. The image
+/// renderer preserves brand colors, so the unlit state dims instead of
+/// recoloring the way Lucide glyphs do.
+pub const UNLIT_DISTRO_OPACITY: f32 = 0.35;
+
 impl SessionIcon {
-    pub fn render(self, size: f32, color: Rgba) -> AnyElement {
+    pub fn render(self, size: f32, color: Rgba, lit: bool) -> AnyElement {
         match self {
             Self::Lucide(icon) => gpui::svg()
                 .path(icon.path())
@@ -25,6 +30,7 @@ impl SessionIcon {
             Self::Distro(icon) => img(icon.path)
                 .size(px(size))
                 .object_fit(gpui::ObjectFit::Contain)
+                .opacity(if lit { 1.0 } else { UNLIT_DISTRO_OPACITY })
                 .into_any_element(),
         }
     }

@@ -91,7 +91,6 @@
       "packages": "Pacotes"
     },
     "tooltips": {
-      "select_sessions": "Selecionar nós de sessão",
       "switch_to_light": "Mudar para o tema claro",
       "switch_to_dark": "Mudar para o tema escuro",
       "settings": "Configurações",
@@ -105,11 +104,11 @@
       "sort": "Ordenar",
       "lock_app": "Bloquear OxideTerm",
       "setup_app_lock": "Configurar bloqueio",
-      "collapse": "Recolher",
-      "select_connections": "Selecionar conexões"
+      "collapse": "Recolher"
     },
     "active_sessions": "Sessões ativas",
-    "active_session_count": "Sessões ativas: {{count}}",
+    "session_removed_count": "Removidas: {{count}}",
+    "session_removed_count_skipped": "Removidas: {{removed}} · Ignoradas: {{skipped}}",
     "no_sessions": "Nenhuma sessão",
     "add_new_connection": "Clique em + para adicionar uma conexão",
     "host_connection": {
@@ -889,25 +888,10 @@
         "partial_support": "A inspeção de pacotes em {{os}} é somente leitura.",
         "unknown_error": "Erro desconhecido ao verificar pacotes."
       }
-    }
+    },
+    "session_footer_counts": "Ativas: {{active}} · Selecionadas: {{selected}}"
   },
   "sessions": {
-    "selection": {
-      "count": "Selecionadas: {{count}} / {{total}}",
-      "select_all": "Selecionar tudo",
-      "remove": "Remover",
-      "exit": "Sair"
-    },
-    "remove": {
-      "title": "Remover nós de sessão",
-      "body": "Isso fechará {{count}} sessões ativas.",
-      "warning": "Esta ação não pode ser desfeita. O histórico de rolagem dessas sessões será descartado."
-    },
-    "menu": {
-      "remove_selected": "Remover selecionadas ({{count}})",
-      "remove_others": "Remover outras ({{count}})",
-      "remove_inactive": "Remover inativas ({{count}})"
-    },
     "tree": {
       "terminal": "Terminal #{{number}}",
       "no_sessions": "Nenhuma sessão",
@@ -920,6 +904,7 @@
         "reconnect": "Reconectar",
         "edit_and_reconnect": "Editar e reconectar",
         "remove_session": "Remover sessão",
+        "remove_selected": "Remover seleção",
         "cancel_reconnect": "Cancelar reconexão",
         "port_forwarding": "Redirecionar portas",
         "drill_in": "Próximo salto",

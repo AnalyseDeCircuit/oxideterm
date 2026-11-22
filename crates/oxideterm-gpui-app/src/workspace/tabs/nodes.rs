@@ -2204,6 +2204,9 @@ mod session_retention_tests {
                 let config = SshConfig {
                     host: "sftp-retention.invalid".into(),
                     proxy_command: Some(oxideterm_ssh::ProxyCommandConfig::Unavailable),
+                    // The views start directory loads on Tokio. Reject those attempts
+                    // before they register a consumer; this test installs its own lease.
+                    pre_connect_command: Some("exit 1".into()),
                     ..Default::default()
                 };
                 let node = ws.materialize_ssh_root_node(config.clone(), "SFTP".into(), None);

@@ -519,36 +519,21 @@ impl WorkspaceApp {
                 ActiveSessionSidebarViewMode::Tree => LucideIcon::Folder,
                 ActiveSessionSidebarViewMode::Host => LucideIcon::Server,
             };
-            // Selection mode owns the header: five actions do not fit the 200px
-            // minimum sidebar width, and its search/sort/view/new commands are
-            // not usable while rows are being checked.
-            let selecting = self.session_node_selection.is_active();
-            let mut actions = div().flex().items_center();
-            if !selecting {
-                actions = actions
-                    .child(self.render_session_search_button(cx))
-                    .child(self.render_session_sort_button(cx));
-            }
-            if self.active_session_sidebar_view_mode == ActiveSessionSidebarViewMode::Tree {
-                actions = actions.child(self.render_sidebar_action(
-                    LucideIcon::ListChecks,
-                    SidebarActionKind::ToggleSessionNodeSelection,
+            let actions = div()
+                .flex()
+                .items_center()
+                .child(self.render_session_search_button(cx))
+                .child(self.render_session_sort_button(cx))
+                .child(self.render_sidebar_action(
+                    view_icon,
+                    SidebarActionKind::ToggleSessionView,
+                    cx,
+                ))
+                .child(self.render_sidebar_action(
+                    LucideIcon::Plus,
+                    SidebarActionKind::NewConnection,
                     cx,
                 ));
-            }
-            if !selecting {
-                actions = actions
-                    .child(self.render_sidebar_action(
-                        view_icon,
-                        SidebarActionKind::ToggleSessionView,
-                        cx,
-                    ))
-                    .child(self.render_sidebar_action(
-                        LucideIcon::Plus,
-                        SidebarActionKind::NewConnection,
-                        cx,
-                    ));
-            }
             header = header.child(if let Some(transition_gen) = transition_gen {
                 oxideterm_gpui_ui::motion::fade_in(
                     &self.tokens,
@@ -588,11 +573,6 @@ impl WorkspaceApp {
                         )),
                 )
                 .child(self.render_sidebar_action(
-                    LucideIcon::ListChecks,
-                    SidebarActionKind::ToggleSessionManagerSelection,
-                    cx,
-                ))
-                .child(self.render_sidebar_action(
                     LucideIcon::ExternalLink,
                     SidebarActionKind::OpenSessionManagerTab,
                     cx,
@@ -631,24 +611,13 @@ impl WorkspaceApp {
             SidebarActionKind::NewConnection => self.i18n.t("sidebar.tooltips.new_connection"),
             SidebarActionKind::OpenSessionManagerTab => self.i18n.t("sidebar.tooltips.open_in_tab"),
             SidebarActionKind::ToggleSessionSort => self.i18n.t("sidebar.tooltips.sort"),
-            SidebarActionKind::ToggleSessionNodeSelection => {
-                self.i18n.t("sidebar.tooltips.select_sessions")
-            }
-            SidebarActionKind::ToggleSessionManagerSelection => {
-                self.i18n.t("sidebar.tooltips.select_connections")
-            }
         };
 
         let host_view_active = action == SidebarActionKind::ToggleSessionView
             && self.active_session_sidebar_view_mode == ActiveSessionSidebarViewMode::Host;
         let sort_active = action == SidebarActionKind::ToggleSessionSort
             && self.connections.session_manager.read(cx).sidebar_sort_open;
-        let selection_active = action == SidebarActionKind::ToggleSessionNodeSelection
-            && self.session_node_selection.is_active();
-        let manager_selection_active = action == SidebarActionKind::ToggleSessionManagerSelection
-            && self.connections.session_manager.read(cx).selection_mode;
-        let active =
-            host_view_active || sort_active || selection_active || manager_selection_active;
+        let active = host_view_active || sort_active;
 
         div()
             .ml(px(2.0))
@@ -685,15 +654,6 @@ impl WorkspaceApp {
                         SidebarActionKind::ToggleSessionSort => {
                             this.connections.session_manager.update(cx, |manager, cx| {
                                 manager.set_sidebar_sort_open(!manager.sidebar_sort_open, cx);
-                            });
-                            cx.notify();
-                        }
-                        SidebarActionKind::ToggleSessionNodeSelection => {
-                            this.toggle_session_node_selection_mode(cx)
-                        }
-                        SidebarActionKind::ToggleSessionManagerSelection => {
-                            this.connections.session_manager.update(cx, |manager, cx| {
-                                manager.toggle_session_selection_mode(cx);
                             });
                             cx.notify();
                         }
@@ -1381,8 +1341,6 @@ pub(in crate::workspace) enum SidebarActionKind {
     NewConnection,
     OpenSessionManagerTab,
     ToggleSessionSort,
-    ToggleSessionNodeSelection,
-    ToggleSessionManagerSelection,
 }
 
 #[cfg(test)]

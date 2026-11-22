@@ -1076,9 +1076,6 @@ impl WorkspaceApp {
         if self.close_tab_context_menu() {
             changed = true;
         }
-        if self.close_session_row_menu() {
-            changed = true;
-        }
 
         changed
     }

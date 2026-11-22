@@ -229,14 +229,6 @@ pub fn selected_count_label(i18n: &I18n, count: usize) -> String {
         .replace("{{count}}", &count.to_string())
 }
 
-/// Header counter for the explicit selection mode: checked rows over the rows
-/// that can currently be checked.
-pub fn selection_counter_label(i18n: &I18n, count: usize, total: usize) -> String {
-    i18n.t("sessionManager.selection.count")
-        .replace("{{count}}", &count.to_string())
-        .replace("{{total}}", &total.to_string())
-}
-
 pub fn confirm_delete_connection_label(i18n: &I18n, name: &str) -> String {
     i18n.t("sessionManager.actions.confirm_delete")
         .replace("{{name}}", name)

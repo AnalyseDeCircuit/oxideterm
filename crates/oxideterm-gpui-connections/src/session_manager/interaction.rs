@@ -140,52 +140,6 @@ impl SessionManagerState {
         self.selection_anchor = None;
         cx.notify();
     }
-
-    /// Selecting is destructive against the live tree, so the mode owns the
-    /// whole selection: leaving it drops what was checked instead of leaving
-    /// invisible state behind.
-    pub fn enter_session_selection_mode(&mut self, cx: &mut Context<Self>) {
-        if self.selection_mode {
-            return;
-        }
-        self.selection_mode = true;
-        cx.notify();
-    }
-
-    pub fn exit_session_selection_mode(&mut self, cx: &mut Context<Self>) {
-        if !self.selection_mode {
-            return;
-        }
-        self.selection_mode = false;
-        self.selected_items.clear();
-        self.selection_anchor = None;
-        self.show_batch_move = false;
-        cx.notify();
-    }
-
-    pub fn toggle_session_selection_mode(&mut self, cx: &mut Context<Self>) {
-        if self.selection_mode {
-            self.exit_session_selection_mode(cx);
-        } else {
-            self.enter_session_selection_mode(cx);
-        }
-    }
-
-    /// Select-all follows what the user can see, matching Shift+click ranges
-    /// that also stop at hidden rows.
-    pub fn select_all_visible_session_items(&mut self, cx: &mut Context<Self>) {
-        let next = self
-            .visible_selection_targets
-            .iter()
-            .cloned()
-            .collect::<std::collections::HashSet<_>>();
-        if next == self.selected_items {
-            return;
-        }
-        self.selected_items = next;
-        self.selection_anchor = None;
-        cx.notify();
-    }
 }
 
 impl SessionManagerState {
