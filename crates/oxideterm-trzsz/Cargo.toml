@@ -9,7 +9,7 @@ version.workspace = true
 
 [dependencies]
 base64.workspace = true
-flate2 = "1.1.9"
+flate2.workspace = true
 md5 = "0.7"
 parking_lot.workspace = true
 regex.workspace = true

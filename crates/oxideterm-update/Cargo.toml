@@ -12,7 +12,7 @@ oxideterm-network-proxy = { path = "../oxideterm-network-proxy" }
 base64.workspace = true
 chrono.workspace = true
 futures-util.workspace = true
-flate2 = "1.1.9"
+flate2.workspace = true
 libc.workspace = true
 minisign-verify.workspace = true
 oxideterm-settings = { path = "../oxideterm-settings" }

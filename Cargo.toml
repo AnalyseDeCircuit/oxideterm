@@ -179,7 +179,8 @@ futures-util = "0.3"
 futures = "0.3"
 futures-concurrency = "7.7.1"
 fs2 = "0.4"
-flate2 = { version = "1.1.9", default-features = false, features = ["rust_backend"] }
+flate2 = { version = "1.1.9", default-features = false, features = ["zlib-rs"] }
+foldhash = "0.2"
 gpui = { package = "gpui-pre", version = "=0.3.12" }
 gpui_platform = { package = "gpui-pre-platform", version = "=0.3.12", features = ["font-kit", "wayland", "x11"] }
 hdrhistogram = "7"
@@ -414,4 +415,18 @@ opt-level = 2
 opt-level = 2
 
 [profile.dev.package.weezl]
+opt-level = 2
+
+# Terminal parsing, grid state, and regex engines run in the hot path on every output chunk
+# and rarely change; optimize them once so dev builds stay responsive without extra churn.
+[profile.dev.package.vte]
+opt-level = 2
+
+[profile.dev.package.alacritty_terminal]
+opt-level = 2
+
+[profile.dev.package.regex]
+opt-level = 2
+
+[profile.dev.package.regex-automata]
 opt-level = 2
