@@ -127,7 +127,7 @@ vte = { path = "crates/vte" }
 edition = "2024"
 license = "GPL-3.0-only"
 publish = false
-version = "2.4.0"
+version = "2.4.1"
 
 [workspace.dependencies]
 accesskit = { version = "0.24.0", features = ["enumn"] }

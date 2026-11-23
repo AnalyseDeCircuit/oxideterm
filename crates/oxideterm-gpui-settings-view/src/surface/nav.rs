@@ -160,7 +160,7 @@ impl SettingsSurfaceView {
                 .h(px(48.0))
                 .px(px(16.0))
                 .gap_2()
-                .when(!settings_search_open, |header| header.mb(px(12.0)))
+                .when(!settings_search_open, |header| header.mb(px(8.0)))
                 .flex()
                 .items_center()
                 .justify_between()
@@ -234,7 +234,11 @@ impl SettingsSurfaceView {
             .min_h(px(0.0))
             .overflow_y_scroll()
             .track_scroll(&settings_nav_scroll)
-            .px_2()
+            // Keep enough inner inset for the active card's rounded shadow
+            // (6px blur, +2px vertical offset) on the first, last, and side edges.
+            .px(px(10.0))
+            .pt(px(4.0))
+            .pb(px(6.0))
             .flex()
             .flex_col();
 
@@ -312,12 +316,14 @@ impl SettingsSurfaceView {
         });
         div()
             // Keep selection and hover surfaces stable when the settings
-            // window has spare vertical space.
+            // window has spare vertical space. Do not clip overflow on the row
+            // itself: `nav_motion.render_vertical` slides `selection_surface`
+            // across sibling rows from the previous tab's y-offset, while the
+            // label child truncates horizontal text independently.
             .h(px(frame.tokens.metrics.ui_button_lg_height))
             .w_full()
             .min_w_0()
             .flex_none()
-            .overflow_hidden()
             .mb(px(4.0))
             .px_3()
             .relative()

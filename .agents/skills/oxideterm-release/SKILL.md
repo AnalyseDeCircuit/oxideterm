@@ -160,6 +160,23 @@ Thank you to the external contributors to this release:
 
 Place the two example sections in their respective language blocks, not together as a third bilingual section.
 
+#### Opening summary
+
+The opening summary tells the reader what this release is about; it is not a table of contents.
+
+- Lead with the main line: the one or two changes users will notice most. Choose them by user-visible impact first, then compatibility or breaking changes. Commit count and effort are not criteria.
+- Do not list the remaining changes in the summary and do not end with "and more" wording. Put them in the sections below. At most add one closing clause that groups the rest, such as "also fixes SSH reconnect and layout issues".
+- When no change stands out, say plainly that the release is mainly fixes.
+- Judge impact from the diff and user-facing behavior, not from commit order or titles.
+
+#### Fixes for regressions introduced inside the release range
+
+Do not list a fix in the release notes when the bug it fixes was introduced after the previous tag of the channel and never shipped. Users on the previous release never saw it, so the fix is not a change for them; describe only the net feature or behavior.
+
+- For each fix commit, check whether the broken code or behavior existed at the baseline tag (`git show <previous-tag>:<path>`, `git log -S`, or the commit that introduced it). Omit the fix when the origin is in `<previous-tag>..HEAD`; keep it when the bug shipped in the baseline.
+- The same applies to follow-up fixes of a new feature in the same range (for example, retention cleanup that first deleted live subtrees): fold them into the feature's description instead of a separate fix item.
+- A fix whose origin cannot be determined stays in the notes only if there is evidence (issue report, earlier release) that users hit it.
+
 #### Release-note detail level
 
 Use the same level for the English and Chinese blocks. The levels control coverage and grouping, not a mandatory word count. Never omit a breaking change, security boundary, upgrade requirement, known limitation, or material compatibility issue just to satisfy a shorter level.

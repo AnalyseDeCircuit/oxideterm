@@ -4,7 +4,7 @@ use std::{hint::black_box, sync::Arc, time::Duration};
 
 use criterion::{BenchmarkId, Criterion, Throughput};
 
-use super::Scene;
+use super::{GlyphEdgeEnhancement, Scene};
 use crate::window::{PreparedGlyphBatch, PreparedMonochromeGlyph, PreparedPolychromeGlyph};
 use crate::{
     AtlasTextureId, AtlasTextureKind, AtlasTile, Bounds, ContentMask, DevicePixels, Hsla, Point,
@@ -81,7 +81,13 @@ fn prepared_glyph_batch_expansion() {
                 // Terminal text already has a row layer. Keep its bounds tree stable
                 // and retain vector capacity so allocator growth is outside measurement.
                 scene.push_layer(mask.bounds);
-                scene.insert_prepared_glyph_batch(batch.clone(), origin, mask, 0.65, false);
+                scene.insert_prepared_glyph_batch(
+                    batch.clone(),
+                    origin,
+                    mask,
+                    0.65,
+                    GlyphEdgeEnhancement::None,
+                );
                 let tiles = match kind {
                     AtlasTextureKind::Monochrome => scene
                         .monochrome_sprites
@@ -123,7 +129,7 @@ fn prepared_glyph_batch_expansion() {
                                 black_box(origin),
                                 black_box(mask),
                                 black_box(0.65),
-                                false,
+                                GlyphEdgeEnhancement::None,
                             );
                             black_box((
                                 &scene.monochrome_sprites,
