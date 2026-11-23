@@ -35,6 +35,10 @@ impl WorkspaceApp {
             self.reconnect_ssh_terminal_session(session_id, &node_id, cx);
             return;
         }
+        let already_connecting = self
+            .workspace_runtime
+            .read(cx)
+            .node_has_in_flight_connection(&node_id);
         pane.update(cx, |pane, cx| pane.set_ssh_reconnect_pending(true, cx));
         self.workspace_runtime.update(cx, |runtime, cx| {
             runtime.queue_ssh_terminal_open(
@@ -51,7 +55,10 @@ impl WorkspaceApp {
                 cx,
             )
         });
-        if !self.ensure_node_connection_started(&node_id, cx) {
+        if !already_connecting && !self.ensure_node_connection_started(&node_id, cx) {
+            self.workspace_runtime.update(cx, |runtime, _cx| {
+                runtime.remove_pending_ssh_terminal_reconnect(&node_id, session_id);
+            });
             pane.update(cx, |pane, cx| pane.set_ssh_reconnect_pending(false, cx));
         }
     }
@@ -80,6 +87,10 @@ impl WorkspaceApp {
         else {
             return false;
         };
+        let active_node_connection_id = self.node_router.connection_id_for_node(node_id);
+        // Only reuse the pane's previous transport when its physical socket is still open
+        // and, for shared connections, still matches the node's current binding. Otherwise
+        // fall through to the node's freshly reconnected transport or a new dedicated one.
         let reuse_connection_id = pane
             .read(cx)
             .ssh_connection_handle()
@@ -87,7 +98,9 @@ impl WorkspaceApp {
                 matches!(
                     connection.state(),
                     ConnectionState::Active | ConnectionState::Idle
-                )
+                ) && connection.has_open_transport()
+                    && (connection.is_dedicated()
+                        || active_node_connection_id.as_deref() == Some(connection.connection_id()))
             })
             .map(|connection| connection.connection_id().to_string());
         if reuse_connection_id.is_some() && pane.read(cx).lifecycle().is_running() {

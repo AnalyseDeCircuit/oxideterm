@@ -645,6 +645,18 @@ impl WorkspaceRuntimeEntity {
         self.pending_ssh_terminal_opens.len() != before
     }
 
+    pub(in crate::workspace) fn remove_pending_ssh_terminal_reconnect(
+        &mut self,
+        node_id: &NodeId,
+        session_id: TerminalSessionId,
+    ) -> bool {
+        let before = self.pending_ssh_terminal_opens.len();
+        self.pending_ssh_terminal_opens.retain(|pending| {
+            !(pending.node_id == *node_id && pending.reconnect_session_id == Some(session_id))
+        });
+        self.pending_ssh_terminal_opens.len() != before
+    }
+
     fn take_ready_ssh_terminal_opens(&mut self) -> Vec<PendingSshTerminalOpen> {
         let mut remaining = VecDeque::new();
         let mut ready = Vec::new();
@@ -663,7 +675,7 @@ impl WorkspaceRuntimeEntity {
         ready
     }
 
-    fn publish_ssh_terminal_opens_for_connected_node(
+    pub(in crate::workspace) fn publish_ssh_terminal_opens_for_connected_node(
         &mut self,
         node_id: &NodeId,
         cx: &mut Context<Self>,
@@ -1631,7 +1643,16 @@ impl WorkspaceRuntimeEntity {
             .insert(task_node_id, (task_job_id, task.abort_handle()));
     }
 
-    fn cancel_reconnect_grace_probe(&mut self, node_id: &NodeId) {
+    pub(in crate::workspace) fn node_has_in_flight_transport(&self, node_id: &NodeId) -> bool {
+        self.node_transport_attempts.contains_key(node_id)
+    }
+
+    pub(in crate::workspace) fn node_has_in_flight_connection(&self, node_id: &NodeId) -> bool {
+        self.node_transport_attempts.contains_key(node_id)
+            || self.connection_chain_contains(node_id)
+    }
+
+    pub(in crate::workspace) fn cancel_reconnect_grace_probe(&mut self, node_id: &NodeId) {
         if let Some((_, abort_handle)) = self.reconnect_grace_probe_tasks.remove(node_id) {
             abort_handle.abort();
         }

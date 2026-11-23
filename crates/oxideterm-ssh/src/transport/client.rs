@@ -1863,6 +1863,11 @@ impl SshTransportClient {
             // consumer channel; other consumers retain the shared transport.
             let _ = channel.close().await;
             if !cancelled {
+                if pooled.is_closed().await {
+                    // Only report transport loss when the physical SSH transport
+                    // itself is closed; a clean shell exit keeps the shared node alive.
+                    mark_transport_lost("SSH transport closed".to_string()).await;
+                }
                 if let Some(bytes) = output_batcher.take_flush() {
                     let _ = output_tx.send(bytes).await;
                 }

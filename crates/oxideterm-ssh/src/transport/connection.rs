@@ -98,6 +98,11 @@ impl SshConnectionHandle {
         self.transport_status_now()
     }
 
+    /// Returns whether this registry handle currently backs an open physical transport.
+    pub fn has_open_transport(&self) -> bool {
+        self.transport_status_now() == ConnectionTransportStatus::Open
+    }
+
     pub(crate) fn transport_status_now(&self) -> ConnectionTransportStatus {
         if let Some(pooled) = self.physical::<PooledSshConnection>() {
             if pooled.target.is_closed() {

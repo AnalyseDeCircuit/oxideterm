@@ -608,6 +608,10 @@ impl SshConnectionHandle {
         &self.entry.connection_id
     }
 
+    pub fn is_dedicated(&self) -> bool {
+        self.entry.retire_when_unused
+    }
+
     pub fn key(&self) -> &str {
         &self.entry.key
     }

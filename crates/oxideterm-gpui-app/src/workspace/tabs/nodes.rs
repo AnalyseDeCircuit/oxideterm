@@ -482,15 +482,23 @@ impl WorkspaceApp {
                             recovered_connections,
                         )
                     });
-                    for recovered_node_id in recovered_node_ids {
+                    for recovered_node_id in &recovered_node_ids {
                         let projected_readiness = self
                             .node_router
-                            .node_state(&recovered_node_id)
+                            .node_state(recovered_node_id)
                             .map(|snapshot| snapshot.state.readiness)
                             .unwrap_or(NodeReadiness::Disconnected);
-                        if let Some(node) = self.ssh_nodes.get_mut(&recovered_node_id) {
+                        if let Some(node) = self.ssh_nodes.get_mut(recovered_node_id) {
                             node.readiness = projected_readiness;
                         }
+                        // Drain any queued terminal reconnect intents (e.g. Enter pressed
+                        // during the grace window) so waiting panes never stay stuck.
+                        self.workspace_runtime.update(cx, |runtime, cx| {
+                            runtime.publish_ssh_terminal_opens_for_connected_node(
+                                recovered_node_id,
+                                cx,
+                            );
+                        });
                     }
                     self.restore_forwarding_session_for_node(&node_id, cx);
                     changed = true;
@@ -1621,6 +1629,15 @@ impl WorkspaceApp {
         {
             return false;
         }
+        self.workspace_runtime.update(cx, |runtime, _cx| {
+            // An explicit or single-hop reconnect supersedes any sleeping grace probe
+            // and retires the closed binding before starting the new transport attempt.
+            runtime.cancel_reconnect_grace_probe(node_id);
+            runtime.reset_node_connection(node_id);
+        });
+        if let Some(node) = self.ssh_nodes.get_mut(node_id) {
+            node.readiness = NodeReadiness::Disconnected;
+        }
         let trace_plan = self.workspace_runtime.update(cx, |runtime, _cx| {
             runtime.new_connection_trace_plan(trace_mode, vec![node_id.clone()])
         });
@@ -1642,15 +1659,13 @@ impl WorkspaceApp {
                 .node_state(node_id)
                 .is_ok_and(|state| state.state.readiness == NodeReadiness::Connecting);
         };
-        self.ssh_registry.get(&connection_id).is_some_and(|handle| {
-            matches!(
-                handle.state(),
-                ConnectionState::Connecting
-                    | ConnectionState::Reconnecting
-                    | ConnectionState::Active
-                    | ConnectionState::Idle
-            )
-        })
+        self.ssh_registry
+            .get(&connection_id)
+            .is_some_and(|handle| match handle.state() {
+                ConnectionState::Connecting | ConnectionState::Reconnecting => true,
+                ConnectionState::Active | ConnectionState::Idle => handle.has_open_transport(),
+                _ => false,
+            })
     }
 
     pub(in crate::workspace) fn connect_node_with_ancestors(
@@ -1660,13 +1675,6 @@ impl WorkspaceApp {
         progress: Option<tokio::sync::watch::Sender<oxideterm_ssh::ConnectionChainProgress>>,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self
-            .workspace_runtime
-            .read(cx)
-            .has_active_connection_chain()
-        {
-            return false;
-        }
         let Ok(path_node_ids) = self.node_router.path_to_node(node_id) else {
             return false;
         };
@@ -1687,12 +1695,29 @@ impl WorkspaceApp {
             }
             return true;
         };
+        let nodes_to_connect = path_node_ids[start_index..].to_vec();
+        // A single node with no disconnected jump ancestors (e.g. independent split-pane
+        // servers reconnecting after a network outage) owns its own per-node lock and must
+        // not be blocked behind another server's global multi-hop connection chain.
+        if nodes_to_connect.len() == 1 && progress.is_none() {
+            return self.ensure_node_connection_started_without_ancestors_with_mode(
+                &nodes_to_connect[0],
+                trace_mode,
+                cx,
+            );
+        }
+        if self
+            .workspace_runtime
+            .read(cx)
+            .has_active_connection_chain()
+        {
+            return false;
+        }
         if let Some(tx) = &progress {
             tx.send_replace(oxideterm_ssh::ConnectionChainProgress::queued(
                 start_index + 1,
             ));
         }
-        let nodes_to_connect = path_node_ids[start_index..].to_vec();
         let trace_plan = self.workspace_runtime.update(cx, |runtime, _cx| {
             runtime.new_connection_trace_plan(trace_mode, nodes_to_connect.clone())
         });
@@ -1702,8 +1727,10 @@ impl WorkspaceApp {
             return false;
         }
         for node_id in &nodes_to_connect {
-            self.workspace_runtime
-                .update(cx, |runtime, _cx| runtime.reset_node_connection(node_id));
+            self.workspace_runtime.update(cx, |runtime, _cx| {
+                runtime.cancel_reconnect_grace_probe(node_id);
+                runtime.reset_node_connection(node_id);
+            });
             if let Some(node) = self.ssh_nodes.get_mut(node_id) {
                 node.readiness = NodeReadiness::Disconnected;
             }
@@ -1715,11 +1742,24 @@ impl WorkspaceApp {
         let Some(step) = self.workspace_runtime.read(cx).connection_chain_next_step() else {
             return false;
         };
+        if self.node_is_ready_for_terminal(&step.node_id) {
+            self.advance_connection_chain_after_node_connected(&step.node_id, cx);
+            return true;
+        }
         if !self.ensure_single_node_connection_started_with_trace(
             &step.node_id,
             Some(step.trace_plan.as_ref()),
             cx,
         ) {
+            self.abort_failed_connection_chain(&step.node_id, cx);
+            return false;
+        }
+        // Guard against leaking active_connection_chain if readiness raced before worker launch.
+        if !self
+            .workspace_runtime
+            .read(cx)
+            .node_has_in_flight_transport(&step.node_id)
+        {
             self.abort_failed_connection_chain(&step.node_id, cx);
             return false;
         }
@@ -2297,5 +2337,146 @@ mod session_retention_tests {
             serde_json::from_slice(&std::fs::read(default_session_tree_path()).unwrap()).unwrap();
         assert!(!saved.nodes.iter().any(|entry| entry.id == node));
         assert!(!saved.root_ids.contains(&node));
+    }
+
+    #[gpui::test]
+    async fn multi_server_reconnect_ignores_stale_transport_unrelated_chain_and_drains_grace_recovery(
+        cx: &mut TestAppContext,
+    ) {
+        let Some(_dir) = isolated_workspace_fixture(cx, "OXIDETERM_MULTI_SERVER_RECONNECT_DIR")
+        else {
+            return;
+        };
+        cx.executor().allow_parking();
+        let (shell, cx) = cx.add_window_view(|window, cx| {
+            let ws = cx.new(|cx| WorkspaceApp::new(window, cx, None, None).unwrap());
+            WorkspaceWindowShell::new(ws, window, cx)
+        });
+        let ws = shell.read_with(cx, |shell, _| shell.session_entity());
+        cx.update(|window, cx| {
+            ws.update(cx, |ws, cx| {
+                let make_config = |host: &str| SshConfig {
+                    host: host.into(),
+                    proxy_command: Some(oxideterm_ssh::ProxyCommandConfig::Unavailable),
+                    pre_connect_command: Some("exit 1".into()),
+                    ..Default::default()
+                };
+                let node_a = ws.materialize_ssh_root_node(
+                    make_config("chain-a.invalid"),
+                    "Server A".into(),
+                    None,
+                );
+                let node_b = ws.materialize_ssh_root_node(
+                    make_config("split-b.invalid"),
+                    "Server B".into(),
+                    None,
+                );
+                let node_c = ws.materialize_ssh_root_node(
+                    make_config("grace-c.invalid"),
+                    "Server C".into(),
+                    None,
+                );
+
+                // Hold the global multi-hop chain on Server A.
+                let chain_started = ws.workspace_runtime.update(cx, |runtime, _| {
+                    let plan = runtime.new_connection_trace_plan(
+                        ConnectionTraceMode::Reconnect,
+                        vec![node_a.clone()],
+                    );
+                    runtime.try_begin_connection_chain(plan, None)
+                });
+                assert!(chain_started);
+                assert!(ws.workspace_runtime.read(cx).has_active_connection_chain());
+
+                // Server B has a stale Active registry entry whose physical transport is gone.
+                let stale_b = ws.ssh_registry.acquire(
+                    make_config("split-b.invalid"),
+                    ConnectionConsumer::NodeRouter(node_b.0.clone()),
+                );
+                ws.ssh_registry
+                    .mark_state(stale_b.connection_id(), ConnectionState::Active);
+                ws.node_router
+                    .bind_connection(&node_b, stale_b.connection_id())
+                    .unwrap();
+                assert!(!stale_b.has_open_transport());
+                assert!(
+                    !ws.node_connection_is_active_or_connecting(&node_b),
+                    "stale Active entry without an open physical transport must not look connected"
+                );
+                assert!(
+                    ws.ensure_node_connection_started(&node_b, cx),
+                    "single-hop Server B must reconnect independently while Server A holds the chain"
+                );
+                assert!(
+                    ws.workspace_runtime
+                        .read(cx)
+                        .node_has_in_flight_transport(&node_b),
+                    "Server B must launch its own transport attempt instead of stalling"
+                );
+
+                // Server C recovers during grace period while a pane has a queued reconnect intent.
+                let live_c = ws.ssh_registry.acquire(
+                    make_config("grace-c.invalid"),
+                    ConnectionConsumer::NodeRouter(node_c.0.clone()),
+                );
+                live_c.set_physical(Arc::new(()));
+                ws.ssh_registry
+                    .mark_state(live_c.connection_id(), ConnectionState::LinkDown);
+                ws.node_router
+                    .bind_connection(&node_c, live_c.connection_id())
+                    .unwrap();
+                let queued_session = TerminalSessionId(9001);
+                ws.workspace_runtime.update(cx, |runtime, cx| {
+                    runtime.queue_ssh_terminal_open(
+                        runtime_entity::PendingSshTerminalOpen {
+                            node_id: node_c.clone(),
+                            reconnect_session_id: Some(queued_session),
+                            post_connect_command: None,
+                            mark_used_connection_id: None,
+                            save_after_open: None,
+                            cleanup_node_id: None,
+                            title: String::new(),
+                            open_sftp_on_connect: false,
+                        },
+                        cx,
+                    );
+                });
+                assert!(ws
+                    .workspace_runtime
+                    .read(cx)
+                    .has_session_connection_work(&node_c));
+                ws.apply_reconnect_worker_effect(
+                    runtime_entity::ReconnectRuntimeEffect::GraceRecovered {
+                        node_id: node_c.clone(),
+                        connection_id: live_c.connection_id().to_owned(),
+                        recovered_connections: Vec::new(),
+                    },
+                    window,
+                    cx,
+                );
+                assert!(
+                    !ws.workspace_runtime
+                        .read(cx)
+                        .has_session_connection_work(&node_c),
+                    "grace recovery must drain queued terminal reconnect opens for the recovered node"
+                );
+                let effects = ws
+                    .workspace_runtime
+                    .update(cx, |runtime, cx| runtime.take_runtime_effects(cx));
+                assert!(
+                    effects.iter().any(|effect| matches!(
+                        effect,
+                        runtime_entity::WorkspaceRuntimeEffect::OpenReadySshTerminals {
+                            requests,
+                            ..
+                        } if requests.iter().any(|request| {
+                            request.node_id == node_c
+                                && request.reconnect_session_id == Some(queued_session)
+                        })
+                    )),
+                    "grace recovery must publish OpenReadySshTerminals for the waiting reconnect pane"
+                );
+            })
+        });
     }
 }
