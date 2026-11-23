@@ -81,6 +81,9 @@ class ComposeReleaseNotesTests(unittest.TestCase):
 
         self.assertIn("## 📥 Download for your system", notes)
         self.assertIn("OxideTerm_2.0.0_windows_x64-setup.exe", notes)
+        self.assertIn("OxideTerm_2.0.0_windows_x64_portable.zip", notes)
+        self.assertIn("OxideTerm_2.0.0_windows_arm64-setup.exe", notes)
+        self.assertIn("OxideTerm_2.0.0_windows_arm64_portable.zip", notes)
         self.assertIn("OxideTerm_2.0.0_macos_arm64.dmg", notes)
         self.assertIn("OxideTerm_2.0.0_linux_arm64.rpm", notes)
         self.assertNotIn("RELEASE_DOWNLOADS", notes)

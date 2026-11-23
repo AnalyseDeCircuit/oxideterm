@@ -317,7 +317,7 @@ Bash、Zsh、Fish、PowerShell、Elvish の補完に対応。全コマンドは 
 | OS | x64 | ARM64 |
 |---|---|---|
 | **macOS** | DMG（Intel） | DMG（Apple Silicon） |
-| **Windows** | インストーラー（`.exe`） | インストーラー（`.exe`） |
+| **Windows** | インストーラー（`.exe`）· ポータブル（`.zip`） | インストーラー（`.exe`）· ポータブル（`.zip`） |
 | **Linux** | AppImage · `.deb` · `.rpm` | AppImage · `.deb` · `.rpm` |
 
 リリースページにはポータブル版、署名、検証用 `sha256sums.txt` もあります。

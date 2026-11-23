@@ -317,7 +317,7 @@ Bash, Zsh, Fish, PowerShell, Elvish 완성을 지원합니다. 전체 명령은 
 | OS | x64 | ARM64 |
 |---|---|---|
 | **macOS** | DMG(Intel) | DMG(Apple Silicon) |
-| **Windows** | 설치 프로그램(`.exe`) | 설치 프로그램(`.exe`) |
+| **Windows** | 설치 프로그램(`.exe`) · 포터블(`.zip`) | 설치 프로그램(`.exe`) · 포터블(`.zip`) |
 | **Linux** | AppImage · `.deb` · `.rpm` | AppImage · `.deb` · `.rpm` |
 
 릴리스 페이지에는 포터블 압축 파일, 서명, 검증용 `sha256sums.txt`도 있습니다.

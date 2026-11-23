@@ -317,7 +317,7 @@ Tải OxideTerm từ [bản phát hành mới nhất](https://github.com/Analyse
 | Hệ điều hành | x64 | ARM64 |
 |---|---|---|
 | **macOS** | DMG (Intel) | DMG (Apple Silicon) |
-| **Windows** | Trình cài đặt (`.exe`) | Trình cài đặt (`.exe`) |
+| **Windows** | Trình cài đặt (`.exe`) · Bản di động (`.zip`) | Trình cài đặt (`.exe`) · Bản di động (`.zip`) |
 | **Linux** | AppImage · `.deb` · `.rpm` | AppImage · `.deb` · `.rpm` |
 
 Trang phát hành còn có bản nén di động, chữ ký và `sha256sums.txt` để kiểm tra tải xuống.

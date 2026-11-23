@@ -317,7 +317,7 @@ Laden Sie OxideTerm aus der [neuesten Veröffentlichung](https://github.com/Anal
 | Betriebssystem | x64 | ARM64 |
 |---|---|---|
 | **macOS** | DMG (Intel) | DMG (Apple Silicon) |
-| **Windows** | Installationsprogramm (`.exe`) | Installationsprogramm (`.exe`) |
+| **Windows** | Installationsprogramm (`.exe`) · Portabel (`.zip`) | Installationsprogramm (`.exe`) · Portabel (`.zip`) |
 | **Linux** | AppImage · `.deb` · `.rpm` | AppImage · `.deb` · `.rpm` |
 
 Die Release-Seite enthält außerdem portable Archive, Signaturen und `sha256sums.txt` zur Downloadprüfung.

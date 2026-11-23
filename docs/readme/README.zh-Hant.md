@@ -317,7 +317,7 @@ oxideterm oxide export ./profile.oxide --connection prod --password-stdin
 | 作業系統 | x64 | ARM64 |
 |---|---|---|
 | **macOS** | DMG（Intel） | DMG（Apple Silicon） |
-| **Windows** | 安裝程式（`.exe`） | 安裝程式（`.exe`） |
+| **Windows** | 安裝程式（`.exe`）· 可攜版（`.zip`） | 安裝程式（`.exe`）· 可攜版（`.zip`） |
 | **Linux** | AppImage · `.deb` · `.rpm` | AppImage · `.deb` · `.rpm` |
 
 發行頁面還提供可攜版壓縮檔、簽章，以及用來驗證下載內容的 `sha256sums.txt` 檔案。

@@ -317,7 +317,7 @@ Scarica OxideTerm dall’[ultima versione](https://github.com/AnalyseDeCircuit/o
 | Sistema operativo | x64 | ARM64 |
 |---|---|---|
 | **macOS** | DMG (Intel) | DMG (Apple Silicon) |
-| **Windows** | Programma di installazione (`.exe`) | Programma di installazione (`.exe`) |
+| **Windows** | Programma di installazione (`.exe`) · Portatile (`.zip`) | Programma di installazione (`.exe`) · Portatile (`.zip`) |
 | **Linux** | AppImage · `.deb` · `.rpm` | AppImage · `.deb` · `.rpm` |
 
 La pagina della versione include archivi portatili, firme e `sha256sums.txt` per verificare il download.
