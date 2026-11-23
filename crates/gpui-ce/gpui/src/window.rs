@@ -13,9 +13,9 @@ use crate::{
     BoxShadow, Capslock, Context, CornerShape, Corners, CursorHideMode, CursorStyle, Decorations,
     DevicePixels, DispatchActionListener, DispatchNodeId, DispatchTree, DisplayId, DynamicTexture,
     DynamicTextureParams, Edges, Effect, Entity, EntityId, EventEmitter, FileDropEvent, Filter,
-    FilterBoundary, FontId, Global, GlobalElementId, GlyphId, GpuSpecs, InputHandler,
-    InputPreference, IsZero, KeyBinding, KeyContext, KeyDownEvent, KeyEvent, Keystroke,
-    KeystrokeEvent, LayoutId, Lerp, LineLayoutIndex, Modifiers, ModifiersChangedEvent,
+    FilterBoundary, FontId, Global, GlobalElementId, GlyphEdgeEnhancement, GlyphId, GpuSpecs,
+    InputHandler, InputPreference, IsZero, KeyBinding, KeyContext, KeyDownEvent, KeyEvent,
+    Keystroke, KeystrokeEvent, LayoutId, Lerp, LineLayoutIndex, Modifiers, ModifiersChangedEvent,
     MonochromeSprite, MouseButton, MouseEvent, MouseMoveEvent, MouseUpEvent, Path, Pixels,
     PlatformAtlas, PlatformDisplay, PlatformInput, PlatformInputHandler, PlatformWindow, Point,
     PolychromeSprite, Priority, PromptButton, PromptLevel, Quad, Render, RenderGlyphParams,
@@ -1293,7 +1293,7 @@ pub struct Window {
     text_system: Rc<WindowTextSystem>,
     text_rendering_mode: Rc<Cell<TextRenderingMode>>,
     #[cfg(target_os = "macos")]
-    enhance_glyph_edges: bool,
+    enhance_glyph_edges: GlyphEdgeEnhancement,
     rem_size: Pixels,
     corner_shape: CornerShape,
     /// The stack of override values for the window's rem size.
@@ -2499,7 +2499,7 @@ impl Window {
             text_system,
             text_rendering_mode: cx.text_rendering_mode.clone(),
             #[cfg(target_os = "macos")]
-            enhance_glyph_edges: false,
+            enhance_glyph_edges: GlyphEdgeEnhancement::None,
             rem_size: px(16.),
             corner_shape: CornerShape::default(),
             rem_size_override_stack: SmallVec::new(),
@@ -4776,28 +4776,42 @@ impl Window {
         enabled: bool,
         paint: impl FnOnce(&mut Self) -> R,
     ) -> R {
+        self.with_glyph_edge_enhancement(GlyphEdgeEnhancement::from(enabled), paint)
+    }
+
+    /// Sets macOS edge coverage compensation for monochrome glyphs painted in this scope.
+    /// Callers should opt in only when painting text over a known opaque light or dark background.
+    pub fn with_glyph_edge_enhancement<R>(
+        &mut self,
+        mode: GlyphEdgeEnhancement,
+        paint: impl FnOnce(&mut Self) -> R,
+    ) -> R {
         #[cfg(target_os = "macos")]
         {
             self.invalidator.debug_assert_paint();
             let previous = self.enhance_glyph_edges;
-            self.enhance_glyph_edges = enabled && self.element_opacity() == 1.0;
+            self.enhance_glyph_edges = if self.element_opacity() == 1.0 {
+                mode
+            } else {
+                GlyphEdgeEnhancement::None
+            };
             let result = paint(self);
             self.enhance_glyph_edges = previous;
             result
         }
         #[cfg(not(target_os = "macos"))]
         {
-            let _ = enabled;
+            let _ = mode;
             paint(self)
         }
     }
 
     #[inline]
-    fn enhance_glyph_edges(&self) -> bool {
+    fn enhance_glyph_edges(&self) -> GlyphEdgeEnhancement {
         #[cfg(target_os = "macos")]
         return self.enhance_glyph_edges;
         #[cfg(not(target_os = "macos"))]
-        false
+        GlyphEdgeEnhancement::None
     }
 
     /// Limits the composed opacity of palette surface fills, without fading text,
@@ -5958,7 +5972,7 @@ impl Window {
 
         self.next_frame.scene.insert_primitive(MonochromeSprite {
             order: 0,
-            enhance_glyph_edges: false.into(),
+            enhance_glyph_edges: GlyphEdgeEnhancement::None.into(),
             bounds: final_bounds,
             content_mask,
             color: color.opacity(element_opacity).into(),

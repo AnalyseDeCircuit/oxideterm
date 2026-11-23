@@ -48,6 +48,38 @@ impl From<PaddedBool32> for u32 {
     }
 }
 
+/// Edge coverage compensation mode for monochrome glyph sprites on macOS.
+/// Stored as a `u32` on `MonochromeSprite` so GPU-facing structs contain no
+/// padding bytes: `0` disabled, `1` dark glyphs on opaque light backgrounds,
+/// `2` bright glyphs on opaque dark backgrounds.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+#[repr(u32)]
+pub enum GlyphEdgeEnhancement {
+    /// No edge coverage adjustment.
+    #[default]
+    None = 0,
+    /// Boost partial edge coverage for dark glyphs on an opaque light background.
+    LightBackground = 1,
+    /// Boost partial edge coverage for bright glyphs on an opaque dark background.
+    DarkBackground = 2,
+}
+
+impl From<bool> for GlyphEdgeEnhancement {
+    fn from(enabled: bool) -> Self {
+        if enabled {
+            Self::LightBackground
+        } else {
+            Self::None
+        }
+    }
+}
+
+impl From<GlyphEdgeEnhancement> for u32 {
+    fn from(mode: GlyphEdgeEnhancement) -> Self {
+        mode as u32
+    }
+}
+
 #[derive(Default)]
 #[expect(missing_docs)]
 pub struct Scene {
@@ -224,7 +256,7 @@ impl Scene {
         origin: Point<ScaledPixels>,
         content_mask: ContentMask<ScaledPixels>,
         opacity: f32,
-        enhance_glyph_edges: bool,
+        enhance_glyph_edges: GlyphEdgeEnhancement,
     ) {
         self.insert_prepared_glyph_batch_with_color(
             batch,
@@ -242,7 +274,7 @@ impl Scene {
         origin: Point<ScaledPixels>,
         content_mask: ContentMask<ScaledPixels>,
         opacity: f32,
-        enhance_glyph_edges: bool,
+        enhance_glyph_edges: GlyphEdgeEnhancement,
         color_override: Option<SceneHsla>,
     ) {
         let layer_order = self.layer_stack.last().copied();
@@ -496,7 +528,7 @@ pub(crate) enum PaintOperation {
         origin: Point<ScaledPixels>,
         content_mask: ContentMask<ScaledPixels>,
         opacity: f32,
-        enhance_glyph_edges: bool,
+        enhance_glyph_edges: GlyphEdgeEnhancement,
         color_override: Option<SceneHsla>,
     },
     StartLayer(Bounds<ScaledPixels>),
@@ -1304,7 +1336,7 @@ impl Default for TransformationMatrix {
 #[expect(missing_docs)]
 pub struct MonochromeSprite {
     pub order: DrawOrder,
-    pub enhance_glyph_edges: PaddedBool32,
+    pub enhance_glyph_edges: u32,
     pub tile: AtlasTile,
     pub bounds: Bounds<ScaledPixels>,
     pub content_mask: ContentMask<ScaledPixels>,
@@ -1769,7 +1801,13 @@ mod tests {
             ],
             ..Default::default()
         });
-        scene.insert_prepared_glyph_batch(batch, Point::default(), mask(), 1.0, true);
+        scene.insert_prepared_glyph_batch(
+            batch,
+            Point::default(),
+            mask(),
+            1.0,
+            GlyphEdgeEnhancement::DarkBackground,
+        );
         scene.pop_layer();
 
         assert_eq!(scene.monochrome_sprites.len(), 2);
@@ -1783,8 +1821,8 @@ mod tests {
             scene.monochrome_sprites[0].order
         );
         assert_eq!(
-            u32::from(replayed.monochrome_sprites[0].enhance_glyph_edges),
-            1
+            replayed.monochrome_sprites[0].enhance_glyph_edges,
+            u32::from(GlyphEdgeEnhancement::DarkBackground)
         );
     }
 
@@ -1803,7 +1841,7 @@ mod tests {
             Point::default(),
             mask(),
             0.5,
-            true,
+            GlyphEdgeEnhancement::LightBackground,
             Some(recolored),
         );
 
@@ -1839,7 +1877,13 @@ mod tests {
                     scene.push_layer(full_bounds());
                 }
                 let origin = point(sp(x), sp(0.0));
-                scene.insert_prepared_glyph_batch(batch.clone(), origin, mask(), 0.5, false);
+                scene.insert_prepared_glyph_batch(
+                    batch.clone(),
+                    origin,
+                    mask(),
+                    0.5,
+                    GlyphEdgeEnhancement::None,
+                );
                 let expected = if x == 100.0 {
                     vec![]
                 } else {
@@ -1897,7 +1941,7 @@ mod tests {
                     Point::default(),
                     mask(),
                     opacity,
-                    false,
+                    GlyphEdgeEnhancement::None,
                 );
                 let expected = vec![SceneHsla {
                     h: expected_hue,

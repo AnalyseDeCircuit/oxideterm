@@ -667,9 +667,16 @@ vertex MonochromeSpriteVertexOutput monochrome_sprite_vertex(
   float2 tile_position = to_tile_position(unit_vertex, sprite.tile, atlas_size);
   float4 color = hsla_to_rgba(sprite.color);
   float coverage_exponent = 1.0;
-  if (sprite.enhance_glyph_edges && color.a == 1.0) {
+  if (sprite.enhance_glyph_edges != 0 && color.a == 1.0) {
     float luma = dot(color.rgb, float3(0.2126, 0.7152, 0.0722));
-    coverage_exponent = mix(0.84, 1.0, smoothstep(0.0, 0.2, luma));
+    if (sprite.enhance_glyph_edges == 1) {
+      // Dark glyphs on opaque light backgrounds.
+      coverage_exponent = mix(0.84, 1.0, smoothstep(0.0, 0.2, luma));
+    } else if (sprite.enhance_glyph_edges == 2) {
+      // Bright glyphs on opaque dark backgrounds: compensate for sRGB alpha
+      // blending attenuating anti-aliased edge coverage without thickening dim text.
+      coverage_exponent = mix(1.0, 0.88, smoothstep(0.3, 0.85, luma));
+    }
   }
   return MonochromeSpriteVertexOutput{
       device_position,

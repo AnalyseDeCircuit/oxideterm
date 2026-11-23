@@ -2575,11 +2575,22 @@ mod tests {
             .unwrap()
             .unwrap();
         let mut scene = Scene::default();
-        for (row, enabled, color) in [
-            (1.0, false, black()),
-            (2.0, true, black()),
-            (3.0, true, white()),
-            (4.0, true, black().opacity(0.5)),
+        for (row, mode, color) in [
+            (1.0, gpui::GlyphEdgeEnhancement::None, black()),
+            (2.0, gpui::GlyphEdgeEnhancement::LightBackground, black()),
+            (3.0, gpui::GlyphEdgeEnhancement::LightBackground, white()),
+            (
+                4.0,
+                gpui::GlyphEdgeEnhancement::LightBackground,
+                black().opacity(0.5),
+            ),
+            (5.0, gpui::GlyphEdgeEnhancement::DarkBackground, white()),
+            (6.0, gpui::GlyphEdgeEnhancement::DarkBackground, black()),
+            (
+                7.0,
+                gpui::GlyphEdgeEnhancement::DarkBackground,
+                white().opacity(0.5),
+            ),
         ] {
             let bounds = Bounds::new(
                 point(ScaledPixels(1.0), ScaledPixels(row)),
@@ -2587,7 +2598,7 @@ mod tests {
             );
             scene.insert_primitive(MonochromeSprite {
                 order: 0,
-                enhance_glyph_edges: enabled.into(),
+                enhance_glyph_edges: mode.into(),
                 tile,
                 bounds,
                 content_mask: ContentMask { bounds },
@@ -2597,13 +2608,16 @@ mod tests {
         }
         scene.finish();
         let image = renderer
-            .render_scene_to_image(&scene, size(DevicePixels(5), DevicePixels(6)))
+            .render_scene_to_image(&scene, size(DevicePixels(5), DevicePixels(9)))
             .unwrap();
         for (row, expected) in [
             (1, [0, 128, 255]),
             (2, [0, 143, 255]),
             (3, [0, 128, 255]),
             (4, [0, 64, 128]),
+            (5, [0, 139, 255]),
+            (6, [0, 128, 255]),
+            (7, [0, 64, 128]),
         ] {
             let actual = [1, 2, 3].map(|x| image.get_pixel(x, row).0[3]);
             for (actual, expected) in actual.into_iter().zip(expected) {
