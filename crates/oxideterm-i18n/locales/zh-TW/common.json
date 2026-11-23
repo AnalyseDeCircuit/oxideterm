@@ -1384,6 +1384,7 @@
     "rename_tab_description": "輸入名稱以識別此終端分頁。",
     "rename_tab_placeholder": "分頁名稱",
     "rename_tab_action": "重新命名",
+    "duplicate_tab": "複製分頁",
     "close_tab": "關閉分頁",
     "close_other_tabs": "關閉其他分頁",
     "close_tabs_to_right": "關閉右側分頁",

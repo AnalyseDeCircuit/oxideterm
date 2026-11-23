@@ -12,6 +12,7 @@ const TAB_CONTEXT_MENU_WIDTH: f32 = 228.0;
 const TAB_CONTEXT_MENU_SPLIT_WIDTH: f32 = 320.0;
 const TAB_CONTEXT_MENU_HEIGHT: f32 = 136.0;
 const TAB_CONTEXT_MENU_RENAME_HEIGHT: f32 = 168.0;
+const TAB_CONTEXT_MENU_DUPLICATE_HEIGHT: f32 = 32.0;
 const TAB_CONTEXT_MENU_SPLIT_HEIGHT: f32 = 72.0;
 const TAB_CONTEXT_MENU_SWITCH_HEIGHT: f32 = 32.0;
 const TAB_CONTEXT_MENU_MARGIN: f32 = 8.0;
@@ -380,6 +381,107 @@ impl WorkspaceApp {
             }
         }
         cx.notify();
+    }
+
+    /// Opens a fresh session with the same launch target as this tab. Only
+    /// terminal tabs duplicate: SFTP surfaces are one-per-node by design and
+    /// Mosh configs are consumed at session start, so neither can re-launch.
+    pub(in crate::workspace) fn duplicate_tab(
+        &mut self,
+        tab_id: TabId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(tab) = self.tab_by_id(tab_id, cx) else {
+            return false;
+        };
+        match &tab.kind {
+            TabKind::LocalTerminal => {
+                let session_id = tab
+                    .active_pane_id
+                    .and_then(|pane_id| tab.root_pane.as_ref()?.session_id_for_pane(pane_id));
+                // The instance guard cannot outlive this statement; clone the
+                // launch identity out of it.
+                let launch = session_id.and_then(|session_id| {
+                    self.tab_host.read(cx).local_sessions.get(&session_id).map(
+                        |instance| {
+                            (
+                                instance.shell.clone(),
+                                instance.cwd.clone(),
+                                instance.remove_env.clone(),
+                                instance.title.clone(),
+                            )
+                        },
+                    )
+                });
+                let Some((shell, cwd, remove_env, title)) = launch else {
+                    return false;
+                };
+                // Launch identity (shell/cwd/env removals) comes from the
+                // instance; the rest re-derives from current local settings
+                // exactly like the original creation path did.
+                let mut config = self.local_terminal_config();
+                config.shell = shell;
+                config.cwd = cwd;
+                config.remove_env = remove_env;
+                self.create_local_terminal_tab_with_config(config, title, window, cx)
+                    .is_ok()
+            }
+            TabKind::SshTerminal => {
+                let session_id = tab
+                    .active_pane_id
+                    .and_then(|pane_id| tab.root_pane.as_ref()?.session_id_for_pane(pane_id));
+                let Some(node_id) = session_id.and_then(|session_id| {
+                    self.workspace_runtime
+                        .read(cx)
+                        .ssh_terminal_node_id(session_id)
+                }) else {
+                    return false;
+                };
+                if !self.ssh_nodes.contains_key(&node_id) {
+                    return false;
+                }
+                self.queue_ssh_terminal_tab_for_sidebar_node_with_sftp(
+                    node_id, false, window, cx,
+                )
+                .is_ok()
+            }
+            _ => false,
+        }
+    }
+
+    /// Whether this tab resolves to a re-launchable target (local shell
+    /// identity or a live SSH node), gating the duplicate menu row.
+    fn duplicate_target_for_tab(&self, tab_id: TabId, cx: &App) -> bool {
+        let Some(tab) = self.tab_by_id(tab_id, cx) else {
+            return false;
+        };
+        match &tab.kind {
+            TabKind::LocalTerminal => {
+                let session_id = tab
+                    .active_pane_id
+                    .and_then(|pane_id| tab.root_pane.as_ref()?.session_id_for_pane(pane_id));
+                session_id.is_some_and(|session_id| {
+                    self.tab_host
+                        .read(cx)
+                        .local_sessions
+                        .contains_key(&session_id)
+                })
+            }
+            TabKind::SshTerminal => {
+                let session_id = tab
+                    .active_pane_id
+                    .and_then(|pane_id| tab.root_pane.as_ref()?.session_id_for_pane(pane_id));
+                session_id
+                    .and_then(|session_id| {
+                        self.workspace_runtime
+                            .read(cx)
+                            .ssh_terminal_node_id(session_id)
+                    })
+                    .is_some_and(|node_id| self.ssh_nodes.contains_key(&node_id))
+            }
+            _ => false,
+        }
     }
 
     pub(in crate::workspace) fn begin_tab_rename(
@@ -1340,6 +1442,7 @@ impl WorkspaceApp {
             )
         });
         let active_tab_id = self.active_tab_id(cx);
+        let can_duplicate = self.duplicate_target_for_tab(menu.tab_id, cx);
         let can_split_into_active =
             active_tab_id.is_some_and(|target| self.can_combine_tabs(menu.tab_id, target, cx));
         let merge_targets = if active_tab_id == Some(menu.tab_id) {
@@ -1360,6 +1463,9 @@ impl WorkspaceApp {
         } else {
             TAB_CONTEXT_MENU_HEIGHT
         };
+        if can_duplicate {
+            menu_height += TAB_CONTEXT_MENU_DUPLICATE_HEIGHT;
+        }
         if can_split_into_active {
             menu_height += TAB_CONTEXT_MENU_SPLIT_HEIGHT;
         }
@@ -1444,6 +1550,25 @@ impl WorkspaceApp {
                                 MouseButton::Left,
                                 cx.listener(move |this, _event, window, cx| {
                                     this.begin_tab_rename(menu.tab_id, window, cx);
+                                    cx.stop_propagation();
+                                }),
+                            ),
+                        )
+                    })
+                    .when(can_duplicate, |content| {
+                        content.child(
+                            context_menu_item_with_icon(
+                                &self.tokens,
+                                "lucide/copy.svg",
+                                self.i18n.t("tabbar.duplicate_tab"),
+                                false,
+                                false,
+                            )
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _event, window, cx| {
+                                    this.close_tab_context_menu();
+                                    this.duplicate_tab(menu.tab_id, window, cx);
                                     cx.stop_propagation();
                                 }),
                             ),

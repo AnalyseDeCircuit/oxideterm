@@ -1384,6 +1384,7 @@
     "rename_tab_description": "Nhập tên để nhận biết tab terminal này.",
     "rename_tab_placeholder": "Tên tab",
     "rename_tab_action": "Đổi tên",
+    "duplicate_tab": "Nhân bản thẻ",
     "close_tab": "Đóng tab",
     "close_other_tabs": "Đóng các tab khác",
     "close_tabs_to_right": "Đóng các tab bên phải",

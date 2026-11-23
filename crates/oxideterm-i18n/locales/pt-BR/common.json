@@ -1384,6 +1384,7 @@
     "rename_tab_description": "Digite um nome para identificar esta aba do terminal.",
     "rename_tab_placeholder": "Nome da aba",
     "rename_tab_action": "Renomear",
+    "duplicate_tab": "Duplicar aba",
     "close_tab": "Fechar aba",
     "close_other_tabs": "Fechar outras abas",
     "close_tabs_to_right": "Fechar abas à direita",

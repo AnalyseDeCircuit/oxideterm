@@ -1384,6 +1384,7 @@
     "rename_tab_description": "Enter a name to identify this terminal tab.",
     "rename_tab_placeholder": "Tab name",
     "rename_tab_action": "Rename",
+    "duplicate_tab": "Duplicate Tab",
     "close_tab": "Close tab",
     "close_other_tabs": "Close other tabs",
     "close_tabs_to_right": "Close tabs to the right",

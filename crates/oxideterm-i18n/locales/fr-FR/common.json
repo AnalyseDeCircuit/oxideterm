@@ -1384,6 +1384,7 @@
     "rename_tab_description": "Saisissez un nom pour identifier cet onglet de terminal.",
     "rename_tab_placeholder": "Nom de l'onglet",
     "rename_tab_action": "Renommer",
+    "duplicate_tab": "Dupliquer l’onglet",
     "close_tab": "Fermer l'onglet",
     "close_other_tabs": "Fermer les autres onglets",
     "close_tabs_to_right": "Fermer les onglets à droite",

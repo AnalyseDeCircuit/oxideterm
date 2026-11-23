@@ -1384,6 +1384,7 @@
     "rename_tab_description": "Introduce un nombre para identificar esta pestaña de terminal.",
     "rename_tab_placeholder": "Nombre de la pestaña",
     "rename_tab_action": "Cambiar nombre",
+    "duplicate_tab": "Duplicar pestaña",
     "close_tab": "Cerrar pestaña",
     "close_other_tabs": "Cerrar otras pestañas",
     "close_tabs_to_right": "Cerrar pestañas a la derecha",

@@ -1384,6 +1384,7 @@
     "rename_tab_description": "输入一个名称，以便识别此终端标签页。",
     "rename_tab_placeholder": "标签页名称",
     "rename_tab_action": "重命名",
+    "duplicate_tab": "复制标签页",
     "close_tab": "关闭标签页",
     "close_other_tabs": "关闭其他标签页",
     "close_tabs_to_right": "关闭右侧标签页",
