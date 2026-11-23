@@ -207,6 +207,32 @@ impl TerminalPane {
             .map(|mark| mark.start_line)
     }
 
+    pub(crate) fn context_menu_navigation_line(
+        &self,
+        reference_line: usize,
+        command_mark_id: Option<&str>,
+    ) -> usize {
+        let Some(mark) = command_mark_id.and_then(|id| {
+            self.command_marks
+                .iter()
+                .find(|mark| mark.command_id == id)
+        }) else {
+            return reference_line;
+        };
+        // Right-clicking anywhere in a command's output should let "Previous command"
+        // jump back to that command's own input line, while clicking on its prompt/input
+        // header (or clipped output whose input line was evicted from scrollback) anchors
+        // navigation at `start_line` so it advances to an earlier command.
+        if !mark.command_line_clipped
+            && reference_line > mark.command_line
+            && reference_line >= mark.output_start_line()
+        {
+            reference_line
+        } else {
+            mark.start_line
+        }
+    }
+
     pub(crate) fn command_mark_has_command_text(&self, command_mark_id: Option<&str>) -> bool {
         command_mark_id
             .and_then(|id| {

@@ -1871,10 +1871,8 @@ impl TerminalPane {
         let command_mark_id = command_mark_ui_visible
             .then(|| self.command_mark_id_at_absolute_line(reference_line))
             .flatten();
-        let navigation_line = command_mark_id
-            .as_deref()
-            .and_then(|id| self.command_mark_start_line(id))
-            .unwrap_or(reference_line);
+        let navigation_line =
+            self.context_menu_navigation_line(reference_line, command_mark_id.as_deref());
 
         // The Tauri/Web terminal now owns a copy/paste context menu instead of
         // exposing the WebView menu. Store pane-local coordinates so the GPUI
@@ -6454,5 +6452,169 @@ mod tests {
         );
 
         assert_eq!(privilege_prompt_text_from_snapshot(&snapshot), "");
+    }
+
+    #[gpui::test]
+    fn context_menu_previous_command_targets_owning_command_from_output_and_earlier_from_header(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        use oxideterm_terminal::{
+            TerminalCommandMark, TerminalCommandMarkClosedBy, TerminalCommandMarkConfidence,
+            TerminalCommandMarkDetectionSource, TerminalCommandPosition,
+        };
+
+        let (pane, cx) = cx.add_window_view(|window, cx| {
+            TerminalPane::new_recording_playback(80, 12, Default::default(), window, cx).unwrap()
+        });
+        cx.simulate_resize(gpui::size(px(800.0), px(400.0)));
+        cx.run_until_parked();
+
+        // Emit enough lines to create scrollback spanning two commands.
+        let mut payload = String::new();
+        for i in 0..=45 {
+            payload.push_str(&format!("line-{i}\r\n"));
+        }
+        pane.update(cx, |pane, cx| {
+            pane.feed_recording_output(payload.as_bytes(), cx);
+            let bounds = gpui::Bounds::new(
+                gpui::point(px(0.0), px(0.0)),
+                gpui::size(px(800.0), px(400.0)),
+            );
+            pane.bounds = Some(bounds);
+            pane.last_pty_resize = Some((80, 12, 800, 400));
+            pane.command_marks = vec![
+                TerminalCommandMark {
+                    command_id: "cmd-1".to_string(),
+                    command: Some("for ((i=1;i<=20;i++)); do echo $i; done".to_string()),
+                    start_line: 0,
+                    command_line: 0,
+                    command_line_clipped: false,
+                    output_start: Some(TerminalCommandPosition { line: 1, column: 0 }),
+                    output_end: Some(TerminalCommandPosition { line: 20, column: 0 }),
+                    end_line: Some(20),
+                    is_closed: true,
+                    closed_by: Some(TerminalCommandMarkClosedBy::ShellIntegration),
+                    exit_code: Some(0),
+                    duration_ms: Some(10),
+                    detection_source: TerminalCommandMarkDetectionSource::ShellIntegration,
+                    submitted_by: None,
+                    confidence: TerminalCommandMarkConfidence::High,
+                    output_confidence: TerminalCommandMarkConfidence::High,
+                    stale: false,
+                    started_at: 1,
+                    finished_at: Some(11),
+                },
+                TerminalCommandMark {
+                    command_id: "cmd-2".to_string(),
+                    command: Some("ls -la".to_string()),
+                    start_line: 21,
+                    command_line: 22,
+                    command_line_clipped: false,
+                    output_start: Some(TerminalCommandPosition { line: 23, column: 0 }),
+                    output_end: Some(TerminalCommandPosition { line: 44, column: 0 }),
+                    end_line: Some(44),
+                    is_closed: true,
+                    closed_by: Some(TerminalCommandMarkClosedBy::ShellIntegration),
+                    exit_code: Some(0),
+                    duration_ms: Some(5),
+                    detection_source: TerminalCommandMarkDetectionSource::ShellIntegration,
+                    submitted_by: None,
+                    confidence: TerminalCommandMarkConfidence::High,
+                    output_confidence: TerminalCommandMarkConfidence::High,
+                    stale: false,
+                    started_at: 12,
+                    finished_at: Some(17),
+                },
+            ];
+            pane.command_marks_render_cache_dirty = true;
+            cx.notify();
+        });
+
+        let open_menu_at_absolute_line = |pane: &mut TerminalPane,
+                                          absolute_line: usize,
+                                          cx: &mut Context<TerminalPane>| {
+            let viewport_start = pane
+                .snapshot
+                .scrollback_lines
+                .saturating_sub(pane.snapshot.display_offset);
+            let row = absolute_line
+                .checked_sub(viewport_start)
+                .expect("target absolute line must be visible in viewport");
+            let y = pane.bounds.unwrap().origin.y
+                + px((row as f32 + 0.5) * pane.metrics.line_height_f32());
+            pane.open_terminal_context_menu(
+                &gpui::MouseDownEvent {
+                    position: gpui::point(px(40.0), y),
+                    button: gpui::MouseButton::Right,
+                    ..Default::default()
+                },
+                cx,
+            );
+            pane.context_menu.clone().expect("context menu opened")
+        };
+
+        pane.update(cx, |pane, cx| {
+            // 1. Right-clicking in cmd-2's output targets cmd-2 itself (not skipping to cmd-1).
+            let menu = open_menu_at_absolute_line(pane, 40, cx);
+            assert!(menu.has_previous_command);
+            assert!(!menu.has_next_command);
+            pane.jump_to_command_mark_from_context_menu(
+                menu.reference_line,
+                crate::app::TerminalCommandNavigationDirection::Previous,
+                cx,
+            );
+            assert_eq!(pane.selected_command_mark_id.as_deref(), Some("cmd-2"));
+
+            // 2. Right-clicking on cmd-2's multi-line prompt/input header jumps to cmd-1.
+            for header_line in [21usize, 22usize] {
+                let menu = open_menu_at_absolute_line(pane, header_line, cx);
+                assert!(menu.has_previous_command);
+                assert!(!menu.has_next_command);
+                pane.jump_to_command_mark_from_context_menu(
+                    menu.reference_line,
+                    crate::app::TerminalCommandNavigationDirection::Previous,
+                    cx,
+                );
+                assert_eq!(pane.selected_command_mark_id.as_deref(), Some("cmd-1"));
+                // Scroll back to cmd-2 header for the second iteration.
+                pane.jump_to_command_mark_from_context_menu(
+                    0,
+                    crate::app::TerminalCommandNavigationDirection::Next,
+                    cx,
+                );
+            }
+
+            // 3. Right-clicking in the very first command's output (line 10) still enables
+            //    Previous command and jumps back to cmd-1's input line.
+            pane.selected_command_mark_id = None;
+            {
+                let mut terminal = pane.terminal.lock();
+                let target_offset = pane.snapshot.scrollback_lines.saturating_sub(5);
+                terminal.scroll_to_display_offset(target_offset);
+                let snap = terminal.snapshot();
+                drop(terminal);
+                pane.snapshot = pane.stamp_snapshot(snap);
+            }
+            let menu = open_menu_at_absolute_line(pane, 10, cx);
+            assert!(menu.has_previous_command);
+            assert!(menu.has_next_command);
+            pane.jump_to_command_mark_from_context_menu(
+                menu.reference_line,
+                crate::app::TerminalCommandNavigationDirection::Previous,
+                cx,
+            );
+            assert_eq!(pane.selected_command_mark_id.as_deref(), Some("cmd-1"));
+
+            // 4. Right-clicking on cmd-1's input line itself disables Previous and keeps Next.
+            let menu = open_menu_at_absolute_line(pane, 0, cx);
+            assert!(!menu.has_previous_command);
+            assert!(menu.has_next_command);
+
+            // 5. Output whose input line was evicted from scrollback does not pretend to jump.
+            pane.command_marks[0].command_line_clipped = true;
+            let menu = open_menu_at_absolute_line(pane, 5, cx);
+            assert!(!menu.has_previous_command);
+            assert!(menu.has_next_command);
+        });
     }
 }
