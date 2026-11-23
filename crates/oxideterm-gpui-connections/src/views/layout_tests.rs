@@ -99,27 +99,50 @@ fn standalone_sftp_keeps_transport_switcher_and_scrolls_vertically(cx: &mut gpui
     };
     cx.simulate_resize(gpui::size(px(1000.0), px(750.0)));
     draw(cx);
-    let rail = view.read_with(cx, |view, cx| {
-        view.views
-            .form_scroll("new-connection-transport-scroll", cx)
+    let (rail, section_tabs) = view.read_with(cx, |view, cx| {
+        (
+            view.views
+                .form_scroll("new-connection-transport-scroll", cx),
+            view.views.form_scroll("studio-category-tabs-scroll", cx),
+        )
     });
+    assert_eq!(
+        rail.max_offset().x,
+        px(0.0),
+        "protocol rail lays out vertically without horizontal scroll",
+    );
+    assert_eq!(
+        rail.max_offset().y,
+        px(0.0),
+        "all built-in protocols fit in the vertical rail at desktop height",
+    );
+    assert_eq!(
+        section_tabs.max_offset().x,
+        px(0.0),
+        "all SSH section tabs fit horizontally without scrolling",
+    );
+    let ssh_basic_tab = cx
+        .debug_bounds("studio-category-None")
+        .expect("SSH modal renders horizontal Basic Information tab");
+    let ssh_appearance_tab = cx
+        .debug_bounds("studio-category-Some(Notes)")
+        .expect("SSH modal renders horizontal Appearance tab");
+    assert_eq!(
+        ssh_basic_tab.center().y,
+        ssh_appearance_tab.center().y,
+        "section tabs sit on one horizontal row",
+    );
+    assert!(
+        ssh_basic_tab.left() >= rail.bounds().right(),
+        "section tabs live in the right pane beside the vertical protocol rail",
+    );
     let sftp_selector = "new-connection-transport-StandaloneSftp";
     let sftp = cx
         .debug_bounds(sftp_selector)
-        .expect("protocol rail contains standalone SFTP");
-    let rail_center = rail.bounds().center();
-    cx.simulate_event(gpui::ScrollEvent {
-        position: rail_center,
-        delta: gpui::ScrollDelta::Pixels(gpui::point(rail_center.x - sftp.center().x, px(0.0))),
-        ..Default::default()
-    });
-    draw(cx);
-    let sftp = cx
-        .debug_bounds(sftp_selector)
-        .expect("protocol rail contains standalone SFTP after scrolling");
+        .expect("vertical protocol rail contains standalone SFTP");
     assert!(
         rail.bounds().contains(&sftp.center()),
-        "horizontal scrolling brings the SFTP button into view"
+        "standalone SFTP is immediately reachable in the vertical rail without scrolling",
     );
     cx.simulate_click(sftp.center(), gpui::Modifiers::default());
 
@@ -141,7 +164,7 @@ fn standalone_sftp_keeps_transport_switcher_and_scrolls_vertically(cx: &mut gpui
     draw(cx);
     let primary_nav = cx
         .debug_bounds("studio-category-Some(StandaloneSftpPrimary)")
-        .expect("standalone SFTP keeps Remote Host 1 in its own category");
+        .expect("standalone SFTP keeps Remote Host 1 in its horizontal section tab bar");
     cx.simulate_click(primary_nav.center(), gpui::Modifiers::default());
     draw(cx);
     view.read_with(cx, |view, cx| {
@@ -159,7 +182,7 @@ fn standalone_sftp_keeps_transport_switcher_and_scrolls_vertically(cx: &mut gpui
     });
     let rail_item = cx
         .debug_bounds("new-connection-transport-Ssh")
-        .expect("protocol rail remains pinned outside scrolling fields");
+        .expect("vertical protocol rail remains pinned outside scrolling fields");
     let viewport = fields.bounds();
     assert!(viewport.size.height > px(0.0) && viewport.size.height < px(460.0));
     assert!(fields.max_offset().y > px(0.0));
@@ -178,12 +201,12 @@ fn standalone_sftp_keeps_transport_switcher_and_scrolls_vertically(cx: &mut gpui
     assert_eq!(
         cx.debug_bounds("new-connection-transport-Ssh").unwrap(),
         rail_item,
-        "the protocol rail stays pinned outside the scrolling fields",
+        "the vertical protocol rail stays pinned outside the scrolling fields",
     );
 
     let secondary_nav = cx
         .debug_bounds("studio-category-Some(StandaloneSftpSecondary)")
-        .expect("remote-to-remote mode shows Remote Host 2 in category sidebar");
+        .expect("remote-to-remote mode shows Remote Host 2 in section tab bar");
     cx.simulate_click(secondary_nav.center(), gpui::Modifiers::default());
     draw(cx);
     view.read_with(cx, |view, cx| {

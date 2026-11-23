@@ -75,16 +75,35 @@ impl WorkspaceApp {
         let mut draft = NewConnectionForm::default();
         draft.name = profile.map(|p| p.name.clone()).unwrap_or_default();
         draft.group = profile.and_then(|p| p.group.clone()).unwrap_or_default();
-        draft.host = "127.0.0.1".into();
-        draft.port.clear();
-        draft.tunnel_target_host = "127.0.0.1".into();
+        if let Some(rule) = saved.as_ref().map(|entry| &entry.rule) {
+            // Hydrate the saved rule's endpoints so edit mode renders the accurate flow preview.
+            draft.host = rule.bind_address.clone();
+            draft.port = if rule.bind_port == 0 {
+                String::new()
+            } else {
+                rule.bind_port.to_string()
+            };
+            draft.tunnel_target_host = rule.target_host.clone();
+            draft.tunnel_target_port = if rule.target_port == 0 {
+                String::new()
+            } else {
+                rule.target_port.to_string()
+            };
+        } else {
+            draft.host = "127.0.0.1".into();
+            draft.port.clear();
+            draft.tunnel_target_host = "127.0.0.1".into();
+        }
         draft.advanced_connections_expanded = true;
         self.update_connection_form_state(cx, |state| state.replace_with_new_form(draft));
         let form = TunnelForm {
             host_id: saved
                 .as_ref()
                 .and_then(|rule| rule.owner_connection_id.clone()),
-            kind: ForwardType::Local,
+            kind: saved
+                .as_ref()
+                .map(|entry| entry.rule.forward_type)
+                .unwrap_or(ForwardType::Local),
             startup: profile.is_some_and(|p| p.connect_on_startup),
             saved,
         };

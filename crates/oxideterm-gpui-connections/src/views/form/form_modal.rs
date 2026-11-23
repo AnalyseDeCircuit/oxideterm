@@ -435,8 +435,12 @@ impl ConnectionFormView {
                 .max(0.0);
             (520.0_f32.min(max_w), None)
         } else {
-            let (width, height) =
-                composer::studio_modal_size(window, shows_transport_selector, modal_max_height);
+            let (width, height) = composer::studio_modal_size(
+                window,
+                &self.tokens,
+                shows_transport_selector,
+                modal_max_height,
+            );
             (width, Some(height))
         };
         let modal_max_height = modal_max_height.min(
@@ -461,7 +465,7 @@ impl ConnectionFormView {
                 inset: false,
             },
         ];
-        let uses_category_sidebar = !prompt_mode
+        let uses_category_tabs = !prompt_mode
             && !drill_down_mode
             && !wsl_graphics_mode
             && (ssh_submission_mode
@@ -472,8 +476,8 @@ impl ConnectionFormView {
                 || telnet_mode
                 || ftp_mode
                 || local_terminal_mode);
-        let show_general_page = !uses_category_sidebar || form.active_drawer.is_none();
-        let category_sidebar = uses_category_sidebar.then(|| {
+        let show_general_page = !uses_category_tabs || form.active_drawer.is_none();
+        let category_tabs = uses_category_tabs.then(|| {
             use crate::form_state::ConnectionFormDrawer;
             let route_summary = if form.proxy_command_enabled {
                 Some("Proxy".to_string())
@@ -492,13 +496,11 @@ impl ConnectionFormView {
                 vec![
                     composer::CategoryNavItem {
                         drawer: None,
-                        icon: LucideIcon::Terminal,
                         label: self.i18n.t("ssh.form.basic_information"),
                         summary: None,
                     },
                     composer::CategoryNavItem {
                         drawer: Some(ConnectionFormDrawer::Notes),
-                        icon: LucideIcon::Sparkles,
                         label: self.i18n.t("ssh.form.appearance"),
                         summary: notes_summary,
                     },
@@ -507,19 +509,16 @@ impl ConnectionFormView {
                 vec![
                     composer::CategoryNavItem {
                         drawer: None,
-                        icon: LucideIcon::Radio,
                         label: self.i18n.t("modals.new_connection.serial_section_title"),
                         summary: None,
                     },
                     composer::CategoryNavItem {
                         drawer: Some(ConnectionFormDrawer::Terminal),
-                        icon: LucideIcon::Terminal,
                         label: self.i18n.t("ssh.form.terminal_options"),
                         summary: terminal_summary,
                     },
                     composer::CategoryNavItem {
                         drawer: Some(ConnectionFormDrawer::Notes),
-                        icon: LucideIcon::Sparkles,
                         label: self.i18n.t("ssh.form.appearance"),
                         summary: notes_summary,
                     },
@@ -528,13 +527,11 @@ impl ConnectionFormView {
                 vec![
                     composer::CategoryNavItem {
                         drawer: None,
-                        icon: LucideIcon::Bluetooth,
                         label: self.i18n.t("modals.new_connection.ble_form_title"),
                         summary: None,
                     },
                     composer::CategoryNavItem {
                         drawer: Some(ConnectionFormDrawer::BleTransportOptions),
-                        icon: LucideIcon::Radio,
                         label: self
                             .i18n
                             .t("modals.new_connection.ble_transport_options_title"),
@@ -542,13 +539,11 @@ impl ConnectionFormView {
                     },
                     composer::CategoryNavItem {
                         drawer: Some(ConnectionFormDrawer::Terminal),
-                        icon: LucideIcon::Terminal,
                         label: self.i18n.t("ssh.form.terminal_options"),
                         summary: terminal_summary,
                     },
                     composer::CategoryNavItem {
                         drawer: Some(ConnectionFormDrawer::Notes),
-                        icon: LucideIcon::Sparkles,
                         label: self.i18n.t("ssh.form.appearance"),
                         summary: notes_summary,
                     },
@@ -557,13 +552,11 @@ impl ConnectionFormView {
                 vec![
                     composer::CategoryNavItem {
                         drawer: None,
-                        icon: LucideIcon::Network,
                         label: self.i18n.t("ssh.form.basic_information"),
                         summary: None,
                     },
                     composer::CategoryNavItem {
                         drawer: Some(ConnectionFormDrawer::Route),
-                        icon: LucideIcon::Network,
                         label: self.i18n.t("ssh.form.connection_route"),
                         summary: (form.upstream_proxy_policy
                             != NewConnectionUpstreamProxyPolicy::Direct)
@@ -571,13 +564,11 @@ impl ConnectionFormView {
                     },
                     composer::CategoryNavItem {
                         drawer: Some(ConnectionFormDrawer::Terminal),
-                        icon: LucideIcon::Terminal,
                         label: self.i18n.t("ssh.form.terminal_options"),
                         summary: terminal_summary,
                     },
                     composer::CategoryNavItem {
                         drawer: Some(ConnectionFormDrawer::Notes),
-                        icon: LucideIcon::Sparkles,
                         label: self.i18n.t("ssh.form.appearance"),
                         summary: notes_summary,
                     },
@@ -586,19 +577,16 @@ impl ConnectionFormView {
                 vec![
                     composer::CategoryNavItem {
                         drawer: None,
-                        icon: LucideIcon::FolderSync,
                         label: self.i18n.t("ssh.form.basic_information"),
                         summary: None,
                     },
                     composer::CategoryNavItem {
                         drawer: Some(ConnectionFormDrawer::FtpOptions),
-                        icon: LucideIcon::Network,
                         label: self.i18n.t("ssh.form.connection_route"),
                         summary: None,
                     },
                     composer::CategoryNavItem {
                         drawer: Some(ConnectionFormDrawer::Notes),
-                        icon: LucideIcon::Sparkles,
                         label: self.i18n.t("ssh.form.appearance"),
                         summary: notes_summary,
                     },
@@ -607,13 +595,11 @@ impl ConnectionFormView {
                 let mut items = vec![
                     composer::CategoryNavItem {
                         drawer: None,
-                        icon: LucideIcon::Monitor,
                         label: self.i18n.t("ssh.form.basic_information"),
                         summary: None,
                     },
                     composer::CategoryNavItem {
                         drawer: Some(ConnectionFormDrawer::Route),
-                        icon: LucideIcon::Network,
                         label: self
                             .i18n
                             .t("modals.new_connection.remote_desktop_ssh_gateway"),
@@ -623,14 +609,12 @@ impl ConnectionFormView {
                 if protocol == oxideterm_remote_desktop::RemoteDesktopProtocol::Vnc {
                     items.push(composer::CategoryNavItem {
                         drawer: Some(ConnectionFormDrawer::VncPreferences),
-                        icon: LucideIcon::ShieldCheck,
                         label: self.i18n.t("modals.new_connection.vnc_preferences_title"),
                         summary: None,
                     });
                 }
                 items.push(composer::CategoryNavItem {
                     drawer: Some(ConnectionFormDrawer::RemoteFeatures),
-                    icon: LucideIcon::AppWindow,
                     label: self
                         .i18n
                         .t("modals.new_connection.remote_desktop_features_title"),
@@ -638,13 +622,11 @@ impl ConnectionFormView {
                 });
                 items.push(composer::CategoryNavItem {
                     drawer: Some(ConnectionFormDrawer::Terminal),
-                    icon: LucideIcon::Terminal,
                     label: self.i18n.t("ssh.form.terminal_options"),
                     summary: terminal_summary,
                 });
                 items.push(composer::CategoryNavItem {
                     drawer: Some(ConnectionFormDrawer::Notes),
-                    icon: LucideIcon::Sparkles,
                     label: self.i18n.t("ssh.form.appearance"),
                     summary: notes_summary,
                 });
@@ -655,31 +637,26 @@ impl ConnectionFormView {
                 vec![
                     composer::CategoryNavItem {
                         drawer: None,
-                        icon: LucideIcon::Wifi,
                         label: self.i18n.t("ssh.form.basic_information"),
                         summary: None,
                     },
                     composer::CategoryNavItem {
                         drawer: Some(ConnectionFormDrawer::Route),
-                        icon: LucideIcon::Network,
                         label: self.i18n.t("ssh.form.connection_route"),
                         summary: route_summary,
                     },
                     composer::CategoryNavItem {
                         drawer: Some(ConnectionFormDrawer::MoshOptions),
-                        icon: LucideIcon::Terminal,
                         label: self.i18n.t("mosh.form.advanced"),
                         summary: None,
                     },
                     composer::CategoryNavItem {
                         drawer: Some(ConnectionFormDrawer::SshAlgorithms),
-                        icon: LucideIcon::KeyRound,
                         label: self.i18n.t("ssh.form.ssh_algorithms"),
                         summary: algorithms_summary,
                     },
                     composer::CategoryNavItem {
                         drawer: Some(ConnectionFormDrawer::Notes),
-                        icon: LucideIcon::Sparkles,
                         label: self.i18n.t("ssh.form.appearance"),
                         summary: notes_summary,
                     },
@@ -693,49 +670,37 @@ impl ConnectionFormView {
                 vec![
                     composer::CategoryNavItem {
                         drawer: None,
-                        icon: LucideIcon::Server,
                         label: self.i18n.t("ssh.form.basic_information"),
                         summary: None,
                     },
                     composer::CategoryNavItem {
                         drawer: Some(ConnectionFormDrawer::Route),
-                        icon: LucideIcon::Network,
                         label: self.i18n.t("ssh.form.connection_route"),
                         summary: route_summary,
                     },
                     composer::CategoryNavItem {
                         drawer: Some(ConnectionFormDrawer::SshSecurity),
-                        icon: LucideIcon::ShieldCheck,
                         label: self.i18n.t("ssh.form.ssh_options"),
                         summary: security_summary,
                     },
                     composer::CategoryNavItem {
                         drawer: Some(ConnectionFormDrawer::SshAlgorithms),
-                        icon: LucideIcon::KeyRound,
                         label: self.i18n.t("ssh.form.ssh_algorithms"),
                         summary: algorithms_summary,
                     },
                     composer::CategoryNavItem {
                         drawer: Some(ConnectionFormDrawer::Terminal),
-                        icon: LucideIcon::Terminal,
                         label: self.i18n.t("ssh.form.terminal_options"),
                         summary: terminal_summary,
                     },
                     composer::CategoryNavItem {
                         drawer: Some(ConnectionFormDrawer::Notes),
-                        icon: LucideIcon::Sparkles,
                         label: self.i18n.t("ssh.form.appearance"),
                         summary: notes_summary,
                     },
                 ]
             };
-            self.render_studio_category_sidebar(
-                items,
-                form.active_drawer,
-                shows_icon_field,
-                Some(ConnectionFormDrawer::Notes),
-                cx,
-            )
+            self.render_studio_category_tabs(items, form.active_drawer, cx)
         });
         // A long scrolling form uses an opaque theme surface: underlying text
         // must not bleed through, and live backdrop blur would add GPU work
@@ -777,7 +742,7 @@ impl ConnectionFormView {
                     title,
                     Some(description),
                     shows_transport_selector,
-                    !uses_category_sidebar && shows_icon_field,
+                    !uses_category_tabs && shows_icon_field,
                     cx,
                 ))
                 .child(
@@ -785,42 +750,49 @@ impl ConnectionFormView {
                         .flex_1()
                         .min_h(px(0.0))
                         .flex()
-                        .when_some(category_sidebar, |content, sidebar| content.child(sidebar))
+                        .when(shows_transport_selector, |content| {
+                            content.child(self.render_studio_protocol_sidebar(cx))
+                        })
                         .child(
                             div()
                                 .flex_1()
                                 .min_h(px(0.0))
                                 .min_w(px(0.0))
                                 .flex()
-                                .gap(px(self.tokens.metrics.modal_section_gap))
+                                .flex_col()
+                                .when_some(category_tabs, |pane, tabs| pane.child(tabs))
                                 .child(
                                     div()
-                                        .id("new-connection-modal-form-scroll")
                                         .flex_1()
                                         .min_h(px(0.0))
                                         .min_w(px(0.0))
-                                        .px(px(22.0))
-                                        .py(px(18.0))
-                                        .overflow_y_scroll()
-                                        .track_scroll(
-                                            &self.selectable_text_scroll_handle(
-                                                "new-connection-modal-form-scroll",
-                                            ),
-                                        )
-                                        .on_scroll(cx.listener(
-                                            |this, _event, _window, cx| {
-                                                // Tauri/Radix closes select content when the modal
-                                                // scroll body moves its trigger. Native caches the
-                                                // trigger anchor explicitly, so clear both popup
-                                                // ownership and the stale group-select bounds here.
-                                                if this.connection_form_state(cx).open_select.is_some() {
-                                                    this.close_new_connection_select(cx);
-                                                    this.clear_new_connection_select_anchor(cx);
-                                                    cx.notify();
-                                                }
-                                            },
-                                        ))
+                                        .relative()
                                         .child(
+                                            div()
+                                                .id("new-connection-modal-form-scroll")
+                                                .size_full()
+                                                .px(px(22.0))
+                                                .py(px(18.0))
+                                                .overflow_y_scroll()
+                                                .track_scroll(
+                                                    &self.selectable_text_scroll_handle(
+                                                        "new-connection-modal-form-scroll",
+                                                    ),
+                                                )
+                                                .on_scroll(cx.listener(
+                                                    |this, _event, _window, cx| {
+                                                        // Tauri/Radix closes select content when the modal
+                                                        // scroll body moves its trigger. Native caches the
+                                                        // trigger anchor explicitly, so clear both popup
+                                                        // ownership and the stale group-select bounds here.
+                                                        if this.connection_form_state(cx).open_select.is_some() {
+                                                            this.close_new_connection_select(cx);
+                                                            this.clear_new_connection_select_anchor(cx);
+                                                            cx.notify();
+                                                        }
+                                                    },
+                                                ))
+                                                .child(
                                             div()
                                         .flex()
                                         .flex_col()
@@ -1673,6 +1645,15 @@ impl ConnectionFormView {
                                     content.when_some(page_body, |c, body| c.child(body))
                                 })
                                     })
+                                ),
+                                )
+                                .child(
+                                    oxideterm_gpui_ui::Scrollbar::new(
+                                        &self.selectable_text_scroll_handle(
+                                            "new-connection-modal-form-scroll",
+                                        ),
+                                    )
+                                    .axis(oxideterm_gpui_ui::ScrollbarAxis::Vertical),
                                 ),
                         )
                         ),

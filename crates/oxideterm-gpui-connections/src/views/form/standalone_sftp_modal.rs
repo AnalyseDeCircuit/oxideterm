@@ -170,8 +170,12 @@ impl ConnectionFormView {
         let remote_to_remote = form.transfer_mode == StandaloneSftpTransferMode::RemoteRemote;
         let modal_max_height = f32::from(window.viewport_size().height)
             * self.tokens.metrics.modal_max_viewport_height_ratio;
-        let (modal_width, studio_height) =
-            composer::studio_modal_size(window, shows_transport_selector, modal_max_height);
+        let (modal_width, studio_height) = composer::studio_modal_size(
+            window,
+            &self.tokens,
+            shows_transport_selector,
+            modal_max_height,
+        );
         let form_visible = self.connection_form_state(cx).presence.phase()
             == oxideterm_gpui_ui::motion::ExitPhase::Visible;
         let primary_complete = !form.host.trim().is_empty()
@@ -202,16 +206,14 @@ impl ConnectionFormView {
             self.i18n.t("sftp.standalone.form_title")
         };
 
-        let mut sidebar_items = vec![
+        let mut tab_items = vec![
             composer::CategoryNavItem {
                 drawer: None,
-                icon: LucideIcon::FolderSync,
                 label: self.i18n.t("ssh.form.basic_information"),
                 summary: None,
             },
             composer::CategoryNavItem {
                 drawer: Some(ConnectionFormDrawer::StandaloneSftpPrimary),
-                icon: LucideIcon::Server,
                 label: self.i18n.t(if remote_to_remote {
                     "sftp.standalone.remote_host_1"
                 } else {
@@ -221,22 +223,19 @@ impl ConnectionFormView {
             },
         ];
         if remote_to_remote {
-            sidebar_items.push(composer::CategoryNavItem {
+            tab_items.push(composer::CategoryNavItem {
                 drawer: Some(ConnectionFormDrawer::StandaloneSftpSecondary),
-                icon: LucideIcon::Server,
                 label: self.i18n.t("sftp.standalone.remote_host_2"),
                 summary: (!form.secondary_host.trim().is_empty()).then(|| "•".to_string()),
             });
         }
-        sidebar_items.push(composer::CategoryNavItem {
+        tab_items.push(composer::CategoryNavItem {
             drawer: Some(ConnectionFormDrawer::Route),
-            icon: LucideIcon::Network,
             label: self.i18n.t("ssh.form.connection_route"),
             summary: form.route_customized.then(|| "•".to_string()),
         });
-        sidebar_items.push(composer::CategoryNavItem {
+        tab_items.push(composer::CategoryNavItem {
             drawer: Some(ConnectionFormDrawer::Notes),
-            icon: LucideIcon::Sparkles,
             label: self.i18n.t("ssh.form.appearance"),
             summary: (!form.notes.trim().is_empty()).then(|| "•".to_string()),
         });
@@ -249,13 +248,7 @@ impl ConnectionFormView {
             form.active_drawer
         };
 
-        let category_sidebar = self.render_studio_category_sidebar(
-            sidebar_items,
-            active_drawer,
-            true,
-            Some(ConnectionFormDrawer::Notes),
-            cx,
-        );
+        let category_tabs = self.render_studio_category_tabs(tab_items, active_drawer, cx);
 
         let page_content = match active_drawer {
             Some(ConnectionFormDrawer::StandaloneSftpPrimary) => {
@@ -323,33 +316,48 @@ impl ConnectionFormView {
                         .flex_1()
                         .min_h(px(0.0))
                         .flex()
-                        .child(category_sidebar)
+                        .when(shows_transport_selector, |content| {
+                            content.child(self.render_studio_protocol_sidebar(cx))
+                        })
                         .child(
                             div()
                                 .flex_1()
                                 .min_w_0()
                                 .min_h(px(0.0))
-                                .relative()
+                                .flex()
+                                .flex_col()
+                                .child(category_tabs)
                                 .child(
                                     div()
-                                        .id("standalone-sftp-form-scroll")
-                                        .size_full()
-                                        .px(px(22.0))
-                                        .py(px(18.0))
-                                        .overflow_y_scroll()
-                                        .track_scroll(&fields_scroll)
-                                        .on_scroll(cx.listener(|this, _, _, cx| {
-                                            if this.connection_form_state(cx).open_select.is_some()
-                                            {
-                                                this.close_new_connection_select(cx);
-                                                this.clear_new_connection_select_anchor(cx);
-                                                cx.notify();
-                                            }
-                                        }))
-                                        .child(page_content),
-                                )
-                                .child(
-                                    Scrollbar::new(&fields_scroll).axis(ScrollbarAxis::Vertical),
+                                        .flex_1()
+                                        .min_w_0()
+                                        .min_h(px(0.0))
+                                        .relative()
+                                        .child(
+                                            div()
+                                                .id("standalone-sftp-form-scroll")
+                                                .size_full()
+                                                .px(px(22.0))
+                                                .py(px(18.0))
+                                                .overflow_y_scroll()
+                                                .track_scroll(&fields_scroll)
+                                                .on_scroll(cx.listener(|this, _, _, cx| {
+                                                    if this
+                                                        .connection_form_state(cx)
+                                                        .open_select
+                                                        .is_some()
+                                                    {
+                                                        this.close_new_connection_select(cx);
+                                                        this.clear_new_connection_select_anchor(cx);
+                                                        cx.notify();
+                                                    }
+                                                }))
+                                                .child(page_content),
+                                        )
+                                        .child(
+                                            Scrollbar::new(&fields_scroll)
+                                                .axis(ScrollbarAxis::Vertical),
+                                        ),
                                 ),
                         ),
                 )

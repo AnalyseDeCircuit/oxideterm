@@ -59,7 +59,7 @@ use oxideterm_gpui_ui::{
     },
     checkbox, checkbox_with, form_field,
     modal::{dismissible_dialog_backdrop, popover_backdrop},
-    modal_body, modal_container, modal_footer, segmented_tab, segmented_tabs,
+    modal_container, modal_footer, segmented_tab, segmented_tabs,
     select::{
         SelectAnchorId, select_option, select_option_action, select_overlay_popup_with_max_height,
     },
