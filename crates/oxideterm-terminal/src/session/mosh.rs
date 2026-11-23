@@ -1121,7 +1121,15 @@ fn prediction_attributes(cell: &AlacrittyCell) -> Vec<u8> {
     if cell.flags.contains(Flags::ITALIC) {
         codes.push("3".to_string());
     }
-    if cell.flags.intersects(Flags::ALL_UNDERLINES) {
+    if cell.flags.contains(Flags::UNDERCURL) {
+        codes.push("4:3".to_string());
+    } else if cell.flags.contains(Flags::DOUBLE_UNDERLINE) {
+        codes.push("4:2".to_string());
+    } else if cell.flags.contains(Flags::DOTTED_UNDERLINE) {
+        codes.push("4:4".to_string());
+    } else if cell.flags.contains(Flags::DASHED_UNDERLINE) {
+        codes.push("4:5".to_string());
+    } else if cell.flags.contains(Flags::UNDERLINE) {
         codes.push("4".to_string());
     }
     if cell.flags.contains(Flags::INVERSE) {

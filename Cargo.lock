@@ -7887,6 +7887,7 @@ dependencies = [
  "chrono",
  "criterion 0.8.2",
  "crossbeam-channel",
+ "foldhash 0.2.0",
  "futures",
  "gpui-pre",
  "gpui-pre-platform",

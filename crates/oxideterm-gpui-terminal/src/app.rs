@@ -542,6 +542,7 @@ pub struct TerminalPane {
     row_timestamps: Arc<TerminalRowTimestampStore>,
     metrics: TerminalMetrics,
     metrics_dirty: bool,
+    metrics_scale_factor_bits: u32,
     selection: Option<TerminalSelection>,
     paste_editor: Option<paste::PasteEditor>,
     // The pane observes only its session's capability and never stores the sandbox path.
@@ -805,6 +806,18 @@ pub(crate) struct TerminalRowTimestampStore {
 impl TerminalRowTimestampStore {
     pub(crate) fn get(&self, identity: u64) -> Option<&TerminalRowTimestamp> {
         self.entries.get(&identity)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn insert_label(&mut self, identity: u64, label: impl Into<String>) {
+        self.entries.insert(
+            identity,
+            TerminalRowTimestamp {
+                label: label.into(),
+                signature: 0,
+                source_signature: 0,
+            },
+        );
     }
 }
 
@@ -1209,6 +1222,7 @@ impl TerminalPane {
         let audit_context = terminal.lock().audit_context();
         let focus_handle = cx.focus_handle();
         let metrics = TerminalMetrics::measure_with_preferences(window, &preferences);
+        let metrics_scale_factor_bits = window.scale_factor().to_bits();
         window.focus(&focus_handle, cx);
         terminal.lock().set_focused(true)?;
         let trzsz_owner_id = format!(
@@ -1375,6 +1389,7 @@ impl TerminalPane {
             row_timestamps: Arc::new(TerminalRowTimestampStore::default()),
             metrics,
             metrics_dirty: false,
+            metrics_scale_factor_bits,
             selection: None,
             paste_editor: None,
             kitty_file_transmission,

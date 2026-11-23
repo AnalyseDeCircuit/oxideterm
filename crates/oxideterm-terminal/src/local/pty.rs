@@ -1554,20 +1554,31 @@ fn snapshot_row_from_source<T: EventListener>(
         }
         let zerowidth = cell.zerowidth().unwrap_or_default();
         let hyperlink = cell.hyperlink();
-        if !zerowidth.is_empty() || hyperlink.is_some() {
-            if let Some((previous_zerowidth, previous_hyperlink, extra)) = &previous_extra
+        let underline_color = cell
+            .underline_color()
+            .map(|color| crate::color::color_to_rgb(color, palette, overrides));
+        if !zerowidth.is_empty() || hyperlink.is_some() || underline_color.is_some() {
+            if let Some((
+                previous_zerowidth,
+                previous_hyperlink,
+                previous_underline_color,
+                extra,
+            )) = &previous_extra
                 && previous_zerowidth == &zerowidth
                 && previous_hyperlink == &hyperlink
+                && previous_underline_color == &underline_color
             {
                 snapshot_cell.extra = Some(Arc::clone(extra));
             } else {
-                snapshot_cell.set_extra(
+                snapshot_cell.set_extra_with_underline_color(
                     zerowidth.iter().copied().collect(),
                     hyperlink.as_ref().map(|link| link.uri().to_owned()),
+                    underline_color,
                 );
                 previous_extra = Some((
                     zerowidth,
                     hyperlink,
+                    underline_color,
                     snapshot_cell.extra.as_ref().unwrap().clone(),
                 ));
             }
@@ -1963,6 +1974,47 @@ mod incremental_snapshot_tests {
         let mut expected = linked[1].clone();
         expected.cursor = true;
         assert_eq!(next.lines[1].cells[1], expected);
+
+        parser.advance(
+            &mut term,
+            b"\x1b[2;1H\x1b[4:1m1\x1b[4:2m2\x1b[4:3;58:2::255:80:80m34\x1b[59;4:4m5\x1b[4:5m6\x1b[0m",
+        );
+        let underlined = incremental_snapshot_from_term(
+            &mut term,
+            size,
+            &graphics,
+            &TerminalPalette::default(),
+            &next,
+        );
+        let ul_cells = &underlined.lines[1].cells;
+        assert_eq!(
+            ul_cells[..6]
+                .iter()
+                .map(|c| c.attrs.underline_style())
+                .collect::<Vec<_>>(),
+            vec![
+                crate::TerminalUnderlineStyle::Single,
+                crate::TerminalUnderlineStyle::Double,
+                crate::TerminalUnderlineStyle::Curly,
+                crate::TerminalUnderlineStyle::Curly,
+                crate::TerminalUnderlineStyle::Dotted,
+                crate::TerminalUnderlineStyle::Dashed,
+            ]
+        );
+        assert_eq!(ul_cells[0].underline_color(), None);
+        assert_eq!(
+            ul_cells[2].underline_color(),
+            Some(TerminalColor::rgb(255, 80, 80))
+        );
+        assert_eq!(
+            ul_cells[3].underline_color(),
+            Some(TerminalColor::rgb(255, 80, 80))
+        );
+        assert_eq!(ul_cells[4].underline_color(), None);
+        assert!(Arc::ptr_eq(
+            ul_cells[2].extra.as_ref().unwrap(),
+            ul_cells[3].extra.as_ref().unwrap()
+        ));
     }
 
     #[test]

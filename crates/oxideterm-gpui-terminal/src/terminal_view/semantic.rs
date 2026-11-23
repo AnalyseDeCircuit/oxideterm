@@ -3,6 +3,7 @@
 
 use std::ops::Range;
 
+use foldhash::{HashSet, HashSetExt};
 use oxideterm_terminal::{TerminalAttrs, TerminalCommandMark, TerminalSnapshot};
 use oxideterm_terminal_semantic::{
     CompiledSemanticScheme, SemanticClass, SemanticLineRole, SemanticShellDialect, SemanticSpan,
@@ -63,7 +64,7 @@ pub(super) fn append_terminal_semantics_with_palette(
     layout: &mut TerminalHighlightLayout,
     cached_spans: Option<&[SemanticSpan]>,
 ) {
-    let mut seen_lines = std::collections::HashSet::new();
+    let mut seen_lines = HashSet::new();
     for row in rows {
         let Some(line_range) = logical_line_range(snapshot, row) else {
             continue;
@@ -722,6 +723,14 @@ mod tests {
 
         assert_ne!(timestamp, operator);
         assert_ne!(number, operator);
+        assert_ne!(option, operator);
+        assert_ne!(string, operator);
+        let dark_theme =
+            TerminalUiTheme::from_tokens(ThemeTokens::from_builtin(theme_by_id("oxide-dark")));
+        assert_ne!(
+            semantic_foreground(&dark_theme, SemanticClass::Operator, scheme),
+            semantic_foreground(&dark_theme, SemanticClass::String, scheme)
+        );
         assert_eq!(layout.foregrounds.get(&(0, 0)), Some(&timestamp));
         assert_eq!(layout.foregrounds.get(&(0, 1)), Some(&operator));
         assert_eq!(layout.foregrounds.get(&(0, 2)), Some(&timestamp));

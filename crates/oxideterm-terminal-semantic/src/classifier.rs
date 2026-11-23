@@ -6,7 +6,7 @@ use crate::syntax;
 use crate::{
     CompiledSemanticScheme, SemanticClass, SemanticLineRole, SemanticScheme, SemanticShellDialect,
     SemanticSpan, command::ParsedCommand, compiler, container, filesystem, git, network,
-    permissions, ps, resources, scheme, systemd, test_runner,
+    permissions, ps, resources, scheme, structured, systemd, test_runner,
 };
 
 // Severity metadata belongs in the log envelope; bounding it prevents payload text from promotion.
@@ -286,6 +286,9 @@ pub fn classify_line_with_scheme(
     candidates.extend(container::line_candidates(text, role, |class| {
         semantic_scheme.includes(class)
     }));
+    candidates.extend(structured::line_candidates(text, role, |class| {
+        semantic_scheme.includes(class)
+    }));
     accept_candidates_with_structural_variants(&mut candidates, structural)
 }
 
@@ -345,6 +348,12 @@ pub fn classify_line_with_compiled_scheme_and_shell(
     }));
     candidates.extend(container::line_candidates(text, role, |class| {
         semantic_scheme.contains_rule_class(class)
+    }));
+    candidates.extend(structured::line_candidates(text, role, |class| {
+        matches!(
+            class,
+            SemanticClass::Keyword | SemanticClass::Command | SemanticClass::Comment
+        ) || semantic_scheme.contains_rule_class(class)
     }));
     #[cfg(feature = "shell-syntax")]
     candidates.extend(syntax::shell_syntax_candidates(text, role, shell));

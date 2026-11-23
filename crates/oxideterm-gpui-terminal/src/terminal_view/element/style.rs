@@ -2,9 +2,57 @@ use gpui::{
     Font, FontStyle, FontWeight, Hsla, Rgba, StrikethroughStyle, TextRun, UnderlineStyle, px, rgb,
     rgba,
 };
-use oxideterm_terminal::{TerminalCell, TerminalColor};
+use oxideterm_terminal::{TerminalCell, TerminalColor, TerminalUnderlineStyle};
 
 use crate::terminal_ui::*;
+
+/// Non-GPUI underline styles (`Double`, `Dotted`, `Dashed`) painted with pixel-snapped quads.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct CustomUnderline {
+    pub(crate) style: TerminalUnderlineStyle,
+    pub(crate) color: Hsla,
+    pub(crate) explicit_color: bool,
+}
+
+fn resolved_underline_style(cell: &TerminalCell, link: bool) -> TerminalUnderlineStyle {
+    match cell.attrs.underline_style() {
+        TerminalUnderlineStyle::None if link => TerminalUnderlineStyle::Single,
+        style => style,
+    }
+}
+
+fn resolved_underline_color(cell: &TerminalCell, color: Hsla, link: bool) -> (Hsla, bool) {
+    if link {
+        (rgb(0x61afef).into(), true)
+    } else if let Some(underline_color) = cell.underline_color() {
+        (to_hsla(underline_color), true)
+    } else {
+        (color, false)
+    }
+}
+
+pub(crate) fn custom_underline_for_cell(
+    cell: &TerminalCell,
+    color: Hsla,
+    link: bool,
+) -> Option<CustomUnderline> {
+    let style = resolved_underline_style(cell, link);
+    match style {
+        TerminalUnderlineStyle::Double
+        | TerminalUnderlineStyle::Dotted
+        | TerminalUnderlineStyle::Dashed => {
+            let (ul_color, explicit_color) = resolved_underline_color(cell, color, link);
+            Some(CustomUnderline {
+                style,
+                color: ul_color,
+                explicit_color,
+            })
+        }
+        TerminalUnderlineStyle::None
+        | TerminalUnderlineStyle::Single
+        | TerminalUnderlineStyle::Curly => None,
+    }
+}
 
 pub(crate) fn text_run_for_cell(
     cell: &TerminalCell,
@@ -23,6 +71,23 @@ pub(crate) fn text_run_for_cell(
     } else {
         FontStyle::Normal
     };
+    let (ul_color, _) = resolved_underline_color(cell, color, link);
+    let underline = match resolved_underline_style(cell, link) {
+        TerminalUnderlineStyle::Single => Some(UnderlineStyle {
+            thickness: px(1.0),
+            color: Some(ul_color),
+            wavy: false,
+        }),
+        TerminalUnderlineStyle::Curly => Some(UnderlineStyle {
+            thickness: px(1.0),
+            color: Some(ul_color),
+            wavy: true,
+        }),
+        TerminalUnderlineStyle::None
+        | TerminalUnderlineStyle::Double
+        | TerminalUnderlineStyle::Dotted
+        | TerminalUnderlineStyle::Dashed => None,
+    };
 
     TextRun {
         len: text_len,
@@ -35,11 +100,7 @@ pub(crate) fn text_run_for_cell(
         },
         color: if link { rgb(0x61afef).into() } else { color },
         background_color: None,
-        underline: (cell.attrs.underline() || link).then_some(UnderlineStyle {
-            thickness: px(1.0),
-            color: Some(if link { rgb(0x61afef).into() } else { color }),
-            wavy: false,
-        }),
+        underline,
         strikethrough: cell.attrs.strikeout().then_some(StrikethroughStyle {
             thickness: px(1.0),
             color: Some(color),
@@ -90,9 +151,11 @@ pub(crate) fn timestamp_text_run(
     theme: &TerminalUiTheme,
     metrics: &TerminalMetrics,
 ) -> TextRun {
+    let mut font = metrics.font.clone();
+    font.features = oxideterm_gpui_ui::tabular_nums_features();
     TextRun {
         len: text.len(),
-        font: metrics.font.clone(),
+        font,
         color: rgba((theme.header_foreground << 8) | 0xcc).into(),
         background_color: None,
         underline: None,
@@ -102,20 +165,12 @@ pub(crate) fn timestamp_text_run(
 }
 
 pub(crate) fn text_run_style_matches(left: &TextRun, right: &TextRun) -> bool {
-    fn comparable_style(
-        run: &TextRun,
-    ) -> (&Font, Hsla, Option<Hsla>, bool, bool, Option<gpui::Pixels>) {
-        (
-            &run.font,
-            run.color,
-            run.background_color,
-            run.underline.is_some(),
-            run.strikethrough.is_some(),
-            run.letter_spacing,
-        )
-    }
-
-    comparable_style(left) == comparable_style(right)
+    left.font == right.font
+        && left.color == right.color
+        && left.background_color == right.background_color
+        && left.underline == right.underline
+        && left.strikethrough == right.strikethrough
+        && left.letter_spacing == right.letter_spacing
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -134,6 +189,12 @@ pub(crate) enum PowerlineWeight {
 pub(crate) enum PowerlineShape {
     Triangle,
     HalfCircle,
+    SlantedLower,
+    SlantedUpper,
+    Trapezoid,
+    InverseTriangle,
+    PixelatedSmall,
+    PixelatedBig,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -141,6 +202,16 @@ pub(crate) struct PowerlineSeparator {
     pub(crate) direction: PowerlineDirection,
     pub(crate) weight: PowerlineWeight,
     pub(crate) shape: PowerlineShape,
+}
+
+impl PowerlineSeparator {
+    pub(crate) const fn supports_background_cutout(self) -> bool {
+        matches!(self.weight, PowerlineWeight::Filled)
+            && !matches!(
+                self.shape,
+                PowerlineShape::PixelatedSmall | PowerlineShape::PixelatedBig
+            )
+    }
 }
 
 pub(crate) fn powerline_background_cutout(
@@ -156,51 +227,138 @@ pub(crate) fn powerline_background_cutout(
         return None;
     }
     let separator = powerline_separator(cell.ch)?;
-    (separator.weight == PowerlineWeight::Filled).then_some(cell.ch)
+    separator.supports_background_cutout().then_some(cell.ch)
 }
 
 pub(crate) fn powerline_separator(ch: char) -> Option<PowerlineSeparator> {
+    let sep = |direction, weight, shape| {
+        Some(PowerlineSeparator {
+            direction,
+            weight,
+            shape,
+        })
+    };
     match ch as u32 {
-        0xe0b0 => Some(PowerlineSeparator {
-            direction: PowerlineDirection::Right,
-            weight: PowerlineWeight::Filled,
-            shape: PowerlineShape::Triangle,
-        }),
-        0xe0b1 => Some(PowerlineSeparator {
-            direction: PowerlineDirection::Right,
-            weight: PowerlineWeight::Thin,
-            shape: PowerlineShape::Triangle,
-        }),
-        0xe0b2 => Some(PowerlineSeparator {
-            direction: PowerlineDirection::Left,
-            weight: PowerlineWeight::Filled,
-            shape: PowerlineShape::Triangle,
-        }),
-        0xe0b3 => Some(PowerlineSeparator {
-            direction: PowerlineDirection::Left,
-            weight: PowerlineWeight::Thin,
-            shape: PowerlineShape::Triangle,
-        }),
-        0xe0b4 => Some(PowerlineSeparator {
-            direction: PowerlineDirection::Right,
-            weight: PowerlineWeight::Filled,
-            shape: PowerlineShape::HalfCircle,
-        }),
-        0xe0b5 => Some(PowerlineSeparator {
-            direction: PowerlineDirection::Right,
-            weight: PowerlineWeight::Thin,
-            shape: PowerlineShape::HalfCircle,
-        }),
-        0xe0b6 => Some(PowerlineSeparator {
-            direction: PowerlineDirection::Left,
-            weight: PowerlineWeight::Filled,
-            shape: PowerlineShape::HalfCircle,
-        }),
-        0xe0b7 => Some(PowerlineSeparator {
-            direction: PowerlineDirection::Left,
-            weight: PowerlineWeight::Thin,
-            shape: PowerlineShape::HalfCircle,
-        }),
+        0xe0b0 => sep(
+            PowerlineDirection::Right,
+            PowerlineWeight::Filled,
+            PowerlineShape::Triangle,
+        ),
+        0xe0b1 => sep(
+            PowerlineDirection::Right,
+            PowerlineWeight::Thin,
+            PowerlineShape::Triangle,
+        ),
+        0xe0b2 => sep(
+            PowerlineDirection::Left,
+            PowerlineWeight::Filled,
+            PowerlineShape::Triangle,
+        ),
+        0xe0b3 => sep(
+            PowerlineDirection::Left,
+            PowerlineWeight::Thin,
+            PowerlineShape::Triangle,
+        ),
+        0xe0b4 => sep(
+            PowerlineDirection::Right,
+            PowerlineWeight::Filled,
+            PowerlineShape::HalfCircle,
+        ),
+        0xe0b5 => sep(
+            PowerlineDirection::Right,
+            PowerlineWeight::Thin,
+            PowerlineShape::HalfCircle,
+        ),
+        0xe0b6 => sep(
+            PowerlineDirection::Left,
+            PowerlineWeight::Filled,
+            PowerlineShape::HalfCircle,
+        ),
+        0xe0b7 => sep(
+            PowerlineDirection::Left,
+            PowerlineWeight::Thin,
+            PowerlineShape::HalfCircle,
+        ),
+        0xe0b8 => sep(
+            PowerlineDirection::Right,
+            PowerlineWeight::Filled,
+            PowerlineShape::SlantedLower,
+        ),
+        0xe0b9 => sep(
+            PowerlineDirection::Right,
+            PowerlineWeight::Thin,
+            PowerlineShape::SlantedLower,
+        ),
+        0xe0ba => sep(
+            PowerlineDirection::Left,
+            PowerlineWeight::Filled,
+            PowerlineShape::SlantedLower,
+        ),
+        0xe0bb => sep(
+            PowerlineDirection::Left,
+            PowerlineWeight::Thin,
+            PowerlineShape::SlantedLower,
+        ),
+        0xe0bc => sep(
+            PowerlineDirection::Right,
+            PowerlineWeight::Filled,
+            PowerlineShape::SlantedUpper,
+        ),
+        0xe0bd => sep(
+            PowerlineDirection::Right,
+            PowerlineWeight::Thin,
+            PowerlineShape::SlantedUpper,
+        ),
+        0xe0be => sep(
+            PowerlineDirection::Left,
+            PowerlineWeight::Filled,
+            PowerlineShape::SlantedUpper,
+        ),
+        0xe0bf => sep(
+            PowerlineDirection::Left,
+            PowerlineWeight::Thin,
+            PowerlineShape::SlantedUpper,
+        ),
+        0xe0c4 => sep(
+            PowerlineDirection::Right,
+            PowerlineWeight::Filled,
+            PowerlineShape::PixelatedSmall,
+        ),
+        0xe0c5 => sep(
+            PowerlineDirection::Left,
+            PowerlineWeight::Filled,
+            PowerlineShape::PixelatedSmall,
+        ),
+        0xe0c6 => sep(
+            PowerlineDirection::Right,
+            PowerlineWeight::Filled,
+            PowerlineShape::PixelatedBig,
+        ),
+        0xe0c7 => sep(
+            PowerlineDirection::Left,
+            PowerlineWeight::Filled,
+            PowerlineShape::PixelatedBig,
+        ),
+        0xe0d2 => sep(
+            PowerlineDirection::Right,
+            PowerlineWeight::Filled,
+            PowerlineShape::Trapezoid,
+        ),
+        0xe0d4 => sep(
+            PowerlineDirection::Left,
+            PowerlineWeight::Filled,
+            PowerlineShape::Trapezoid,
+        ),
+        0xe0d6 => sep(
+            PowerlineDirection::Right,
+            PowerlineWeight::Filled,
+            PowerlineShape::InverseTriangle,
+        ),
+        0xe0d7 => sep(
+            PowerlineDirection::Left,
+            PowerlineWeight::Filled,
+            PowerlineShape::InverseTriangle,
+        ),
         _ => None,
     }
 }
@@ -270,6 +428,49 @@ mod tests {
         assert_eq!(
             timestamp_text_run("12:00", &theme, &metrics).letter_spacing,
             None
+        );
+
+        let mut curly_cell = cell.clone();
+        curly_cell.attrs = curly_cell
+            .attrs
+            .with_underline_style(TerminalUnderlineStyle::Curly);
+        let red = TerminalColor::rgb(0xff, 0x55, 0x55);
+        curly_cell.set_underline_color(Some(red));
+        let curly_run = text_run_for_cell(&curly_cell, gpui::white(), false, &metrics);
+        assert_eq!(
+            curly_run.underline,
+            Some(UnderlineStyle {
+                thickness: px(1.0),
+                color: Some(to_hsla(red)),
+                wavy: true,
+            })
+        );
+        assert_eq!(
+            custom_underline_for_cell(&curly_cell, gpui::white(), false),
+            None
+        );
+
+        let mut single_cell = cell.clone();
+        single_cell.attrs = single_cell
+            .attrs
+            .with_underline_style(TerminalUnderlineStyle::Single);
+        let single_run = text_run_for_cell(&single_cell, gpui::white(), false, &metrics);
+        assert!(!text_run_style_matches(&single_run, &curly_run));
+
+        let mut double_cell = cell;
+        double_cell.attrs = double_cell
+            .attrs
+            .with_underline_style(TerminalUnderlineStyle::Double);
+        double_cell.set_underline_color(Some(red));
+        let double_run = text_run_for_cell(&double_cell, gpui::white(), false, &metrics);
+        assert_eq!(double_run.underline, None);
+        assert_eq!(
+            custom_underline_for_cell(&double_cell, gpui::white(), false),
+            Some(CustomUnderline {
+                style: TerminalUnderlineStyle::Double,
+                color: to_hsla(red),
+                explicit_color: true,
+            })
         );
     }
 }

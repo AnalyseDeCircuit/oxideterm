@@ -9,6 +9,7 @@ pub use oxideterm_terminal_graphics::{
 };
 pub use oxideterm_terminal_model::{
     TerminalAttrs, TerminalCell, TerminalColor, TerminalRow, TerminalStyleOrigin,
+    TerminalUnderlineStyle,
 };
 
 #[derive(Clone, Debug)]

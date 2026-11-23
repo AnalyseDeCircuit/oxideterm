@@ -1,10 +1,10 @@
 use std::{
     borrow::Cow,
-    collections::HashMap,
     ops::Range,
     sync::{Arc, Mutex, OnceLock},
 };
 
+use foldhash::{HashMap, HashMapExt, HashSet, HashSetExt};
 use gpui::{Hsla, rgba};
 use regex::RegexBuilder;
 
@@ -110,7 +110,7 @@ pub(crate) fn terminal_highlights_for_rows(
     }
 
     let mut layout = TerminalHighlightLayout::empty();
-    let mut seen_lines = std::collections::HashSet::new();
+    let mut seen_lines = HashSet::new();
 
     for row in rows {
         let Some(line_range) = logical_line_range(snapshot, row) else {

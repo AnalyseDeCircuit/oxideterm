@@ -998,7 +998,11 @@ pub(crate) fn terminal_semantic_color_from_palette(
         SemanticClass::Command => terminal.green,
         SemanticClass::Keyword => terminal.bright_magenta,
         SemanticClass::Option => terminal.cyan,
-        SemanticClass::Operator => terminal.bright_yellow,
+        // Keep punctuation/operators visually neutral so `=` and `--` stay distinct from
+        // adjacent yellow string values and cyan option names across both dark and light themes.
+        SemanticClass::Operator => {
+            blend_terminal_hex(terminal.foreground, terminal.bright_black, 0.45)
+        }
         SemanticClass::String => terminal.yellow,
         SemanticClass::Variable => terminal.bright_blue,
         SemanticClass::Link => terminal.bright_cyan,
@@ -1021,6 +1025,15 @@ pub(crate) fn terminal_semantic_color_from_palette(
         SemanticClass::Success => terminal.bright_green,
         SemanticClass::Info => terminal.bright_blue,
     }
+}
+
+fn blend_terminal_hex(base: u32, toward: u32, ratio: f32) -> u32 {
+    let blend = |shift: u32| -> u32 {
+        let a = ((base >> shift) & 0xff) as f32;
+        let b = ((toward >> shift) & 0xff) as f32;
+        (a + (b - a) * ratio).round().clamp(0.0, 255.0) as u32
+    };
+    (blend(16) << 16) | (blend(8) << 8) | blend(0)
 }
 
 /// Resolves presentation variants while keeping the base semantic palette shared by every view.
@@ -1423,6 +1436,17 @@ fn primary_font_vertical_metrics(
     (ascent, descent)
 }
 
+/// Snaps terminal row height to an integer physical pixel step so every row shares the same
+/// vertical subpixel phase for uniform glyph sharpness and `LinePaintCache` reuse across rows.
+fn snap_line_height_to_device_pixel(line_height: Pixels, scale_factor: f32) -> Pixels {
+    let scale = if scale_factor.is_finite() && scale_factor > 0.0 {
+        scale_factor
+    } else {
+        1.0
+    };
+    px(((f32::from(line_height) * scale).round().max(1.0)) / scale)
+}
+
 /// Computes terminal line height by scaling the primary font's natural
 /// `ascent + |descent|` box rather than bare `font_size`, matching macOS Terminal.
 pub fn terminal_line_height_for_font(
@@ -1502,11 +1526,14 @@ impl TerminalMetrics {
         let font_id = window.text_system().resolve_font(&font);
         let (primary_ascent, primary_descent) =
             primary_font_vertical_metrics(window.text_system(), font_id, font_size);
-        let line_height = terminal_line_height_for_font(
-            window.text_system(),
-            &font,
-            font_size,
-            preferences.line_height,
+        let line_height = snap_line_height_to_device_pixel(
+            terminal_line_height_for_font(
+                window.text_system(),
+                &font,
+                font_size,
+                preferences.line_height,
+            ),
+            window.scale_factor(),
         );
         let base_width = base_cell_width_for_font(window.text_system(), &font, font_size);
         let (cell_width, letter_spacing) =
@@ -1780,5 +1807,20 @@ mod tests {
         assert_scaled(0.85, 7.905, Some(-2.095));
         assert_scaled(5.0, 18.6, Some(8.6));
         assert_scaled(f32::NAN, 9.3, Some(-0.7));
+    }
+
+    #[test]
+    fn line_height_snaps_to_integer_device_pixels_per_scale_factor() {
+        assert_eq!(snap_line_height_to_device_pixel(px(16.632), 2.0), px(16.5));
+        assert_eq!(snap_line_height_to_device_pixel(px(16.632), 1.0), px(17.0));
+        assert_eq!(
+            snap_line_height_to_device_pixel(px(16.632), 1.5),
+            px(25.0 / 1.5)
+        );
+        assert_eq!(snap_line_height_to_device_pixel(px(0.1), 2.0), px(0.5));
+        assert_eq!(
+            snap_line_height_to_device_pixel(px(16.632), f32::NAN),
+            px(17.0)
+        );
     }
 }

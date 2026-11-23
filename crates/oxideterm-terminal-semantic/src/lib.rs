@@ -19,6 +19,7 @@ mod permissions;
 mod ps;
 mod resources;
 mod scheme;
+mod structured;
 #[cfg(feature = "shell-syntax")]
 mod syntax;
 mod systemd;

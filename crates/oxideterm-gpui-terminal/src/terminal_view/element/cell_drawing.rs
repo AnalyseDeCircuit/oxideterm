@@ -4,18 +4,32 @@
 //! Font-independent cell graphics. Coordinates are quantized in device pixels
 //! before conversion back to GPUI pixels, including shared edges between cells.
 
-use std::fmt::Write;
-
-use gpui::{Bounds, Pixels, Point, point, px, size};
+use gpui::{Bounds, Pixels, Point, point, px};
 
 pub(super) enum CellDrawing {
     Fill(Bounds<Pixels>, f32),
     Line(Point<Pixels>, Point<Pixels>, Pixels),
-    Curve([Point<Pixels>; 4], Pixels),
+    /// Continuous vertical-leg -> quarter-circle Bezier -> horizontal-leg corner (`╭╮╯╰`).
+    RoundedCorner([Point<Pixels>; 6], Pixels),
 }
 
 pub(super) fn is_cell_drawing(ch: char) -> bool {
     ('\u{2500}'..='\u{259f}').contains(&ch) || ('\u{2800}'..='\u{28ff}').contains(&ch)
+}
+
+/// Returns true when consecutive identical cells can be merged into one horizontal span
+/// with identical vertical geometry and zero inter-cell seams.
+pub(super) fn is_horizontally_coalesceable(ch: char) -> bool {
+    matches!(
+        ch,
+        '\u{2500}' // ─
+        | '\u{2501}' // ━
+        | '\u{2550}' // ═
+        | '\u{2580}' // ▀
+        | '\u{2581}'..='\u{2588}' // ▁..█
+        | '\u{2591}'..='\u{2593}' // ░▒▓
+        | '\u{2594}' // ▔
+    )
 }
 
 struct CellGeometry {
@@ -83,6 +97,28 @@ impl CellGeometry {
     }
 
     fn connections(&self, weights: [u8; 4], emit: &mut impl FnMut(CellDrawing)) {
+        // Pure straight horizontal or vertical segments emit one continuous fill per lane
+        // instead of two overlapping half-arms, eliminating internal seams and halving quads.
+        for axis in 0..2 {
+            let w0 = weights[axis * 2];
+            let w1 = weights[axis * 2 + 1];
+            let cross = 1 - axis;
+            if w0 != 0 && w0 == w1 && weights[cross * 2] == 0 && weights[cross * 2 + 1] == 0 {
+                let lanes: &[i8] = if w0 == 3 { &[-1, 1] } else { &[0] };
+                let thickness = self.stroke * if w0 == 2 { 2.0 } else { 1.0 };
+                for &lane in lanes {
+                    let across = self.center[cross] + f32::from(lane) * self.stroke;
+                    let mut rectangle = [0.0; 4];
+                    rectangle[axis] = self.edges[axis];
+                    rectangle[axis + 2] = self.edges[axis + 2];
+                    rectangle[cross] = across - thickness / 2.0;
+                    rectangle[cross + 2] = across + thickness / 2.0;
+                    self.rectangle(rectangle, 1.0, emit);
+                }
+                return;
+            }
+        }
+
         // Each arm ends at the crossing arm's rail. Double junctions leave
         // their central channels open instead of painting a solid cross.
         for direction in 0..4 {
@@ -132,6 +168,16 @@ impl CellGeometry {
             }
         }
     }
+}
+
+pub(super) fn draw_cell_with_stroke(
+    ch: char,
+    bounds: Bounds<Pixels>,
+    scale: f32,
+    stroke: f32,
+    emit: impl FnMut(CellDrawing),
+) {
+    draw_geometry(ch, CellGeometry::with_stroke(bounds, scale, stroke), emit);
 }
 
 #[cfg(test)]
@@ -206,29 +252,24 @@ fn draw_geometry(ch: char, geometry: CellGeometry, mut emit: impl FnMut(CellDraw
             let radius = ((geometry.edges[2] - geometry.edges[0])
                 .min(geometry.edges[3] - geometry.edges[1])
                 - geometry.stroke)
+                .max(0.0)
                 / 2.0;
+            let v_edge = [cx, geometry.edges[if sy > 0.0 { 3 } else { 1 }]];
             let start = [cx, cy + sy * radius];
             let end = [cx + sx * radius, cy];
+            let h_edge = [geometry.edges[if sx > 0.0 { 2 } else { 0 }], cy];
             let tangent = radius * (1.0 - 0.552_284_8);
-            geometry.line(
-                [cx, geometry.edges[if sy > 0.0 { 3 } else { 1 }]],
-                start,
-                &mut emit,
-            );
-            emit(CellDrawing::Curve(
+            emit(CellDrawing::RoundedCorner(
                 [
+                    geometry.point(v_edge[0], v_edge[1]),
                     geometry.point(start[0], start[1]),
                     geometry.point(cx, cy + sy * tangent),
                     geometry.point(cx + sx * tangent, cy),
                     geometry.point(end[0], end[1]),
+                    geometry.point(h_edge[0], h_edge[1]),
                 ],
                 px(geometry.stroke / geometry.scale),
             ));
-            geometry.line(
-                end,
-                [geometry.edges[if sx > 0.0 { 2 } else { 0 }], cy],
-                &mut emit,
-            );
         }
         0x2571..=0x2573 => {
             let [left, top, right, bottom] = geometry.edges;
@@ -281,51 +322,6 @@ fn draw_geometry(ch: char, geometry: CellGeometry, mut emit: impl FnMut(CellDraw
     }
 }
 
-/// SVG masks share GPUI's atlas with icons; colors are applied only at paint time.
-pub(super) fn cell_drawing_svg(ch: char, width: u32, height: u32, stroke: u32) -> String {
-    let mut svg = format!(
-        "<svg xmlns='http://www.w3.org/2000/svg' width='{width}' height='{height}' viewBox='0 0 {width} {height}'>"
-    );
-    let bounds = Bounds::new(
-        point(px(0.0), px(0.0)),
-        size(px(width as f32), px(height as f32)),
-    );
-    draw_geometry(
-        ch,
-        CellGeometry::with_stroke(bounds, 1.0, stroke as f32),
-        |drawing| match drawing {
-            CellDrawing::Fill(b, alpha) => {
-                write!(
-                    svg,
-                    "<rect x='{}' y='{}' width='{}' height='{}' fill='white' opacity='{alpha}'/>",
-                    b.left().as_f32(),
-                    b.top().as_f32(),
-                    b.size.width.as_f32(),
-                    b.size.height.as_f32()
-                )
-                .unwrap();
-            }
-            CellDrawing::Line(a, b, width) => {
-                write!(
-                    svg,
-                    "<path d='M {} {} L {} {}' stroke='white' stroke-width='{}' fill='none'/>",
-                    a.x.as_f32(),
-                    a.y.as_f32(),
-                    b.x.as_f32(),
-                    b.y.as_f32(),
-                    width.as_f32()
-                )
-                .unwrap();
-            }
-            CellDrawing::Curve([a, b, c, d], width) => {
-                write!(svg, "<path d='M {} {} C {} {}, {} {}, {} {}' stroke='white' stroke-width='{}' fill='none'/>", a.x.as_f32(), a.y.as_f32(), b.x.as_f32(), b.y.as_f32(), c.x.as_f32(), c.y.as_f32(), d.x.as_f32(), d.y.as_f32(), width.as_f32()).unwrap();
-            }
-        },
-    );
-    svg.push_str("</svg>");
-    svg
-}
-
 // Unicode connection semantics: left, right, up, down occupy two bits each.
 // 0 = absent, 1 = light/single, 2 = heavy, 3 = double. Special shapes use the branches above.
 const BOX_CONNECTIONS: [u8; 128] = [
@@ -373,23 +369,61 @@ mod tests {
 
     #[test]
     fn adjacent_horizontal_cells_share_pixel_aligned_edges() {
-        for scale in [1.0, 1.25, 1.5, 2.0] {
-            let mut fills = Vec::new();
-            for column in 0..2 {
+        for scale in [1.0f32, 1.25, 1.5, 2.0] {
+            let stroke = (9.5f32 * scale / 8.0).round().max(1.0);
+            let mut col0 = Vec::new();
+            let mut col1 = Vec::new();
+            for (column, target) in [(0, &mut col0), (1, &mut col1)] {
                 let bounds = Bounds::new(
                     point(px(2.25 + column as f32 * 9.5), px(3.5)),
                     size(px(9.5), px(21.0)),
                 );
-                draw_cell('─', bounds, scale, |shape| {
+                draw_cell_with_stroke('─', bounds, scale, stroke, |shape| {
                     if let CellDrawing::Fill(bounds, _) = shape {
-                        fills.push(bounds);
+                        target.push(bounds);
                     }
                 });
             }
-            let right = fills[..2].iter().map(|b| b.right()).max().unwrap();
-            let left = fills[2..].iter().map(|b| b.left()).min().unwrap();
-            assert_eq!(left, right);
-            for bounds in fills {
+            assert_eq!(col0.len(), 1);
+            assert_eq!(col1.len(), 1);
+            assert_eq!(col0[0].right(), col1[0].left());
+            assert_eq!(col0[0].top(), col1[0].top());
+            assert_eq!(col0[0].bottom(), col1[0].bottom());
+
+            // Coalesced multi-cell horizontal span emits one quad matching individual edges.
+            let span_bounds = Bounds::new(point(px(2.25), px(3.5)), size(px(9.5 * 4.0), px(21.0)));
+            let mut span_fills = Vec::new();
+            draw_cell_with_stroke('─', span_bounds, scale, stroke, |shape| {
+                if let CellDrawing::Fill(bounds, _) = shape {
+                    span_fills.push(bounds);
+                }
+            });
+            assert_eq!(span_fills.len(), 1);
+            assert_eq!(span_fills[0].left(), col0[0].left());
+            assert_eq!(span_fills[0].top(), col0[0].top());
+            assert_eq!(span_fills[0].bottom(), col0[0].bottom());
+
+            // Rounded corner `╭` connects continuously from bottom edge to right edge at the same centerline.
+            let corner_bounds = Bounds::new(point(px(2.25), px(3.5)), size(px(9.5), px(21.0)));
+            let mut corners = Vec::new();
+            draw_cell_with_stroke('╭', corner_bounds, scale, stroke, |shape| {
+                if let CellDrawing::RoundedCorner(pts, width) = shape {
+                    corners.push((pts, width));
+                }
+            });
+            assert_eq!(corners.len(), 1);
+            let ([v_edge, _, _, _, _, h_edge], width) = corners[0];
+            assert_eq!(width, px(stroke / scale));
+            assert_eq!(h_edge.x, col0[0].right());
+            assert!(
+                ((h_edge.y.as_f32() - (col0[0].top().as_f32() + col0[0].bottom().as_f32()) * 0.5)
+                    * scale)
+                    .abs()
+                    < 0.001
+            );
+            assert!(((v_edge.y.as_f32() * scale) - ((3.5 + 21.0) * scale).round()).abs() < 0.001);
+
+            for bounds in col0.into_iter().chain(col1).chain(span_fills) {
                 for value in [bounds.left(), bounds.top(), bounds.right(), bounds.bottom()] {
                     let device = value.as_f32() * scale;
                     assert!((device - device.round()).abs() < 0.0001);

@@ -65,7 +65,7 @@ pub use data::{
     TerminalImageData, TerminalImageFrame, TerminalImageId, TerminalImageProtocol,
     TerminalImageSnapshot, TerminalLogicalContext, TerminalLogicalContextRow,
     TerminalLogicalMember, TerminalRow, TerminalSearchMatch, TerminalSearchRange, TerminalSnapshot,
-    TerminalStyleOrigin,
+    TerminalStyleOrigin, TerminalUnderlineStyle,
 };
 pub use editor_integration::{
     EMACS_FREE_TYPE_INTEGRATION_SOURCE, TerminalEditorApplication, TerminalEditorCapabilities,

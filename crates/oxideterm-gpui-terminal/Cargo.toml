@@ -17,6 +17,7 @@ oxideterm-audit = { path = "../oxideterm-audit" }
 anyhow.workspace = true
 async-channel.workspace = true
 chrono.workspace = true
+foldhash.workspace = true
 futures.workspace = true
 gpui.workspace = true
 oxideterm-background-media = { path = "../oxideterm-background-media" }

@@ -1,11 +1,15 @@
 use std::{
-    collections::{HashMap, HashSet, VecDeque, hash_map::DefaultHasher},
-    hash::{Hash, Hasher},
+    collections::{HashMap, HashSet, VecDeque},
+    hash::{BuildHasher, Hash, Hasher},
     ops::Range,
-    sync::{Arc, OnceLock, Weak},
+    sync::{Arc, LazyLock, OnceLock, Weak},
     time::{Duration, Instant},
 };
 
+use foldhash::{
+    HashMap as FastHashMap, HashMapExt, HashSet as FastHashSet, HashSetExt,
+    quality::{FoldHasher, RandomState as CacheKeyHasherState},
+};
 use gpui::{
     App, Bounds, ContentMask, CursorStyle, Element, ElementId, Entity, FocusHandle,
     GlobalElementId, Hsla, InspectorElementId, IntoElement, LayoutId, LineLayout, LinePaintCache,
@@ -45,10 +49,21 @@ mod layout;
 mod paint;
 mod style;
 
+// Render cache key signatures stay process-local while all frames share one seed.
+type CacheKeyHasher = FoldHasher<'static>;
+
+static CACHE_KEY_HASHER_STATE: LazyLock<CacheKeyHasherState> =
+    LazyLock::new(CacheKeyHasherState::default);
+
+fn new_cache_key_hasher() -> CacheKeyHasher {
+    CACHE_KEY_HASHER_STATE.build_hasher()
+}
+
 const TERMINAL_ROW_LAYOUT_CACHE_CAPACITY: usize = 512;
 const TERMINAL_HIGHLIGHT_CACHE_CAPACITY: usize = 128;
 const TERMINAL_SEMANTIC_SPAN_CACHE_BUDGET: usize = 65_536;
 const TERMINAL_LINK_CACHE_CAPACITY: usize = 512;
+const TERMINAL_TIMESTAMP_CACHE_CAPACITY: usize = 256;
 const TRANSIENT_COMMAND_HIGHLIGHT_ALPHA: u32 = 0x52;
 
 pub(crate) use layout::*;
@@ -202,6 +217,7 @@ pub(crate) struct BatchedTextRun {
     pub(crate) text: SharedString,
     pub(crate) cells: usize,
     pub(crate) style: TextRun,
+    pub(crate) custom_underline: Option<CustomUnderline>,
     cache: Option<Arc<TerminalTextRunCache>>,
 }
 
@@ -281,6 +297,7 @@ struct TerminalRowTextRun {
     text: SharedString,
     cells: usize,
     style: TextRun,
+    custom_underline: Option<CustomUnderline>,
     transition_key: TerminalTransitionColorKey,
     cache: Arc<TerminalTextRunCache>,
 }
@@ -290,6 +307,7 @@ struct PendingTerminalRowTextRun {
     text: String,
     cells: usize,
     style: TextRun,
+    custom_underline: Option<CustomUnderline>,
     transition_key: TerminalTransitionColorKey,
 }
 
@@ -315,6 +333,7 @@ impl PendingTerminalRowTextRun {
             text: SharedString::from(self.text),
             cells: self.cells,
             style: self.style,
+            custom_underline: self.custom_underline,
             transition_key: self.transition_key,
             cache,
         }
@@ -331,7 +350,7 @@ struct TerminalLogicalHighlightLayout {
     backgrounds: Vec<TerminalRowOffsetRect>,
     underlines: Vec<TerminalRowOffsetRect>,
     outlines: Vec<TerminalRowOffsetRect>,
-    foregrounds: HashMap<(usize, usize), TerminalHighlightForeground>,
+    foregrounds: FastHashMap<(usize, usize), TerminalHighlightForeground>,
 }
 
 struct TerminalRowOffsetRect {
@@ -389,7 +408,7 @@ struct TerminalRowLinkCacheKey {
 }
 
 struct RecentCache<K, V> {
-    entries: HashMap<K, V>,
+    entries: FastHashMap<K, V>,
     insertion_order: VecDeque<K>,
     capacity: usize,
 }
@@ -417,7 +436,7 @@ where
     fn new(capacity: usize) -> Self {
         let capacity = capacity.max(1);
         Self {
-            entries: HashMap::with_capacity(capacity),
+            entries: FastHashMap::with_capacity(capacity),
             insertion_order: VecDeque::with_capacity(capacity),
             capacity,
         }
@@ -464,12 +483,13 @@ where
     }
 
     fn clear(&mut self) {
-        self.entries = HashMap::new();
+        self.entries = FastHashMap::new();
         self.insertion_order = VecDeque::new();
     }
 }
 
 pub(crate) struct TerminalLayoutCache {
+    last_frame: Option<(u64, Arc<TerminalElementLayout>)>,
     rows: RecentCache<TerminalRowLayoutCacheKey, Arc<TerminalRowLayout>>,
     recent_row_keys: RecentCache<u64, TerminalRowLayoutCacheKey>,
     reuse_metrics: Option<[u32; 3]>,
@@ -482,6 +502,7 @@ pub(crate) struct TerminalLayoutCache {
     semantic_span_count: usize,
     highlights: RecentCache<TerminalLogicalHighlightCacheKey, Arc<TerminalLogicalHighlightLayout>>,
     links: RecentCache<TerminalRowLinkCacheKey, Arc<TerminalRowLinkLayout>>,
+    timestamps: RecentCache<(SharedString, u64), Arc<TerminalTextRunCache>>,
     performance: TerminalLayoutPerformance,
     cache_hits: u64,
     cache_misses: u64,
@@ -490,6 +511,7 @@ pub(crate) struct TerminalLayoutCache {
 impl Default for TerminalLayoutCache {
     fn default() -> Self {
         Self {
+            last_frame: None,
             rows: RecentCache::new(TERMINAL_ROW_LAYOUT_CACHE_CAPACITY),
             recent_row_keys: RecentCache::new(TERMINAL_ROW_LAYOUT_CACHE_CAPACITY),
             reuse_metrics: None,
@@ -499,6 +521,7 @@ impl Default for TerminalLayoutCache {
             semantic_span_count: 0,
             highlights: RecentCache::new(TERMINAL_HIGHLIGHT_CACHE_CAPACITY),
             links: RecentCache::new(TERMINAL_LINK_CACHE_CAPACITY),
+            timestamps: RecentCache::new(TERMINAL_TIMESTAMP_CACHE_CAPACITY),
             performance: TerminalLayoutPerformance::default(),
             cache_hits: 0,
             cache_misses: 0,
@@ -597,6 +620,18 @@ impl TerminalLayoutCache {
         } else {
             self.cache_misses = self.cache_misses.saturating_add(1);
         }
+        self.refresh_cache_hit_percent();
+    }
+
+    fn record_cache_hits(&mut self, hits: u64, collect_performance_metrics: bool) {
+        if !collect_performance_metrics {
+            return;
+        }
+        self.cache_hits = self.cache_hits.saturating_add(hits);
+        self.refresh_cache_hit_percent();
+    }
+
+    fn refresh_cache_hit_percent(&mut self) {
         let accesses = self.cache_hits.saturating_add(self.cache_misses);
         self.performance.cache_hit_percent = self
             .cache_hits
@@ -619,6 +654,7 @@ impl TerminalLayoutCache {
     }
 
     pub(crate) fn clear(&mut self) {
+        self.last_frame = None;
         self.rows.clear();
         self.recent_row_keys.clear();
         self.reuse_metrics = None;
@@ -628,6 +664,7 @@ impl TerminalLayoutCache {
         self.semantic_spans.clear();
         self.semantic_span_count = 0;
         self.links.clear();
+        self.timestamps.clear();
         self.performance = TerminalLayoutPerformance::default();
         self.cache_hits = 0;
         self.cache_misses = 0;
@@ -1008,6 +1045,7 @@ impl TerminalElement {
             .map(|value| f32::from(value).to_bits());
             if cache.reuse_metrics != Some(metrics) {
                 cache.recent_row_keys.clear();
+                cache.timestamps.clear();
                 cache.reuse_metrics = Some(metrics);
             }
         }
@@ -1040,7 +1078,7 @@ impl TerminalElement {
                 Vec::new(),
             )
         };
-        let mut foreground_lines = HashSet::new();
+        let mut foreground_lines = FastHashSet::new();
         #[cfg(feature = "bench")]
         if let Some(cache) = cache.as_deref_mut() {
             cache.performance.highlights_micros = duration_micros(highlights_started.elapsed());
@@ -1154,6 +1192,10 @@ impl TerminalElement {
                 transition.target_background_hsla
             });
         let row_style_hasher = self.row_layout_style_hasher();
+        let timestamp_style_signature = self
+            .row_timestamps
+            .is_some()
+            .then(|| self.timestamp_style_signature());
         for row_index in visible_rows {
             let Some(row) = self.snapshot.lines.get(row_index) else {
                 continue;
@@ -1232,8 +1274,13 @@ impl TerminalElement {
                     &mut cursor,
                 );
             }
-            if let Some(timestamp_run) =
-                self.timestamp_run_for_row(row_index, terminal_row_timestamp_identity(row))
+            if let Some(style_signature) = timestamp_style_signature
+                && let Some(timestamp_run) = self.timestamp_run_for_row(
+                    row_index,
+                    terminal_row_timestamp_identity(row),
+                    style_signature,
+                    cache.as_deref_mut(),
+                )
             {
                 timestamp_runs.push(timestamp_run);
             }
@@ -1290,16 +1337,283 @@ impl TerminalElement {
         }
     }
 
-    fn timestamp_run_for_row(&self, row_index: usize, index: u64) -> Option<BatchedTextRun> {
+    fn timestamp_style_signature(&self) -> u64 {
+        let mut hasher = new_cache_key_hasher();
+        f32::from(self.metrics.font_size)
+            .to_bits()
+            .hash(&mut hasher);
+        f32::from(self.metrics.cell_width)
+            .to_bits()
+            .hash(&mut hasher);
+        f32::from(self.metrics.line_height)
+            .to_bits()
+            .hash(&mut hasher);
+        self.metrics.font.hash(&mut hasher);
+        self.theme.header_foreground.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    fn timestamp_run_for_row(
+        &self,
+        row_index: usize,
+        index: u64,
+        style_signature: u64,
+        cache: Option<&mut TerminalLayoutCache>,
+    ) -> Option<BatchedTextRun> {
         let label = self.row_timestamps.as_ref()?.get(index)?.label.clone();
+        let text = SharedString::from(label);
+        // Many rows from the same PTY chunk share an identical formatted timestamp; reuse the
+        // shaped `LineLayout` and glyph paint cache across both matching rows and consecutive frames.
+        let run_cache = cache.map(|cache| {
+            cache
+                .timestamps
+                .get_or_insert_with((text.clone(), style_signature), || {
+                    Arc::new(TerminalTextRunCache::default())
+                })
+                .0
+        });
         Some(BatchedTextRun {
             row: row_index,
             col: 0,
             cells: TERMINAL_TIMESTAMP_LABEL_CELLS,
-            style: timestamp_text_run(&label, &self.theme, &self.metrics),
-            text: SharedString::from(label),
-            cache: None,
+            style: timestamp_text_run(&text, &self.theme, &self.metrics),
+            custom_underline: None,
+            text,
+            cache: run_cache,
         })
+    }
+
+    fn frame_layout_cache_key(&self, visible_rows: &Range<usize>) -> u64 {
+        let mut hasher = self.row_layout_style_hasher();
+        visible_rows.start.hash(&mut hasher);
+        visible_rows.end.hash(&mut hasher);
+        self.viewport_rows.hash(&mut hasher);
+        let painted_limit = self.painted_row_limit();
+        painted_limit.hash(&mut hasher);
+        self.scrollbar_display_offset.to_bits().hash(&mut hasher);
+        self.metrics
+            .letter_spacing
+            .map(|value| f32::from(value).to_bits())
+            .hash(&mut hasher);
+        f32::from(self.metrics.primary_ascent)
+            .to_bits()
+            .hash(&mut hasher);
+        f32::from(self.metrics.primary_descent)
+            .to_bits()
+            .hash(&mut hasher);
+        self.highlight_ui_colors().hash(&mut hasher);
+
+        self.snapshot.generation.hash(&mut hasher);
+        self.snapshot.display_offset.hash(&mut hasher);
+        self.snapshot.scrollback_lines.hash(&mut hasher);
+        self.snapshot.rows.hash(&mut hasher);
+        self.snapshot.cursor_row.hash(&mut hasher);
+        self.snapshot.cursor_col.hash(&mut hasher);
+        self.snapshot.cursor_shape.hash(&mut hasher);
+        self.snapshot.lines.len().hash(&mut hasher);
+
+        // Include wrapped neighbors outside `visible_rows` so clipped logical-line edits
+        // invalidate semantic/highlight layout even when synthetic snapshots reuse generation.
+        let mut content_start = visible_rows.start.min(self.snapshot.lines.len());
+        while content_start > 0 && self.snapshot.lines[content_start - 1].wrapped {
+            content_start -= 1;
+        }
+        let mut content_end = visible_rows.end.min(self.snapshot.lines.len());
+        while content_end > content_start
+            && content_end < self.snapshot.lines.len()
+            && self.snapshot.lines[content_end - 1].wrapped
+        {
+            content_end += 1;
+        }
+        content_start.hash(&mut hasher);
+        content_end.hash(&mut hasher);
+        for row in &self.snapshot.lines[content_start..content_end] {
+            hash_row_content(row, &mut hasher);
+            row.wrapped.hash(&mut hasher);
+            row.active_input.hash(&mut hasher);
+        }
+
+        self.cursor_visible.hash(&mut hasher);
+        self.marked_text.hash(&mut hasher);
+        self.marked_text_caret_utf16.hash(&mut hasher);
+        self.ghost_text.hash(&mut hasher);
+        if self.marked_text.is_some() || self.ghost_text.is_some() {
+            self.theme.foreground.hash(&mut hasher);
+            self.theme.background.hash(&mut hasher);
+        }
+
+        self.selection
+            .map(|selection| {
+                (
+                    selection.anchor.line,
+                    selection.anchor.col,
+                    selection.head.line,
+                    selection.head.col,
+                    std::mem::discriminant(&selection.mode),
+                )
+            })
+            .hash(&mut hasher);
+
+        self.search_query.hash(&mut hasher);
+        self.search_matches_precomputed.hash(&mut hasher);
+        self.selected_search_match.hash(&mut hasher);
+        (
+            Arc::as_ptr(&self.search_matches) as *const () as usize,
+            self.search_matches.len(),
+        )
+            .hash(&mut hasher);
+        self.search_matches
+            .first()
+            .map(|m| (m.line, m.start_col, m.end_col))
+            .hash(&mut hasher);
+        self.search_matches
+            .last()
+            .map(|m| (m.line, m.start_col, m.end_col))
+            .hash(&mut hasher);
+        self.selection_highlight_query
+            .as_deref()
+            .map(|query| query.as_str())
+            .hash(&mut hasher);
+        if self.selection_highlight_query.is_some() {
+            self.theme.tokens.ui.warning.hash(&mut hasher);
+        }
+
+        (
+            Arc::as_ptr(&self.command_marks) as *const () as usize,
+            self.command_marks.len(),
+        )
+            .hash(&mut hasher);
+        self.command_marks
+            .first()
+            .map(|mark| {
+                (
+                    mark.command_id.as_str(),
+                    mark.start_line,
+                    mark.end_line,
+                    mark.is_closed,
+                    mark.exit_code,
+                    mark.stale,
+                    mark.finished_at,
+                )
+            })
+            .hash(&mut hasher);
+        self.command_marks
+            .last()
+            .map(|mark| {
+                (
+                    mark.command_id.as_str(),
+                    mark.start_line,
+                    mark.end_line,
+                    mark.is_closed,
+                    mark.exit_code,
+                    mark.stale,
+                    mark.finished_at,
+                )
+            })
+            .hash(&mut hasher);
+        self.selected_command_mark_id.hash(&mut hasher);
+        self.hovered_command_mark_id.hash(&mut hasher);
+        self.collapsed_commands.len().hash(&mut hasher);
+        let mut collapsed_acc = 0u64;
+        for id in &self.collapsed_commands {
+            let mut item_hasher = new_cache_key_hasher();
+            id.hash(&mut item_hasher);
+            collapsed_acc = collapsed_acc.wrapping_add(item_hasher.finish());
+        }
+        collapsed_acc.hash(&mut hasher);
+        self.fold_rotations.len().hash(&mut hasher);
+        let mut rotation_acc = 0u64;
+        for (id, rotation) in &self.fold_rotations {
+            let mut item_hasher = new_cache_key_hasher();
+            id.hash(&mut item_hasher);
+            rotation.to_bits().hash(&mut item_hasher);
+            rotation_acc = rotation_acc.wrapping_add(item_hasher.finish());
+        }
+        rotation_acc.hash(&mut hasher);
+
+        self.highlight_rules
+            .iter()
+            .any(|rule| rule.enabled)
+            .hash(&mut hasher);
+        self.transient_command_highlight.is_some().hash(&mut hasher);
+        self.semantic_coloring.hash(&mut hasher);
+        self.semantic_shell.hash(&mut hasher);
+        self.semantic_classification_signature.hash(&mut hasher);
+        self.semantic_style_signature.hash(&mut hasher);
+        self.semantic_scheme
+            .as_ref()
+            .map(|scheme| Arc::as_ptr(scheme) as usize)
+            .hash(&mut hasher);
+        self.hovered_link.hash(&mut hasher);
+
+        let mut visible_image_count = 0usize;
+        for image in &self.rendered_images {
+            if image.snapshot.row < painted_limit
+                && image.snapshot.row + image.snapshot.rows > visible_rows.start
+                && image.snapshot.row < visible_rows.end
+            {
+                visible_image_count += 1;
+                image.snapshot.id.0.hash(&mut hasher);
+                image.snapshot.version.hash(&mut hasher);
+                image.snapshot.row.hash(&mut hasher);
+                image.snapshot.col.hash(&mut hasher);
+                image.snapshot.rows.hash(&mut hasher);
+                image.snapshot.cols.hash(&mut hasher);
+                image.snapshot.z_index.hash(&mut hasher);
+                image.snapshot.clipped_rows.hash(&mut hasher);
+                image.snapshot.source_x.hash(&mut hasher);
+                image.snapshot.source_y.hash(&mut hasher);
+                image.snapshot.source_width.hash(&mut hasher);
+                image.snapshot.source_height.hash(&mut hasher);
+                image.snapshot.pixel_width.hash(&mut hasher);
+                image.snapshot.pixel_height.hash(&mut hasher);
+                image.snapshot.placeholder.hash(&mut hasher);
+                image
+                    .snapshot
+                    .kitty
+                    .as_ref()
+                    .map(|placement| {
+                        (
+                            placement.serial,
+                            placement.id,
+                            placement.image_id,
+                            placement.offset_x,
+                            placement.offset_y,
+                            placement.clip_top,
+                            placement.clip_bottom,
+                            placement.column_offset,
+                            placement.hidden,
+                            placement.scaled,
+                        )
+                    })
+                    .hash(&mut hasher);
+                image
+                    .render_image
+                    .as_ref()
+                    .map(|img| Arc::as_ptr(img) as usize)
+                    .hash(&mut hasher);
+                image.playback.frame.hash(&mut hasher);
+            }
+        }
+        visible_image_count.hash(&mut hasher);
+
+        if let Some(store) = &self.row_timestamps {
+            true.hash(&mut hasher);
+            self.theme.header_foreground.hash(&mut hasher);
+            for row_index in visible_rows.clone() {
+                let label = self
+                    .snapshot
+                    .lines
+                    .get(row_index)
+                    .and_then(|row| store.get(terminal_row_timestamp_identity(row)))
+                    .map(|timestamp| timestamp.label.as_str());
+                label.hash(&mut hasher);
+            }
+        } else {
+            false.hash(&mut hasher);
+        }
+
+        hasher.finish()
     }
 
     fn cached_layout_for_bounds(&self, bounds: Bounds<Pixels>) -> Arc<TerminalElementLayout> {
@@ -1307,14 +1621,33 @@ impl TerminalElement {
             return Arc::new(self.layout_for_bounds(bounds));
         };
         let visible_rows = self.visible_rows_for_bounds(bounds);
+        let frame_key = self.frame_layout_cache_key(&visible_rows);
         let mut cache = cache.lock();
-        Arc::new(self.layout_for_rows(visible_rows, Some(&mut cache)))
+        if let Some((cached_key, layout)) = &cache.last_frame
+            && *cached_key == frame_key
+        {
+            let layout = Arc::clone(layout);
+            #[cfg(feature = "bench")]
+            {
+                cache.performance.semantic_roles_micros = 0;
+                cache.performance.links_micros = 0;
+                cache.performance.highlights_micros = 0;
+            }
+            cache.record_cache_hits(
+                visible_rows.len().max(1) as u64,
+                self.performance_metrics_enabled,
+            );
+            return layout;
+        }
+        let layout = Arc::new(self.layout_for_rows(visible_rows, Some(&mut cache)));
+        cache.last_frame = Some((frame_key, Arc::clone(&layout)));
+        layout
     }
 
     fn cached_highlight_layout_for_rows(
         &self,
         logical_lines: &TerminalLogicalLineIndex,
-        semantic_roles: &HashMap<Range<usize>, SemanticLineRole>,
+        semantic_roles: &FastHashMap<Range<usize>, SemanticLineRole>,
         cache: &mut TerminalLayoutCache,
     ) -> (
         TerminalHighlightLayout,
@@ -1612,6 +1945,7 @@ impl TerminalElement {
                         col_index,
                     );
                 let style = text_run_for_cell(cell, fg, link, &self.metrics);
+                let custom_underline = custom_underline_for_cell(cell, fg, link);
                 let is_drawing =
                     cell.zerowidth().is_empty() && cell_drawing::is_cell_drawing(cell.ch);
                 if cell.zerowidth().is_empty() && powerline_separator(cell.ch).is_some() {
@@ -1623,6 +1957,7 @@ impl TerminalElement {
                         text: cell_text(cell),
                         cells: cell_width,
                         style,
+                        custom_underline,
                         transition_key: fg_key,
                     });
                     continue;
@@ -1630,6 +1965,7 @@ impl TerminalElement {
                 if let Some(run) = &mut current_run
                     && run.col + run.cells == col_index
                     && text_run_style_matches(&run.style, &style)
+                    && run.custom_underline == custom_underline
                     && run.transition_key == fg_key
                     && current_run_is_drawing == is_drawing
                 {
@@ -1650,6 +1986,7 @@ impl TerminalElement {
                     text: cell_text(cell),
                     cells: cell_width,
                     style,
+                    custom_underline,
                     transition_key: fg_key,
                 });
             } else if let Some(run) = current_run.take() {
@@ -1713,10 +2050,10 @@ impl TerminalElement {
         }
     }
 
-    fn row_layout_style_hasher(&self) -> DefaultHasher {
+    fn row_layout_style_hasher(&self) -> CacheKeyHasher {
         // Every row in this layout shares these settings. Preserve the hash state so only
         // row-dependent data is appended for each cache key, without repeating font hashing.
-        let mut hasher = DefaultHasher::new();
+        let mut hasher = new_cache_key_hasher();
         self.snapshot.cols.hash(&mut hasher);
         f32::from(self.metrics.font_size)
             .to_bits()
@@ -1752,7 +2089,7 @@ impl TerminalElement {
         row_index: usize,
         logical_line: &TerminalLogicalLine,
         semantic_role: Option<SemanticLineRole>,
-        style_hasher: &DefaultHasher,
+        style_hasher: &CacheKeyHasher,
     ) -> TerminalRowLayoutCacheKey {
         let mut hasher = style_hasher.clone();
         if let Some(row) = self.snapshot.lines.get(row_index) {
@@ -1790,7 +2127,7 @@ impl TerminalElement {
         logical_line: &TerminalLogicalLine,
         semantic_role: Option<SemanticLineRole>,
     ) -> TerminalLogicalHighlightCacheKey {
-        let mut hasher = DefaultHasher::new();
+        let mut hasher = new_cache_key_hasher();
         self.snapshot.cols.hash(&mut hasher);
         self.highlight_rules_signature.hash(&mut hasher);
         self.transient_command_highlight_signature.hash(&mut hasher);
@@ -1849,7 +2186,7 @@ impl TerminalElement {
             else {
                 break;
             };
-            let mut hasher = DefaultHasher::new();
+            let mut hasher = new_cache_key_hasher();
             range.len().hash(&mut hasher);
             if let Some(highlight) = &self.transient_command_highlight {
                 logical_line_overlaps_transient_output(&self.snapshot, range.clone(), highlight)
@@ -1882,11 +2219,11 @@ impl TerminalElement {
         &self,
         logical_lines: &TerminalLogicalLineIndex,
         mut cache: Option<&mut TerminalLayoutCache>,
-    ) -> HashMap<Range<usize>, SemanticLineRole> {
+    ) -> FastHashMap<Range<usize>, SemanticLineRole> {
         if !self.semantic_coloring {
-            return HashMap::new();
+            return FastHashMap::new();
         }
-        let mut roles = HashMap::new();
+        let mut roles = FastHashMap::new();
         if let Some(cache) = cache.as_deref_mut() {
             if cache
                 .semantic_marks
@@ -1938,7 +2275,7 @@ impl TerminalElement {
     }
 
     fn row_link_cache_key(&self, row_index: usize) -> TerminalRowLinkCacheKey {
-        let mut hasher = DefaultHasher::new();
+        let mut hasher = new_cache_key_hasher();
         if let Some(row) = self.snapshot.lines.get(row_index) {
             hash_row_content(row, &mut hasher);
         }
@@ -1965,6 +2302,7 @@ impl TerminalElement {
             text: SharedString::from(text.clone()),
             cells: marked_text_cells_before_utf16(text, usize::MAX).max(1),
             style: marked_text_run(text, &self.theme, &self.metrics),
+            custom_underline: None,
             cache: None,
         })
     }
@@ -2022,6 +2360,7 @@ impl TerminalElement {
             col,
             cells: visible_cells,
             style: ghost_text_run(&visible_text, &self.theme, &self.metrics),
+            custom_underline: None,
             text: SharedString::from(visible_text),
             cache: None,
         })
@@ -2087,12 +2426,18 @@ fn append_cached_row_layout(
     }));
     text_runs.extend(row_layout.text_runs.iter().map(|run| {
         let mut style = run.style.clone();
+        let mut custom_underline = run.custom_underline;
         if let Some(transition) = transition_colors {
             style.color = transition.resolve_row_color(
                 run.transition_key,
                 run.style.color,
                 live_terminal_background,
             );
+            if let Some(ul) = custom_underline.as_mut()
+                && !ul.explicit_color
+            {
+                ul.color = style.color;
+            }
         }
         BatchedTextRun {
             row: row_index,
@@ -2100,6 +2445,7 @@ fn append_cached_row_layout(
             text: run.text.clone(),
             cells: run.cells,
             style,
+            custom_underline,
             cache: Some(run.cache.clone()),
         }
     }));
@@ -2326,7 +2672,7 @@ fn hash_highlight_rules(rules: &[TerminalHighlightRule], hasher: &mut impl Hashe
 }
 
 fn terminal_highlight_rules_signature(rules: &[TerminalHighlightRule]) -> u64 {
-    let mut hasher = DefaultHasher::new();
+    let mut hasher = new_cache_key_hasher();
     hash_highlight_rules(rules, &mut hasher);
     hasher.finish()
 }
@@ -2334,7 +2680,7 @@ fn terminal_highlight_rules_signature(rules: &[TerminalHighlightRule]) -> u64 {
 fn terminal_transient_command_highlight_signature(
     highlight: Option<&TransientCommandHighlight>,
 ) -> u64 {
-    let mut hasher = DefaultHasher::new();
+    let mut hasher = new_cache_key_hasher();
     highlight.hash(&mut hasher);
     hasher.finish()
 }
@@ -2344,7 +2690,7 @@ fn terminal_semantic_classification_signature(
     scheme: &CompiledSemanticScheme,
     shell: SemanticShellDialect,
 ) -> u64 {
-    let mut hasher = DefaultHasher::new();
+    let mut hasher = new_cache_key_hasher();
     enabled.hash(&mut hasher);
     if enabled {
         scheme.signature().hash(&mut hasher);
@@ -2359,7 +2705,7 @@ fn terminal_semantic_style_signature_from_palette(
     scheme: &CompiledSemanticScheme,
     shell: SemanticShellDialect,
 ) -> u64 {
-    let mut hasher = DefaultHasher::new();
+    let mut hasher = new_cache_key_hasher();
     enabled.hash(&mut hasher);
     if enabled {
         terminal.red.hash(&mut hasher);
@@ -2733,6 +3079,7 @@ fn push_visual_text_runs(
                 cluster.logical_col,
             );
         let style = text_run_for_cell(cell, fg, link, metrics);
+        let custom_underline = custom_underline_for_cell(cell, fg, link);
         let is_drawing = cell.zerowidth().is_empty() && cell_drawing::is_cell_drawing(cell.ch);
         if cell.zerowidth().is_empty() && powerline_separator(cell.ch).is_some() {
             if let Some(run) = current_run.take() {
@@ -2743,6 +3090,7 @@ fn push_visual_text_runs(
                 text: cluster.text.clone(),
                 cells: cluster.cells,
                 style,
+                custom_underline,
                 transition_key: fg_key,
             });
             continue;
@@ -2755,6 +3103,7 @@ fn push_visual_text_runs(
             && let Some(run) = &mut current_run
             && run.col + run.cells == cluster.visual_col
             && text_run_style_matches(&run.style, &style)
+            && run.custom_underline == custom_underline
             && run.transition_key == fg_key
             && current_run_is_drawing == is_drawing
         {
@@ -2772,6 +3121,7 @@ fn push_visual_text_runs(
             text: cluster.text.clone(),
             cells: cluster.cells,
             style,
+            custom_underline,
             transition_key: fg_key,
         };
         if wide {
@@ -2946,8 +3296,18 @@ impl Element for TerminalElement {
             }),
             |window| {
                 if self.row_timestamps.is_some() {
-                    for run in &layout.timestamp_runs {
-                        paint_text_run(run, timestamp_origin, &self.metrics, window, cx);
+                    if !layout.timestamp_runs.is_empty() {
+                        window.paint_layer(viewport_mask_bounds, |window| {
+                            paint_text_runs_in_layer(
+                                &layout.timestamp_runs,
+                                timestamp_origin,
+                                &self.metrics,
+                                gpui::GlyphEdgeEnhancement::None,
+                                None,
+                                window,
+                                cx,
+                            );
+                        });
                     }
                     let divider_x = viewport_timestamp_origin.x
                         + px((TERMINAL_TIMESTAMP_LABEL_CELLS as f32
@@ -3046,42 +3406,59 @@ impl Element for TerminalElement {
                         );
                     }
                 }
-                let glyph_edge_exclusions = if cfg!(target_os = "macos")
+                let glyph_edge_mode = if cfg!(target_os = "macos")
                     && !self.transparent_background
                     && layout.images.is_empty()
-                    && terminal_background(&self.theme).l >= 0.8
                 {
-                    Some(layout.glyph_edge_exclusions(
-                        self.snapshot.lines.len(),
-                        self.snapshot.cols,
-                        self.command_mark_decorations,
-                    ))
+                    let bg_l = terminal_background(&self.theme).l;
+                    if bg_l >= 0.8 {
+                        gpui::GlyphEdgeEnhancement::LightBackground
+                    } else if bg_l <= 0.25 {
+                        gpui::GlyphEdgeEnhancement::DarkBackground
+                    } else {
+                        gpui::GlyphEdgeEnhancement::None
+                    }
                 } else {
-                    None
+                    gpui::GlyphEdgeEnhancement::None
                 };
-                paint_text_runs_by_row(
-                    &layout.text_runs,
-                    origin,
-                    self.snapshot.cols,
-                    &self.metrics,
-                    glyph_edge_exclusions.as_deref(),
-                    window,
-                    cx,
-                );
-                for cached_row in &layout.cached_rows {
-                    paint_cached_text_runs_for_row(
-                        cached_row.row,
-                        &cached_row.layout.text_runs,
-                        origin,
-                        self.snapshot.cols,
-                        &self.metrics,
-                        glyph_edge_exclusions.as_deref(),
-                        transition_colors,
-                        self.dilation_settle_row,
-                        live_terminal_background,
-                        window,
-                        cx,
-                    );
+                let glyph_edge_exclusions = (glyph_edge_mode != gpui::GlyphEdgeEnhancement::None)
+                    .then(|| {
+                        layout.glyph_edge_exclusions(
+                            self.snapshot.lines.len(),
+                            self.snapshot.cols,
+                            self.command_mark_decorations,
+                        )
+                    });
+                if !layout.text_runs.is_empty() || !layout.cached_rows.is_empty() {
+                    // Establish one viewport-scoped layer for all visible terminal rows so GPUI
+                    // can batch glyphs, underlines, and box-drawing quads across rows instead of
+                    // splitting GPU draw batches at every row boundary.
+                    window.paint_layer(grid_mask_bounds, |window| {
+                        paint_text_runs_in_layer(
+                            &layout.text_runs,
+                            origin,
+                            &self.metrics,
+                            glyph_edge_mode,
+                            glyph_edge_exclusions.as_deref(),
+                            window,
+                            cx,
+                        );
+                        for cached_row in &layout.cached_rows {
+                            paint_cached_text_runs_in_layer(
+                                cached_row.row,
+                                &cached_row.layout.text_runs,
+                                origin,
+                                &self.metrics,
+                                glyph_edge_mode,
+                                glyph_edge_exclusions.as_deref(),
+                                transition_colors,
+                                self.dilation_settle_row,
+                                live_terminal_background,
+                                window,
+                                cx,
+                            );
+                        }
+                    });
                 }
                 if let Some(ghost_text) = &layout.ghost_text {
                     paint_grid_text_run(ghost_text, origin, &self.metrics, window, cx);
@@ -4162,5 +4539,152 @@ mod cache_tests {
             uncached_layout.text_runs[0].style.color,
             mid_colors.interpolated_foreground
         );
+    }
+
+    #[test]
+    fn frame_layout_cache_reuses_unchanged_frames_and_invalidates_on_layout_changes() {
+        use crate::terminal_view::selection::{TerminalGridPoint, TerminalSelectionMode};
+
+        let mut row0 = row_with_text_and_cursor(11, "alpha", 4);
+        row0.source_id = 101;
+        let mut row1 = row_with_text_and_cursor(12, "beta", 0);
+        row1.source_id = 102;
+        row1.cells_mut()[0].cursor = false;
+        row1.refresh_signature();
+        let mut snap = snapshot(0, vec![row0, row1]);
+        snap.cursor_row = 0;
+        snap.cursor_col = 4;
+        snap.cursor_shape = TerminalCursorShape::Block;
+
+        let cache = Arc::new(Mutex::new(TerminalLayoutCache::default()));
+        let mut timestamps = TerminalRowTimestampStore::default();
+        timestamps.insert_label(101, "[12:00:00.000]");
+        timestamps.insert_label(102, "[12:00:00.000]");
+
+        let mut view = element(snap)
+            .layout_cache(Arc::clone(&cache))
+            .row_timestamps(Some(Arc::new(timestamps.clone())))
+            .scroll_y_offset(px(3.5))
+            .performance_metrics_enabled(true);
+        let bounds = Bounds::new(point(px(0.0), px(0.0)), size(px(320.0), px(120.0)));
+
+        let first = view.cached_layout_for_bounds(bounds);
+        // Paint-only changes (sub-row scroll animation, horizontal offset, scrollbar visibility)
+        // must reuse the exact same whole-frame layout without rebuilding.
+        view.scroll_y_offset = px(1.25);
+        view.scroll_x_offset = px(12.0);
+        view.scrollbar_visible = true;
+        view.scrollbar_active = true;
+        let second = view.cached_layout_for_bounds(bounds);
+        assert!(Arc::ptr_eq(&first, &second));
+        assert!(cache.lock().performance().cache_hit_percent > 0);
+
+        // Cursor blink toggles layout cursor presence and must invalidate the frame cache.
+        view.cursor_visible = false;
+        let blinked = view.cached_layout_for_bounds(bounds);
+        assert!(!Arc::ptr_eq(&second, &blinked));
+        assert_eq!(blinked.cursor, None);
+
+        // Selection change must invalidate the frame cache and emit the new selection rect.
+        view.selection = Some(TerminalSelection {
+            anchor: TerminalGridPoint { line: 0, col: 0 },
+            head: TerminalGridPoint { line: 0, col: 3 },
+            mode: TerminalSelectionMode::Simple,
+        });
+        let selected = view.cached_layout_for_bounds(bounds);
+        assert!(!Arc::ptr_eq(&blinked, &selected));
+        assert!(
+            selected
+                .cached_rows
+                .iter()
+                .any(|row| !row.layout.selections.is_empty())
+        );
+
+        // Timestamp label change on a visible row must invalidate the frame cache.
+        timestamps.insert_label(102, "[12:00:01.250]");
+        view.row_timestamps = Some(Arc::new(timestamps));
+        let retimestamped = view.cached_layout_for_bounds(bounds);
+        assert!(!Arc::ptr_eq(&selected, &retimestamped));
+        assert_eq!(
+            retimestamped
+                .timestamp_runs
+                .iter()
+                .map(|run| run.text.as_ref())
+                .collect::<Vec<_>>(),
+            vec!["[12:00:00.000]", "[12:00:01.250]"]
+        );
+
+        // Visible row content change must invalidate even when snapshot generation is unchanged.
+        view.snapshot.lines[0].cells_mut()[0].ch = 'Z';
+        view.snapshot.lines[0].refresh_signature();
+        let edited = view.cached_layout_for_bounds(bounds);
+        assert!(!Arc::ptr_eq(&retimestamped, &edited));
+        assert_eq!(
+            edited.cached_rows[0].layout.text_runs[0].text.as_ref(),
+            "Zlpha"
+        );
+
+        cache.lock().clear();
+        let after_clear = view.cached_layout_for_bounds(bounds);
+        assert!(!Arc::ptr_eq(&edited, &after_clear));
+    }
+
+    #[test]
+    fn timestamp_runs_share_text_run_cache_across_matching_labels_and_frames() {
+        let mut row0 = row_with_text_and_cursor(21, "line0", 0);
+        row0.source_id = 201;
+        row0.cells_mut()[0].cursor = false;
+        row0.refresh_signature();
+        let mut row1 = row_with_text_and_cursor(22, "line1", 0);
+        row1.source_id = 202;
+        row1.cells_mut()[0].cursor = false;
+        row1.refresh_signature();
+        let mut row2 = row_with_text_and_cursor(23, "line2", 0);
+        row2.source_id = 203;
+        row2.cells_mut()[0].cursor = false;
+        row2.refresh_signature();
+
+        let mut timestamps = TerminalRowTimestampStore::default();
+        timestamps.insert_label(201, "[12:34:56.789]");
+        timestamps.insert_label(202, "[12:34:56.789]");
+        timestamps.insert_label(203, "[12:34:57.000]");
+
+        let mut cache = TerminalLayoutCache::default();
+        let mut view =
+            element(snapshot(0, vec![row0, row1, row2])).row_timestamps(Some(Arc::new(timestamps)));
+
+        let first = view.layout_for_rows(0..3, Some(&mut cache));
+        assert_eq!(first.timestamp_runs.len(), 3);
+        let cache0 = first.timestamp_runs[0]
+            .cache
+            .as_ref()
+            .expect("cached timestamp layout");
+        let cache1 = first.timestamp_runs[1]
+            .cache
+            .as_ref()
+            .expect("cached timestamp layout");
+        let cache2 = first.timestamp_runs[2]
+            .cache
+            .as_ref()
+            .expect("cached timestamp layout");
+        assert!(
+            Arc::ptr_eq(cache0, cache1),
+            "rows with the same timestamp label must share shaped LineLayout cache"
+        );
+        assert!(!Arc::ptr_eq(cache0, cache2));
+
+        let second = view.layout_for_rows(0..3, Some(&mut cache));
+        assert!(Arc::ptr_eq(
+            cache0,
+            second.timestamp_runs[0].cache.as_ref().unwrap()
+        ));
+
+        // Changing timestamp color must produce a distinct cache entry rather than reusing stale style.
+        view.theme.header_foreground ^= 0x0010_1010;
+        let restyled = view.layout_for_rows(0..3, Some(&mut cache));
+        assert!(!Arc::ptr_eq(
+            cache0,
+            restyled.timestamp_runs[0].cache.as_ref().unwrap()
+        ));
     }
 }

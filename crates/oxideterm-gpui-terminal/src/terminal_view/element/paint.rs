@@ -2,16 +2,18 @@ use gpui::{
     App, Bounds, Corners, DecorationRun, Hsla, PathBuilder, Pixels, Point, Rgba, SharedString,
     TextAlign, TextRun, Window, fill, point, px, rgb, rgba, size,
 };
-use oxideterm_terminal::TerminalCursorShape;
+use oxideterm_terminal::{TerminalCursorShape, TerminalUnderlineStyle};
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
-use super::cell_drawing::{cell_drawing_svg, is_cell_drawing};
+use super::cell_drawing::{
+    CellDrawing, draw_cell_with_stroke, is_cell_drawing, is_horizontally_coalesceable,
+};
 use crate::terminal_ui::*;
 use crate::terminal_view::element::{
-    BatchedTextRun, TerminalCommandMarkOverlay, TerminalCursor, TerminalHorizontalScrollbar,
-    TerminalImageLayout, TerminalRect, TerminalRowRect, TerminalRowTextRun, TerminalScrollbar,
-    TerminalTextRunCache,
+    BatchedTextRun, CustomUnderline, TerminalCommandMarkOverlay, TerminalCursor,
+    TerminalHorizontalScrollbar, TerminalImageLayout, TerminalRect, TerminalRowRect,
+    TerminalRowTextRun, TerminalScrollbar, TerminalTextRunCache,
 };
 use crate::terminal_view::element::{
     PowerlineDirection, PowerlineShape, PowerlineWeight, powerline_separator,
@@ -796,22 +798,13 @@ mod image_geometry_tests {
     }
 }
 
-pub(crate) fn paint_text_run(
-    run: &BatchedTextRun,
-    origin: gpui::Point<Pixels>,
-    metrics: &TerminalMetrics,
-    window: &mut Window,
-    cx: &mut App,
-) {
-    paint_text_run_with_layer(run, origin, metrics, true, window, cx);
-}
-
 struct TerminalPaintRun<'a> {
     row: usize,
     col: usize,
     text: &'a SharedString,
     cells: usize,
     style: &'a TextRun,
+    custom_underline: Option<CustomUnderline>,
     color: Hsla,
     dilation_color_hint: Option<Hsla>,
     cache: Option<&'a TerminalTextRunCache>,
@@ -832,6 +825,7 @@ fn paint_text_run_with_layer(
             text: &run.text,
             cells: run.cells,
             style: &run.style,
+            custom_underline: run.custom_underline,
             color: run.style.color,
             dilation_color_hint: None,
             cache: run.cache.as_deref(),
@@ -852,7 +846,10 @@ fn paint_text_run_parts(
     window: &mut Window,
     cx: &mut App,
 ) {
-    if paint_cell_drawing_run(&run, origin, metrics, window, cx) {
+    if paint_cell_drawing_run(&run, origin, metrics, window) {
+        if let Some(custom) = run.custom_underline {
+            paint_custom_underline(custom, &run, origin, metrics, window);
+        }
         if run.style.underline.is_some() || run.style.strikethrough.is_some() {
             // Let the font's metrics position decorations, without drawing a
             // second copy of the cell graphic through the font fallback path.
@@ -866,6 +863,7 @@ fn paint_text_run_parts(
                     text: &spaces,
                     cells: run.cells,
                     style: &style,
+                    custom_underline: None,
                     color: run.color,
                     dilation_color_hint: run.dilation_color_hint,
                     cache: run.cache,
@@ -880,6 +878,9 @@ fn paint_text_run_parts(
         return;
     }
     if paint_powerline_separators(&run, origin, metrics, window) {
+        if let Some(custom) = run.custom_underline {
+            paint_custom_underline(custom, &run, origin, metrics, window);
+        }
         return;
     }
 
@@ -906,11 +907,17 @@ fn paint_text_run_parts(
             layout.ascent,
             layout.descent,
         );
+        let underline = run.style.underline.map(|mut ul| {
+            if run.color != run.style.color && ul.color == Some(run.style.color) {
+                ul.color = Some(run.color);
+            }
+            ul
+        });
         let decoration = DecorationRun {
             len: run.style.len as u32,
             color: run.color,
             background_color: run.style.background_color,
-            underline: run.style.underline,
+            underline,
             strikethrough: run.style.strikethrough,
         };
         let decorations = std::slice::from_ref(&decoration);
@@ -959,6 +966,9 @@ fn paint_text_run_parts(
                 cx,
             )
         };
+        if let Some(custom) = run.custom_underline {
+            paint_custom_underline(custom, &run, origin, metrics, window);
+        }
         return;
     }
 
@@ -988,20 +998,79 @@ fn paint_text_run_parts(
         window,
         cx,
     );
+    if let Some(custom) = run.custom_underline {
+        paint_custom_underline(custom, &run, origin, metrics, window);
+    }
 }
 
-struct CachedCellDrawing {
-    name: SharedString,
-    svg: String,
-}
+fn paint_custom_underline(
+    custom: CustomUnderline,
+    run: &TerminalPaintRun<'_>,
+    origin: Point<Pixels>,
+    metrics: &TerminalMetrics,
+    window: &mut Window,
+) {
+    let scale = window.scale_factor();
+    let raw_left = origin.x + metrics.cell_width * run.col as f32;
+    let raw_right = origin.x + metrics.cell_width * (run.col + run.cells) as f32;
+    let row_top = origin.y + metrics.line_height * run.row as f32;
+    let row_bottom = row_top + metrics.line_height;
 
-type CellDrawingCache =
-    super::RecentCache<(char, u32, u32, u32), std::sync::Arc<CachedCellDrawing>>;
+    let x0 = (raw_left.as_f32() * scale).round();
+    let x1 = (raw_right.as_f32() * scale).round();
+    if x1 <= x0 {
+        return;
+    }
 
-thread_local! {
-    // Holds all 160 box/block and 255 active Braille characters across recent scales.
-    static CELL_DRAWINGS: std::cell::RefCell<CellDrawingCache> =
-        std::cell::RefCell::new(CellDrawingCache::new(1024));
+    let stroke = scale.round().max(1.0);
+    let bottom_px = (row_bottom.as_f32() * scale).round();
+    let top_px = (row_top.as_f32() * scale).round();
+    // Place the underline slightly below the font baseline while keeping double lines inside the row.
+    let baseline_px = ((row_top + metrics.primary_ascent).as_f32() * scale).round();
+    let base_y = (baseline_px + stroke * 1.5).round();
+
+    let paint_rect = |window: &mut Window, rx0: f32, ry0: f32, rx1: f32, ry1: f32| {
+        if rx1 > rx0 && ry1 > ry0 {
+            let bounds = Bounds::from_corners(
+                point(px(rx0 / scale), px(ry0 / scale)),
+                point(px(rx1 / scale), px(ry1 / scale)),
+            );
+            window.paint_quad(fill(bounds, custom.color));
+        }
+    };
+
+    match custom.style {
+        TerminalUnderlineStyle::Double => {
+            let gap = stroke;
+            let total = stroke * 2.0 + gap;
+            let y0 = base_y.min(bottom_px - total).max(top_px);
+            paint_rect(window, x0, y0, x1, y0 + stroke);
+            paint_rect(window, x0, y0 + stroke + gap, x1, y0 + total);
+        }
+        TerminalUnderlineStyle::Dotted => {
+            let y0 = base_y.min(bottom_px - stroke).max(top_px);
+            let dot = stroke;
+            let pitch = (stroke * 2.0).max(2.0);
+            let mut x = x0;
+            while x < x1 {
+                paint_rect(window, x, y0, (x + dot).min(x1), y0 + stroke);
+                x += pitch;
+            }
+        }
+        TerminalUnderlineStyle::Dashed => {
+            let y0 = base_y.min(bottom_px - stroke).max(top_px);
+            let dash = (stroke * 3.0).max(3.0);
+            let pitch = (stroke * 5.0).max(5.0);
+            let mut x = x0;
+            while x < x1 {
+                paint_rect(window, x, y0, (x + dash).min(x1), y0 + stroke);
+                x += pitch;
+            }
+        }
+        TerminalUnderlineStyle::None
+        | TerminalUnderlineStyle::Single
+        | TerminalUnderlineStyle::Curly => {}
+    }
 }
 
 fn paint_cell_drawing_run(
@@ -1009,7 +1078,6 @@ fn paint_cell_drawing_run(
     origin: Point<Pixels>,
     metrics: &TerminalMetrics,
     window: &mut Window,
-    cx: &App,
 ) -> bool {
     if !run.text.starts_with(is_cell_drawing)
         || run.text.chars().count() != run.cells
@@ -1020,92 +1088,100 @@ fn paint_cell_drawing_run(
     let scale = window.scale_factor();
     // Stroke weight is based on the nominal cell width so neighboring cells
     // with differently rounded edges still join with the same line thickness.
-    let stroke = (metrics.cell_width.as_f32() * scale / 8.0).round().max(1.0) as u32;
-    for (column, ch) in run.text.chars().enumerate() {
+    let stroke = (metrics.cell_width.as_f32() * scale / 8.0).round().max(1.0);
+    let mut chars = run.text.chars().enumerate().peekable();
+    while let Some((start_col, ch)) = chars.next() {
+        let mut span = 1usize;
+        if is_horizontally_coalesceable(ch) {
+            while let Some(&(_, next_ch)) = chars.peek() {
+                if next_ch != ch {
+                    break;
+                }
+                chars.next();
+                span += 1;
+            }
+        }
         if ch == '\u{2800}' {
             continue;
         }
         let raw = Bounds::new(
             origin
                 + point(
-                    metrics.cell_width * (run.col + column) as f32,
+                    metrics.cell_width * (run.col + start_col) as f32,
                     metrics.line_height * run.row as f32,
                 ),
-            size(metrics.cell_width, metrics.line_height),
+            size(metrics.cell_width * span as f32, metrics.line_height),
         );
         let bounds = Bounds::from_corners(
             window.pixel_snap_point(raw.origin),
             window.pixel_snap_point(point(raw.right(), raw.bottom())),
         );
-        let width = (bounds.size.width.as_f32() * scale).round() as u32;
-        let height = (bounds.size.height.as_f32() * scale).round() as u32;
-        if width == 0 || height == 0 {
+        if bounds.size.width <= px(0.0) || bounds.size.height <= px(0.0) {
             continue;
         }
-        let drawing = CELL_DRAWINGS.with(|cache| {
-            cache
-                .borrow_mut()
-                .get_or_insert_with((ch, width, height, stroke), || {
-                    std::sync::Arc::new(CachedCellDrawing {
-                        name: format!("oxideterm-cell-{:x}-{width}-{height}-{stroke}", ch as u32)
-                            .into(),
-                        svg: cell_drawing_svg(ch, width, height, stroke),
-                    })
-                })
-                .0
+        draw_cell_with_stroke(ch, bounds, scale, stroke, |drawing| match drawing {
+            CellDrawing::Fill(rect, alpha) => {
+                let mut color = run.color;
+                color.a *= alpha;
+                window.paint_quad(fill(rect, color));
+            }
+            CellDrawing::Line(a, b, width) => {
+                let mut builder = PathBuilder::stroke(width);
+                builder.move_to(a);
+                builder.line_to(b);
+                if let Ok(path) = builder.build() {
+                    window.paint_path(path, run.color);
+                }
+            }
+            CellDrawing::RoundedCorner([v_edge, start, c1, c2, end, h_edge], width) => {
+                let mut builder = PathBuilder::stroke(width);
+                builder.move_to(v_edge);
+                if start != v_edge {
+                    builder.line_to(start);
+                }
+                // GPUI `cubic_bezier_to` takes `(to, control_a, control_b)`.
+                builder.cubic_bezier_to(end, c1, c2);
+                if h_edge != end {
+                    builder.line_to(h_edge);
+                }
+                if let Ok(path) = builder.build() {
+                    window.paint_path(path, run.color);
+                }
+            }
         });
-        if let Err(error) = window.paint_svg(
-            bounds,
-            drawing.name.clone(),
-            Some(drawing.svg.as_bytes()),
-            gpui::TransformationMatrix::default(),
-            run.color,
-            cx,
-        ) {
-            eprintln!("Failed to paint terminal cell drawing: {error}");
-        }
     }
     true
 }
 
-pub(crate) fn paint_text_runs_by_row(
+pub(crate) fn paint_text_runs_in_layer(
     runs: &[BatchedTextRun],
     origin: gpui::Point<Pixels>,
-    terminal_cols: usize,
     metrics: &TerminalMetrics,
+    glyph_edge_mode: gpui::GlyphEdgeEnhancement,
     glyph_edge_exclusions: Option<&[Vec<bool>]>,
     window: &mut Window,
     cx: &mut App,
 ) {
-    for row_runs in runs.chunk_by(|left, right| left.row == right.row) {
-        let row = row_runs[0].row;
-        let row_bounds = Bounds::new(
-            origin + point(px(0.0), px(row as f32 * metrics.line_height_f32())),
-            size(
-                px(terminal_cols as f32 * metrics.cell_width_f32()),
-                metrics.line_height,
-            ),
+    for run in runs {
+        let mode = enhance_run_glyph_edges(
+            glyph_edge_mode,
+            glyph_edge_exclusions,
+            run.row,
+            run.col,
+            run.cells,
         );
-        // The complete row bounds include glyph overhang that can extend beyond a run's cells.
-        // One row-scoped layer still avoids a layer pair for every adjacent style run.
-        window.paint_layer(row_bounds, |window| {
-            for run in row_runs {
-                let enhance =
-                    enhance_run_glyph_edges(glyph_edge_exclusions, row, run.col, run.cells);
-                window.with_enhanced_glyph_edges(enhance, |window| {
-                    paint_text_run_with_layer(run, origin, metrics, false, window, cx);
-                });
-            }
+        window.with_glyph_edge_enhancement(mode, |window| {
+            paint_text_run_with_layer(run, origin, metrics, false, window, cx);
         });
     }
 }
 
-pub(crate) fn paint_cached_text_runs_for_row(
+pub(crate) fn paint_cached_text_runs_in_layer(
     row: usize,
     runs: &[TerminalRowTextRun],
     origin: gpui::Point<Pixels>,
-    terminal_cols: usize,
     metrics: &TerminalMetrics,
+    glyph_edge_mode: gpui::GlyphEdgeEnhancement,
     glyph_edge_exclusions: Option<&[Vec<bool>]>,
     transition_colors: Option<&TerminalTransitionColors>,
     dilation_settle_row: Option<usize>,
@@ -1113,68 +1189,78 @@ pub(crate) fn paint_cached_text_runs_for_row(
     window: &mut Window,
     cx: &mut App,
 ) {
-    if runs.is_empty() {
-        return;
+    for run in runs {
+        let mode = enhance_run_glyph_edges(
+            glyph_edge_mode,
+            glyph_edge_exclusions,
+            row,
+            run.col,
+            run.cells,
+        );
+        let live_color = transition_colors.map_or(run.style.color, |transition| {
+            transition.resolve_row_color(
+                run.transition_key,
+                run.style.color,
+                live_terminal_background,
+            )
+        });
+        let custom_underline = run.custom_underline.map(|mut ul| {
+            if !ul.explicit_color {
+                ul.color = live_color;
+            }
+            ul
+        });
+        let dilation_color_hint = if transition_colors.is_some()
+            || dilation_settle_row.is_some_and(|settled_rows| row >= settled_rows)
+        {
+            Some(run.style.color)
+        } else {
+            None
+        };
+        window.with_glyph_edge_enhancement(mode, |window| {
+            paint_text_run_parts(
+                TerminalPaintRun {
+                    row,
+                    col: run.col,
+                    text: &run.text,
+                    cells: run.cells,
+                    style: &run.style,
+                    custom_underline,
+                    color: live_color,
+                    dilation_color_hint,
+                    cache: Some(&run.cache),
+                },
+                origin,
+                metrics,
+                false,
+                window,
+                cx,
+            );
+        });
     }
-    let row_bounds = Bounds::new(
-        origin + point(px(0.0), px(row as f32 * metrics.line_height_f32())),
-        size(
-            px(terminal_cols as f32 * metrics.cell_width_f32()),
-            metrics.line_height,
-        ),
-    );
-    window.paint_layer(row_bounds, |window| {
-        for run in runs {
-            let enhance = enhance_run_glyph_edges(glyph_edge_exclusions, row, run.col, run.cells);
-            let live_color = transition_colors.map_or(run.style.color, |transition| {
-                transition.resolve_row_color(
-                    run.transition_key,
-                    run.style.color,
-                    live_terminal_background,
-                )
-            });
-            let dilation_color_hint = if transition_colors.is_some()
-                || dilation_settle_row.is_some_and(|settled_rows| row >= settled_rows)
-            {
-                Some(run.style.color)
-            } else {
-                None
-            };
-            window.with_enhanced_glyph_edges(enhance, |window| {
-                paint_text_run_parts(
-                    TerminalPaintRun {
-                        row,
-                        col: run.col,
-                        text: &run.text,
-                        cells: run.cells,
-                        style: &run.style,
-                        color: live_color,
-                        dilation_color_hint,
-                        cache: Some(&run.cache),
-                    },
-                    origin,
-                    metrics,
-                    false,
-                    window,
-                    cx,
-                );
-            });
-        }
-    });
 }
 
 fn enhance_run_glyph_edges(
+    mode: gpui::GlyphEdgeEnhancement,
     exclusions: Option<&[Vec<bool>]>,
     row: usize,
     col: usize,
     cells: usize,
-) -> bool {
-    exclusions
+) -> gpui::GlyphEdgeEnhancement {
+    if mode == gpui::GlyphEdgeEnhancement::None {
+        return gpui::GlyphEdgeEnhancement::None;
+    }
+    let allowed = exclusions
         .and_then(|rows| rows.get(row))
         .is_some_and(|excluded| {
             let end = col.saturating_add(cells).min(excluded.len());
             !excluded[col.min(end)..end].contains(&true)
-        })
+        });
+    if allowed {
+        mode
+    } else {
+        gpui::GlyphEdgeEnhancement::None
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1375,10 +1461,250 @@ fn paint_powerline_separators(
                     window.paint_path(path, run.color);
                 }
             }
+            (
+                PowerlineShape::SlantedLower | PowerlineShape::SlantedUpper,
+                PowerlineWeight::Filled,
+            ) => {
+                let Some(points) = powerline_slanted_points(separator, bounds, paint_metrics)
+                else {
+                    return false;
+                };
+                let mut builder = PathBuilder::fill();
+                builder.add_polygon(&points, true);
+                if let Ok(path) = builder.build() {
+                    window.paint_path(path, run.color);
+                }
+            }
+            (
+                PowerlineShape::SlantedLower | PowerlineShape::SlantedUpper,
+                PowerlineWeight::Thin,
+            ) => {
+                let [a, b] = powerline_diagonal_line(separator, bounds, paint_metrics);
+                let mut builder = PathBuilder::stroke(paint_metrics.thin_stroke_width);
+                builder.move_to(a);
+                builder.line_to(b);
+                if let Ok(path) = builder.build() {
+                    window.paint_path(path, run.color);
+                }
+            }
+            (PowerlineShape::Trapezoid, PowerlineWeight::Filled) => {
+                let [upper, lower] =
+                    powerline_trapezoid_polygons(separator.direction, bounds, paint_metrics);
+                let mut builder = PathBuilder::fill();
+                builder.add_polygon(&upper, true);
+                builder.add_polygon(&lower, true);
+                if let Ok(path) = builder.build() {
+                    window.paint_path(path, run.color);
+                }
+            }
+            (PowerlineShape::InverseTriangle, PowerlineWeight::Filled) => {
+                let [upper, lower] =
+                    powerline_inverse_triangle_polygons(separator.direction, bounds, paint_metrics);
+                let mut builder = PathBuilder::fill();
+                builder.add_polygon(&upper, true);
+                builder.add_polygon(&lower, true);
+                if let Ok(path) = builder.build() {
+                    window.paint_path(path, run.color);
+                }
+            }
+            (PowerlineShape::PixelatedSmall, PowerlineWeight::Filled) => {
+                paint_powerline_pixelated(bounds, separator.direction, false, run.color, window);
+            }
+            (PowerlineShape::PixelatedBig, PowerlineWeight::Filled) => {
+                paint_powerline_pixelated(bounds, separator.direction, true, run.color, window);
+            }
+            (
+                PowerlineShape::Trapezoid
+                | PowerlineShape::InverseTriangle
+                | PowerlineShape::PixelatedSmall
+                | PowerlineShape::PixelatedBig,
+                PowerlineWeight::Thin,
+            ) => return false,
         }
     }
 
     true
+}
+
+fn powerline_slanted_points(
+    separator: crate::terminal_view::element::PowerlineSeparator,
+    bounds: Bounds<Pixels>,
+    metrics: PowerlinePaintMetrics,
+) -> Option<[Point<Pixels>; 3]> {
+    let extents = powerline_shape_extents(bounds, separator.direction, separator.weight, metrics);
+    match separator.shape {
+        PowerlineShape::SlantedLower => Some([
+            point(px(extents.flat_x), px(extents.top)),
+            point(px(extents.flat_x), px(extents.bottom)),
+            point(px(extents.tip_x), px(extents.bottom)),
+        ]),
+        PowerlineShape::SlantedUpper => Some([
+            point(px(extents.flat_x), px(extents.top)),
+            point(px(extents.tip_x), px(extents.top)),
+            point(px(extents.flat_x), px(extents.bottom)),
+        ]),
+        _ => None,
+    }
+}
+
+fn powerline_diagonal_line(
+    separator: crate::terminal_view::element::PowerlineSeparator,
+    bounds: Bounds<Pixels>,
+    metrics: PowerlinePaintMetrics,
+) -> [Point<Pixels>; 2] {
+    let extents = powerline_shape_extents(bounds, separator.direction, separator.weight, metrics);
+    match separator.shape {
+        PowerlineShape::SlantedLower => [
+            point(px(extents.flat_x), px(extents.top)),
+            point(px(extents.tip_x), px(extents.bottom)),
+        ],
+        PowerlineShape::SlantedUpper => [
+            point(px(extents.flat_x), px(extents.bottom)),
+            point(px(extents.tip_x), px(extents.top)),
+        ],
+        _ => [
+            point(px(extents.flat_x), px(extents.top)),
+            point(px(extents.tip_x), px(extents.bottom)),
+        ],
+    }
+}
+
+// Proportions measured from Nerd Fonts `nf-ple-trapezoid_top_bottom` (U+E0D2 / U+E0D4).
+const POWERLINE_TRAPEZOID_INNER_X_FRACTION: f32 = 0.32;
+const POWERLINE_TRAPEZOID_UPPER_Y_FRACTION: f32 = 0.44;
+const POWERLINE_TRAPEZOID_LOWER_Y_FRACTION: f32 = 0.56;
+
+fn powerline_trapezoid_polygons(
+    direction: PowerlineDirection,
+    bounds: Bounds<Pixels>,
+    metrics: PowerlinePaintMetrics,
+) -> [[Point<Pixels>; 4]; 2] {
+    let extents = powerline_shape_extents(bounds, direction, PowerlineWeight::Filled, metrics);
+    let left = f32::from(bounds.origin.x);
+    let width = f32::from(bounds.size.width);
+    let height = extents.bottom - extents.top;
+    let inner_x = match direction {
+        PowerlineDirection::Right => left + width * POWERLINE_TRAPEZOID_INNER_X_FRACTION,
+        PowerlineDirection::Left => left + width * (1.0 - POWERLINE_TRAPEZOID_INNER_X_FRACTION),
+    };
+    let upper_y = extents.top + height * POWERLINE_TRAPEZOID_UPPER_Y_FRACTION;
+    let lower_y = extents.top + height * POWERLINE_TRAPEZOID_LOWER_Y_FRACTION;
+    let upper = [
+        point(px(extents.flat_x), px(extents.top)),
+        point(px(extents.tip_x), px(extents.top)),
+        point(px(inner_x), px(upper_y)),
+        point(px(extents.flat_x), px(upper_y)),
+    ];
+    let lower = [
+        point(px(extents.flat_x), px(lower_y)),
+        point(px(inner_x), px(lower_y)),
+        point(px(extents.tip_x), px(extents.bottom)),
+        point(px(extents.flat_x), px(extents.bottom)),
+    ];
+    [upper, lower]
+}
+
+fn powerline_inverse_triangle_polygons(
+    direction: PowerlineDirection,
+    bounds: Bounds<Pixels>,
+    metrics: PowerlinePaintMetrics,
+) -> [[Point<Pixels>; 3]; 2] {
+    let extents = powerline_shape_extents(bounds, direction, PowerlineWeight::Filled, metrics);
+    let upper = [
+        point(px(extents.flat_x), px(extents.top)),
+        point(px(extents.tip_x), px(extents.top)),
+        point(px(extents.flat_x), px(extents.middle_y)),
+    ];
+    let lower = [
+        point(px(extents.flat_x), px(extents.middle_y)),
+        point(px(extents.tip_x), px(extents.bottom)),
+        point(px(extents.flat_x), px(extents.bottom)),
+    ];
+    [upper, lower]
+}
+
+fn paint_powerline_pixelated(
+    bounds: Bounds<Pixels>,
+    direction: PowerlineDirection,
+    big: bool,
+    color: Hsla,
+    window: &mut Window,
+) {
+    // 0 = empty, 1 = faint trailing pixel, 2 = solid pixel (anchored on the left for Right direction).
+    const SMALL_ROWS: [[u8; 6]; 10] = [
+        [2, 2, 2, 2, 1, 0],
+        [2, 2, 2, 1, 2, 1],
+        [2, 2, 2, 2, 0, 0],
+        [2, 2, 1, 2, 1, 0],
+        [2, 2, 2, 0, 2, 0],
+        [2, 2, 2, 2, 1, 0],
+        [2, 2, 1, 2, 0, 1],
+        [2, 1, 2, 1, 1, 0],
+        [2, 2, 2, 2, 0, 0],
+        [2, 2, 2, 1, 1, 0],
+    ];
+    const BIG_ROWS: [[u8; 4]; 6] = [
+        [2, 2, 2, 0],
+        [2, 2, 1, 1],
+        [2, 2, 2, 0],
+        [2, 1, 2, 0],
+        [2, 2, 1, 2],
+        [2, 2, 2, 0],
+    ];
+
+    let scale = window.scale_factor();
+    let left_px = (f32::from(bounds.left()) * scale).round();
+    let top_px = (f32::from(bounds.top()) * scale).round();
+    let right_px = (f32::from(bounds.right()) * scale).round();
+    let bottom_px = (f32::from(bounds.bottom()) * scale).round();
+    let total_w = right_px - left_px;
+    let total_h = bottom_px - top_px;
+    if total_w <= 0.0 || total_h <= 0.0 {
+        return;
+    }
+
+    let (cols, rows): (usize, usize) = if big { (4, 6) } else { (6, 10) };
+    let gutter = if total_w / cols as f32 >= 3.0 {
+        1.0
+    } else {
+        0.0
+    };
+
+    for row in 0..rows {
+        let y0 = (top_px + total_h * row as f32 / rows as f32).round();
+        let y1 = ((top_px + total_h * (row + 1) as f32 / rows as f32).round() - gutter)
+            .max(y0 + 1.0)
+            .min(bottom_px);
+        for col in 0..cols {
+            let level = if big {
+                BIG_ROWS[row][col]
+            } else {
+                SMALL_ROWS[row][col]
+            };
+            if level == 0 {
+                continue;
+            }
+            let visual_col = match direction {
+                PowerlineDirection::Right => col,
+                PowerlineDirection::Left => cols - 1 - col,
+            };
+            let x0 = (left_px + total_w * visual_col as f32 / cols as f32).round();
+            let x1 = ((left_px + total_w * (visual_col + 1) as f32 / cols as f32).round() - gutter)
+                .max(x0 + 1.0)
+                .min(right_px);
+            if x1 > x0 && y1 > y0 {
+                let mut quad_color = color;
+                if level == 1 {
+                    quad_color.a *= 0.45;
+                }
+                let rect = Bounds::from_corners(
+                    point(px(x0 / scale), px(y0 / scale)),
+                    point(px(x1 / scale), px(y1 / scale)),
+                );
+                window.paint_quad(fill(rect, quad_color));
+            }
+        }
+    }
 }
 
 fn aligned_run_position_y(
@@ -1416,7 +1742,7 @@ fn push_half_circle_arc(
 
 fn powerline_background_path(ch: char, bounds: Bounds<Pixels>) -> Option<gpui::Path<Pixels>> {
     let separator = powerline_separator(ch)?;
-    if separator.weight != PowerlineWeight::Filled {
+    if !separator.supports_background_cutout() {
         return None;
     }
     // The opaque complement stays inside this cell; the transparent glyph needs no seam overlap.
@@ -1444,6 +1770,27 @@ fn powerline_background_path(ch: char, bounds: Bounds<Pixels>) -> Option<gpui::P
             push_half_circle_arc(&mut builder, &curve, true);
             builder.close();
         }
+        PowerlineShape::SlantedLower => {
+            let [flat_top, _, tip_bottom] = powerline_slanted_points(separator, bounds, metrics)?;
+            builder.add_polygon(&[flat_top, point(outer_x, flat_top.y), tip_bottom], true);
+        }
+        PowerlineShape::SlantedUpper => {
+            let [_, tip_top, flat_bottom] = powerline_slanted_points(separator, bounds, metrics)?;
+            builder.add_polygon(&[tip_top, point(outer_x, flat_bottom.y), flat_bottom], true);
+        }
+        PowerlineShape::Trapezoid => {
+            let [upper, lower] = powerline_trapezoid_polygons(separator.direction, bounds, metrics);
+            builder.add_polygon(
+                &[upper[1], lower[2], lower[1], lower[0], upper[3], upper[2]],
+                true,
+            );
+        }
+        PowerlineShape::InverseTriangle => {
+            let [upper, lower] =
+                powerline_inverse_triangle_polygons(separator.direction, bounds, metrics);
+            builder.add_polygon(&[upper[1], lower[1], upper[2]], true);
+        }
+        PowerlineShape::PixelatedSmall | PowerlineShape::PixelatedBig => return None,
     }
     builder.build().ok()
 }
@@ -1455,6 +1802,22 @@ mod powerline_background_tests {
     #[test]
     fn powerline_cutouts_leave_the_glyph_interior_unpainted() {
         let bounds = Bounds::new(point(px(10.0), px(20.0)), size(px(8.0), px(16.0)));
+        let sample_covered = |path: &gpui::Path<Pixels>, x: f32, y: f32| {
+            let sample = point(px(10.0 + x * 8.0), px(20.0 + y * 16.0));
+            path.vertices.chunks_exact(3).any(|triangle| {
+                let cross = |a: Point<Pixels>, b: Point<Pixels>| {
+                    f32::from(b.x - a.x) * f32::from(sample.y - a.y)
+                        - f32::from(b.y - a.y) * f32::from(sample.x - a.x)
+                };
+                let signs = [
+                    cross(triangle[0].xy_position, triangle[1].xy_position),
+                    cross(triangle[1].xy_position, triangle[2].xy_position),
+                    cross(triangle[2].xy_position, triangle[0].xy_position),
+                ];
+                signs.iter().all(|s| *s >= 0.0) || signs.iter().all(|s| *s <= 0.0)
+            })
+        };
+
         for (ch, left) in [
             ('\u{e0b0}', false),
             ('\u{e0b2}', true),
@@ -1470,21 +1833,38 @@ mod powerline_background_tests {
                 (0.9, 0.9, true),
             ] {
                 let x = if left { 1.0 - x } else { x };
-                let sample = point(px(10.0 + x * 8.0), px(20.0 + y * 16.0));
-                let covered = path.vertices.chunks_exact(3).any(|triangle| {
-                    let cross = |a: Point<Pixels>, b: Point<Pixels>| {
-                        f32::from(b.x - a.x) * f32::from(sample.y - a.y)
-                            - f32::from(b.y - a.y) * f32::from(sample.x - a.x)
-                    };
-                    let signs = [
-                        cross(triangle[0].xy_position, triangle[1].xy_position),
-                        cross(triangle[1].xy_position, triangle[2].xy_position),
-                        cross(triangle[2].xy_position, triangle[0].xy_position),
-                    ];
-                    signs.iter().all(|s| *s >= 0.0) || signs.iter().all(|s| *s <= 0.0)
-                });
-                assert_eq!(covered, painted, "{ch}: sample ({x}, {y})");
+                assert_eq!(
+                    sample_covered(&path, x, y),
+                    painted,
+                    "{ch}: sample ({x}, {y})"
+                );
             }
+        }
+
+        for (ch, samples) in [
+            ('\u{e0b8}', [(0.2, 0.8, false), (0.8, 0.2, true)]),
+            ('\u{e0ba}', [(0.8, 0.8, false), (0.2, 0.2, true)]),
+            ('\u{e0bc}', [(0.2, 0.2, false), (0.8, 0.8, true)]),
+            ('\u{e0be}', [(0.8, 0.2, false), (0.2, 0.8, true)]),
+            ('\u{e0d2}', [(0.2, 0.15, false), (0.85, 0.5, true)]),
+            ('\u{e0d4}', [(0.8, 0.15, false), (0.15, 0.5, true)]),
+            ('\u{e0d6}', [(0.2, 0.1, false), (0.75, 0.5, true)]),
+            ('\u{e0d7}', [(0.8, 0.1, false), (0.25, 0.5, true)]),
+        ] {
+            let path = powerline_background_path(ch, bounds).expect("extended cutout path");
+            for (x, y, painted) in samples {
+                assert_eq!(
+                    sample_covered(&path, x, y),
+                    painted,
+                    "U+{:04X}: sample ({x}, {y})",
+                    ch as u32
+                );
+            }
+        }
+
+        for ch in ['\u{e0c4}', '\u{e0c5}', '\u{e0c6}', '\u{e0c7}'] {
+            assert!(powerline_separator(ch).is_some());
+            assert!(powerline_background_path(ch, bounds).is_none());
         }
     }
 

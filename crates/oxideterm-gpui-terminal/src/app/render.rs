@@ -230,8 +230,10 @@ impl Focusable for TerminalPane {
 
 impl Render for TerminalPane {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        if self.metrics_dirty {
+        let current_scale_bits = window.scale_factor().to_bits();
+        if self.metrics_dirty || self.metrics_scale_factor_bits != current_scale_bits {
             self.metrics = TerminalMetrics::measure_with_preferences(window, &self.preferences);
+            self.metrics_scale_factor_bits = current_scale_bits;
             self.metrics_dirty = false;
         }
         if self.snapshot_dirty {
@@ -3333,6 +3335,7 @@ impl TerminalPane {
             .border_color(rgba(0xffffff33))
             .bg(rgba(0x0d0f12dd))
             .text_size(px(10.0))
+            .font_features(oxideterm_gpui_ui::tabular_nums_features())
             .font_family(SharedString::from(self.preferences.font_family.clone()))
             .child(
                 div()

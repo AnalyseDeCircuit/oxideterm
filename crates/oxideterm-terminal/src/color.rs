@@ -3,7 +3,7 @@ use alacritty_terminal::{
     vte::ansi::{Color, NamedColor, Rgb},
 };
 
-use crate::{TerminalAttrs, TerminalColor, TerminalStyleOrigin};
+use crate::{TerminalAttrs, TerminalColor, TerminalStyleOrigin, TerminalUnderlineStyle};
 
 /// Colors that resolve ANSI, default, and color-query palette slots for one terminal.
 ///
@@ -97,11 +97,24 @@ pub(crate) const OXIDETERM_DARK_THEME: TerminalPalette = TerminalPalette {
 
 pub(crate) const DEFAULT_MINIMUM_CONTRAST_SCORE: f32 = 45.0;
 pub(crate) fn attrs_from_flags(flags: Flags) -> TerminalAttrs {
-    TerminalAttrs::new(
+    let underline_style = if flags.contains(Flags::UNDERCURL) {
+        TerminalUnderlineStyle::Curly
+    } else if flags.contains(Flags::DOUBLE_UNDERLINE) {
+        TerminalUnderlineStyle::Double
+    } else if flags.contains(Flags::DOTTED_UNDERLINE) {
+        TerminalUnderlineStyle::Dotted
+    } else if flags.contains(Flags::DASHED_UNDERLINE) {
+        TerminalUnderlineStyle::Dashed
+    } else if flags.contains(Flags::UNDERLINE) {
+        TerminalUnderlineStyle::Single
+    } else {
+        TerminalUnderlineStyle::None
+    };
+    TerminalAttrs::with_underline(
         flags.contains(Flags::BOLD),
         flags.contains(Flags::DIM),
         flags.contains(Flags::ITALIC),
-        flags.intersects(Flags::ALL_UNDERLINES),
+        underline_style,
         flags.contains(Flags::STRIKEOUT),
         flags.contains(Flags::INVERSE),
     )

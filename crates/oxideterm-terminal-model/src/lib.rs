@@ -34,6 +34,7 @@ pub struct TerminalCell {
 pub struct TerminalCellExtra {
     zerowidth: String,
     hyperlink: Option<String>,
+    underline_color: Option<TerminalColor>,
 }
 
 impl TerminalCell {
@@ -49,20 +50,37 @@ impl TerminalCell {
             .and_then(|extra| extra.hyperlink.as_deref())
     }
 
-    /// Replaces both rare fields at once while preserving the allocation-free empty state.
+    pub fn underline_color(&self) -> Option<TerminalColor> {
+        self.extra
+            .as_deref()
+            .and_then(|extra| extra.underline_color)
+    }
+
+    /// Replaces rare text and link fields while preserving the allocation-free empty state.
     pub fn set_extra(&mut self, zerowidth: String, hyperlink: Option<String>) {
-        self.extra = if zerowidth.is_empty() && hyperlink.is_none() {
+        self.set_extra_with_underline_color(zerowidth, hyperlink, None);
+    }
+
+    /// Replaces all rare cell metadata fields while preserving the allocation-free empty state.
+    pub fn set_extra_with_underline_color(
+        &mut self,
+        zerowidth: String,
+        hyperlink: Option<String>,
+        underline_color: Option<TerminalColor>,
+    ) {
+        self.extra = if zerowidth.is_empty() && hyperlink.is_none() && underline_color.is_none() {
             None
         } else {
             Some(Arc::new(TerminalCellExtra {
                 zerowidth,
                 hyperlink,
+                underline_color,
             }))
         };
     }
 
     pub fn set_zerowidth(&mut self, zerowidth: String) {
-        if zerowidth.is_empty() && self.hyperlink().is_none() {
+        if zerowidth.is_empty() && self.hyperlink().is_none() && self.underline_color().is_none() {
             self.extra = None;
             return;
         }
@@ -74,7 +92,7 @@ impl TerminalCell {
     }
 
     pub fn set_hyperlink(&mut self, hyperlink: Option<String>) {
-        if hyperlink.is_none() && self.zerowidth().is_empty() {
+        if hyperlink.is_none() && self.zerowidth().is_empty() && self.underline_color().is_none() {
             self.extra = None;
             return;
         }
@@ -83,6 +101,18 @@ impl TerminalCell {
             .extra
             .get_or_insert_with(|| Arc::new(TerminalCellExtra::default()));
         Arc::make_mut(extra).hyperlink = hyperlink;
+    }
+
+    pub fn set_underline_color(&mut self, underline_color: Option<TerminalColor>) {
+        if underline_color.is_none() && self.zerowidth().is_empty() && self.hyperlink().is_none() {
+            self.extra = None;
+            return;
+        }
+
+        let extra = self
+            .extra
+            .get_or_insert_with(|| Arc::new(TerminalCellExtra::default()));
+        Arc::make_mut(extra).underline_color = underline_color;
     }
 }
 
@@ -144,6 +174,19 @@ impl TerminalColor {
     }
 }
 
+/// SGR 4:x underline style packed into the top 3 bits of [`TerminalAttrs`].
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq)]
+pub enum TerminalUnderlineStyle {
+    #[default]
+    None = 0,
+    Single = 1,
+    Double = 2,
+    Curly = 3,
+    Dotted = 4,
+    Dashed = 5,
+}
+
 /// Stores independent terminal text attributes as bits in snapshot hot storage.
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq)]
@@ -153,9 +196,10 @@ impl TerminalAttrs {
     const BOLD: u8 = 1 << 0;
     const DIM: u8 = 1 << 1;
     const ITALIC: u8 = 1 << 2;
-    const UNDERLINE: u8 = 1 << 3;
-    const STRIKEOUT: u8 = 1 << 4;
-    const INVERSE: u8 = 1 << 5;
+    const STRIKEOUT: u8 = 1 << 3;
+    const INVERSE: u8 = 1 << 4;
+    const UNDERLINE_SHIFT: u8 = 5;
+    const UNDERLINE_MASK: u8 = 0b111 << Self::UNDERLINE_SHIFT;
 
     pub const fn new(
         bold: bool,
@@ -165,14 +209,35 @@ impl TerminalAttrs {
         strikeout: bool,
         inverse: bool,
     ) -> Self {
+        let style = if underline {
+            TerminalUnderlineStyle::Single
+        } else {
+            TerminalUnderlineStyle::None
+        };
+        Self::with_underline(bold, dim, italic, style, strikeout, inverse)
+    }
+
+    pub const fn with_underline(
+        bold: bool,
+        dim: bool,
+        italic: bool,
+        underline_style: TerminalUnderlineStyle,
+        strikeout: bool,
+        inverse: bool,
+    ) -> Self {
         Self(
             (if bold { Self::BOLD } else { 0 })
                 | (if dim { Self::DIM } else { 0 })
                 | (if italic { Self::ITALIC } else { 0 })
-                | (if underline { Self::UNDERLINE } else { 0 })
                 | (if strikeout { Self::STRIKEOUT } else { 0 })
-                | (if inverse { Self::INVERSE } else { 0 }),
+                | (if inverse { Self::INVERSE } else { 0 })
+                | ((underline_style as u8) << Self::UNDERLINE_SHIFT),
         )
+    }
+
+    #[inline]
+    pub const fn with_underline_style(self, underline_style: TerminalUnderlineStyle) -> Self {
+        Self((self.0 & !Self::UNDERLINE_MASK) | ((underline_style as u8) << Self::UNDERLINE_SHIFT))
     }
 
     #[inline]
@@ -191,8 +256,20 @@ impl TerminalAttrs {
     }
 
     #[inline]
+    pub const fn underline_style(self) -> TerminalUnderlineStyle {
+        match (self.0 & Self::UNDERLINE_MASK) >> Self::UNDERLINE_SHIFT {
+            1 => TerminalUnderlineStyle::Single,
+            2 => TerminalUnderlineStyle::Double,
+            3 => TerminalUnderlineStyle::Curly,
+            4 => TerminalUnderlineStyle::Dotted,
+            5 => TerminalUnderlineStyle::Dashed,
+            _ => TerminalUnderlineStyle::None,
+        }
+    }
+
+    #[inline]
     pub const fn underline(self) -> bool {
-        self.0 & Self::UNDERLINE != 0
+        !matches!(self.underline_style(), TerminalUnderlineStyle::None)
     }
 
     #[inline]
@@ -315,22 +392,47 @@ mod tests {
         assert!(!foreground_origin.background_explicit());
         assert!(!background_origin.foreground_explicit());
         assert!(background_origin.background_explicit());
+
+        for style in [
+            TerminalUnderlineStyle::None,
+            TerminalUnderlineStyle::Single,
+            TerminalUnderlineStyle::Double,
+            TerminalUnderlineStyle::Curly,
+            TerminalUnderlineStyle::Dotted,
+            TerminalUnderlineStyle::Dashed,
+        ] {
+            let styled = alternating.with_underline_style(style);
+            assert_eq!(styled.underline_style(), style);
+            assert_eq!(styled.underline(), style != TerminalUnderlineStyle::None);
+            assert!(styled.bold());
+            assert!(!styled.dim());
+            assert!(styled.italic());
+            assert!(styled.strikeout());
+            assert!(!styled.inverse());
+        }
     }
 
     #[test]
     fn terminal_cell_extra_uses_copy_on_write_and_clears_empty_state() {
         let mut original = test_cell('e');
-        original.set_extra(
+        let red = TerminalColor::rgb(0xff, 0x55, 0x55);
+        original.set_extra_with_underline_color(
             "\u{301}".to_string(),
             Some("https://example.com".to_string()),
+            Some(red),
         );
         let mut changed = original.clone();
 
         changed.set_zerowidth(String::new());
         changed.set_hyperlink(None);
+        assert_eq!(changed.underline_color(), Some(red));
+        assert!(changed.extra.is_some());
+
+        changed.set_underline_color(None);
 
         assert_eq!(original.zerowidth(), "\u{301}");
         assert_eq!(original.hyperlink(), Some("https://example.com"));
+        assert_eq!(original.underline_color(), Some(red));
         assert!(changed.extra.is_none());
     }
 

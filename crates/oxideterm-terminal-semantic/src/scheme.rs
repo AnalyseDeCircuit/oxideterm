@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use std::{
-    collections::{BTreeMap, hash_map::DefaultHasher},
+    collections::{BTreeMap, HashMap, hash_map::DefaultHasher},
     hash::{Hash, Hasher},
     sync::LazyLock,
 };
 
-use regex::Regex;
+use regex::{Regex, RegexSet};
 
 use crate::{
     SEMANTIC_SCHEME_FORMAT_VERSION, SemanticClass, SemanticLineRole, SemanticRuleContext,
@@ -44,42 +44,135 @@ const IDENTIFIER_PATTERN: &str = r"(?x)\b[0-9a-fA-F]{8}(?:
 const ENGLISH_WEEKDAY_PATTERN: &str = r"(?i)\b(?:Mon(?:day)?|Tue(?:sday)?|Wed(?:nesday)?|Thu(?:rsday)?|Fri(?:day)?|Sat(?:urday)?|Sun(?:day)?)\b";
 const ENGLISH_MONTH_PATTERN: &str = r"(?i)\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\b";
 
-#[derive(Clone)]
-struct Rule {
-    id: String,
-    pattern: String,
-    matcher: Regex,
+struct BuiltInRule {
+    id: &'static str,
+    pattern: &'static str,
     capture: usize,
     class: SemanticClass,
     priority: u8,
     context: SemanticRuleContext,
 }
 
-impl Rule {
-    fn new(
-        id: impl Into<String>,
-        pattern: &str,
+impl BuiltInRule {
+    const fn new(
+        id: &'static str,
+        pattern: &'static str,
         capture: usize,
         class: SemanticClass,
         priority: u8,
         context: SemanticRuleContext,
     ) -> Self {
         Self {
-            id: id.into(),
-            pattern: pattern.to_string(),
-            matcher: Regex::new(pattern).expect("built-in semantic pattern must compile"),
+            id,
+            pattern,
             capture,
             class,
             priority,
             context,
         }
     }
+}
 
-    fn applies_to(&self, role: SemanticLineRole) -> bool {
-        match self.context {
-            SemanticRuleContext::Any => true,
-            SemanticRuleContext::Command => role == SemanticLineRole::Command,
-            SemanticRuleContext::Output => role.is_output(),
+#[derive(Clone, Copy)]
+struct RuleTarget {
+    capture: usize,
+    class: SemanticClass,
+    priority: u8,
+}
+
+#[derive(Clone)]
+struct PatternGroup {
+    matcher: Regex,
+    targets: Vec<RuleTarget>,
+}
+
+impl PatternGroup {
+    fn emit_candidates(&self, text: &str, candidates: &mut Vec<Candidate>) {
+        if let [target] = self.targets.as_slice()
+            && target.capture == 0
+        {
+            // Whole-token rules need only match ranges, not capture-group storage.
+            candidates.extend(
+                self.matcher
+                    .find_iter(text)
+                    .filter(|matched| !matched.is_empty())
+                    .map(|matched| Candidate {
+                        span: SemanticSpan::new(matched.range(), target.class),
+                        priority: target.priority,
+                    }),
+            );
+            return;
+        }
+        for captures in self.matcher.captures_iter(text) {
+            for target in &self.targets {
+                let Some(matched) = captures.get(target.capture) else {
+                    continue;
+                };
+                if matched.is_empty() {
+                    continue;
+                }
+                candidates.push(Candidate {
+                    span: SemanticSpan::new(matched.start()..matched.end(), target.class),
+                    priority: target.priority,
+                });
+            }
+        }
+    }
+}
+
+#[derive(Clone)]
+struct ContextMatcher {
+    prefilter: Option<RegexSet>,
+    groups: Vec<PatternGroup>,
+}
+
+impl ContextMatcher {
+    fn build(rules: &[&SemanticRuleDefinition], compiled_patterns: &HashMap<&str, Regex>) -> Self {
+        let mut groups: Vec<PatternGroup> = Vec::new();
+        let mut group_by_pattern: HashMap<&str, usize> = HashMap::new();
+        let mut patterns: Vec<&str> = Vec::new();
+
+        for rule in rules {
+            let target = RuleTarget {
+                capture: rule.capture,
+                class: rule.class,
+                priority: rule.priority,
+            };
+            if let Some(&index) = group_by_pattern.get(rule.pattern.as_str()) {
+                groups[index].targets.push(target);
+            } else {
+                let index = groups.len();
+                group_by_pattern.insert(rule.pattern.as_str(), index);
+                patterns.push(rule.pattern.as_str());
+                groups.push(PatternGroup {
+                    matcher: compiled_patterns[rule.pattern.as_str()].clone(),
+                    targets: vec![target],
+                });
+            }
+        }
+
+        // Fall back to linear group scan only if a large custom scheme exceeds RegexSet size limits.
+        let prefilter = if patterns.is_empty() {
+            None
+        } else {
+            RegexSet::new(&patterns).ok()
+        };
+
+        Self { prefilter, groups }
+    }
+
+    fn emit_candidates(&self, text: &str, candidates: &mut Vec<Candidate>) {
+        if self.groups.is_empty() || text.is_empty() {
+            return;
+        }
+        if let Some(prefilter) = &self.prefilter {
+            for index in prefilter.matches(text).iter() {
+                self.groups[index].emit_candidates(text, candidates);
+            }
+            return;
+        }
+        for group in &self.groups {
+            group.emit_candidates(text, candidates);
         }
     }
 }
@@ -89,7 +182,10 @@ pub struct CompiledSemanticScheme {
     id: String,
     name: String,
     signature: u64,
-    rules: Vec<Rule>,
+    command_matcher: ContextMatcher,
+    output_matcher: ContextMatcher,
+    unknown_matcher: ContextMatcher,
+    rule_classes_mask: u32,
     colors: BTreeMap<SemanticClass, String>,
 }
 
@@ -111,7 +207,7 @@ impl CompiledSemanticScheme {
     }
 
     pub(crate) fn contains_rule_class(&self, class: SemanticClass) -> bool {
-        self.rules.iter().any(|rule| rule.class == class)
+        (self.rule_classes_mask & (1u32 << (class as u8))) != 0
     }
 }
 
@@ -140,281 +236,279 @@ impl Candidate {
     }
 }
 
-static BUILT_IN_RULES: LazyLock<Vec<Rule>> = LazyLock::new(|| {
-    vec![
-        Rule::new(
-            "quoted-string",
-            r#"(?s)(?:\"(?:\\.|[^\"\r\n])*\"|'(?:\\.|[^'\r\n])*')"#,
-            0,
-            SemanticClass::String,
-            100,
-            SemanticRuleContext::Any,
-        ),
-        Rule::new(
-            "url",
-            r#"https?://[^\s<>()\[\]{}\"']+"#,
-            0,
-            SemanticClass::Link,
-            95,
-            SemanticRuleContext::Any,
-        ),
-        Rule::new(
-            "path",
-            r#"(?:^|[\s(])((?:~?/|\./|\.\./)[^\s\"']+)"#,
-            1,
-            SemanticClass::Path,
-            90,
-            SemanticRuleContext::Any,
-        ),
-        Rule::new(
-            "windows-path",
-            WINDOWS_PATH_PATTERN,
-            1,
-            SemanticClass::Path,
-            90,
-            SemanticRuleContext::Any,
-        ),
-        Rule::new(
-            "identifier",
-            IDENTIFIER_PATTERN,
-            0,
-            SemanticClass::Variable,
-            89,
-            SemanticRuleContext::Any,
-        ),
-        // Capacity values with a unit (190G / 7.9G / 4.0M / 256K). Without this
-        // rule the generic one only matches bare numbers, so "number + unit" output
-        // from df -h or ls -lh ends up half tinted and half default. Longer
-        // suffixes come first so KiB is not matched by K.
-        Rule::new(
-            "quantity",
-            r"\b\d+(?:[.,]\d+)?(?:KiB|MiB|GiB|TiB|PiB|EiB|KB|MB|GB|TB|PB|EB|Ki|Mi|Gi|Ti|Pi|Ei|[kKMGTPE]|B)\b",
-            0,
-            SemanticClass::Number,
-            86,
-            SemanticRuleContext::Any,
-        ),
-        Rule::new(
-            "ipv6-address",
-            IPV6_ADDRESS_PATTERN,
-            1,
-            SemanticClass::Address,
-            89,
-            SemanticRuleContext::Any,
-        ),
-        Rule::new(
-            "mac-address",
-            r"(?i)\b(?:[0-9a-f]{2}:){5}[0-9a-f]{2}\b",
-            0,
-            SemanticClass::Address,
-            88,
-            SemanticRuleContext::Any,
-        ),
-        Rule::new(
-            "ipv4-address",
-            r"\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d?\d)\b",
-            0,
-            SemanticClass::Address,
-            87,
-            SemanticRuleContext::Any,
-        ),
-        // macOS ps switches STIME between a clock, weekday-clock, and
-        // day-month-year form as a process gets older.
-        Rule::new(
-            "twelve-hour-time",
-            r"(?i)\b(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s?(?:0?[1-9]|1[0-2])|(?:0?[1-9]|1[0-2]):[0-5]\d(?::[0-5]\d)?(?:\.\d+)?)\s?(?:AM|PM)\b",
-            0,
-            SemanticClass::Timestamp,
-            86,
-            SemanticRuleContext::Any,
-        ),
-        Rule::new(
-            "ps-start-date",
-            r"(?i)\b(?:0?[1-9]|[12]\d|3[01])(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)(?:\d{2}|\d{4})\b",
-            0,
-            SemanticClass::Timestamp,
-            86,
-            SemanticRuleContext::Any,
-        ),
-        Rule::new(
-            "weekday-name",
-            ENGLISH_WEEKDAY_PATTERN,
-            0,
-            SemanticClass::Weekday,
-            86,
-            SemanticRuleContext::Any,
-        ),
-        Rule::new(
-            "month-name",
-            ENGLISH_MONTH_PATTERN,
-            0,
-            SemanticClass::Month,
-            86,
-            SemanticRuleContext::Any,
-        ),
-        Rule::new(
-            "localized-month-day",
-            r"(?:^|[^\p{L}\p{N}])((?:0?[1-9]|1[0-2])(?:月|월)(?:[12]\d|3[01]|0?[1-9])(?:日|일)?)",
-            1,
-            SemanticClass::Timestamp,
-            86,
-            SemanticRuleContext::Any,
-        ),
-        Rule::new(
-            "date-time",
-            r"\b\d{4}[-/]\d{1,2}[-/]\d{1,2}(?:[ T]\d{1,2}(?::\d{2}){1,2}(?:\.\d+)?)?\b",
-            0,
-            SemanticClass::Timestamp,
-            85,
-            SemanticRuleContext::Any,
-        ),
-        Rule::new(
-            "elapsed-time",
-            r"\b\d{3,}:[0-5]\d(?::[0-5]\d)?(?:\.\d+)?\b",
-            0,
-            SemanticClass::Timestamp,
-            85,
-            SemanticRuleContext::Any,
-        ),
-        Rule::new(
-            "time",
-            r"\b\d{1,2}(?::\d{2}){1,2}(?:\.\d+)?\b",
-            0,
-            SemanticClass::Timestamp,
-            84,
-            SemanticRuleContext::Any,
-        ),
-        Rule::new(
-            "option",
-            r"(?:^|\s)(--?[A-Za-z][A-Za-z0-9_-]*)",
-            1,
-            SemanticClass::Option,
-            82,
-            SemanticRuleContext::Any,
-        ),
-        Rule::new(
-            "option-assignment-operator",
-            OPTION_ASSIGNMENT_PATTERN,
-            2,
-            SemanticClass::Operator,
-            81,
-            SemanticRuleContext::Any,
-        ),
-        Rule::new(
-            "option-assignment-value",
-            OPTION_ASSIGNMENT_PATTERN,
-            3,
-            SemanticClass::String,
-            80,
-            SemanticRuleContext::Any,
-        ),
-        Rule::new(
-            "variable-assignment-name",
-            VARIABLE_ASSIGNMENT_PATTERN,
-            1,
-            SemanticClass::Variable,
-            82,
-            SemanticRuleContext::Any,
-        ),
-        Rule::new(
-            "variable-assignment-operator",
-            VARIABLE_ASSIGNMENT_PATTERN,
-            2,
-            SemanticClass::Operator,
-            81,
-            SemanticRuleContext::Any,
-        ),
-        Rule::new(
-            "variable-assignment-value",
-            VARIABLE_ASSIGNMENT_PATTERN,
-            3,
-            SemanticClass::String,
-            80,
-            SemanticRuleContext::Any,
-        ),
-        Rule::new(
-            "error-status",
-            r"(?i)\b(?:bad|cannot(?:\s+\w+){0,2}|critical|denied|deprecated|disabled|errors?|failed?|failure|fatal|false|incorrect|invalid|no\s+(?:access|permission)|none|not\s+(?:available|configured|connected|enabled|found|installed|running|supported|valid)|panic|(?:ca|could)n't|refused|unknown|unsupported|wrong)\b",
-            0,
-            SemanticClass::Error,
-            78,
-            SemanticRuleContext::Any,
-        ),
-        Rule::new(
-            "success-status",
-            r"(?i)\b(?:can\s+be\s+(?:applied|enabled|installed|updated|upgraded)|correct(?:ly)?|known|ok|passed?|success(?:ful(?:ly)?)?|supported|true|yes|valid)\b",
-            0,
-            SemanticClass::Success,
-            77,
-            SemanticRuleContext::Any,
-        ),
-        Rule::new(
-            "warning-status",
-            r"(?i)\b(?:closed|debug|disconnected|exited|skipped|stopped|sudo|terminated|warn|warnings?)\b",
-            0,
-            SemanticClass::Warning,
-            76,
-            SemanticRuleContext::Any,
-        ),
-        Rule::new(
-            "info-status",
-            r"(?i)\b(?:access|authentication|connection|disconnection|info|login|operation|password|permission)\b",
-            0,
-            SemanticClass::Info,
-            75,
-            SemanticRuleContext::Any,
-        ),
-        Rule::new(
-            "multilingual-error-status",
-            r"(?i)(?:错误|錯誤|失败|失敗|拒绝|拒絕|无效|無效|不支持|不支援|未知|无法|無法|未找到|不存在|エラー|失敗|拒否|無効|未対応|不明|見つかりません|오류|실패|거부|잘못됨|지원되지 않음|알 수 없음|\b(?:error|fehler|échec|erreur|fallo|fracaso|errore|falha|erro|lỗi|thất bại|invalide?|ungültig|inválido|non supportato|não suportado|không được hỗ trợ)\b)",
-            0,
-            SemanticClass::Error,
-            79,
-            SemanticRuleContext::Any,
-        ),
-        Rule::new(
-            "multilingual-success-status",
-            r"(?i)(?:成功|已完成|完成|有效|有効|成功しました|완료|성공|유효|\b(?:succès|réussi|erfolgreich|erfolg|éxito|correcto|riuscito|sucesso|concluído|thành công|hoàn tất|valide?|válido|gültig)\b)",
-            0,
-            SemanticClass::Success,
-            78,
-            SemanticRuleContext::Any,
-        ),
-        Rule::new(
-            "multilingual-warning-status",
-            r"(?i)(?:警告|注意|警告あり|경고|주의|\b(?:avertissement|warnung|advertencia|avviso|aviso|cảnh báo|atenção|achtung)\b)",
-            0,
-            SemanticClass::Warning,
-            77,
-            SemanticRuleContext::Any,
-        ),
-        Rule::new(
-            "multilingual-info-status",
-            r"(?i)(?:信息|資訊|提示|情報|案内|정보|안내|\b(?:information|informations|información|informazione|informação|hinweis|thông tin)\b)",
-            0,
-            SemanticClass::Info,
-            76,
-            SemanticRuleContext::Any,
-        ),
-        Rule::new(
-            "number",
-            r"(?i)\b(?:0x[0-9a-f]+|\d+(?:\.\d+)*(?:e[+-]?\d+)?)(?:%|\b)",
-            0,
-            SemanticClass::Number,
-            60,
-            SemanticRuleContext::Any,
-        ),
-        // Commands are classified only when shell integration identifies the line.
-        Rule::new(
-            "command",
-            r"(?:^\s*|[$#>%❯]\s+)([A-Za-z_./][A-Za-z0-9_./-]*)",
-            1,
-            SemanticClass::Command,
-            110,
-            SemanticRuleContext::Command,
-        ),
-    ]
-});
+const BUILT_IN_RULES: &[BuiltInRule] = &[
+    BuiltInRule::new(
+        "quoted-string",
+        r#"(?s)(?:\"(?:\\.|[^\"\r\n])*\"|'(?:\\.|[^'\r\n])*')"#,
+        0,
+        SemanticClass::String,
+        100,
+        SemanticRuleContext::Any,
+    ),
+    BuiltInRule::new(
+        "url",
+        r#"https?://[^\s<>()\[\]{}\"']+"#,
+        0,
+        SemanticClass::Link,
+        95,
+        SemanticRuleContext::Any,
+    ),
+    BuiltInRule::new(
+        "path",
+        r#"(?:^|[\s(])((?:~?/|\./|\.\./)[^\s\"']+)"#,
+        1,
+        SemanticClass::Path,
+        90,
+        SemanticRuleContext::Any,
+    ),
+    BuiltInRule::new(
+        "windows-path",
+        WINDOWS_PATH_PATTERN,
+        1,
+        SemanticClass::Path,
+        90,
+        SemanticRuleContext::Any,
+    ),
+    BuiltInRule::new(
+        "identifier",
+        IDENTIFIER_PATTERN,
+        0,
+        SemanticClass::Variable,
+        89,
+        SemanticRuleContext::Any,
+    ),
+    // Capacity values with a unit (190G / 7.9G / 4.0M / 256K). Without this
+    // rule the generic one only matches bare numbers, so "number + unit" output
+    // from df -h or ls -lh ends up half tinted and half default. Longer
+    // suffixes come first so KiB is not matched by K.
+    BuiltInRule::new(
+        "quantity",
+        r"\b\d+(?:[.,]\d+)?(?:KiB|MiB|GiB|TiB|PiB|EiB|KB|MB|GB|TB|PB|EB|Ki|Mi|Gi|Ti|Pi|Ei|[kKMGTPE]|B)\b",
+        0,
+        SemanticClass::Number,
+        86,
+        SemanticRuleContext::Any,
+    ),
+    BuiltInRule::new(
+        "ipv6-address",
+        IPV6_ADDRESS_PATTERN,
+        1,
+        SemanticClass::Address,
+        89,
+        SemanticRuleContext::Any,
+    ),
+    BuiltInRule::new(
+        "mac-address",
+        r"(?i)\b(?:[0-9a-f]{2}:){5}[0-9a-f]{2}\b",
+        0,
+        SemanticClass::Address,
+        88,
+        SemanticRuleContext::Any,
+    ),
+    BuiltInRule::new(
+        "ipv4-address",
+        r"\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d?\d)\b",
+        0,
+        SemanticClass::Address,
+        87,
+        SemanticRuleContext::Any,
+    ),
+    // macOS ps switches STIME between a clock, weekday-clock, and
+    // day-month-year form as a process gets older.
+    BuiltInRule::new(
+        "twelve-hour-time",
+        r"(?i)\b(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s?(?:0?[1-9]|1[0-2])|(?:0?[1-9]|1[0-2]):[0-5]\d(?::[0-5]\d)?(?:\.\d+)?)\s?(?:AM|PM)\b",
+        0,
+        SemanticClass::Timestamp,
+        86,
+        SemanticRuleContext::Any,
+    ),
+    BuiltInRule::new(
+        "ps-start-date",
+        r"(?i)\b(?:0?[1-9]|[12]\d|3[01])(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)(?:\d{2}|\d{4})\b",
+        0,
+        SemanticClass::Timestamp,
+        86,
+        SemanticRuleContext::Any,
+    ),
+    BuiltInRule::new(
+        "weekday-name",
+        ENGLISH_WEEKDAY_PATTERN,
+        0,
+        SemanticClass::Weekday,
+        86,
+        SemanticRuleContext::Any,
+    ),
+    BuiltInRule::new(
+        "month-name",
+        ENGLISH_MONTH_PATTERN,
+        0,
+        SemanticClass::Month,
+        86,
+        SemanticRuleContext::Any,
+    ),
+    BuiltInRule::new(
+        "localized-month-day",
+        r"(?:^|[^\p{L}\p{N}])((?:0?[1-9]|1[0-2])(?:月|월)(?:[12]\d|3[01]|0?[1-9])(?:日|일)?)",
+        1,
+        SemanticClass::Timestamp,
+        86,
+        SemanticRuleContext::Any,
+    ),
+    BuiltInRule::new(
+        "date-time",
+        r"\b\d{4}[-/]\d{1,2}[-/]\d{1,2}(?:[ T]\d{1,2}(?::\d{2}){1,2}(?:\.\d+)?)?\b",
+        0,
+        SemanticClass::Timestamp,
+        85,
+        SemanticRuleContext::Any,
+    ),
+    BuiltInRule::new(
+        "elapsed-time",
+        r"\b\d{3,}:[0-5]\d(?::[0-5]\d)?(?:\.\d+)?\b",
+        0,
+        SemanticClass::Timestamp,
+        85,
+        SemanticRuleContext::Any,
+    ),
+    BuiltInRule::new(
+        "time",
+        r"\b\d{1,2}(?::\d{2}){1,2}(?:\.\d+)?\b",
+        0,
+        SemanticClass::Timestamp,
+        84,
+        SemanticRuleContext::Any,
+    ),
+    BuiltInRule::new(
+        "option",
+        r"(?:^|\s)(--?[A-Za-z][A-Za-z0-9_-]*)",
+        1,
+        SemanticClass::Option,
+        82,
+        SemanticRuleContext::Any,
+    ),
+    BuiltInRule::new(
+        "option-assignment-operator",
+        OPTION_ASSIGNMENT_PATTERN,
+        2,
+        SemanticClass::Operator,
+        81,
+        SemanticRuleContext::Any,
+    ),
+    BuiltInRule::new(
+        "option-assignment-value",
+        OPTION_ASSIGNMENT_PATTERN,
+        3,
+        SemanticClass::String,
+        80,
+        SemanticRuleContext::Any,
+    ),
+    BuiltInRule::new(
+        "variable-assignment-name",
+        VARIABLE_ASSIGNMENT_PATTERN,
+        1,
+        SemanticClass::Variable,
+        82,
+        SemanticRuleContext::Any,
+    ),
+    BuiltInRule::new(
+        "variable-assignment-operator",
+        VARIABLE_ASSIGNMENT_PATTERN,
+        2,
+        SemanticClass::Operator,
+        81,
+        SemanticRuleContext::Any,
+    ),
+    BuiltInRule::new(
+        "variable-assignment-value",
+        VARIABLE_ASSIGNMENT_PATTERN,
+        3,
+        SemanticClass::String,
+        80,
+        SemanticRuleContext::Any,
+    ),
+    BuiltInRule::new(
+        "error-status",
+        r"(?i)\b(?:bad|cannot(?:\s+\w+){0,2}|critical|denied|deprecated|disabled|errors?|failed?|failure|fatal|false|incorrect|invalid|no\s+(?:access|permission)|none|not\s+(?:available|configured|connected|enabled|found|installed|running|supported|valid)|panic|(?:ca|could)n't|refused|unknown|unsupported|wrong)\b",
+        0,
+        SemanticClass::Error,
+        78,
+        SemanticRuleContext::Any,
+    ),
+    BuiltInRule::new(
+        "success-status",
+        r"(?i)\b(?:can\s+be\s+(?:applied|enabled|installed|updated|upgraded)|correct(?:ly)?|known|ok|passed?|success(?:ful(?:ly)?)?|supported|true|yes|valid)\b",
+        0,
+        SemanticClass::Success,
+        77,
+        SemanticRuleContext::Any,
+    ),
+    BuiltInRule::new(
+        "warning-status",
+        r"(?i)\b(?:closed|debug|disconnected|exited|skipped|stopped|sudo|terminated|warn|warnings?)\b",
+        0,
+        SemanticClass::Warning,
+        76,
+        SemanticRuleContext::Any,
+    ),
+    BuiltInRule::new(
+        "info-status",
+        r"(?i)\b(?:access|authentication|connection|disconnection|info|login|operation|password|permission)\b",
+        0,
+        SemanticClass::Info,
+        75,
+        SemanticRuleContext::Any,
+    ),
+    BuiltInRule::new(
+        "multilingual-error-status",
+        r"(?i)(?:错误|錯誤|失败|失敗|拒绝|拒絕|无效|無效|不支持|不支援|未知|无法|無法|未找到|不存在|エラー|失敗|拒否|無効|未対応|不明|見つかりません|오류|실패|거부|잘못됨|지원되지 않음|알 수 없음|\b(?:error|fehler|échec|erreur|fallo|fracaso|errore|falha|erro|lỗi|thất bại|invalide?|ungültig|inválido|non supportato|não suportado|không được hỗ trợ)\b)",
+        0,
+        SemanticClass::Error,
+        79,
+        SemanticRuleContext::Any,
+    ),
+    BuiltInRule::new(
+        "multilingual-success-status",
+        r"(?i)(?:成功|已完成|完成|有效|有効|成功しました|완료|성공|유효|\b(?:succès|réussi|erfolgreich|erfolg|éxito|correcto|riuscito|sucesso|concluído|thành công|hoàn tất|valide?|válido|gültig)\b)",
+        0,
+        SemanticClass::Success,
+        78,
+        SemanticRuleContext::Any,
+    ),
+    BuiltInRule::new(
+        "multilingual-warning-status",
+        r"(?i)(?:警告|注意|警告あり|경고|주의|\b(?:avertissement|warnung|advertencia|avviso|aviso|cảnh báo|atenção|achtung)\b)",
+        0,
+        SemanticClass::Warning,
+        77,
+        SemanticRuleContext::Any,
+    ),
+    BuiltInRule::new(
+        "multilingual-info-status",
+        r"(?i)(?:信息|資訊|提示|情報|案内|정보|안내|\b(?:information|informations|información|informazione|informação|hinweis|thông tin)\b)",
+        0,
+        SemanticClass::Info,
+        76,
+        SemanticRuleContext::Any,
+    ),
+    BuiltInRule::new(
+        "number",
+        r"(?i)\b(?:0x[0-9a-f]+|\d+(?:\.\d+)*(?:e[+-]?\d+)?)(?:%|\b)",
+        0,
+        SemanticClass::Number,
+        60,
+        SemanticRuleContext::Any,
+    ),
+    // Commands are classified only when shell integration identifies the line.
+    BuiltInRule::new(
+        "command",
+        r"(?:^\s*|[$#>%❯]\s+)([A-Za-z_./][A-Za-z0-9_./-]*)",
+        1,
+        SemanticClass::Command,
+        110,
+        SemanticRuleContext::Command,
+    ),
+];
 
 static BALANCED_SCHEME: LazyLock<CompiledSemanticScheme> = LazyLock::new(|| {
     compile_scheme_document(&built_in_scheme_document(SemanticScheme::Balanced))
@@ -439,9 +533,9 @@ pub fn built_in_scheme_document(scheme: SemanticScheme) -> SemanticSchemeDocumen
             .iter()
             .filter(|rule| scheme.includes(rule.class))
             .map(|rule| SemanticRuleDefinition {
-                id: rule.id.clone(),
+                id: rule.id.to_string(),
                 enabled: true,
-                pattern: rule.pattern.clone(),
+                pattern: rule.pattern.to_string(),
                 capture: rule.capture,
                 class: rule.class,
                 priority: rule.priority,
@@ -456,21 +550,49 @@ pub fn compile_scheme_document(
     document: &SemanticSchemeDocument,
 ) -> Result<CompiledSemanticScheme, String> {
     validate_scheme_document(document)?;
-    let rules = document
-        .rules
+    let enabled_rules: Vec<&SemanticRuleDefinition> =
+        document.rules.iter().filter(|rule| rule.enabled).collect();
+    let mut compiled_patterns: HashMap<&str, Regex> = HashMap::new();
+    let mut rule_classes_mask = 0u32;
+    for rule in &enabled_rules {
+        rule_classes_mask |= 1u32 << (rule.class as u8);
+        if !compiled_patterns.contains_key(rule.pattern.as_str()) {
+            let compiled = Regex::new(&rule.pattern)
+                .map_err(|error| format!("Invalid regex for rule '{}': {error}", rule.id))?;
+            compiled_patterns.insert(rule.pattern.as_str(), compiled);
+        }
+    }
+
+    let command_rules: Vec<&SemanticRuleDefinition> = enabled_rules
         .iter()
-        .filter(|rule| rule.enabled)
-        .map(|rule| {
-            Rule::new(
-                rule.id.clone(),
-                &rule.pattern,
-                rule.capture,
-                rule.class,
-                rule.priority,
+        .copied()
+        .filter(|rule| {
+            matches!(
                 rule.context,
+                SemanticRuleContext::Any | SemanticRuleContext::Command
             )
         })
         .collect();
+    let output_rules: Vec<&SemanticRuleDefinition> = enabled_rules
+        .iter()
+        .copied()
+        .filter(|rule| {
+            matches!(
+                rule.context,
+                SemanticRuleContext::Any | SemanticRuleContext::Output
+            )
+        })
+        .collect();
+    let unknown_rules: Vec<&SemanticRuleDefinition> = enabled_rules
+        .iter()
+        .copied()
+        .filter(|rule| rule.context == SemanticRuleContext::Any)
+        .collect();
+
+    let command_matcher = ContextMatcher::build(&command_rules, &compiled_patterns);
+    let output_matcher = ContextMatcher::build(&output_rules, &compiled_patterns);
+    let unknown_matcher = ContextMatcher::build(&unknown_rules, &compiled_patterns);
+
     let mut hasher = DefaultHasher::new();
     serde_json::to_string(document)
         .map_err(|error| format!("Failed to sign semantic scheme: {error}"))?
@@ -479,7 +601,10 @@ pub fn compile_scheme_document(
         id: document.id.clone(),
         name: document.name.trim().to_string(),
         signature: hasher.finish(),
-        rules,
+        command_matcher,
+        output_matcher,
+        unknown_matcher,
+        rule_classes_mask,
         colors: document.colors.clone(),
     })
 }
@@ -505,36 +630,13 @@ pub(crate) fn candidates_for_compiled(
     semantic_scheme: &CompiledSemanticScheme,
 ) -> Vec<Candidate> {
     let mut candidates = Vec::new();
-    for rule in semantic_scheme
-        .rules
-        .iter()
-        .filter(|rule| rule.applies_to(role))
-    {
-        if rule.capture == 0 {
-            // Whole-token rules need only match ranges, not capture-group storage.
-            candidates.extend(
-                rule.matcher
-                    .find_iter(text)
-                    .filter(|matched| !matched.is_empty())
-                    .map(|matched| Candidate {
-                        span: SemanticSpan::new(matched.range(), rule.class),
-                        priority: rule.priority,
-                    }),
-            );
-            continue;
-        }
-        for captures in rule.matcher.captures_iter(text) {
-            let Some(matched) = captures.get(rule.capture) else {
-                continue;
-            };
-            if matched.is_empty() {
-                continue;
-            }
-            candidates.push(Candidate {
-                span: SemanticSpan::new(matched.start()..matched.end(), rule.class),
-                priority: rule.priority,
-            });
-        }
-    }
+    let matcher = if role == SemanticLineRole::Command {
+        &semantic_scheme.command_matcher
+    } else if role.is_output() {
+        &semantic_scheme.output_matcher
+    } else {
+        &semantic_scheme.unknown_matcher
+    };
+    matcher.emit_candidates(text, &mut candidates);
     candidates
 }
