@@ -52,7 +52,9 @@ impl SettingsWorkspaceEntity {
             self.set_ai_page(page, cx);
         }
         self.set_slider_drag(None);
-        self.close_settings_search(true, cx);
+        // The results panel must survive activation: the user picks one row of
+        // many and the search stays the left-hand surface until explicitly
+        // closed (Escape or the toolbar toggle), which also keeps the query.
         cx.notify();
     }
 

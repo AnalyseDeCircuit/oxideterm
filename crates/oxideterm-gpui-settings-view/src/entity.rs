@@ -3078,4 +3078,31 @@ mod tests {
             });
         }
     }
+
+    // Pins the fix for "clicking a result must not discard the results page":
+    // activation navigates the right-hand page while the left-hand search
+    // panel stays open with its query so further results remain clickable.
+    #[gpui::test]
+    fn navigating_to_a_result_keeps_search_open_and_query(cx: &mut TestAppContext) {
+        let entity = cx.new(SettingsWorkspaceEntity::new);
+        let i18n = oxideterm_i18n::I18n::new(oxideterm_i18n::Locale::En);
+        let result = crate::settings_search_results(&i18n, "Free Type Mode")
+            .into_iter()
+            .find(|result| {
+                result.section
+                    != oxideterm_settings_model::SettingsSectionId::KnowledgeDocuments
+            })
+            .expect("the terminal query always matches input settings");
+        entity.update(cx, |state, cx| {
+            state.open_settings_search(cx);
+            state.settings_search_query = "Free Type Mode".into();
+            state.navigate_to_search_result(&result, cx);
+            assert_eq!(state.route_snapshot().active_tab, result.tab);
+            assert!(
+                state.settings_search_open(),
+                "search results panel closed after activating a result"
+            );
+            assert_eq!(state.settings_search_query(), "Free Type Mode");
+        });
+    }
 }
