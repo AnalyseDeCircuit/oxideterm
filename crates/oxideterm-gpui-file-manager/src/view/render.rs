@@ -999,6 +999,7 @@ impl FileManagerView {
                                         .w(px(FILE_MANAGER_SIZE_COL))
                                         .flex_none()
                                         .text_align(gpui::TextAlign::Right)
+                                        .font_features(oxideterm_gpui_ui::tabular_nums_features())
                                         .text_color(rgb(theme.text_muted))
                                         .child(row.size_text.clone()),
                                 )
@@ -1007,6 +1008,7 @@ impl FileManagerView {
                                         .w(px(FILE_MANAGER_MODIFIED_COL))
                                         .flex_none()
                                         .text_align(gpui::TextAlign::Right)
+                                        .font_features(oxideterm_gpui_ui::tabular_nums_features())
                                         .text_color(rgb(theme.text_muted))
                                         .child(row.modified_text.clone()),
                                 )
@@ -1143,18 +1145,22 @@ impl FileManagerView {
                             cx,
                         ),
                     ))
-                    .child(self.render_selectable_display_text(
-                        "file-manager-operation-count",
-                        (&progress.file_name, progress.current, progress.total),
-                        format!(
-                            "{}/{} ({}%)",
-                            progress.current,
-                            progress.total,
-                            percent.round() as u32
-                        ),
-                        theme.text_muted,
-                        cx,
-                    )),
+                    .child(
+                        div()
+                            .font_features(oxideterm_gpui_ui::tabular_nums_features())
+                            .child(self.render_selectable_display_text(
+                                "file-manager-operation-count",
+                                (&progress.file_name, progress.current, progress.total),
+                                format!(
+                                    "{}/{} ({}%)",
+                                    progress.current,
+                                    progress.total,
+                                    percent.round() as u32
+                                ),
+                                theme.text_muted,
+                                cx,
+                            )),
+                    ),
             )
             .child(
                 div()

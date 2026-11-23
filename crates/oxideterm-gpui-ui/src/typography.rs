@@ -1,5 +1,18 @@
-use gpui::{Div, FontWeight, ParentElement, SharedString, Styled, div, prelude::*, px, rgb};
+use std::sync::{Arc, OnceLock};
+
+use gpui::{
+    Div, FontFeatures, FontWeight, ParentElement, SharedString, Styled, div, prelude::*, px, rgb,
+};
 use oxideterm_theme::ThemeTokens;
+
+/// OpenType `tnum` (tabular numerals) so live counters, timestamps, ports, and
+/// right-aligned numeric columns stay aligned without horizontal jitter.
+pub fn tabular_nums_features() -> FontFeatures {
+    static FEATURES: OnceLock<FontFeatures> = OnceLock::new();
+    FEATURES
+        .get_or_init(|| FontFeatures(Arc::new(vec![("tnum".to_string(), 1)])))
+        .clone()
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MonospaceDatumTone {
@@ -74,6 +87,7 @@ pub fn monospace_datum(
         .truncate()
         .text_size(px(text_size))
         .line_height(px(text_size + 4.0))
+        .font_features(tabular_nums_features())
         .font_weight(if options.strong {
             FontWeight::MEDIUM
         } else {

@@ -1,6 +1,8 @@
 use gpui::{Div, ParentElement, Styled, div, px, rgb, rgba};
 use oxideterm_theme::ThemeTokens;
 
+use crate::typography::tabular_nums_features;
+
 pub const FONT_SIZE_HUD_DURATION_MS: u64 = 1200;
 
 pub fn font_size_hud(tokens: &ThemeTokens, size: f32) -> Div {
@@ -28,6 +30,7 @@ pub fn font_size_hud(tokens: &ThemeTokens, size: f32) -> Div {
                         .items_end()
                         // Inherit the configured terminal font from the HUD owner.
                         .text_size(px(tokens.metrics.ui_text_2xl))
+                        .font_features(tabular_nums_features())
                         .font_weight(gpui::FontWeight::SEMIBOLD)
                         .text_color(rgb(tokens.ui.text))
                         .child(format!("{size:.0}"))

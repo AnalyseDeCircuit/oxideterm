@@ -72,6 +72,7 @@ impl ForwardsView {
                         .items_center()
                         .gap(px(4.0))
                         .text_size(px(self.tokens.metrics.ui_text_xs))
+                        .font_features(oxideterm_gpui_ui::tabular_nums_features())
                         .text_color(rgb(self.tokens.ui.text_muted))
                         .child(Self::render_lucide_icon(
                             LucideIcon::Activity,
