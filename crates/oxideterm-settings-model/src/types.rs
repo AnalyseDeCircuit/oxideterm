@@ -360,6 +360,7 @@ pub enum SettingsSlider {
     AppearanceWindowOpacity,
     AppearanceBackgroundOpacity,
     AppearanceBackgroundBlur,
+    BackgroundSurfaceOpacity,
     BackgroundReadability,
     BackgroundEffectStrength,
     BackgroundEffectSheen,

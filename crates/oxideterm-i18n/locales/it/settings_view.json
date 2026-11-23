@@ -325,6 +325,8 @@
       "bg_effect_strength_hint": "Regola gli effetti da delicati a intensi senza cambiare l’opacità del contenuto o la velocità del movimento.",
       "bg_effect_max_fps": "Limite fotogrammi dell’effetto",
       "bg_effect_fps_hint": "Lascia vuoto per automatico. Intervallo: 1–30 fotogrammi al secondo.",
+      "bg_surface_opacity": "Opacità delle superfici",
+      "bg_surface_opacity_hint": "Regola l’opacità di base di pannelli, barre laterali, schede e terminali sopra lo sfondo.",
       "bg_readability": "Velo di lettura",
       "bg_readability_hint": "Attenua lo sfondo con il colore del tema per migliorare la leggibilità.",
       "bg_dimensions_hint": "Lascia vuoto per dimensioni automatiche. Intervallo: 1–8192 pixel.",

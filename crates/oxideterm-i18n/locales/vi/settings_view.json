@@ -325,6 +325,8 @@
       "bg_effect_strength_hint": "Điều chỉnh hiệu ứng từ nhẹ đến nổi bật mà không đổi độ mờ của nội dung hay tốc độ chuyển động.",
       "bg_effect_max_fps": "Giới hạn khung hình của hiệu ứng",
       "bg_effect_fps_hint": "Để trống để tự động. Phạm vi: 1–30 khung hình mỗi giây.",
+      "bg_surface_opacity": "Độ đục bề mặt bảng",
+      "bg_surface_opacity_hint": "Điều chỉnh độ đục nền của các bảng, thanh bên, thẻ và terminal phía trên hình nền.",
       "bg_readability": "Lớp hỗ trợ đọc",
       "bg_readability_hint": "Phủ màu nền của chủ đề để làm dịu nền và giúp đọc chữ dễ hơn.",
       "bg_dimensions_hint": "Để trống để tự chọn kích thước. Phạm vi: 1–8192 điểm ảnh.",

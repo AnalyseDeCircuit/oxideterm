@@ -622,6 +622,9 @@ pub fn settings_slider_anchor_id(slider: SettingsSlider) -> SelectAnchorId {
             SelectAnchorId::SettingsAppearanceBackgroundBlurSlider
         }
         SettingsSlider::BackgroundEffectSpeed => SelectAnchorId::SettingsBackgroundEffectSpeed,
+        SettingsSlider::BackgroundSurfaceOpacity => {
+            SelectAnchorId::SettingsBackgroundSurfaceOpacity
+        }
         SettingsSlider::BackgroundReadability => SelectAnchorId::SettingsBackgroundReadability,
         SettingsSlider::BackgroundEffectStrength => {
             SelectAnchorId::SettingsBackgroundEffectStrength

@@ -325,6 +325,8 @@
       "bg_effect_strength_hint": "Ajusta os efeitos de sutis a intensos sem alterar a opacidade da mídia ou a velocidade do movimento.",
       "bg_effect_max_fps": "Limite de quadros do efeito",
       "bg_effect_fps_hint": "Deixe em branco para automático. Intervalo: 1–30 quadros por segundo.",
+      "bg_surface_opacity": "Opacidade das superfícies",
+      "bg_surface_opacity_hint": "Ajusta a opacidade base de painéis, barras laterais, cartões e terminais sobre o fundo.",
       "bg_readability": "Camada de leitura",
       "bg_readability_hint": "Suaviza o fundo com a cor do tema para melhorar a legibilidade.",
       "bg_dimensions_hint": "Deixe em branco para tamanho automático. Intervalo: 1–8192 pixels.",

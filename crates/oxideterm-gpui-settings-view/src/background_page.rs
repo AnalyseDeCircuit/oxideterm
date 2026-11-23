@@ -333,6 +333,22 @@ impl BackgroundPage<'_> {
             rows.push(self.card_separator());
             rows.extend(self.appearance_background_interaction_rows(settings, animated_media, cx));
             rows.push(self.card_separator());
+            let surface_opacity = terminal
+                .background_surface_opacity
+                .unwrap_or(self.tokens.metrics.sidebar_vibrancy_alpha);
+            rows.push(self.appearance_row(
+                "settings_view.terminal.bg_surface_opacity",
+                "settings_view.terminal.bg_surface_opacity_hint",
+                self.appearance_slider_value_control(
+                    SettingsSlider::BackgroundSurfaceOpacity,
+                    SelectAnchorId::SettingsBackgroundSurfaceOpacity,
+                    0.0,
+                    100.0,
+                    (surface_opacity * 100.0).round(),
+                    "%",
+                    cx,
+                ),
+            ));
             rows.push(self.appearance_row(
                 "settings_view.terminal.bg_readability",
                 "settings_view.terminal.bg_readability_hint",

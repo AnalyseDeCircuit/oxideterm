@@ -518,6 +518,9 @@ pub fn theme_tokens_for_system(settings: &PersistedSettings, dark: bool) -> Them
         .unwrap_or_else(|| theme_by_id(terminal_id).terminal);
     // Mixed palettes need separate surface and terminal contrast profiles.
     tokens.refresh_palette_metrics();
+    if let Some(surface_opacity) = settings.resolved_background(dark).surface_opacity {
+        tokens.apply_surface_opacity(surface_opacity);
+    }
     tokens
 }
 
@@ -1203,6 +1206,14 @@ mod tests {
         assert_eq!(tokens.ui.bg, 0xffffff);
         assert_eq!(tokens.metrics.window_vibrancy_tint_alpha, 0.72);
         assert_eq!(tokens.metrics.terminal_vibrancy_alpha, 0.94);
+
+        settings.terminal.background_surface_opacity = Some(0.80);
+        let overridden = theme_tokens_from_settings(&settings);
+        assert!((overridden.metrics.sidebar_vibrancy_alpha - 0.80).abs() < 0.001);
+        assert!(
+            overridden.metrics.panel_vibrancy_alpha > overridden.metrics.sidebar_vibrancy_alpha
+        );
+        assert!((overridden.metrics.panel_vibrancy_alpha - 0.884).abs() < 0.001);
     }
 
     #[test]

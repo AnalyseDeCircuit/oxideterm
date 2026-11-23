@@ -123,6 +123,12 @@ impl SettingsWorkspaceEntity {
                 );
                 None
             }
+            BackgroundSurfaceOpacity => {
+                let value = scale(0.0, 100.0) / 100.0;
+                Some(SliderEdit::Background(Box::new(move |style| {
+                    style.surface_opacity = Some(value)
+                })))
+            }
             BackgroundReadability => {
                 let value = scale(0.0, 100.0) / 100.0;
                 Some(SliderEdit::Background(Box::new(move |style| {

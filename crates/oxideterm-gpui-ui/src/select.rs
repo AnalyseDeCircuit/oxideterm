@@ -133,6 +133,7 @@ pub enum SelectAnchorId {
     SettingsAppearanceFrostedGlass,
     SettingsAppearanceBackgroundOpacitySlider,
     SettingsAppearanceBackgroundBlurSlider,
+    SettingsBackgroundSurfaceOpacity,
     SettingsBackgroundReadability,
     SettingsBackgroundEffectStrength,
     SettingsBackgroundEffectSheen,

@@ -534,6 +534,8 @@ pub struct TerminalSettings {
     pub background_effect: Option<GeneratedBackgroundSettings>,
     #[serde(default)]
     pub background_readability: f32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub background_surface_opacity: Option<f32>,
     #[serde(default)]
     pub background_pause_on_input: bool,
     #[serde(default)]
@@ -738,6 +740,7 @@ impl Default for TerminalSettings {
             background_alignment: BackgroundAlignment::default(),
             background_effect: None,
             background_readability: 0.0,
+            background_surface_opacity: None,
             background_pause_on_input: false,
             background_parallax: false,
             background_camera: None,

@@ -325,6 +325,8 @@
       "bg_effect_strength_hint": "Adjusts effects from subtle to vivid without changing media opacity or motion speed.",
       "bg_effect_max_fps": "Effect frame-rate limit",
       "bg_effect_fps_hint": "Leave blank for automatic. Range: 1–30 frames per second.",
+      "bg_surface_opacity": "Surface opacity",
+      "bg_surface_opacity_hint": "Adjust the base opacity of panels, sidebars, cards, and terminals over the background.",
       "bg_readability": "Reading overlay",
       "bg_readability_hint": "Soften the background with the theme’s surface color to improve text readability.",
       "bg_dimensions_hint": "Leave blank for automatic sizing. Range: 1–8192 pixels.",

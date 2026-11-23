@@ -325,6 +325,8 @@
       "bg_effect_strength_hint": "從柔和到鮮明調整特效，不改變素材透明度或移動速度。",
       "bg_effect_max_fps": "特效影格率上限",
       "bg_effect_fps_hint": "留空為自動，範圍為每秒 1–30 影格。",
+      "bg_surface_opacity": "面板底色不透明度",
+      "bg_surface_opacity_hint": "統一調整頁面底色、側邊欄、卡片與終端機在背景圖之上的不透明度。",
       "bg_readability": "閱讀遮罩",
       "bg_readability_hint": "使用主題底色柔化背景，提高文字可讀性。",
       "bg_dimensions_hint": "留空使用自動尺寸，範圍為 1–8192 像素。",

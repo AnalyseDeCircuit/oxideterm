@@ -325,6 +325,8 @@
       "bg_effect_strength_hint": "素材の不透明度や動く速さを変えずに、効果を控えめから鮮やかまで調整します。",
       "bg_effect_max_fps": "エフェクトのフレームレート上限",
       "bg_effect_fps_hint": "空欄で自動。範囲：毎秒 1～30 フレーム。",
+      "bg_surface_opacity": "パネルの不透明度",
+      "bg_surface_opacity_hint": "背景の上に重なるパネル、サイドバー、カード、ターミナルのベース不透明度を調整します。",
       "bg_readability": "読みやすさの調整",
       "bg_readability_hint": "テーマの背景色を重ねて背景を和らげ、文字を読みやすくします。",
       "bg_dimensions_hint": "空欄でサイズを自動設定。範囲：1～8192 ピクセル。",

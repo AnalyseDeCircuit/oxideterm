@@ -325,6 +325,8 @@
       "bg_effect_strength_hint": "Regelt Effekte von dezent bis kräftig, ohne die Deckkraft der Medien oder die Bewegungsgeschwindigkeit zu ändern.",
       "bg_effect_max_fps": "Bildratenlimit für Effekte",
       "bg_effect_fps_hint": "Leer lassen für automatisch. Bereich: 1–30 Bilder pro Sekunde.",
+      "bg_surface_opacity": "Oberflächen-Deckkraft",
+      "bg_surface_opacity_hint": "Grunddeckkraft von Panels, Seitenleisten, Karten und Terminals über dem Hintergrund anpassen.",
       "bg_readability": "Lesemaske",
       "bg_readability_hint": "Die Hintergrundfarbe des Designs mildert das Bild und verbessert die Lesbarkeit.",
       "bg_dimensions_hint": "Leer lassen für automatische Größe. Bereich: 1–8192 Pixel.",

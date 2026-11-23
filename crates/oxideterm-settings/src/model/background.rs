@@ -148,6 +148,8 @@ pub struct BackgroundStyle {
     pub alignment: BackgroundAlignment,
     pub effect: Option<GeneratedBackgroundSettings>,
     pub readability: f32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub surface_opacity: Option<f32>,
     pub pause_on_input: bool,
     pub parallax: bool,
     pub camera: Option<BackgroundCameraSettings>,
@@ -183,6 +185,7 @@ impl TerminalSettings {
             alignment: self.background_alignment,
             effect: self.background_effect.clone(),
             readability: self.background_readability,
+            surface_opacity: self.background_surface_opacity,
             pause_on_input: self.background_pause_on_input,
             parallax: self.background_parallax,
             camera: self.background_camera,
@@ -213,6 +216,7 @@ impl TerminalSettings {
         self.background_alignment = style.alignment;
         self.background_effect = style.effect;
         self.background_readability = style.readability;
+        self.background_surface_opacity = style.surface_opacity;
         self.background_pause_on_input = style.pause_on_input;
         self.background_parallax = style.parallax;
         self.background_camera = style.camera;

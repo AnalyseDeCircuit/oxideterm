@@ -489,6 +489,7 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
                 "settings_view.terminal.bg_camera",
                 "settings_view.terminal.bg_effects",
                 "settings_view.terminal.bg_effect_strength",
+                "settings_view.terminal.bg_surface_opacity",
                 "settings_view.terminal.bg_readability",
                 "settings_view.terminal.bg_pause_input",
                 "settings_view.terminal.bg_parallax",

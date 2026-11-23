@@ -148,6 +148,7 @@ pub(in crate::workspace) fn select_anchor_tracks_while_closed(anchor_id: SelectA
             | SelectAnchorId::VersionMigrationBorderRadiusSlider
             | SelectAnchorId::SettingsAppearanceBackgroundOpacitySlider
             | SelectAnchorId::SettingsAppearanceBackgroundBlurSlider
+            | SelectAnchorId::SettingsBackgroundSurfaceOpacity
             | SelectAnchorId::SettingsBackgroundReadability
             | SelectAnchorId::SettingsBackgroundEffectStrength
             | SelectAnchorId::SettingsBackgroundEffectSheen

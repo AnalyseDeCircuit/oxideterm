@@ -325,6 +325,8 @@
       "bg_effect_strength_hint": "Règle les effets de discrets à intenses sans modifier l’opacité du média ni la vitesse du mouvement.",
       "bg_effect_max_fps": "Limite d’images par seconde de l’effet",
       "bg_effect_fps_hint": "Laisser vide pour automatique. Plage : 1–30 images par seconde.",
+      "bg_surface_opacity": "Opacité des surfaces",
+      "bg_surface_opacity_hint": "Ajuste l’opacité de base des panneaux, barres latérales, cartes et terminaux au-dessus de l’arrière-plan.",
       "bg_readability": "Voile de lecture",
       "bg_readability_hint": "Adoucit le fond avec la couleur du thème pour améliorer la lisibilité.",
       "bg_dimensions_hint": "Laisser vide pour une taille automatique. Plage : 1–8192 pixels.",

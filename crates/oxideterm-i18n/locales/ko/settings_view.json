@@ -325,6 +325,8 @@
       "bg_effect_strength_hint": "미디어 불투명도나 이동 속도를 바꾸지 않고 효과를 은은하게 또는 선명하게 조절합니다.",
       "bg_effect_max_fps": "효과 프레임률 제한",
       "bg_effect_fps_hint": "비워 두면 자동으로 설정됩니다. 범위: 초당 1–30 프레임.",
+      "bg_surface_opacity": "패널 배경 불투명도",
+      "bg_surface_opacity_hint": "배경 위에 표시되는 패널, 사이드바, 카드 및 터미널의 기본 불투명도를 조절합니다.",
       "bg_readability": "읽기용 덮개",
       "bg_readability_hint": "테마의 배경색을 덧입혀 배경을 부드럽게 하고 글자를 읽기 쉽게 만듭니다.",
       "bg_dimensions_hint": "비워 두면 크기를 자동으로 설정합니다. 범위: 1–8192 픽셀.",

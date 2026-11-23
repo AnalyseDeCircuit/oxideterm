@@ -752,6 +752,14 @@ impl ThemeTokens {
         };
     }
 
+    /// Override the base panel/surface opacity used over background media while
+    /// preserving a proportional elevation step for cards and floating panels.
+    pub fn apply_surface_opacity(&mut self, opacity: f32) {
+        let base = opacity.clamp(0.0, 1.0);
+        self.metrics.sidebar_vibrancy_alpha = base;
+        self.metrics.panel_vibrancy_alpha = (base + (1.0 - base) * 0.42).clamp(0.0, 1.0);
+    }
+
     pub fn apply_density(&mut self, density: UiDensityProfile) {
         let scale = match density {
             UiDensityProfile::Compact => 0.82,
