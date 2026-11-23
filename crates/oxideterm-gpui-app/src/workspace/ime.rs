@@ -418,9 +418,9 @@ impl fmt::Debug for PendingPlatformTextCommit {
 pub(super) struct WorkspaceImeMarkedText {
     // IME marked text is rendered in a virtual text buffer but commits into the
     // original value range that was selected when composition started.
-    target: WorkspaceImeTarget,
-    replacement_range: Range<usize>,
-    text: Zeroizing<String>,
+    pub(in crate::workspace) target: WorkspaceImeTarget,
+    pub(in crate::workspace) replacement_range: Range<usize>,
+    pub(in crate::workspace) text: Zeroizing<String>,
 }
 
 impl fmt::Debug for WorkspaceImeMarkedText {
@@ -2665,7 +2665,7 @@ impl WorkspaceApp {
         }
     }
 
-    fn replace_platform_ime_text(
+    pub(in crate::workspace) fn replace_platform_ime_text(
         &mut self,
         target: WorkspaceImeTarget,
         replacement_range: Option<Range<usize>>,

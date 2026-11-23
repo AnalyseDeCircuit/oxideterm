@@ -1500,4 +1500,189 @@ mod tests {
             assert!(sftp.tree_selected.is_none());
         });
     }
+
+    /// Reproduces the SFTP path-edit crash: typing into the local path bar
+    /// must survive per-keystroke completion refreshes, live re-renders, a
+    /// backspace, and the final commit without aborting the frame loop.
+    #[gpui::test]
+    fn sftp_path_edit_survives_typing_backspace_and_commit(cx: &mut gpui::TestAppContext) {
+        let executable = std::env::current_exe().unwrap();
+        let fixture_key = "OXIDETERM_SFTP_PATH_EDIT_TEST_DIR";
+        let Some(fixture_dir) = std::env::var_os(fixture_key) else {
+            // Workspace storage is process-wide; isolate the real workspace in a portable child.
+            let directory = tempfile::tempdir_in(executable.parent().unwrap()).unwrap();
+            let child = directory.path().join(executable.file_name().unwrap());
+            std::fs::hard_link(&executable, &child).unwrap();
+            std::fs::write(directory.path().join("portable"), []).unwrap();
+            let output = std::process::Command::new(child)
+                .arg(cx.test_function_name().unwrap())
+                .arg("--nocapture")
+                .env(fixture_key, directory.path())
+                .env_remove("APPIMAGE")
+                .current_dir(directory.path())
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        };
+        let settings_path = default_settings_path();
+        assert!(settings_path.starts_with(PathBuf::from(fixture_dir)));
+        let mut settings = SettingsStore::load_from_path(settings_path).unwrap();
+        settings.settings_mut().ssh_config.auto_load_hosts = false;
+        settings.settings_mut().onboarding_completed = true;
+        settings.save().unwrap();
+        // Real workspace workers and drag timers wake the UI from I/O threads.
+        cx.executor().allow_parking();
+        let (shell, cx) = cx.add_window_view(|window, cx| {
+            let workspace = cx.new(|cx| WorkspaceApp::new(window, cx, None, None).unwrap());
+            workspace.update(cx, |workspace, cx| {
+                workspace.open_sftp_tab_surface(NodeId::new("path-edit-fixture"), None, cx);
+            });
+            crate::workspace::window_shell::WorkspaceWindowShell::new(workspace, window, cx)
+        });
+        let workspace = shell.read_with(cx, |shell, _| shell.session_entity());
+        cx.run_until_parked();
+
+        // Pretend the node is connected so the SFTP surface owns the shared
+        // IME target and the completion popup renders while typing.
+        workspace.update(cx, |workspace, cx| {
+            let view = workspace.sftp_view();
+            view.update(cx, |sftp, cx| {
+                sftp.current_surface_id = Some(SftpSurfaceId::Tab(
+                    workspace.active_tab_id(cx).expect("sftp tab is active"),
+                ));
+                sftp.current_remote_id = Some(SftpRemoteId::Node(NodeId::new("path-edit-fixture")));
+                sftp.remote_path = "/root".into();
+                sftp.remote_path_input = "/root".into();
+            });
+            workspace.start_sftp_path_edit(SftpPane::Local, cx);
+        });
+        let initial_local_path = workspace.read_with(cx, |workspace, cx| {
+            workspace.sftp_view().read(cx).local_path.clone()
+        });
+        let target = workspace.read_with(cx, |workspace, _| {
+            WorkspaceImeTarget::Sftp(workspace.sftp_surface_id(), SftpInput::LocalPath)
+        });
+        let draw = |cx: &mut gpui::VisualTestContext| {
+            cx.update(|window, cx| {
+                window.draw(cx).clear(cx);
+            });
+        };
+        draw(cx);
+
+        // Type a Windows path one keystroke at a time; every keystroke
+        // refreshes completion and repaints the inline editor.
+        for character in ["D", ":", "\\", "t", "e", "m", "p"] {
+            workspace.update_in(cx, |workspace, _window, cx| {
+                workspace.replace_platform_ime_text(target, None, character, cx);
+            });
+            draw(cx);
+        }
+
+        workspace.update_in(cx, |workspace, _window, cx| {
+            let keystroke = gpui::Keystroke {
+                key: "backspace".into(),
+                ..Default::default()
+            };
+            assert!(workspace.handle_active_text_input_delete_selection(&keystroke, cx));
+        });
+        draw(cx);
+
+        // Committing must move the pane to the typed directory.
+        workspace.update(cx, |workspace, cx| {
+            workspace.commit_sftp_path_input(SftpPane::Local, cx);
+        });
+        cx.run_until_parked();
+        draw(cx);
+
+        let (path, input, editing) = workspace.read_with(cx, |workspace, cx| {
+            let sftp = workspace.sftp_view().read(cx);
+            (
+                sftp.local_path.clone(),
+                sftp.local_path_input.clone(),
+                sftp.editing_local_path,
+            )
+        });
+        // The caret starts at the input's end, so typed characters append to
+        // the current directory instead of replacing it.
+        assert_eq!(path, format!("{initial_local_path}D:\\tem"));
+        assert_eq!(input, format!("{initial_local_path}D:\\tem"));
+        assert!(!editing);
+
+        // The remote path bar must behave identically; committing without a
+        // live connection exercises the worker error path instead of the
+        // local listing path.
+        let remote_target = workspace.read_with(cx, |workspace, _| {
+            WorkspaceImeTarget::Sftp(workspace.sftp_surface_id(), SftpInput::RemotePath)
+        });
+        workspace.update(cx, |workspace, cx| {
+            workspace.start_sftp_path_edit(SftpPane::Remote, cx);
+        });
+        for character in ["/", "v", "a", "r"] {
+            workspace.update_in(cx, |workspace, _window, cx| {
+                workspace.replace_platform_ime_text(remote_target, None, character, cx);
+            });
+            draw(cx);
+        }
+        workspace.update(cx, |workspace, cx| {
+            workspace.commit_sftp_path_input(SftpPane::Remote, cx);
+        });
+        cx.run_until_parked();
+        draw(cx);
+
+        let (remote_path, remote_editing) = workspace.read_with(cx, |workspace, cx| {
+            let sftp = workspace.sftp_view().read(cx);
+            (sftp.remote_path.clone(), sftp.editing_remote_path)
+        });
+        assert_eq!(remote_path, "/root/var");
+        assert!(!remote_editing);
+
+        // Chinese IME composition must survive too: marked text renders in a
+        // virtual buffer, then the platform commit maps the virtual range back
+        // onto the real value.
+        workspace.update(cx, |workspace, cx| {
+            workspace.start_sftp_path_edit(SftpPane::Local, cx);
+        });
+        let local_target = workspace.read_with(cx, |workspace, _| {
+            WorkspaceImeTarget::Sftp(workspace.sftp_surface_id(), SftpInput::LocalPath)
+        });
+        let composed_len = workspace.read_with(cx, |workspace, cx| {
+            workspace
+                .sftp_view()
+                .read(cx)
+                .local_path_input
+                .encode_utf16()
+                .count()
+        });
+        workspace.update(cx, |workspace, cx| {
+            workspace.ime_marked_text = Some(crate::workspace::ime::WorkspaceImeMarkedText {
+                target: local_target,
+                replacement_range: composed_len..composed_len,
+                text: zeroize::Zeroizing::new("下载".to_string()),
+            });
+            cx.notify();
+        });
+        draw(cx);
+        workspace.update_in(cx, |workspace, _window, cx| {
+            workspace.replace_platform_ime_text(local_target, Some(composed_len..composed_len + 2), "下载", cx);
+        });
+        cx.run_until_parked();
+        draw(cx);
+
+        let composed = workspace.read_with(cx, |workspace, cx| {
+            let sftp = workspace.sftp_view().read(cx);
+            (sftp.local_path_input.clone(), sftp.editing_local_path)
+        });
+        assert_eq!(
+            composed.0,
+            format!("{initial_local_path}D:\\tem下载"),
+            "IME commit must land at the caret like a platform commit"
+        );
+        assert!(composed.1, "composition alone must not leave edit mode");
+    }
 }
