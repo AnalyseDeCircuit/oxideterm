@@ -22,7 +22,6 @@ from conpty_runtime import stage_runtime as stage_conpty_runtime
 
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
-APP_MANIFEST = ROOT_DIR / "crates" / "oxideterm-gpui-app" / "Cargo.toml"
 RESOURCE_DIR = ROOT_DIR / "crates" / "oxideterm-gpui-app" / "resources"
 MACOS_INFO_PLIST_EXTENSION_DIR = RESOURCE_DIR / "info"
 MACOS_ENTITLEMENTS = RESOURCE_DIR / "OxideTerm.entitlements"
@@ -45,7 +44,9 @@ MACOS_RESOURCE_BUSY_EXIT_CODE = 16
 DIST_DIR = ROOT_DIR / "dist"
 BASE_APP_NAME = "OxideTerm"
 STANDARD_APP_IDENTIFIER = "com.oxideterm.app"
+APP_PACKAGE = "oxideterm-gpui-app"
 APP_BIN = "oxideterm-native"
+CLI_PACKAGE = "oxideterm-cli"
 CLI_BIN = "oxideterm"
 CONNECTION_URI_SCHEMES = ("ssh", "telnet", "mosh", "rdp", "vnc")
 UPDATE_HELPER_PACKAGE = "oxideterm-update"
@@ -480,63 +481,45 @@ def native_cargo_build_env(target: str) -> dict[str, str]:
     return env
 
 
-def build_cli(target: str, target_was_explicit: bool) -> Path:
-    args = ["cargo", "build", "-p", "oxideterm-cli", "--release"]
-    if target_was_explicit:
-        args.extend(["--target", target])
-    run(args, env=native_cargo_build_env(target))
-
-    source = release_binary(target, target_was_explicit, CLI_BIN)
-    if not source.exists():
-        raise FileNotFoundError(f"CLI binary not found: {source}")
-
-    out_dir = RESOURCE_DIR / "cli-bin" / target
-    out_dir.mkdir(parents=True, exist_ok=True)
-    dest = out_dir / source.name
-    shutil.copy2(source, dest)
-    make_executable(dest)
-    print(f"CLI artifact written to {dest}")
-    return dest
-
-
-def build_update_helper(target: str, target_was_explicit: bool) -> Path:
+def build_release_binaries(target: str, target_was_explicit: bool) -> tuple[Path, Path]:
+    # Build all three release binaries in one Cargo invocation so workspace
+    # feature unification happens once and shared dependencies are not compiled
+    # two or three times under different feature hashes.
     args = [
         "cargo",
         "build",
+        "--release",
+        "-p",
+        CLI_PACKAGE,
+        "-p",
+        APP_PACKAGE,
         "-p",
         UPDATE_HELPER_PACKAGE,
-        "--bin",
-        UPDATE_HELPER_BIN,
-        "--release",
+        "--bins",
     ]
     if target_was_explicit:
         args.extend(["--target", target])
     run(args, env=native_cargo_build_env(target))
 
-    source = release_binary(target, target_was_explicit, UPDATE_HELPER_BIN)
-    if not source.exists():
-        raise FileNotFoundError(f"update helper binary not found: {source}")
-    return source
+    cli_source = release_binary(target, target_was_explicit, CLI_BIN)
+    if not cli_source.exists():
+        raise FileNotFoundError(f"CLI binary not found: {cli_source}")
+    cli_out_dir = RESOURCE_DIR / "cli-bin" / target
+    cli_out_dir.mkdir(parents=True, exist_ok=True)
+    cli_dest = cli_out_dir / cli_source.name
+    shutil.copy2(cli_source, cli_dest)
+    make_executable(cli_dest)
+    print(f"CLI artifact written to {cli_dest}")
 
+    app_binary = release_binary(target, target_was_explicit, APP_BIN)
+    if not app_binary.exists():
+        raise FileNotFoundError(f"app binary not found: {app_binary}")
 
-def build_app(target: str, target_was_explicit: bool) -> Path:
-    args = [
-        "cargo",
-        "build",
-        "--manifest-path",
-        str(APP_MANIFEST),
-        "--bin",
-        APP_BIN,
-        "--release",
-    ]
-    if target_was_explicit:
-        args.extend(["--target", target])
-    run(args, env=native_cargo_build_env(target))
+    update_helper = release_binary(target, target_was_explicit, UPDATE_HELPER_BIN)
+    if not update_helper.exists():
+        raise FileNotFoundError(f"update helper binary not found: {update_helper}")
 
-    source = release_binary(target, target_was_explicit, APP_BIN)
-    if not source.exists():
-        raise FileNotFoundError(f"app binary not found: {source}")
-    return source
+    return app_binary, update_helper
 
 
 def zip_directory(src: Path, dest: Path) -> None:
@@ -787,7 +770,7 @@ def create_macos_dmg(
 ) -> None:
     """Create a compressed DMG, applying Finder chrome when it is available."""
     if not should_include_macos_unsigned_install_notice(identity):
-        create_macos_disk_image(dmg_root, dmg_path, identity.app_name, "UDZO")
+        create_macos_disk_image(dmg_root, dmg_path, identity.app_name, "ULMO")
         return
 
     writable_dmg = dmg_path.with_name(f".{dmg_path.stem}.writable.dmg")
@@ -835,9 +818,7 @@ def create_macos_dmg(
             str(writable_dmg),
             "-ov",
             "-format",
-            "UDZO",
-            "-imagekey",
-            "zlib-level=9",
+            "ULMO",
             "-o",
             str(dmg_path),
         ]
@@ -1286,6 +1267,7 @@ def windows_installer_script(
     return f"""
 Unicode true
 RequestExecutionLevel user
+SetCompressor /SOLID lzma
 !define MUI_ICON "{modern_ui_icon}"
 !define MUI_UNICON "{modern_ui_icon}"
 !include MUI2.nsh
@@ -2021,9 +2003,7 @@ def main() -> None:
         f"==> Packaging {identity.app_name} {version} ({identity.channel}) for {target}",
         flush=True,
     )
-    build_cli(target, target_was_explicit)
-    app_binary = build_app(target, target_was_explicit)
-    update_helper = build_update_helper(target, target_was_explicit)
+    app_binary, update_helper = build_release_binaries(target, target_was_explicit)
     if "windows" in target:
         sign_windows_file(app_binary)
         sign_windows_file(update_helper)

@@ -39,7 +39,7 @@ def main() -> None:
                 "GST_REGISTRY_1_0=/media-registry.bin", "/media/probe", "/media/fixture.mp4"]
         elif package.suffix == ".deb":
             command = ["docker", "run", "--rm", *mounts, "-v", f"{package}:/media/package.deb:ro", "ubuntu:22.04",
-                "sh", "-c", "apt-get update >&2 && apt-get install -y /media/package.deb >&2 && /media/probe /media/fixture.mp4"]
+                "sh", "-c", "DEBIAN_FRONTEND=noninteractive apt-get update >&2 && DEBIAN_FRONTEND=noninteractive apt-get install -y /media/package.deb >&2 && /media/probe /media/fixture.mp4"]
         elif package.suffix == ".rpm":
             command = ["docker", "run", "--rm", *mounts, "-v", f"{package}:/media/package.rpm:ro", "fedora:44",
                 "sh", "-c", "dnf install -y /media/package.rpm >&2 && /media/probe /media/fixture.mp4"]

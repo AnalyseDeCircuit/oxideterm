@@ -67,6 +67,11 @@ class WindowsInstallerScriptTests(unittest.TestCase):
             icon_path=Path(r"C:\icons\icon.ico"),
         )
 
+        self.assertIn("SetCompressor /SOLID lzma", script)
+        self.assertLess(
+            script.index("SetCompressor /SOLID lzma"),
+            script.index("!include MUI2.nsh"),
+        )
         self.assertIn("InstallDirRegKey HKCU", script)
         self.assertIn("SetOverwrite on", script)
         self.assertIn("WriteUninstaller", script)
@@ -336,11 +341,12 @@ class MacosBridgeArchiveTests(unittest.TestCase):
 
 class MacosDmgCreateTests(unittest.TestCase):
     def test_creation_retries_resource_busy_for_both_image_formats(self) -> None:
-        for notice, image_format in [(False, "UDZO"), (True, "UDRW")]:
+        for notice, image_format in [(False, "ULMO"), (True, "UDRW")]:
             with self.subTest(image_format=image_format), tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp)
                 image = root / "OxideTerm.dmg"
                 attempts = []
+                converts = []
 
                 def run_command(command, **kwargs):
                     if command[:2] == ["hdiutil", "create"]:
@@ -349,6 +355,8 @@ class MacosDmgCreateTests(unittest.TestCase):
                             raise subprocess.CalledProcessError(
                                 1, command, stderr="hdiutil: create failed - Resource busy\n"
                             )
+                    elif command[:2] == ["hdiutil", "convert"]:
+                        converts.append(command)
                     return subprocess.CompletedProcess(command, 0, stderr="")
 
                 with (
@@ -362,6 +370,11 @@ class MacosDmgCreateTests(unittest.TestCase):
                 expected_image = root / ".OxideTerm.writable.dmg" if notice else image
                 expected = ["hdiutil", "create", "-volname", "OxideTerm", "-srcfolder", str(root), "-ov", "-format", image_format, str(expected_image)]
                 self.assertEqual(attempts, [expected, expected])
+                if notice:
+                    self.assertEqual(
+                        converts,
+                        [["hdiutil", "convert", str(expected_image), "-ov", "-format", "ULMO", "-o", str(image)]],
+                    )
                 sleep.assert_called_once_with(2)
 
     def test_creation_fails_after_busy_limit_and_does_not_retry_other_errors(self) -> None:
@@ -371,14 +384,14 @@ class MacosDmgCreateTests(unittest.TestCase):
             (1, "hdiutil: create failed - No space left on device\n", 1),
         ]:
             with self.subTest(code=code, diagnostic=diagnostic):
-                command = ["hdiutil", "create", "-volname", "OxideTerm", "-srcfolder", "/tmp/source", "-ov", "-format", "UDZO", "/tmp/output.dmg"]
+                command = ["hdiutil", "create", "-volname", "OxideTerm", "-srcfolder", "/tmp/source", "-ov", "-format", "ULMO", "/tmp/output.dmg"]
                 error = subprocess.CalledProcessError(code, command, stderr=diagnostic)
                 with (
                     patch.object(package_native.subprocess, "run", side_effect=error) as run_mock,
                     patch.object(package_native.time, "sleep") as sleep,
                     self.assertRaises(subprocess.CalledProcessError) as raised,
                 ):
-                    package_native.create_macos_disk_image(Path("/tmp/source"), Path("/tmp/output.dmg"), "OxideTerm", "UDZO")
+                    package_native.create_macos_disk_image(Path("/tmp/source"), Path("/tmp/output.dmg"), "OxideTerm", "ULMO")
                 self.assertIs(raised.exception, error)
                 self.assertEqual([args.args[0] for args in run_mock.call_args_list], [command] * expected_attempts)
                 self.assertEqual(sleep.call_args_list, [call(2)] * (expected_attempts - 1))
