@@ -78,7 +78,8 @@ impl QuickCommandsState {
         let command = QuickCommand {
             id: draft.id.unwrap_or_else(new_quick_command_id),
             name: draft.name.trim().to_string(),
-            command: draft.command.trim().to_string(),
+            // Preserve intentional leading/trailing whitespace in quick command text.
+            command: draft.command,
             category: if self
                 .categories
                 .iter()
@@ -118,7 +119,7 @@ impl QuickCommandsState {
             created_at: draft.created_at,
             updated_at,
         };
-        if command.name.is_empty() || command.command.is_empty() {
+        if command.name.is_empty() || command.command.trim().is_empty() {
             return false;
         }
         // Persist the candidate snapshot before exposing it to readers so a
@@ -699,6 +700,80 @@ mod quick_command_tests {
                 .commands
                 .iter()
                 .any(|command| command.id == "qc-synced")
+        );
+        let _ = fs::remove_dir_all(settings_path.parent().unwrap());
+    }
+
+    #[test]
+    fn quick_commands_preserve_leading_and_trailing_spaces_while_rejecting_blank_commands() {
+        use super::QuickCommandEditorDraft;
+
+        let settings_path = temp_settings_path("preserve-spaces");
+        let mut state = QuickCommandsState::load(&settings_path);
+
+        assert!(state.upsert_editor_command(QuickCommandEditorDraft {
+            id: Some("qc-trailing-space".to_string()),
+            name: "  Tail logs  ".to_string(),
+            command: "kubectl logs -f ".to_string(),
+            category: "custom".to_string(),
+            description: String::new(),
+            host_patterns: String::new(),
+            match_field: oxideterm_quick_commands::QuickCommandMatchField::default(),
+            parameters: Vec::new(),
+            protocols: Vec::new(),
+            confirmation: oxideterm_quick_commands::QuickCommandConfirmationPolicy::Inherit,
+            created_at: 1,
+            sort_order: 0,
+        }));
+        assert!(!state.upsert_editor_command(QuickCommandEditorDraft {
+            id: Some("qc-blank".to_string()),
+            name: "Blank".to_string(),
+            command: "   \t  ".to_string(),
+            category: "custom".to_string(),
+            description: String::new(),
+            host_patterns: String::new(),
+            match_field: oxideterm_quick_commands::QuickCommandMatchField::default(),
+            parameters: Vec::new(),
+            protocols: Vec::new(),
+            confirmation: oxideterm_quick_commands::QuickCommandConfirmationPolicy::Inherit,
+            created_at: 2,
+            sort_order: 1,
+        }));
+        state.upsert_command(QuickCommandDraft {
+            id: Some("qc-leading-trailing".to_string()),
+            name: "  Quiet grep  ".to_string(),
+            command: " grep -rn ".to_string(),
+            category: Some("custom".to_string()),
+            description: None,
+            parameters: None,
+            protocols: None,
+            host_patterns: None,
+            match_field: None,
+            confirmation: None,
+        });
+
+        let reloaded = QuickCommandsState::load(&settings_path);
+        let tail = reloaded
+            .commands
+            .iter()
+            .find(|command| command.id == "qc-trailing-space")
+            .expect("editor command persisted");
+        assert_eq!(tail.name, "Tail logs");
+        assert_eq!(tail.command, "kubectl logs -f ");
+
+        let quiet = reloaded
+            .commands
+            .iter()
+            .find(|command| command.id == "qc-leading-trailing")
+            .expect("draft command persisted");
+        assert_eq!(quiet.name, "Quiet grep");
+        assert_eq!(quiet.command, " grep -rn ");
+
+        assert!(
+            reloaded
+                .commands
+                .iter()
+                .all(|command| command.id != "qc-blank")
         );
         let _ = fs::remove_dir_all(settings_path.parent().unwrap());
     }

@@ -596,7 +596,7 @@ pub fn is_builtin_category_id(id: &str) -> bool {
 fn same_command_content(a: &QuickCommand, b: &QuickCommand) -> bool {
     a.id == b.id
         && a.name.trim() == b.name.trim()
-        && a.command.trim() == b.command.trim()
+        && a.command == b.command
         && a.category == b.category
         && a.description.as_deref().map(str::trim) == b.description.as_deref().map(str::trim)
         && a.parameters == b.parameters
@@ -708,7 +708,11 @@ fn sanitize_command(
     Ok(QuickCommand {
         id: bounded_required(command.id, "command.id", MAX_ID_LEN)?,
         name: bounded_required(command.name, "command.name", MAX_NAME_LEN)?,
-        command: bounded_required(command.command, "command.command", MAX_COMMAND_LEN)?,
+        command: bounded_required_preserving_whitespace(
+            command.command,
+            "command.command",
+            MAX_COMMAND_LEN,
+        )?,
         category: if category_ids.contains(&category) {
             category
         } else {
@@ -824,6 +828,22 @@ fn bounded_required(value: String, field: &str, max_len: usize) -> Result<String
         ));
     }
     Ok(trimmed)
+}
+
+fn bounded_required_preserving_whitespace(
+    value: String,
+    field: &str,
+    max_len: usize,
+) -> Result<String, String> {
+    if value.trim().is_empty() {
+        return Err(format!("Quick Commands field {field} cannot be empty"));
+    }
+    if value.len() > max_len {
+        return Err(format!(
+            "Quick Commands field {field} exceeds limit {max_len}"
+        ));
+    }
+    Ok(value)
 }
 
 fn bounded_optional(

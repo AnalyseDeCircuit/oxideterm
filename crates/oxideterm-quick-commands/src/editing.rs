@@ -130,7 +130,9 @@ pub fn upsert_quick_command(
     let command = QuickCommand {
         id: draft.id.unwrap_or_else(new_quick_command_id),
         name: draft.name.trim().to_string(),
-        command: draft.command.trim().to_string(),
+        // Preserve leading and trailing spaces in quick commands (e.g. `kubectl logs -f `
+        // for inserting before typing an argument, or leading space for shell history ignore).
+        command: draft.command,
         category: draft.category.map_or(existing_category, |category| {
             if categories.iter().any(|item| item.id == category) {
                 category
@@ -164,7 +166,7 @@ pub fn upsert_quick_command(
         created_at: existing_created_at.unwrap_or(now),
         updated_at: now,
     };
-    if command.name.is_empty() || command.command.is_empty() {
+    if command.name.is_empty() || command.command.trim().is_empty() {
         return false;
     }
     if crate::validate_quick_command_template(&command.command, &command.parameters).is_err() {

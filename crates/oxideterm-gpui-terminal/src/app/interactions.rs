@@ -6490,7 +6490,10 @@ mod tests {
                     command_line: 0,
                     command_line_clipped: false,
                     output_start: Some(TerminalCommandPosition { line: 1, column: 0 }),
-                    output_end: Some(TerminalCommandPosition { line: 20, column: 0 }),
+                    output_end: Some(TerminalCommandPosition {
+                        line: 20,
+                        column: 0,
+                    }),
                     end_line: Some(20),
                     is_closed: true,
                     closed_by: Some(TerminalCommandMarkClosedBy::ShellIntegration),
@@ -6510,8 +6513,14 @@ mod tests {
                     start_line: 21,
                     command_line: 22,
                     command_line_clipped: false,
-                    output_start: Some(TerminalCommandPosition { line: 23, column: 0 }),
-                    output_end: Some(TerminalCommandPosition { line: 44, column: 0 }),
+                    output_start: Some(TerminalCommandPosition {
+                        line: 23,
+                        column: 0,
+                    }),
+                    output_end: Some(TerminalCommandPosition {
+                        line: 44,
+                        column: 0,
+                    }),
                     end_line: Some(44),
                     is_closed: true,
                     closed_by: Some(TerminalCommandMarkClosedBy::ShellIntegration),
@@ -6530,28 +6539,27 @@ mod tests {
             cx.notify();
         });
 
-        let open_menu_at_absolute_line = |pane: &mut TerminalPane,
-                                          absolute_line: usize,
-                                          cx: &mut Context<TerminalPane>| {
-            let viewport_start = pane
-                .snapshot
-                .scrollback_lines
-                .saturating_sub(pane.snapshot.display_offset);
-            let row = absolute_line
-                .checked_sub(viewport_start)
-                .expect("target absolute line must be visible in viewport");
-            let y = pane.bounds.unwrap().origin.y
-                + px((row as f32 + 0.5) * pane.metrics.line_height_f32());
-            pane.open_terminal_context_menu(
-                &gpui::MouseDownEvent {
-                    position: gpui::point(px(40.0), y),
-                    button: gpui::MouseButton::Right,
-                    ..Default::default()
-                },
-                cx,
-            );
-            pane.context_menu.clone().expect("context menu opened")
-        };
+        let open_menu_at_absolute_line =
+            |pane: &mut TerminalPane, absolute_line: usize, cx: &mut Context<TerminalPane>| {
+                let viewport_start = pane
+                    .snapshot
+                    .scrollback_lines
+                    .saturating_sub(pane.snapshot.display_offset);
+                let row = absolute_line
+                    .checked_sub(viewport_start)
+                    .expect("target absolute line must be visible in viewport");
+                let y = pane.bounds.unwrap().origin.y
+                    + px((row as f32 + 0.5) * pane.metrics.line_height_f32());
+                pane.open_terminal_context_menu(
+                    &gpui::MouseDownEvent {
+                        position: gpui::point(px(40.0), y),
+                        button: gpui::MouseButton::Right,
+                        ..Default::default()
+                    },
+                    cx,
+                );
+                pane.context_menu.clone().expect("context menu opened")
+            };
 
         pane.update(cx, |pane, cx| {
             // 1. Right-clicking in cmd-2's output targets cmd-2 itself (not skipping to cmd-1).
