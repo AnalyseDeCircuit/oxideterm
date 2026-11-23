@@ -52,7 +52,9 @@ impl SettingsWorkspaceEntity {
             self.set_ai_page(page, cx);
         }
         self.set_slider_drag(None);
-        self.close_settings_search(true, cx);
+        if self.settings_entity_focused_input() == Some(SettingsInput::SettingsSearch) {
+            self.blur_settings_entity_input(cx);
+        }
         cx.notify();
     }
 
@@ -157,5 +159,49 @@ impl SettingsWorkspaceEntity {
             SettingsInputDraftApply::Invalid => SettingsDraftEdit::Invalid,
             SettingsInputDraftApply::Unhandled => SettingsDraftEdit::Unhandled,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui::{AppContext, TestAppContext};
+    use oxideterm_i18n::{I18n, Locale};
+    use oxideterm_settings_model::{SettingsSectionId, SettingsTab, TerminalSettingsPage};
+
+    use super::*;
+
+    #[gpui::test]
+    fn settings_search_keeps_query_across_result_navigation(cx: &mut TestAppContext) {
+        let settings = cx.new(SettingsWorkspaceEntity::new);
+        settings.update(cx, |settings, cx| {
+            let input = SettingsInput::SettingsSearch;
+            settings.set_terminal_page(TerminalSettingsPage::Input, cx);
+            settings.open_settings_search(cx);
+            assert!(settings.focus_settings_entity_input(input, cx));
+            assert!(settings.replace_settings_entity_input(input, None, "font", cx));
+
+            let results = crate::settings_search_results(&I18n::new(Locale::En), "font");
+            for (section, tab) in [
+                (
+                    SettingsSectionId::TerminalDisplayFont,
+                    SettingsTab::Terminal,
+                ),
+                (SettingsSectionId::IdeTypography, SettingsTab::Ide),
+            ] {
+                let result = results
+                    .iter()
+                    .find(|result| result.section == section)
+                    .unwrap();
+                settings.navigate_to_search_result(result, cx);
+                assert_eq!(settings.route_snapshot().active_tab, tab);
+                assert!(settings.settings_search_open());
+                assert_eq!(settings.settings_search_query(), "font");
+                assert_eq!(settings.settings_entity_focused_input(), None);
+            }
+            assert_eq!(
+                settings.route_snapshot().terminal_page,
+                TerminalSettingsPage::Display
+            );
+        });
     }
 }
