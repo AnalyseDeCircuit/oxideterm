@@ -2399,7 +2399,7 @@ impl WorkspaceApp {
     ) -> Div {
         let theme = self.tokens.ui;
         let text_color = theme.text_muted;
-        let hover_bg = rgb(theme.bg_panel);
+        let hover_bg = rgb(theme.bg_hover);
         div()
             .rounded(px(self.tokens.radii.md))
             .border_1()
@@ -2458,7 +2458,7 @@ impl WorkspaceApp {
                 CursorStyle::Arrow
             })
             .when(listener.is_none(), |button| button.opacity(0.45))
-            .hover(move |button| button.bg(rgb(theme.bg_panel)))
+            .hover(move |button| button.bg(rgb(theme.bg_hover)))
             .child(Self::render_lucide_icon(
                 icon,
                 PLUGIN_MANAGER_ACTION_ICON_SIZE,

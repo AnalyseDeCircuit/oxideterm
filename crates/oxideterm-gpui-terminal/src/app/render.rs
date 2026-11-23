@@ -445,6 +445,22 @@ impl Render for TerminalPane {
         self.ensure_background_image_completion_poll(cx);
         let transparent_pane_base =
             terminal_pane_base_is_transparent(self.preferences.transparent_background);
+        let background_scrim = (transparent_pane_base || background_layer.is_some()).then(|| {
+            // Keep terminal imagery behind the same uniform canvas tint used by
+            // non-terminal tabs and sidebars so bright backgrounds never expose raw pixels.
+            let alpha = (self
+                .theme
+                .tokens
+                .metrics
+                .sidebar_vibrancy_alpha
+                .clamp(0.0, 1.0)
+                * 255.0)
+                .round() as u32;
+            div()
+                .absolute()
+                .inset_0()
+                .bg(rgba((self.theme.background << 8) | alpha))
+        });
         let bell_style = self.preferences.bell_style;
         let bell_accent = self.theme.tokens.ui.accent;
         let bell_flash_layer = bell_progress.and_then(|progress| {
@@ -853,6 +869,7 @@ impl Render for TerminalPane {
                 |pane| pane.child(self.render_scrollbar_drag_capture(cx)),
             )
             .when_some(background_layer, |pane, background| pane.child(background))
+            .when_some(background_scrim, |pane, scrim| pane.child(scrim))
             .when_some(bell_flash_layer, |pane, flash| pane.child(flash))
             .child(
                 div()

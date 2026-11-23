@@ -370,7 +370,13 @@ impl SftpBrowserView {
             .flex_col()
             .p(px(SFTP_ROOT_PADDING))
             .gap(px(SFTP_GAP))
-            .bg(sftp_bg(theme.bg, has_background))
+            // The enclosing `tab_canvas_surface` owns the uniform base tint when
+            // a background is active so pane headers and cards retain panel stepping.
+            .bg(if has_background {
+                rgba(0x00000000)
+            } else {
+                rgb(theme.bg)
+            })
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event, window, cx| {
@@ -604,8 +610,10 @@ impl SftpBrowserView {
             })
             .bg(if drag_over {
                 drag_bg
+            } else if has_background {
+                rgba(0x00000000)
             } else {
-                sftp_bg(theme.bg, has_background)
+                rgb(theme.bg)
             })
             .drag_over::<gpui::ExternalPaths>(move |style, _paths, _window, _cx| {
                 style.bg(drag_bg).border_color(drag_border)

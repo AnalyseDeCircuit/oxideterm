@@ -164,11 +164,15 @@ impl KnowledgeWorkspaceView {
             .pr(px(self.tokens.spacing.two))
             .border_b_1()
             .border_color(rgb(self.tokens.ui.border))
-            .bg(color_for_background(
-                self.tokens.ui.bg_secondary,
-                self.has_background,
-                KNOWLEDGE_BACKGROUND_SURFACE_ALPHA,
-            ))
+            .bg(if self.has_background {
+                oxideterm_gpui_ui::color_for_background(
+                    self.tokens.ui.bg_panel,
+                    true,
+                    oxideterm_gpui_ui::theme_glass_card_background_alpha(&self.tokens),
+                )
+            } else {
+                rgb(self.tokens.ui.bg_secondary)
+            })
             .child(self.knowledge_navigator_action(
                 "notes-toggle-navigation",
                 if navigator_visible {

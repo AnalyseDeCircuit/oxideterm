@@ -779,13 +779,18 @@ impl WorkspaceApp {
             );
         }
 
+        let has_background = self.background_surface_active("graphics");
         div()
             .size_full()
             .flex()
             .items_center()
             .justify_center()
             .px(px(GRAPHICS_SELECTOR_PADDING_X))
-            .bg(rgb(theme.bg))
+            .bg(if has_background {
+                rgba(0x00000000)
+            } else {
+                rgb(theme.bg)
+            })
             .child(
                 div()
                     .w_full()
@@ -1529,12 +1534,17 @@ impl WorkspaceApp {
         action: Option<String>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let has_background = self.background_surface_active("graphics");
         div()
             .size_full()
             .flex()
             .items_center()
             .justify_center()
-            .bg(rgb(self.tokens.ui.bg))
+            .bg(if has_background {
+                rgba(0x00000000)
+            } else {
+                rgb(self.tokens.ui.bg)
+            })
             .child(
                 div()
                     .flex()
@@ -1583,13 +1593,18 @@ impl WorkspaceApp {
 
     fn render_graphics_not_available(&self, _cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
+        let has_background = self.background_surface_active("graphics");
         div()
             .size_full()
             .flex()
             .items_center()
             .justify_center()
             .px(px(GRAPHICS_SELECTOR_PADDING_X))
-            .bg(rgb(theme.bg))
+            .bg(if has_background {
+                rgba(0x00000000)
+            } else {
+                rgb(theme.bg)
+            })
             .child(
                 div()
                     .w_full()

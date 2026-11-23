@@ -271,14 +271,16 @@ impl WorkspaceApp {
                 (_, Some(root_pane)) => self.render_terminal_surface(root_pane, window, cx),
                 _ => {
                     let available_width = self.welcome_main_content_width(window, cx);
-                    self.render_empty_workspace(available_width, cx)
+                    let has_background = self.window_background_preferences().is_some();
+                    self.render_empty_workspace(available_width, has_background, cx)
                 }
             }
         } else if *self.tab_host.read(cx).scope() != tabs::TabScope::All {
             self.render_empty_tab_scope(cx)
         } else {
             let available_width = self.welcome_main_content_width(window, cx);
-            self.render_empty_workspace(available_width, cx)
+            let has_background = self.window_background_preferences().is_some();
+            self.render_empty_workspace(available_width, has_background, cx)
         };
         let content = if let Some((tab, _, _)) = &active_tab_projection {
             self.wrap_split_drop_region(*tab, None, content, window, cx)
@@ -290,7 +292,7 @@ impl WorkspaceApp {
             content,
             active_tab_projection
                 .as_ref()
-                .map(|(_, kind, _)| tab_background_key(kind)),
+                .and_then(|(_, kind, root_pane)| content_background_key(kind, root_pane.is_some())),
             window,
             cx,
         );

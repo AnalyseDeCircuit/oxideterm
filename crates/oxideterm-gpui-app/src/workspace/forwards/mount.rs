@@ -69,7 +69,8 @@ impl WorkspaceApp {
         if let Some(tab) = self.active_tab_id(cx) {
             self.render_forwards_surface_for_tab(tab, window, cx)
         } else {
-            self.render_empty_workspace(f32::from(window.viewport_size().width), cx)
+            let has_background = self.background_surface_active("forwards");
+            self.render_empty_workspace(f32::from(window.viewport_size().width), has_background, cx)
         }
     }
 
@@ -84,7 +85,8 @@ impl WorkspaceApp {
         if let Some(views) = self.forwarding.read(cx).views(tab) {
             views.body()
         } else {
-            self.render_empty_workspace(f32::from(window.viewport_size().width), cx)
+            let has_background = self.background_surface_active("forwards");
+            self.render_empty_workspace(f32::from(window.viewport_size().width), has_background, cx)
         }
     }
 

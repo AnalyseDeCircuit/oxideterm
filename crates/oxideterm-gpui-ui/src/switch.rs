@@ -274,7 +274,7 @@ mod tests {
     fn switch_thumb_stays_opaque_inside_light_tab_surface_card(cx: &mut gpui::TestAppContext) {
         let mut tokens = ThemeTokens::from_builtin(oxideterm_theme::theme_by_id("code-light"));
         assert_eq!(tokens.ui.bg, SWITCH_THUMB_COLOR);
-        tokens.metrics.sidebar_vibrancy_alpha = 0.72;
+        tokens.metrics.panel_vibrancy_alpha = 0.78;
         tokens.motion.enabled = false;
         tokens.motion.spatial_enabled = false;
 

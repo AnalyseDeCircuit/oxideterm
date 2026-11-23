@@ -168,14 +168,7 @@ impl WorkspaceApp {
             .overflow_hidden()
             .border_b_1()
             .border_color(self.workspace_chrome_divider())
-            .bg(if has_window_background {
-                rgba(
-                    (strip_bg << 8)
-                        | oxideterm_gpui_ui::theme_glass_card_background_alpha(&self.tokens),
-                )
-            } else {
-                rgb(strip_bg)
-            });
+            .bg(self.workspace_chrome_background(strip_bg));
 
         // Tauri's scroll container measures the full inline-flex tab row as
         // scrollWidth. GPUI's ScrollHandle computes max_offset from direct
@@ -1043,6 +1036,7 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn render_empty_workspace(
         &self,
         available_width: f32,
+        has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         const WELCOME_CONTENT_MAX_WIDTH: f32 = 860.0;
@@ -1051,9 +1045,13 @@ impl WorkspaceApp {
         let compact = welcome_layout_is_compact(available_width);
         div()
             .size_full()
-            // Keep the start page on the primary workspace canvas while light
-            // themes recess peripheral shell bars to `shell_bg()`.
-            .bg(self.workspace_sidebar_background(theme.bg))
+            // The enclosing `tab_canvas_surface` owns the uniform base tint when
+            // a background is active so cards below retain their panel vibrancy step.
+            .bg(if has_background {
+                rgba(0x00000000)
+            } else {
+                rgb(theme.bg)
+            })
             .text_color(rgb(theme.text_muted))
             .font_family(settings_ui_font_family(
                 &self.settings_store.settings().appearance.ui_font_family,
@@ -1083,8 +1081,12 @@ impl WorkspaceApp {
                                     .items_start()
                                     .gap(px(22.0))
                                     .child(self.render_welcome_header())
-                                    .child(self.render_welcome_workbench(compact, cx))
-                                    .child(self.render_welcome_shortcuts()),
+                                    .child(self.render_welcome_workbench(
+                                        compact,
+                                        has_background,
+                                        cx,
+                                    ))
+                                    .child(self.render_welcome_shortcuts(has_background)),
                             ),
                     ),
             )
@@ -1173,16 +1175,25 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_welcome_workbench(&self, compact: bool, cx: &mut Context<Self>) -> AnyElement {
+    fn render_welcome_workbench(
+        &self,
+        compact: bool,
+        has_background: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         welcome_workbench_layout(
             compact,
-            self.render_welcome_recent_connections(cx),
-            self.render_welcome_guidance(cx),
+            self.render_welcome_recent_connections(has_background, cx),
+            self.render_welcome_guidance(has_background, cx),
         )
         .into_any_element()
     }
 
-    fn render_welcome_recent_connections(&self, cx: &mut Context<Self>) -> gpui::Div {
+    fn render_welcome_recent_connections(
+        &self,
+        has_background: bool,
+        cx: &mut Context<Self>,
+    ) -> gpui::Div {
         const RECENT_CONNECTION_LIMIT: usize = 4;
 
         let theme = self.tokens.ui;
@@ -1222,12 +1233,17 @@ impl WorkspaceApp {
                 ),
         );
 
+        let card_alpha = oxideterm_gpui_ui::theme_glass_card_background_alpha(&self.tokens);
         let container = div()
             .w_full()
             .rounded(px(self.tokens.radii.lg))
             .border_1()
             .border_color(rgba((theme.border << 8) | 0x80))
-            .bg(self.workspace_sidebar_background(welcome_card_background(theme)))
+            .bg(oxideterm_gpui_ui::color_for_background(
+                welcome_card_background(theme),
+                has_background,
+                card_alpha,
+            ))
             .overflow_hidden();
 
         if recent.is_empty() {
@@ -1243,6 +1259,7 @@ impl WorkspaceApp {
                     connection,
                     index == 0,
                     index + 1 == count,
+                    has_background,
                     cx,
                 ));
             }
@@ -1301,10 +1318,12 @@ impl WorkspaceApp {
         connection: WelcomeRecentConnection,
         is_first: bool,
         is_last: bool,
+        has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let metrics = welcome_workbench_metrics(&self.tokens);
+        let card_alpha = oxideterm_gpui_ui::theme_glass_card_background_alpha(&self.tokens);
         let inner_radius =
             oxideterm_gpui_ui::modal::rounded_shell_child_radius(self.tokens.radii.lg);
         let target = connection.target.clone();
@@ -1320,7 +1339,13 @@ impl WorkspaceApp {
             .items_center()
             .gap(px(10.0))
             .cursor_pointer()
-            .hover(|row| row.bg(self.workspace_sidebar_background(theme.bg_hover)))
+            .hover(move |row| {
+                row.bg(oxideterm_gpui_ui::color_for_background(
+                    theme.bg_hover,
+                    has_background,
+                    0x80,
+                ))
+            })
             .child(
                 div()
                     .size(px(28.0))
@@ -1328,7 +1353,11 @@ impl WorkspaceApp {
                     .rounded(px(self.tokens.radii.sm))
                     .border_1()
                     .border_color(rgba((theme.border << 8) | 0x66))
-                    .bg(self.workspace_sidebar_background(theme.bg_sunken))
+                    .bg(oxideterm_gpui_ui::color_for_background(
+                        theme.bg_sunken,
+                        has_background,
+                        card_alpha,
+                    ))
                     .flex()
                     .items_center()
                     .justify_center()
@@ -1376,7 +1405,11 @@ impl WorkspaceApp {
                             .rounded(px(self.tokens.radii.xs))
                             .border_1()
                             .border_color(rgba((theme.border << 8) | 0x66))
-                            .bg(self.workspace_sidebar_background(theme.bg_sunken))
+                            .bg(oxideterm_gpui_ui::color_for_background(
+                                theme.bg_sunken,
+                                has_background,
+                                card_alpha,
+                            ))
                             .px(px(6.0))
                             .py(px(1.0))
                             .font_family(settings_mono_font_family(self.settings_store.settings()))
@@ -1400,9 +1433,10 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_welcome_guidance(&self, cx: &mut Context<Self>) -> gpui::Div {
+    fn render_welcome_guidance(&self, has_background: bool, cx: &mut Context<Self>) -> gpui::Div {
         let theme = self.tokens.ui;
         let metrics = welcome_workbench_metrics(&self.tokens);
+        let card_alpha = oxideterm_gpui_ui::theme_glass_card_background_alpha(&self.tokens);
         let primary_actions = [
             (
                 LucideIcon::Plus,
@@ -1445,7 +1479,11 @@ impl WorkspaceApp {
             .rounded(px(self.tokens.radii.lg))
             .border_1()
             .border_color(rgba((theme.border << 8) | 0x80))
-            .bg(self.workspace_sidebar_background(welcome_card_background(theme)))
+            .bg(oxideterm_gpui_ui::color_for_background(
+                welcome_card_background(theme),
+                has_background,
+                card_alpha,
+            ))
             .overflow_hidden()
             .flex()
             .flex_col();
@@ -1463,6 +1501,7 @@ impl WorkspaceApp {
                 action,
                 index == 0,
                 index + 1 == utility_count,
+                has_background,
                 cx,
             ));
         }
@@ -1490,7 +1529,13 @@ impl WorkspaceApp {
                         primary_actions.into_iter().map(
                             |(icon, title_key, desc_key, action, primary)| {
                                 self.render_welcome_primary_tile(
-                                    icon, title_key, desc_key, action, primary, cx,
+                                    icon,
+                                    title_key,
+                                    desc_key,
+                                    action,
+                                    primary,
+                                    has_background,
+                                    cx,
                                 )
                             },
                         ),
@@ -1499,6 +1544,7 @@ impl WorkspaceApp {
             )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn render_welcome_primary_tile(
         &self,
         icon: LucideIcon,
@@ -1506,10 +1552,12 @@ impl WorkspaceApp {
         description_key: &str,
         action: WelcomeToolAction,
         primary: bool,
+        has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let metrics = welcome_workbench_metrics(&self.tokens);
+        let card_alpha = oxideterm_gpui_ui::theme_glass_card_background_alpha(&self.tokens);
         let card = div()
             .w_full()
             .min_w_0()
@@ -1521,12 +1569,22 @@ impl WorkspaceApp {
             } else {
                 rgba((theme.border << 8) | 0x80)
             })
-            .bg(self.workspace_sidebar_background(welcome_card_background(theme)))
+            .bg(oxideterm_gpui_ui::color_for_background(
+                welcome_card_background(theme),
+                has_background,
+                card_alpha,
+            ))
             .px(px(12.0))
             .flex()
             .items_center()
             .gap(px(10.0))
-            .hover(|tile| tile.bg(self.workspace_sidebar_background(theme.bg_hover)))
+            .hover(move |tile| {
+                tile.bg(oxideterm_gpui_ui::color_for_background(
+                    theme.bg_hover,
+                    has_background,
+                    0x80,
+                ))
+            })
             .cursor_pointer()
             .child(
                 div()
@@ -1537,7 +1595,11 @@ impl WorkspaceApp {
                         badge
                             .border_1()
                             .border_color(rgba((theme.border << 8) | 0x66))
-                            .bg(self.workspace_sidebar_background(theme.bg_sunken))
+                            .bg(oxideterm_gpui_ui::color_for_background(
+                                theme.bg_sunken,
+                                has_background,
+                                card_alpha,
+                            ))
                     })
                     .when(primary, |badge| badge.bg(rgb(theme.accent)))
                     .flex()
@@ -1577,6 +1639,7 @@ impl WorkspaceApp {
         action: WelcomeToolAction,
         is_first: bool,
         is_last: bool,
+        has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
@@ -1593,7 +1656,13 @@ impl WorkspaceApp {
             .flex()
             .items_center()
             .gap(px(10.0))
-            .hover(|row| row.bg(self.workspace_sidebar_background(theme.bg_hover)))
+            .hover(move |row| {
+                row.bg(oxideterm_gpui_ui::color_for_background(
+                    theme.bg_hover,
+                    has_background,
+                    0x80,
+                ))
+            })
             .cursor_pointer()
             .child(Self::render_lucide_icon(icon, 14.0, rgb(theme.text_muted)))
             .child(
@@ -1710,7 +1779,7 @@ impl WorkspaceApp {
         }
     }
 
-    fn render_welcome_shortcuts(&self) -> AnyElement {
+    fn render_welcome_shortcuts(&self, has_background: bool) -> AnyElement {
         const WELCOME_SHORTCUTS: [(&str, &str); 6] = [
             ("app.commandPalette", "command_palette.title"),
             ("app.newConnection", "layout.empty.new_connection"),
@@ -1740,16 +1809,22 @@ impl WorkspaceApp {
                     .into_iter()
                     .filter_map(|(action_id, label_key)| {
                         effective_shortcut_label(action_id, overrides)
-                            .map(|key| self.render_welcome_shortcut(key, label_key))
+                            .map(|key| self.render_welcome_shortcut(key, label_key, has_background))
                     }),
             )
             .into_any_element()
     }
 
-    fn render_welcome_shortcut(&self, key: String, label_key: &str) -> AnyElement {
+    fn render_welcome_shortcut(
+        &self,
+        key: String,
+        label_key: &str,
+        has_background: bool,
+    ) -> AnyElement {
         let theme = self.tokens.ui;
+        let card_alpha = oxideterm_gpui_ui::theme_glass_card_background_alpha(&self.tokens);
         // Window imagery needs the stronger semantic text color to remain legible.
-        let label_color = if self.window_background_preferences().is_some() {
+        let label_color = if has_background {
             theme.text
         } else {
             theme.text_muted
@@ -1766,7 +1841,11 @@ impl WorkspaceApp {
                     .rounded(px(self.tokens.radii.xs))
                     .border_1()
                     .border_color(rgba((theme.border << 8) | 0x80))
-                    .bg(self.workspace_sidebar_background(welcome_keycap_background(theme)))
+                    .bg(oxideterm_gpui_ui::color_for_background(
+                        welcome_keycap_background(theme),
+                        has_background,
+                        card_alpha,
+                    ))
                     .px(px(5.0))
                     .py(px(1.5))
                     .font_family(settings_mono_font_family(self.settings_store.settings()))

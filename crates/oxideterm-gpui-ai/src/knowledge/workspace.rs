@@ -44,7 +44,6 @@ const KNOWLEDGE_NAVIGATOR_ACTION_SIZE: f32 = 28.0;
 const KNOWLEDGE_NAVIGATOR_ACTION_ICON_SIZE: f32 = 14.0;
 const KNOWLEDGE_NAVIGATOR_DEFAULT_WIDTH: f32 = 200.0;
 const KNOWLEDGE_NARROW_VIEWPORT_WIDTH: f32 = 720.0;
-const KNOWLEDGE_BACKGROUND_SURFACE_ALPHA: u32 = 0x66;
 const KNOWLEDGE_NAVIGATOR_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1207,11 +1206,14 @@ impl KnowledgeWorkspaceView {
                     .border_r_1()
                     .border_color(rgb(self.tokens.ui.border))
             })
-            .bg(color_for_background(
-                self.tokens.ui.bg_secondary,
-                has_background_image,
-                KNOWLEDGE_BACKGROUND_SURFACE_ALPHA,
-            ))
+            // The enclosing `tab_canvas_surface` owns the uniform base tint when
+            // a background is active; keeping the navigator rail transparent
+            // matches Settings navigation and avoids stacking unmanaged `bg_secondary`.
+            .bg(if has_background_image {
+                rgba(0x00000000)
+            } else {
+                rgb(self.tokens.ui.bg_secondary)
+            })
             .child(navigator_toolbar)
             .child(navigator_search)
             .when_some(navigator_error, |navigator, error| {

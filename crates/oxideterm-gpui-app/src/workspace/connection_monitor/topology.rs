@@ -387,6 +387,7 @@ impl WorkspaceApp {
             Vec::new()
         };
 
+        let has_background = self.background_surface_active("topology");
         // Mirrors TopologyViewEnhanced NodeCard: fixed 140x50 glass panel with centered
         // status dot, semibold 11px name, and 9px mono host line.
         div()
@@ -402,7 +403,15 @@ impl WorkspaceApp {
             } else {
                 rgba((theme.border << 8) | TOPOLOGY_PANEL_BORDER_ALPHA_50)
             })
-            .bg(rgba((theme.bg_panel << 8) | TOPOLOGY_PANEL_BG_ALPHA_20))
+            .bg(if has_background {
+                oxideterm_gpui_ui::color_for_background(
+                    theme.bg_card,
+                    true,
+                    oxideterm_gpui_ui::theme_glass_card_background_alpha(&self.tokens),
+                )
+            } else {
+                rgba((theme.bg_panel << 8) | TOPOLOGY_PANEL_BG_ALPHA_20)
+            })
             .shadow(connected_shadow)
             .cursor_pointer()
             .hover(|style| {

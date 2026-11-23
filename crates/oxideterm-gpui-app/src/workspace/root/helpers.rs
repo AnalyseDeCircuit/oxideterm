@@ -27,6 +27,28 @@ pub(in crate::workspace) fn tab_background_key(kind: &TabKind) -> &'static str {
     }
 }
 
+/// Resolves the background routing key for rendered tab content. Terminal-like
+/// tabs without a live pane render the empty welcome canvas instead, so they
+/// route through the non-terminal window-background path (`None`).
+pub(in crate::workspace) fn content_background_key(
+    kind: &TabKind,
+    has_root_pane: bool,
+) -> Option<&'static str> {
+    if !has_root_pane
+        && matches!(
+            kind,
+            TabKind::Workspace
+                | TabKind::LocalTerminal
+                | TabKind::SshTerminal
+                | TabKind::MoshTerminal
+        )
+    {
+        None
+    } else {
+        Some(tab_background_key(kind))
+    }
+}
+
 pub(in crate::workspace) fn current_window_size(window: &Window) -> (f32, f32) {
     // Pointer and overlay coordinates use the drawable viewport. On Windows,
     // inner bounds may describe the restored window while it is maximized.

@@ -260,7 +260,7 @@ impl WorkspaceApp {
                 ONBOARDING_BRAND_ICON_SIZE,
             ),
             sidebar_occupied_width,
-            has_background: self.window_background_preferences().is_some(),
+            has_background: self.background_surface_active("onboarding"),
             system_dark: self.system_dark,
             edit_scheme,
             open_settings_select_active: self.open_settings_select.is_some(),

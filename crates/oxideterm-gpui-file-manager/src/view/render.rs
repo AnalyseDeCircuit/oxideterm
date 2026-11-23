@@ -57,7 +57,13 @@ impl FileManagerView {
             .relative()
             .flex()
             .flex_row()
-            .bg(file_manager_bg(theme.bg, has_background))
+            // The enclosing `tab_canvas_surface` owns the uniform base tint when
+            // a background is active so toolbars and rails retain panel stepping.
+            .bg(if has_background {
+                rgba(0x00000000)
+            } else {
+                rgb(theme.bg)
+            })
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event, window, cx| {
@@ -336,7 +342,11 @@ impl FileManagerView {
             .flex_col()
             // The page toolbar already establishes the file-manager surface.
             // Keep the list body unframed so its internal dividers define hierarchy.
-            .bg(file_manager_bg(theme.bg, has_background))
+            .bg(if has_background {
+                rgba(0x00000000)
+            } else {
+                rgb(theme.bg)
+            })
             .child(self.render_file_manager_header(has_background, window, cx))
             .child(self.render_file_manager_columns(has_background, cx))
             .child(self.render_file_manager_filter(has_background, cx))
@@ -848,7 +858,11 @@ impl FileManagerView {
                     cx.notify();
                 }
             }))
-            .bg(file_manager_bg(theme.bg, has_background));
+            .bg(if has_background {
+                rgba(0x00000000)
+            } else {
+                rgb(theme.bg)
+            });
         let (loading, error, list_scroll) = {
             let file_manager = self.file_manager.read(cx);
             (

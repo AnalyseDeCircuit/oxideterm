@@ -22,7 +22,7 @@ use oxideterm_sftp::{
 use oxideterm_theme::ThemeTokens;
 
 use crate::{
-    style::{SftpUiMetrics, sftp_bg, sftp_hover_bg},
+    style::{SftpUiMetrics, sftp_hover_bg},
     tree::{SftpTreeData, SftpTreeRow},
 };
 
@@ -376,8 +376,10 @@ impl Render for SftpFileListView {
             .min_h(px(0.0))
             .bg(if data.drag_over {
                 rgba((theme.accent << 8) | SFTP_DRAG_BG_ALPHA)
+            } else if has_background {
+                rgba(0x00000000)
             } else {
-                sftp_bg(theme.bg, has_background)
+                rgb(theme.bg)
             })
             .on_mouse_move(self.request(move |event: &MouseMoveEvent| {
                 SftpFileListRequest::DragMoved {

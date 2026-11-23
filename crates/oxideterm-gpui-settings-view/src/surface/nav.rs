@@ -148,7 +148,15 @@ impl SettingsSurfaceView {
             .flex()
             .flex_col()
             .pb_4()
-            .bg(panel_background(frame, theme.bg_panel))
+            // The enclosing `tab_canvas_surface` already paints the uniform
+            // base tint when a background image is active; keeping the nav
+            // column transparent preserves the sidebar seam and leaves card
+            // budget for the active selection pill.
+            .bg(if frame.has_background {
+                rgba(0x00000000)
+            } else {
+                rgb(theme.bg_panel)
+            })
             .border_r_1()
             .border_color(rgb(theme.border));
 

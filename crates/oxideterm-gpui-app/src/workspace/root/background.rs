@@ -408,7 +408,7 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let Some(background_key) = background_key else {
             return if self.window_background_preferences().is_some() {
-                oxideterm_gpui_ui::surface::tab_surface(&self.tokens, content)
+                oxideterm_gpui_ui::surface::tab_canvas_surface(&self.tokens, content)
             } else {
                 content
             };
@@ -420,7 +420,7 @@ impl WorkspaceApp {
             return content;
         }
         let content = if self.background_surface_active(background_key) {
-            oxideterm_gpui_ui::surface::tab_surface(&self.tokens, content)
+            oxideterm_gpui_ui::surface::tab_canvas_surface(&self.tokens, content)
         } else {
             content
         };

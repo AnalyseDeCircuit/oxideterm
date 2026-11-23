@@ -147,7 +147,7 @@ impl WorkspaceApp {
                 )
             }
         };
-        context_sidebar_region_chrome()
+        let region = context_sidebar_region_chrome()
             .child(
                 div()
                     .size_full()
@@ -212,7 +212,12 @@ impl WorkspaceApp {
                             }),
                     ),
             )
-            .into_any_element()
+            .into_any_element();
+        if self.window_background_preferences().is_some() {
+            oxideterm_gpui_ui::surface::tab_surface(&self.tokens, region)
+        } else {
+            region
+        }
     }
 
     pub(in crate::workspace) fn render_left_sidebar_resize_hotzone(
@@ -363,7 +368,7 @@ impl WorkspaceApp {
                 body.into_any_element()
             }
         };
-        div()
+        let sidebar = div()
             .w_full()
             .h_full()
             .flex()
@@ -429,7 +434,12 @@ impl WorkspaceApp {
             .when(panel_section == SidebarSection::Sessions, |sidebar| {
                 sidebar.child(self.render_active_sessions_footer(cx))
             })
-            .into_any_element()
+            .into_any_element();
+        if self.window_background_preferences().is_some() {
+            oxideterm_gpui_ui::surface::tab_surface(&self.tokens, sidebar)
+        } else {
+            sidebar
+        }
     }
 
     pub(in crate::workspace) fn render_sidebar_header(&self, cx: &mut Context<Self>) -> AnyElement {

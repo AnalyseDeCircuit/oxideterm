@@ -44,7 +44,12 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let Some(tab_id) = self.active_tab_id(cx) else {
-            return self.render_empty_workspace(f32::from(window.viewport_size().width), cx);
+            let has_background = self.background_surface_active("sftp");
+            return self.render_empty_workspace(
+                f32::from(window.viewport_size().width),
+                has_background,
+                cx,
+            );
         };
         self.render_sftp_surface_for_tab(tab_id, window, cx)
     }
@@ -57,7 +62,12 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let _scope = self.enter_sftp_surface(SftpSurfaceId::Tab(tab_id));
         let Some(remote_id) = self.sftp_remote_id_for_tab(tab_id) else {
-            return self.render_empty_workspace(f32::from(window.viewport_size().width), cx);
+            let has_background = self.background_surface_active("sftp");
+            return self.render_empty_workspace(
+                f32::from(window.viewport_size().width),
+                has_background,
+                cx,
+            );
         };
         let view = self.sftp_view().read(cx);
         if view.remote_load_pending && !view.remote_load_inflight {

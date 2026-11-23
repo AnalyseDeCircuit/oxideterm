@@ -574,7 +574,14 @@ impl WorkspaceApp {
         div()
             .size_full()
             .min_h_0()
-            .bg(self.workspace_chrome_background(theme.bg))
+            // The enclosing `tab_canvas_surface` owns the base tint when a
+            // background is active so declarative plugin cards retain their
+            // panel vibrancy step.
+            .bg(if self.background_surface_active("plugin") {
+                rgba(0x00000000)
+            } else {
+                rgb(theme.bg)
+            })
             .text_color(rgb(theme.text))
             .child(
                 div()

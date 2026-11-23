@@ -1856,7 +1856,7 @@ impl WorkspaceApp {
         let content = self.wrap_content_background(
             window_background,
             content,
-            Some(tab_background_key(&tab_kind)),
+            content_background_key(&tab_kind, root_pane.is_some()),
             window,
             cx,
         );
@@ -1999,7 +1999,14 @@ impl WorkspaceApp {
             (_, Some(root_pane)) => {
                 self.render_detached_terminal_surface(tab_id, root_pane, window, cx)
             }
-            _ => self.render_empty_workspace(f32::from(window.viewport_size().width), cx),
+            _ => {
+                let has_background = self.window_background_preferences().is_some();
+                self.render_empty_workspace(
+                    f32::from(window.viewport_size().width),
+                    has_background,
+                    cx,
+                )
+            }
         }
     }
 

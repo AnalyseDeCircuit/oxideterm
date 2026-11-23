@@ -4,11 +4,36 @@ use gpui::{
 };
 use oxideterm_theme::ThemeTokens;
 
-/// Tab content shares a tint budget; media and accent colors retain their own opacity.
+/// Uniform base tint painted behind non-terminal tab content when an image or
+/// shader background is active, matching the sidebar vibrancy level.
+pub fn tab_base_background(tokens: &ThemeTokens) -> Rgba {
+    let alpha = (tokens.metrics.sidebar_vibrancy_alpha.clamp(0.0, 1.0) * 255.0).round() as u32;
+    color_with_alpha(tokens.ui.bg, alpha)
+}
+
+/// Wraps non-terminal tab content with the uniform base tint and a shared panel
+/// tint budget so raw background imagery never shows through un-tinted while
+/// cards and nested panels step cleanly up to `panel_vibrancy_alpha`.
+pub fn tab_canvas_surface(tokens: &ThemeTokens, content: AnyElement) -> AnyElement {
+    tab_surface(
+        tokens,
+        div()
+            .size_full()
+            .bg(tab_base_background(tokens))
+            .child(content)
+            .into_any_element(),
+    )
+}
+
+const TAB_HOVER_MAX_ALPHA: f32 = 0.5;
+
+/// Tab content shares a tint budget capped at `panel_vibrancy_alpha`; hover
+/// fills are capped independently so they stay translucent without vanishing
+/// inside saturated cards.
 pub fn tab_surface(tokens: &ThemeTokens, content: AnyElement) -> AnyElement {
     TabSurface {
         content,
-        limit: (tokens.metrics.sidebar_vibrancy_alpha.clamp(0.0, 1.0) * 255.0).round() / 255.0,
+        limit: (tokens.metrics.panel_vibrancy_alpha.clamp(0.0, 1.0) * 255.0).round() / 255.0,
         colors: Some(
             [
                 tokens.ui.bg,
@@ -16,10 +41,10 @@ pub fn tab_surface(tokens: &ThemeTokens, content: AnyElement) -> AnyElement {
                 tokens.ui.bg_card,
                 tokens.ui.bg_elevated,
                 tokens.ui.bg_sunken,
-                tokens.ui.bg_hover,
             ]
             .map(|color| rgb(color).into()),
         ),
+        hover: Some((rgb(tokens.ui.bg_hover).into(), TAB_HOVER_MAX_ALPHA)),
     }
     .into_any_element()
 }
@@ -32,6 +57,7 @@ pub fn opaque_control_surface(content: impl IntoElement) -> AnyElement {
         content: content.into_any_element(),
         limit: 1.0,
         colors: None,
+        hover: None,
     }
     .into_any_element()
 }
@@ -39,7 +65,8 @@ pub fn opaque_control_surface(content: impl IntoElement) -> AnyElement {
 struct TabSurface {
     content: AnyElement,
     limit: f32,
-    colors: Option<[gpui::Hsla; 6]>,
+    colors: Option<[gpui::Hsla; 5]>,
+    hover: Option<(gpui::Hsla, f32)>,
 }
 
 impl IntoElement for TabSurface {
@@ -95,7 +122,7 @@ impl gpui::Element for TabSurface {
         cx: &mut gpui::App,
     ) {
         let colors: &[gpui::Hsla] = self.colors.as_ref().map_or(&[], |colors| colors.as_slice());
-        window.with_surface_tint_limit(self.limit, colors, |window| {
+        window.with_surface_tint_limit(self.limit, colors, self.hover, |window| {
             self.content.paint(window, cx);
         });
     }
@@ -657,11 +684,14 @@ mod tests {
     fn tab_tint_budget_caps_nested_surfaces_without_fading_accents(cx: &mut gpui::TestAppContext) {
         let window = cx.add_empty_window();
         let mut tokens = oxideterm_theme::default_tokens();
+        tokens.ui.bg = 0x081018;
         tokens.ui.bg_card = 0x102030;
         tokens.ui.bg_elevated = 0x304050;
         tokens.ui.bg_sunken = 0x506070;
+        tokens.ui.bg_hover = 0x708090;
         tokens.ui.accent = 0x00aaff;
-        tokens.metrics.sidebar_vibrancy_alpha = 0.64;
+        tokens.metrics.sidebar_vibrancy_alpha = 0.60;
+        tokens.metrics.panel_vibrancy_alpha = 0.80;
         window.draw(
             point(px(0.0), px(0.0)),
             gpui::size(px(200.0), px(200.0)),
@@ -670,31 +700,29 @@ mod tests {
                     .size_full()
                     .flex()
                     .flex_col()
-                    .child(tab_surface(
-                        &tokens,
-                        div()
-                            .w_full()
-                            .flex()
-                            .flex_col()
-                            .child(
-                                div()
-                                    .h(px(50.0))
-                                    .bg(rgb(tokens.ui.bg_card).alpha(0.6))
-                                    .child(
-                                        div()
-                                            .h(px(30.0))
-                                            .bg(rgb(tokens.ui.bg_elevated).alpha(0.5))
-                                            .child(
-                                                div()
-                                                    .h(px(10.0))
-                                                    .bg(rgb(tokens.ui.bg_sunken).alpha(0.5)),
-                                            ),
-                                    )
-                                    .child(div().h(px(5.0)).bg(rgb(tokens.ui.accent))),
-                            )
-                            .child(div().h(px(40.0)).bg(rgb(tokens.ui.bg_card).alpha(0.6)))
-                            .into_any_element(),
-                    ))
+                    .child(
+                        div().h(px(120.0)).child(tab_canvas_surface(
+                            &tokens,
+                            div()
+                                .w_full()
+                                .flex()
+                                .flex_col()
+                                .child(
+                                    div()
+                                        .h(px(50.0))
+                                        .bg(rgb(tokens.ui.bg_card).alpha(0.75))
+                                        .child(
+                                            div()
+                                                .h(px(30.0))
+                                                .bg(rgb(tokens.ui.bg_elevated).alpha(0.5)),
+                                        )
+                                        .child(div().h(px(12.0)).bg(rgb(tokens.ui.bg_hover)))
+                                        .child(div().h(px(5.0)).bg(rgb(tokens.ui.accent))),
+                                )
+                                .child(div().h(px(40.0)).bg(rgb(tokens.ui.bg_card).alpha(0.3)))
+                                .into_any_element(),
+                        )),
+                    )
                     .child(div().h(px(20.0)).bg(rgb(tokens.ui.bg_elevated).alpha(0.5)))
             },
         );
@@ -709,12 +737,21 @@ mod tests {
                 })
                 .collect();
             let alpha = |height| fills.iter().find(|(h, _)| *h == height).unwrap().1;
-            assert!((alpha(50.0) - 0.6).abs() < 0.001);
-            assert!((alpha(30.0) - 0.0980392).abs() < 0.001);
-            assert!(!fills.iter().any(|(height, _)| *height == 10.0));
+            // Base canvas starts at sidebar_vibrancy_alpha (0.60); remaining budget
+            // up to panel_vibrancy_alpha (0.80) is (0.80 - 0.60) / (1 - 0.60) = 0.50.
+            assert!((alpha(120.0) - 0.6).abs() < 0.005);
+            assert!((alpha(50.0) - 0.5).abs() < 0.005);
+            assert!(
+                !fills.iter().any(|(height, _)| *height == 30.0),
+                "nested surfaces inside a saturated card must not stack past panel_vibrancy_alpha"
+            );
+            assert!(
+                (alpha(12.0) - 0.5).abs() < 0.005,
+                "hover highlight must remain visible inside a saturated card"
+            );
             assert_eq!(alpha(5.0), 1.0, "accent controls retain their color");
             assert!(
-                (alpha(40.0) - 0.6).abs() < 0.001,
+                (alpha(40.0) - 0.3).abs() < 0.005,
                 "siblings have independent budgets"
             );
             assert_eq!(

@@ -1309,7 +1309,7 @@ pub struct Window {
     pub(crate) rendered_entity_stack: Vec<EntityId>,
     pub(crate) element_offset_stack: Vec<Point<Pixels>>,
     pub(crate) element_opacity: f32,
-    surface_tint: Option<(f32, Vec<Hsla>, f32)>,
+    surface_tint: Option<(f32, Vec<Hsla>, Option<(Hsla, f32)>, f32)>,
     pub(crate) content_mask_stack: Vec<ContentMask<Pixels>>,
     pub(crate) requested_autoscroll: Option<Bounds<Pixels>>,
     /// The [`TextInputConfiguration`] most recently forwarded to the platform
@@ -4815,16 +4815,19 @@ impl Window {
     }
 
     /// Limits the composed opacity of palette surface fills, without fading text,
-    /// images, accent controls, or borders. The scope belongs to the painted subtree.
+    /// images, accent controls, or borders. An optional hover color is capped
+    /// per-layer without consuming or being zeroed by the structural budget.
     pub fn with_surface_tint_limit<R>(
         &mut self,
         limit: f32,
         colors: &[Hsla],
+        hover: Option<(Hsla, f32)>,
         f: impl FnOnce(&mut Self) -> R,
     ) -> R {
-        let previous = self
-            .surface_tint
-            .replace((limit.clamp(0.0, 1.0), colors.to_vec(), 0.0));
+        let hover = hover.map(|(color, max_alpha)| (color, max_alpha.clamp(0.0, 1.0)));
+        let previous =
+            self.surface_tint
+                .replace((limit.clamp(0.0, 1.0), colors.to_vec(), hover, 0.0));
         let result = f(self);
         self.surface_tint = previous;
         result
@@ -4838,12 +4841,20 @@ impl Window {
         let Some(color) = background.and_then(|background| background.as_solid()) else {
             return f(self, background);
         };
-        let Some((limit, colors, accumulated)) = self.surface_tint.as_mut() else {
+        let Some((limit, colors, hover, accumulated)) = self.surface_tint.as_mut() else {
             return f(self, background);
         };
         if !colors.iter().any(|candidate| {
             candidate.h == color.h && candidate.s == color.s && candidate.l == color.l
         }) {
+            if let Some((hover_color, max_alpha)) = *hover
+                && hover_color.h == color.h
+                && hover_color.s == color.s
+                && hover_color.l == color.l
+            {
+                let color = color.alpha(color.a.min(max_alpha));
+                return f(self, Some(color.into()));
+            }
             return f(self, background);
         }
         let previous = *accumulated;
@@ -4855,7 +4866,7 @@ impl Window {
         let color = color.alpha(color.a.min(available));
         *accumulated = previous + (1.0 - previous) * color.a;
         let result = f(self, Some(color.into()));
-        if let Some((_, _, accumulated)) = self.surface_tint.as_mut() {
+        if let Some((_, _, _, accumulated)) = self.surface_tint.as_mut() {
             *accumulated = previous;
         }
         result
