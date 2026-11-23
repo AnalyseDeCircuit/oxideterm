@@ -301,6 +301,51 @@ async fn proxy_handshake_timeouts_use_transport_timeout_error() {
     }
 }
 
+#[tokio::test]
+async fn tcp_connect_failures_distinguish_direct_target_and_upstream_proxy_without_credentials() {
+    let closed_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let closed_addr = closed_listener.local_addr().unwrap();
+    drop(closed_listener);
+    let closed_endpoint = closed_addr.to_string();
+
+    let direct_error = dial_initial_tcp(&closed_addr.ip().to_string(), closed_addr.port(), 5, None)
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(
+        direct_error.contains(&format!("failed to connect to {closed_endpoint}:")),
+        "unexpected direct error: {direct_error}"
+    );
+    assert!(!direct_error.contains("proxy"));
+
+    for (protocol, label) in [
+        (UpstreamProxyProtocol::Socks5, "SOCKS5 proxy"),
+        (UpstreamProxyProtocol::HttpConnect, "HTTP CONNECT proxy"),
+    ] {
+        let proxy = UpstreamProxyConfig {
+            protocol,
+            host: closed_addr.ip().to_string(),
+            port: closed_addr.port(),
+            auth: UpstreamProxyAuth::Password {
+                username: "proxy-user".to_string(),
+                password: Zeroizing::new("proxy-secret-value".to_string()),
+            },
+            remote_dns: true,
+            no_proxy: String::new(),
+        };
+        let proxy_error = dial_initial_tcp("target.example.com", 22, 5, Some(&proxy))
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(
+            proxy_error.contains(&format!("failed to connect to {label} {closed_endpoint}:")),
+            "unexpected {label} error: {proxy_error}"
+        );
+        assert!(!proxy_error.contains("target.example.com"));
+        assert!(!proxy_error.contains("proxy-secret-value"));
+    }
+}
+
 #[derive(Clone, Copy)]
 enum MockSocks5Mode {
     NoAuthSuccess,

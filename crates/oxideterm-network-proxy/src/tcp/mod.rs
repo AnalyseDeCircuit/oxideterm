@@ -322,7 +322,10 @@ async fn dial_direct_tcp(target_host: &str, target_port: u16) -> Result<TcpStrea
     let socket_addrs = resolve_socket_addrs(target_host, target_port).await?;
     TcpStream::connect(socket_addrs.as_slice())
         .await
-        .map_err(|error| TcpProxyError::ConnectionFailed(error.to_string()))
+        .map_err(|error| {
+            let endpoint = http_authority(target_host, target_port);
+            TcpProxyError::ConnectionFailed(format!("failed to connect to {endpoint}: {error}"))
+        })
 }
 
 async fn dial_via_socks5(
@@ -333,7 +336,12 @@ async fn dial_via_socks5(
     let proxy_addrs = resolve_socket_addrs(&proxy.host, proxy.port).await?;
     let mut stream = TcpStream::connect(proxy_addrs.as_slice())
         .await
-        .map_err(|error| TcpProxyError::ConnectionFailed(error.to_string()))?;
+        .map_err(|error| {
+            let endpoint = http_authority(&proxy.host, proxy.port);
+            TcpProxyError::ConnectionFailed(format!(
+                "failed to connect to SOCKS5 proxy {endpoint}: {error}"
+            ))
+        })?;
 
     negotiate_socks5_auth(&mut stream, &proxy.auth).await?;
     send_socks5_connect(&mut stream, target_host, target_port, proxy.remote_dns).await?;
@@ -348,7 +356,12 @@ async fn dial_via_http_connect(
     let proxy_addrs = resolve_socket_addrs(&proxy.host, proxy.port).await?;
     let mut stream = TcpStream::connect(proxy_addrs.as_slice())
         .await
-        .map_err(|error| TcpProxyError::ConnectionFailed(error.to_string()))?;
+        .map_err(|error| {
+            let endpoint = http_authority(&proxy.host, proxy.port);
+            TcpProxyError::ConnectionFailed(format!(
+                "failed to connect to HTTP CONNECT proxy {endpoint}: {error}"
+            ))
+        })?;
 
     send_http_connect_request(&mut stream, target_host, target_port, &proxy.auth).await?;
     read_http_connect_response(&mut stream).await?;
