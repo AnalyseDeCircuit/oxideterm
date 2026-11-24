@@ -1,8 +1,8 @@
 use super::*;
 use gpui::StatefulInteractiveElement;
 use oxideterm_gpui_ui::{
-    ConfirmDialogVariant, ConfirmDialogView, MaterialRole, confirm_dialog, material_surface,
-    modal::modal_backdrop,
+    ConfirmDialogVariant, ConfirmDialogView, MaterialRole, confirm_dialog_with_focus,
+    material_surface, modal::modal_backdrop,
 };
 
 use super::rows::{MANAGER_ROW_ACTION_BUTTON, MANAGER_ROW_ACTION_ICON_SIZE};
@@ -580,7 +580,7 @@ impl CatalogView {
                 self.i18n.t("sessionManager.folder_tree.delete_group"),
             ),
         };
-        confirm_dialog(
+        confirm_dialog_with_focus(
             &self.tokens,
             ConfirmDialogView {
                 variant: ConfirmDialogVariant::Danger,
@@ -591,6 +591,7 @@ impl CatalogView {
                     .into_any_element(),
                 confirm_label: div().child(confirm_label).into_any_element(),
             },
+            self.session_manager.read(cx).delete_focus,
             cx.listener(|this, _event, _window, cx| {
                 this.action(CatalogAction::CancelDelete, None, cx);
                 cx.stop_propagation();

@@ -1,7 +1,9 @@
 use super::{SessionManagerSelectionTarget, SessionManagerState};
 use gpui::{Context, KeyDownEvent};
 
-use super::{SessionManagerInput, session_manager_input_is_active};
+use super::SessionManagerInput;
+#[cfg(not(target_family = "wasm"))]
+use super::session_manager_input_is_active;
 
 pub enum CatalogInputAction {
     Pass,
@@ -83,6 +85,7 @@ impl SessionManagerState {
         mode: RowSelectionMode,
         cx: &mut Context<Self>,
     ) {
+        self.keyboard_cursor = None;
         match mode {
             RowSelectionMode::Replace => {
                 self.selected_items.clear();
@@ -122,6 +125,49 @@ impl SessionManagerState {
         cx.notify();
     }
 
+    pub(super) fn step_selection(&mut self, forward: bool, extend: bool, cx: &mut Context<Self>) {
+        // A grid can show the same session in Recent and in a group. Navigate each
+        // identity once so crossing the second copy cannot send focus back to Recent.
+        let mut seen = std::collections::HashSet::new();
+        let order: Vec<_> = self
+            .visible_selection_targets
+            .iter()
+            .filter(|target| seen.insert(*target))
+            .collect();
+        if order.is_empty() {
+            return;
+        }
+        let current = self
+            .keyboard_cursor
+            .as_ref()
+            .or(self.selection_anchor.as_ref());
+        let index = current.and_then(|target| order.iter().position(|&v| v == target));
+        let next = match (forward, index) {
+            (true, Some(i)) => (i + 1).min(order.len() - 1),
+            (true, None) => 0,
+            (false, Some(i)) => i.saturating_sub(1),
+            (false, None) => order.len() - 1,
+        };
+        let target = (*order[next]).clone();
+        if extend
+            && let Some(anchor) = self
+                .selection_anchor
+                .as_ref()
+                .and_then(|anchor| order.iter().position(|&v| v == anchor))
+        {
+            self.selected_items = order[anchor.min(next)..=anchor.max(next)]
+                .iter()
+                .copied()
+                .cloned()
+                .collect();
+        } else {
+            self.apply_session_manager_selection(target.clone(), RowSelectionMode::Replace, cx);
+        }
+        self.keyboard_cursor = Some(target);
+        self.reveal_keyboard_cursor = true;
+        cx.notify();
+    }
+
     pub fn set_session_manager_visible_selection_targets(
         &mut self,
         targets: Vec<SessionManagerSelectionTarget>,
@@ -138,6 +184,7 @@ impl SessionManagerState {
         }
         self.selected_items.clear();
         self.selection_anchor = None;
+        self.keyboard_cursor = None;
         cx.notify();
     }
 }
@@ -171,6 +218,7 @@ impl SessionManagerState {
         true
     }
 
+    #[cfg(not(target_family = "wasm"))]
     pub fn active_input(
         &self,
         tab_active: bool,
@@ -222,40 +270,49 @@ impl SessionManagerState {
                 let changed = match input {
                     SessionManagerInput::Search => self.search_query.pop().is_some(),
                     SessionManagerInput::GroupName => self.group_name_draft.pop().is_some(),
+                    #[cfg(not(target_family = "wasm"))]
                     SessionManagerInput::OxideImportPassword => {
                         self.oxide_import_dialog.as_mut().is_some_and(|dialog| {
                             dialog.password.pop().is_some() || dialog.error.take().is_some()
                         })
                     }
+                    #[cfg(not(target_family = "wasm"))]
                     SessionManagerInput::OxideExportPassword => {
                         self.oxide_export_dialog.as_mut().is_some_and(|dialog| {
                             dialog.password.pop().is_some() || dialog.error.take().is_some()
                         })
                     }
+                    #[cfg(not(target_family = "wasm"))]
                     SessionManagerInput::OxideExportConfirmPassword => {
                         self.oxide_export_dialog.as_mut().is_some_and(|dialog| {
                             dialog.confirm_password.pop().is_some() || dialog.error.take().is_some()
                         })
                     }
+                    #[cfg(not(target_family = "wasm"))]
                     SessionManagerInput::OxideExportDescription => {
                         self.oxide_export_dialog.as_mut().is_some_and(|dialog| {
                             dialog.description.pop().is_some() || dialog.error.take().is_some()
                         })
                     }
+                    #[cfg(not(target_family = "wasm"))]
                     SessionManagerInput::BatchPassword => {
                         self.batch_add.as_mut().is_some_and(|dialog| {
                             dialog.password.pop().is_some() || dialog.error.take().is_some()
                         })
                     }
+                    #[cfg(not(target_family = "wasm"))]
                     SessionManagerInput::BatchKeyPath => {
                         self.batch_add.as_mut().is_some_and(|dialog| {
                             dialog.key_path.pop().is_some() || dialog.error.take().is_some()
                         })
                     }
+                    #[cfg(not(target_family = "wasm"))]
                     SessionManagerInput::BatchTemplateName => self
                         .batch_add
                         .as_mut()
                         .is_some_and(|dialog| dialog.rename_draft.pop().is_some()),
+                    #[cfg(target_family = "wasm")]
+                    _ => false,
                 };
                 if changed {
                     cx.notify();
@@ -271,6 +328,7 @@ impl SessionManagerState {
 }
 
 impl SessionManagerState {
+    #[cfg(not(target_family = "wasm"))]
     pub fn retain_visible_selection(
         &mut self,
         items: Vec<super::SessionManagerDisplayItem>,
@@ -280,6 +338,14 @@ impl SessionManagerState {
             .into_iter()
             .filter_map(|item| item.selection_target())
             .collect::<std::collections::HashSet<_>>();
+        self.retain_selection_targets(visible_items, cx);
+    }
+
+    pub(super) fn retain_selection_targets(
+        &mut self,
+        visible_items: std::collections::HashSet<SessionManagerSelectionTarget>,
+        cx: &mut Context<Self>,
+    ) {
         let previous_count = self.selected_items.len();
         self.selected_items
             .retain(|target| visible_items.contains(target));

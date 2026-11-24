@@ -19,6 +19,7 @@ const MANAGER_RECENT_ICON_SIZE: f32 = 28.0;
 const MANAGER_RECENT_ICON_GLYPH_SIZE: f32 = 14.0;
 const MANAGER_GRID_CARD_MIN_WIDTH: f32 = 260.0;
 const MANAGER_GRID_CARD_BASIS: f32 = 320.0;
+#[cfg(not(target_family = "wasm"))]
 const MANAGER_SIDEBAR_TREE_ESTIMATED_ROW_HEIGHT: f32 = 38.0;
 const MANAGER_ROW_ACTION_MENU_WIDTH: f32 = 176.0;
 const MANAGER_ROW_ACTION_MENU_CONNECTION_HEIGHT: f32 = 192.0;
@@ -28,6 +29,53 @@ const MANAGER_ROW_ACTION_MENU_SSH_CONFIG_HEIGHT: f32 = 76.0;
 const MANAGER_ROW_ACTION_MENU_GROUP_HEIGHT: f32 = 156.0;
 
 impl CatalogView {
+    fn catalog_name(&self, label: Div, item: &CatalogRow) -> Div {
+        use oxideterm_gpui_ui::badge::{StatusPillOptions, StatusTone, status_pill};
+        let label = label.child(item.name.clone());
+        if !item.active && item.protocol_badge.is_none() {
+            return label;
+        }
+        div()
+            .flex()
+            .min_w_0()
+            .items_center()
+            .gap_1()
+            .when(item.active, |row| {
+                row.child(
+                    div()
+                        .flex_none()
+                        .size(px(6.))
+                        .rounded_full()
+                        .bg(rgb(self.tokens.ui.success)),
+                )
+            })
+            .child(label)
+            .when_some(item.protocol_badge.clone(), |row, badge| {
+                row.child(status_pill(
+                    &self.tokens,
+                    badge,
+                    StatusPillOptions::new(StatusTone::Neutral).compact(),
+                ))
+            })
+    }
+
+    fn reveal_keyboard_cursor(
+        &self,
+        list: &gpui::ListState,
+        cx: &mut App,
+        index_for: impl FnOnce(&SessionManagerSelectionTarget) -> Option<usize>,
+    ) {
+        if !self.session_manager.read(cx).reveal_keyboard_cursor {
+            return;
+        }
+        self.session_manager.update(cx, |state, _| {
+            state.reveal_keyboard_cursor = false;
+            if let Some(index) = state.keyboard_cursor.as_ref().and_then(index_for) {
+                list.scroll_to_reveal_item(index);
+            }
+        });
+    }
+
     fn session_manager_card_surface(&self, radius: f32, has_background: bool) -> Div {
         let surface = oxideterm_gpui_ui::semantic_surface(
             &self.tokens,
@@ -79,6 +127,7 @@ impl CatalogView {
         )
     }
 
+    #[cfg(not(target_family = "wasm"))]
     pub(super) fn session_manager_sidebar_tree_list_spec() -> TauriVirtualListSpec {
         TauriVirtualListSpec::new(
             px(MANAGER_SIDEBAR_TREE_ESTIMATED_ROW_HEIGHT),
@@ -89,7 +138,7 @@ impl CatalogView {
     fn sync_session_manager_grid_list_state(
         &self,
         rows: &[SessionManagerGridRow],
-        items: &[SessionManagerDisplayItem],
+        items: &[CatalogRow],
         cx: &App,
     ) {
         let signatures = rows
@@ -106,7 +155,7 @@ impl CatalogView {
         );
     }
 
-    fn sync_session_manager_main_list_state(&self, items: &[SessionManagerDisplayItem], cx: &App) {
+    fn sync_session_manager_main_list_state(&self, items: &[CatalogRow], cx: &App) {
         let signatures = items
             .iter()
             .map(session_manager_display_item_signature)
@@ -124,7 +173,7 @@ impl CatalogView {
     fn sync_session_manager_tree_list_state(
         &self,
         rows: &[SessionManagerTreeRow],
-        items: &[SessionManagerDisplayItem],
+        items: &[CatalogRow],
         cx: &App,
     ) {
         let signatures = rows
@@ -141,10 +190,11 @@ impl CatalogView {
         );
     }
 
+    #[cfg(not(target_family = "wasm"))]
     pub(super) fn sync_session_manager_sidebar_tree_list_state(
         &self,
         rows: &[SessionManagerTreeRow],
-        items: &[SessionManagerDisplayItem],
+        items: &[CatalogRow],
         cx: &App,
     ) {
         let signatures = rows
@@ -170,6 +220,7 @@ impl CatalogView {
         let items = std::mem::take(&mut self.environment.items);
         let view_mode = self.session_manager.read(cx).view_mode;
         if items.is_empty() && view_mode != SessionManagerViewMode::Tree {
+            self.set_session_manager_visible_selection_targets(Vec::new(), cx);
             return div()
                 .size_full()
                 .flex()
@@ -236,7 +287,7 @@ impl CatalogView {
 
     pub(super) fn render_session_manager_grid_view(
         &self,
-        items: Vec<SessionManagerDisplayItem>,
+        items: Vec<CatalogRow>,
         window: &Window,
         has_background: bool,
         cx: &mut Context<Self>,
@@ -258,8 +309,17 @@ impl CatalogView {
         );
         self.sync_session_manager_grid_list_state(&rows, &items, cx);
         let state = self.session_manager.read(cx).main_grid_list_state.clone();
+        self.reveal_keyboard_cursor(&state, cx, |target| {
+            rows.iter().position(|row| match row {
+                SessionManagerGridRow::RecentItems { item_indices, .. }
+                | SessionManagerGridRow::Cards { item_indices } => item_indices
+                    .iter()
+                    .any(|&i| items[i].selection_target().as_ref() == Some(target)),
+                SessionManagerGridRow::SectionHeader { .. } => false,
+            })
+        });
         let workspace = cx.entity();
-        let items = Arc::<[SessionManagerDisplayItem]>::from(items);
+        let items = Arc::<[CatalogRow]>::from(items);
         let list = tauri_virtual_list(
             state,
             Self::session_manager_grid_list_spec(),
@@ -295,7 +355,7 @@ impl CatalogView {
     pub(super) fn render_session_manager_grid_row(
         &self,
         row: Option<&SessionManagerGridRow>,
-        items: &[SessionManagerDisplayItem],
+        items: &[CatalogRow],
         has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -388,14 +448,14 @@ impl CatalogView {
 
     pub(super) fn render_session_manager_recent_item(
         &self,
-        item: &SessionManagerDisplayItem,
+        item: &CatalogRow,
         has_background: bool,
         cx: &mut Context<Self>,
     ) -> Div {
         let theme = self.tokens.ui;
-        let open_target = item.open_target();
+        let open_target = item.target.clone();
         let selection_target = item.selection_target();
-        let open_button_target = item.open_target();
+        let open_button_target = item.target.clone();
         let last_used = format_last_used(item.last_used().as_deref(), &self.i18n);
         let is_selected = selection_target.as_ref().is_some_and(|target| {
             self.session_manager
@@ -433,7 +493,7 @@ impl CatalogView {
                     .items_center()
                     .justify_center()
                     .bg(rgba((theme.accent << 8) | 0x1a))
-                    .child(item.icon().render(
+                    .child(item.icon.render(
                         MANAGER_RECENT_ICON_GLYPH_SIZE,
                         rgb(theme.accent),
                         true,
@@ -453,7 +513,7 @@ impl CatalogView {
                             } else {
                                 theme.text
                             }))
-                            .child(item.name().to_string()),
+                            .map(|label| self.catalog_name(label, item)),
                     )
                     .child(
                         div()
@@ -513,15 +573,15 @@ impl CatalogView {
 
     pub(super) fn render_session_manager_item_card(
         &self,
-        item: &SessionManagerDisplayItem,
+        item: &CatalogRow,
         has_background: bool,
         cx: &mut Context<Self>,
     ) -> Div {
         let theme = self.tokens.ui;
-        let open_target = item.open_target();
+        let open_target = item.target.clone();
         let selection_target = item.selection_target();
         let checkbox_target = selection_target.clone();
-        let subtitle = if matches!(item, SessionManagerDisplayItem::SshConfig(_)) {
+        let subtitle = if matches!(&item.target, SessionManagerOpenTarget::SshConfig(_)) {
             format!(
                 "{} · {}",
                 item.subtitle(),
@@ -595,7 +655,7 @@ impl CatalogView {
                             } else {
                                 theme.text
                             }))
-                            .child(item.name().to_string()),
+                            .map(|label| self.catalog_name(label, item)),
                     )
                     .child(
                         div()
@@ -610,7 +670,7 @@ impl CatalogView {
 
     pub(super) fn render_session_manager_list_view(
         &self,
-        items: Vec<SessionManagerDisplayItem>,
+        items: Vec<CatalogRow>,
         has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -624,8 +684,13 @@ impl CatalogView {
         );
         self.sync_session_manager_main_list_state(&items, cx);
         let state = self.session_manager.read(cx).main_list_state.clone();
+        self.reveal_keyboard_cursor(&state, cx, |target| {
+            items
+                .iter()
+                .position(|item| item.selection_target().as_ref() == Some(target))
+        });
         let workspace = cx.entity();
-        let items = Arc::<[SessionManagerDisplayItem]>::from(items);
+        let items = Arc::<[CatalogRow]>::from(items);
         let list = tauri_virtual_list(
             state,
             Self::session_manager_list_spec(),
@@ -710,7 +775,7 @@ impl CatalogView {
 
     pub(super) fn render_session_manager_tree_view(
         &mut self,
-        items: Vec<SessionManagerDisplayItem>,
+        items: Vec<CatalogRow>,
         has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -730,8 +795,16 @@ impl CatalogView {
         );
         self.sync_session_manager_tree_list_state(&rows, &items, cx);
         let state = self.session_manager.read(cx).main_tree_list_state.clone();
+        self.reveal_keyboard_cursor(&state, cx, |target| {
+            rows.iter().position(|row| match row {
+                SessionManagerTreeRow::Item { item_index, .. } => {
+                    items[*item_index].selection_target().as_ref() == Some(target)
+                }
+                SessionManagerTreeRow::Group { .. } => false,
+            })
+        });
         let workspace = cx.entity();
-        let items = Arc::<[SessionManagerDisplayItem]>::from(items);
+        let items = Arc::<[CatalogRow]>::from(items);
         let list = tauri_virtual_list(
             state,
             Self::session_manager_tree_list_spec(),
@@ -930,11 +1003,12 @@ impl CatalogView {
         )
     }
 
+    #[cfg(not(target_family = "wasm"))]
     pub(super) fn render_session_manager_sidebar_tree_row(
         &self,
         rows: &[SessionManagerTreeRow],
         index: usize,
-        items: &[SessionManagerDisplayItem],
+        items: &[CatalogRow],
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let Some(row) = rows.get(index) else {
@@ -954,7 +1028,7 @@ impl CatalogView {
     pub(super) fn render_session_manager_tree_row(
         &self,
         row: Option<&SessionManagerTreeRow>,
-        items: &[SessionManagerDisplayItem],
+        items: &[CatalogRow],
         has_background: bool,
         sidebar: bool,
         cx: &mut Context<Self>,
@@ -1017,14 +1091,12 @@ impl CatalogView {
                         .on_mouse_down(
                             MouseButton::Right,
                             cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
-                                if let Some(target) = context_target.clone() {
-                                    this.open_session_manager_context_menu(
-                                        target,
-                                        f32::from(event.position.x),
-                                        f32::from(event.position.y),
-                                        cx,
-                                    );
-                                }
+                                this.open_session_manager_context_menu(
+                                    context_target.clone(),
+                                    f32::from(event.position.x),
+                                    f32::from(event.position.y),
+                                    cx,
+                                );
                                 cx.stop_propagation();
                             }),
                         );
@@ -1275,7 +1347,7 @@ impl CatalogView {
 
     pub(super) fn render_session_manager_display_item_row(
         &self,
-        item: &SessionManagerDisplayItem,
+        item: &CatalogRow,
         depth: usize,
         has_background: bool,
         allow_drag: bool,
@@ -1283,10 +1355,10 @@ impl CatalogView {
         cx: &mut Context<Self>,
     ) -> gpui::Stateful<gpui::Div> {
         let theme = self.tokens.ui;
-        let open_target = item.open_target();
+        let open_target = item.target.clone();
         let selection_target = item.selection_target();
         let last_used = item.last_used();
-        let subtitle = if matches!(item, SessionManagerDisplayItem::SshConfig(_)) {
+        let subtitle = if matches!(&item.target, SessionManagerOpenTarget::SshConfig(_)) {
             format!(
                 "{} · {}",
                 item.subtitle(),
@@ -1481,7 +1553,7 @@ impl CatalogView {
                             } else {
                                 theme.text
                             }))
-                            .child(item.name().to_string()),
+                            .map(|label| self.catalog_name(label, item)),
                     )
                     .child(
                         div()
@@ -1527,11 +1599,7 @@ impl CatalogView {
         }
     }
 
-    pub(super) fn render_session_manager_item_icon(
-        &self,
-        item: &SessionManagerDisplayItem,
-        text: u32,
-    ) -> Div {
+    pub(super) fn render_session_manager_item_icon(&self, item: &CatalogRow, text: u32) -> Div {
         self.render_session_manager_item_icon_sized(
             item,
             text,
@@ -1543,27 +1611,27 @@ impl CatalogView {
 
     pub(super) fn render_session_manager_item_icon_sized(
         &self,
-        item: &SessionManagerDisplayItem,
+        item: &CatalogRow,
         text: u32,
         box_size: f32,
         glyph_size: f32,
         radius: f32,
     ) -> Div {
         let ui = self.tokens.ui;
-        let semantic_color = match item {
-            SessionManagerDisplayItem::Connection(_)
-            | SessionManagerDisplayItem::Tunnel(_)
-            | SessionManagerDisplayItem::RemoteDesktop(_) => ui.info,
-            SessionManagerDisplayItem::SshConfig(_) | SessionManagerDisplayItem::Plugin(_) => {
+        let semantic_color = match &item.target {
+            SessionManagerOpenTarget::Connection(_)
+            | SessionManagerOpenTarget::Tunnel(_)
+            | SessionManagerOpenTarget::RemoteDesktop(_) => ui.info,
+            SessionManagerOpenTarget::SshConfig(_) | SessionManagerOpenTarget::Plugin(_) => {
                 ui.accent_secondary
             }
-            SessionManagerDisplayItem::Serial(_)
-            | SessionManagerDisplayItem::Ble(_)
-            | SessionManagerDisplayItem::LocalTerminal(_) => ui.warning,
-            SessionManagerDisplayItem::Telnet(_)
-            | SessionManagerDisplayItem::Ftp(_)
-            | SessionManagerDisplayItem::StandaloneSftp(_) => ui.success,
-            SessionManagerDisplayItem::Mosh(_) => ui.accent,
+            SessionManagerOpenTarget::Serial(_)
+            | SessionManagerOpenTarget::Ble(_)
+            | SessionManagerOpenTarget::LocalTerminal(_) => ui.warning,
+            SessionManagerOpenTarget::Telnet(_)
+            | SessionManagerOpenTarget::Ftp(_)
+            | SessionManagerOpenTarget::StandaloneSftp(_) => ui.success,
+            SessionManagerOpenTarget::Mosh(_) => ui.accent,
         };
         let (default_background, default_foreground) =
             ((semantic_color << 8) | 0x26, semantic_color);
@@ -1588,30 +1656,25 @@ impl CatalogView {
             .items_center()
             .justify_center()
             .bg(bg)
-            .child(item.icon().render(glyph_size, fg, true))
+            .child(item.icon.render(glyph_size, fg, true))
             .when(
-                matches!(item, SessionManagerDisplayItem::Connection(_)),
+                matches!(&item.target, SessionManagerOpenTarget::Connection(_)),
                 |icon| icon.border_1().border_color(rgba((text << 8) | 0x1a)),
             )
     }
 
     pub(super) fn render_session_manager_display_item_actions(
         &self,
-        item: &SessionManagerDisplayItem,
+        item: &CatalogRow,
         has_background: bool,
         cx: &mut Context<Self>,
     ) -> Div {
-        match item {
-            SessionManagerDisplayItem::Tunnel(item) => {
-                let id = item.forward.id.clone();
+        match &item.target {
+            SessionManagerOpenTarget::Tunnel(id) => {
+                let id = id.clone();
                 let edit = id.clone();
                 let menu = id.clone();
-                let running = matches!(
-                    self.ssh_tunnel_status(&id),
-                    oxideterm_forwarding::ForwardStatus::Active
-                        | oxideterm_forwarding::ForwardStatus::Starting
-                        | oxideterm_forwarding::ForwardStatus::Suspended
-                );
+                let running = self.ssh_tunnel_status(&id).can_stop();
                 div()
                     .w(px(MANAGER_ROW_ACTIONS_WIDTH))
                     .flex_none()
@@ -1686,10 +1749,10 @@ impl CatalogView {
                         cx,
                     ))
             }
-            SessionManagerDisplayItem::Plugin(profile) => {
-                let open = profile.id.clone();
-                let edit = profile.id.clone();
-                let menu = profile.id.clone();
+            SessionManagerOpenTarget::Plugin(id) => {
+                let open = id.clone();
+                let edit = id.clone();
+                let menu = id.clone();
                 div()
                     .w(px(MANAGER_ROW_ACTIONS_WIDTH))
                     .flex_none()
@@ -1752,10 +1815,10 @@ impl CatalogView {
                         cx,
                     ))
             }
-            SessionManagerDisplayItem::Connection(connection) => {
-                let open_id = connection.id.clone();
-                let edit_id = connection.id.clone();
-                let menu_id = connection.id.clone();
+            SessionManagerOpenTarget::Connection(id) => {
+                let open_id = id.clone();
+                let edit_id = id.clone();
+                let menu_id = id.clone();
                 div()
                     .w(px(MANAGER_ROW_ACTIONS_WIDTH))
                     .flex_none()
@@ -1818,9 +1881,9 @@ impl CatalogView {
                         cx,
                     ))
             }
-            SessionManagerDisplayItem::SshConfig(host) => {
-                let open_alias = host.alias.clone();
-                let import_alias = host.alias.clone();
+            SessionManagerOpenTarget::SshConfig(id) => {
+                let open_alias = id.clone();
+                let import_alias = id.clone();
                 div()
                     .w(px(MANAGER_ROW_ACTIONS_WIDTH))
                     .flex_none()
@@ -1864,10 +1927,10 @@ impl CatalogView {
                         cx,
                     ))
             }
-            SessionManagerDisplayItem::Serial(profile) => {
-                let open_id = profile.id.clone();
-                let edit_id = profile.id.clone();
-                let menu_id = profile.id.clone();
+            SessionManagerOpenTarget::Serial(id) => {
+                let open_id = id.clone();
+                let edit_id = id.clone();
+                let menu_id = id.clone();
                 div()
                     .w(px(MANAGER_ROW_ACTIONS_WIDTH))
                     .flex_none()
@@ -1930,10 +1993,10 @@ impl CatalogView {
                         cx,
                     ))
             }
-            SessionManagerDisplayItem::Ble(profile) => {
-                let open_id = profile.id.clone();
-                let edit_id = profile.id.clone();
-                let menu_id = profile.id.clone();
+            SessionManagerOpenTarget::Ble(id) => {
+                let open_id = id.clone();
+                let edit_id = id.clone();
+                let menu_id = id.clone();
                 div()
                     .w(px(MANAGER_ROW_ACTIONS_WIDTH))
                     .flex_none()
@@ -1996,10 +2059,10 @@ impl CatalogView {
                         cx,
                     ))
             }
-            SessionManagerDisplayItem::LocalTerminal(profile) => {
-                let open_id = profile.id.clone();
-                let edit_id = profile.id.clone();
-                let menu_id = profile.id.clone();
+            SessionManagerOpenTarget::LocalTerminal(id) => {
+                let open_id = id.clone();
+                let edit_id = id.clone();
+                let menu_id = id.clone();
                 div()
                     .w(px(MANAGER_ROW_ACTIONS_WIDTH))
                     .flex_none()
@@ -2064,8 +2127,8 @@ impl CatalogView {
                         cx,
                     ))
             }
-            SessionManagerDisplayItem::Telnet(_) | SessionManagerDisplayItem::Ftp(_) => {
-                let ftp = matches!(item, SessionManagerDisplayItem::Ftp(_));
+            SessionManagerOpenTarget::Telnet(_) | SessionManagerOpenTarget::Ftp(_) => {
+                let ftp = matches!(&item.target, SessionManagerOpenTarget::Ftp(_));
                 let open_id = item.id().to_owned();
                 let edit_id = open_id.clone();
                 let menu_id = open_id.clone();
@@ -2158,10 +2221,10 @@ impl CatalogView {
                         cx,
                     ))
             }
-            SessionManagerDisplayItem::Mosh(profile) => {
-                let open_id = profile.id.clone();
-                let edit_id = profile.id.clone();
-                let menu_id = profile.id.clone();
+            SessionManagerOpenTarget::Mosh(id) => {
+                let open_id = id.clone();
+                let edit_id = id.clone();
+                let menu_id = id.clone();
                 div()
                     .w(px(MANAGER_ROW_ACTIONS_WIDTH))
                     .flex_none()
@@ -2224,10 +2287,10 @@ impl CatalogView {
                         cx,
                     ))
             }
-            SessionManagerDisplayItem::StandaloneSftp(profile) => {
-                let open_id = profile.id.clone();
-                let edit_id = profile.id.clone();
-                let menu_id = profile.id.clone();
+            SessionManagerOpenTarget::StandaloneSftp(id) => {
+                let open_id = id.clone();
+                let edit_id = id.clone();
+                let menu_id = id.clone();
                 div()
                     .w(px(MANAGER_ROW_ACTIONS_WIDTH))
                     .flex_none()
@@ -2292,10 +2355,10 @@ impl CatalogView {
                         cx,
                     ))
             }
-            SessionManagerDisplayItem::RemoteDesktop(profile) => {
-                let open_id = profile.id.clone();
-                let edit_id = profile.id.clone();
-                let menu_id = profile.id.clone();
+            SessionManagerOpenTarget::RemoteDesktop(id) => {
+                let open_id = id.clone();
+                let edit_id = id.clone();
+                let menu_id = id.clone();
                 div()
                     .w(px(MANAGER_ROW_ACTIONS_WIDTH))
                     .flex_none()
@@ -2461,14 +2524,9 @@ impl CatalogView {
                 SessionManagerRowActionTarget::Tunnel(id) => Some(id.clone()),
                 _ => None,
             };
-            let tunnel_running = tunnel_id.as_deref().is_some_and(|id| {
-                matches!(
-                    self.ssh_tunnel_status(id),
-                    oxideterm_forwarding::ForwardStatus::Active
-                        | oxideterm_forwarding::ForwardStatus::Starting
-                        | oxideterm_forwarding::ForwardStatus::Suspended
-                )
-            });
+            let tunnel_running = tunnel_id
+                .as_deref()
+                .is_some_and(|id| self.ssh_tunnel_status(id).can_stop());
             let open_label = if tunnel_id.is_some() {
                 self.i18n.t(if tunnel_running {
                     "sessionManager.actions.stop_tunnel"
@@ -3226,9 +3284,10 @@ impl CatalogView {
         )
     }
 
+    #[cfg(not(target_family = "wasm"))]
     pub(super) fn render_session_manager_sidebar_tree(
         &mut self,
-        items: Vec<SessionManagerDisplayItem>,
+        items: Vec<CatalogRow>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
@@ -3258,7 +3317,7 @@ impl CatalogView {
             .sidebar_tree_list_state
             .clone();
         let workspace = cx.entity();
-        let items = Arc::<[SessionManagerDisplayItem]>::from(items);
+        let items = Arc::<[CatalogRow]>::from(items);
         let list = tauri_virtual_list(
             state,
             Self::session_manager_sidebar_tree_list_spec(),

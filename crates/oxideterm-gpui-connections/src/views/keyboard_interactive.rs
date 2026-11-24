@@ -14,7 +14,7 @@ use zeroize::Zeroizing;
 
 use super::{ConnectionsEnvironment, dialog::DialogRenderer};
 mod input;
-use input::PromptDraft;
+use super::line_edit::LineEdit as PromptDraft;
 
 pub struct KeyboardInteractivePrompt {
     pub label: String,

@@ -158,18 +158,7 @@ pub fn session_group_tree(
         }
     }
 
-    let mut sorted = paths.into_iter().collect::<Vec<_>>();
-    sorted.sort();
-    let mut roots = Vec::new();
-    let mut children: HashMap<String, Vec<String>> = HashMap::new();
-    for path in sorted {
-        if let Some((parent, _name)) = path.rsplit_once('/') {
-            children.entry(parent.to_string()).or_default().push(path);
-        } else {
-            roots.push(path);
-        }
-    }
-    (roots, children)
+    super::catalog::group_tree_from_paths(paths)
 }
 
 pub struct CatalogGroups<'a> {
@@ -187,134 +176,8 @@ impl SessionManagerState {
         event: &gpui::KeyDownEvent,
         cx: &mut Context<Self>,
     ) -> (bool, Option<crate::views::ConnectionsWindowRequest>) {
-        use crate::views::ConnectionsWindowRequest as Request;
-        use SessionManagerBasicDialogFooterAction as Footer;
-        use oxideterm_gpui_ui::confirm::{
-            ModalFooterInputKeyAction as Key, modal_footer_input_key_action,
-        };
-        let modifiers = event.keystroke.modifiers;
-        if !self.show_group_manager
-            || self.group_editor.is_none()
-            || modifiers.platform
-            || modifiers.control
-        {
-            return (false, None);
-        }
-        let request = match modal_footer_input_key_action(
-            event.keystroke.key.as_str(),
-            modifiers.shift,
-            &SESSION_MANAGER_BASIC_DIALOG_FOOTER_ACTIONS,
-            true,
-            self.focused_input == Some(SessionManagerInput::GroupName),
-            self.focused_basic_dialog_footer_action,
-            Footer::Cancel,
-            None,
-        ) {
-            Some(Key::Cancel | Key::Activate(Footer::Cancel)) => {
-                self.cancel_group_editor(cx);
-                Some(Request::ClearComposition)
-            }
-            Some(Key::FocusInput) => {
-                self.focused_input = Some(SessionManagerInput::GroupName);
-                self.focused_basic_dialog_footer_action = None;
-                cx.notify();
-                Some(Request::ClearComposition)
-            }
-            Some(Key::FocusFooter(action)) => {
-                self.focused_input = None;
-                self.focused_basic_dialog_footer_action = Some(action);
-                cx.notify();
-                Some(Request::ClearComposition)
-            }
-            Some(Key::Activate(Footer::Primary)) => {
-                if !self.can_save_group() {
-                    return (true, None);
-                }
-                self.focused_basic_dialog_footer_action = None;
-                cx.notify();
-                Some(Request::Catalog(super::CatalogAction::SaveGroup))
-            }
-            None => return (false, None),
-        };
-        (true, request)
-    }
-
-    pub(super) fn can_save_group(&self) -> bool {
-        let Some(editor) = &self.group_editor else {
-            return false;
-        };
-        let parent = match editor {
-            SessionManagerGroupEditor::Create { parent_path }
-            | SessionManagerGroupEditor::Rename { parent_path, .. } => parent_path.as_deref(),
-        };
-        let Some(candidate) = session_group_path_from_leaf(parent, self.group_name_draft.trim())
-        else {
-            return false;
-        };
-        !matches!(editor, SessionManagerGroupEditor::Rename { old_path, .. } if old_path == &candidate)
-    }
-
-    pub(super) fn open_group_editor(
-        &mut self,
-        editor: SessionManagerGroupEditor,
-        name: String,
-        cx: &mut Context<Self>,
-    ) {
-        close_session_menu_state(self);
-        self.show_group_manager = true;
-        self.group_name_draft = name;
-        self.group_editor = Some(editor);
-        self.group_editor_error = None;
-        self.group_manager_error = None;
-        self.focused_input = Some(SessionManagerInput::GroupName);
-        self.focused_basic_dialog_footer_action = None;
-        cx.emit(SessionManagerWorkspaceEvent::ModalBoundaryChanged);
-        cx.notify();
-    }
-
-    pub(super) fn rename_group_editor(&mut self, group: String, cx: &mut Context<Self>) {
-        let (parent, leaf) = split_session_group_path(&group);
-        let parent_path = parent.map(ToOwned::to_owned);
-        let name = leaf.to_owned();
-        self.open_group_editor(
-            SessionManagerGroupEditor::Rename {
-                old_path: group,
-                parent_path,
-            },
-            name,
-            cx,
-        );
-    }
-
-    pub(super) fn request_delete_session_group(&mut self, name: String, cx: &mut Context<Self>) {
-        close_session_menu_state(self);
-        self.reopen_group_manager_after_delete = self.show_group_manager;
-        self.show_group_manager = false;
-        self.group_editor = None;
-        self.group_editor_error = None;
-        self.focused_input = None;
-        self.focused_basic_dialog_footer_action = None;
-        self.delete_confirm = Some(SessionManagerDeleteConfirm::Group { name });
-        cx.emit(SessionManagerWorkspaceEvent::ModalBoundaryChanged);
-        cx.notify();
-    }
-
-    pub fn close_session_group_manager(&mut self, cx: &mut Context<Self>) {
-        if self.show_group_manager {
-            self.show_group_manager = false;
-            self.group_manager_error = None;
-            self.cancel_group_editor(cx);
-            cx.emit(SessionManagerWorkspaceEvent::ModalBoundaryChanged);
-        }
-    }
-
-    pub fn cancel_group_editor(&mut self, cx: &mut Context<Self>) {
-        self.group_editor = None;
-        self.group_name_draft.clear();
-        self.group_editor_error = None;
-        self.focused_input = None;
-        self.focused_basic_dialog_footer_action = None;
-        cx.notify();
+        let (handled, request) = self.group_editor_key(event, cx);
+        (handled, request.map(Into::into))
     }
 }
 

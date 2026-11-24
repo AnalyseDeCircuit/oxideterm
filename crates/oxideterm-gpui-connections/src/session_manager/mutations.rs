@@ -5,9 +5,8 @@ use oxideterm_terminal_triggers::SavedConnectionKind;
 use std::ops::DerefMut;
 
 use super::{
-    SessionManagerDeleteConfirm as Confirm, SessionManagerRowActionTarget as Row,
-    SessionManagerSelectionTarget as Target, SessionManagerState, SessionManagerWorkspaceEvent,
-    close_session_menu_state, connections_deleted_label,
+    SessionManagerRowActionTarget as Row, SessionManagerSelectionTarget as Target,
+    SessionManagerState, connections_deleted_label,
 };
 
 impl SessionManagerState {
@@ -17,112 +16,34 @@ impl SessionManagerState {
         store: &ConnectionStore,
         cx: &mut Context<Self>,
     ) {
-        let confirm = match target {
-            Row::Group(group) => {
-                self.request_delete_session_group(group, cx);
-                return;
-            }
-            Row::Connection(id) => store.get(&id).map(|p| Confirm::Single {
-                id,
-                name: p.name.clone(),
-            }),
+        let name = match &target {
+            Row::Connection(id) => store.get(id).map(|p| &p.name),
             Row::Serial(id) => store
                 .serial_profiles()
                 .iter()
-                .find(|p| p.id == id)
-                .map(|p| Confirm::SerialProfile {
-                    id,
-                    name: p.name.clone(),
-                }),
-            Row::Ble(id) => {
-                store
-                    .ble_profiles()
-                    .iter()
-                    .find(|p| p.id == id)
-                    .map(|p| Confirm::BleProfile {
-                        id,
-                        name: p.name.clone(),
-                    })
-            }
+                .find(|p| p.id == *id)
+                .map(|p| &p.name),
+            Row::Ble(id) => store
+                .ble_profiles()
+                .iter()
+                .find(|p| p.id == *id)
+                .map(|p| &p.name),
             Row::LocalTerminal(id) => store
                 .local_terminal_profiles()
                 .iter()
-                .find(|p| p.id == id)
-                .map(|p| Confirm::LocalTerminalProfile {
-                    id,
-                    name: p.name.clone(),
-                }),
+                .find(|p| p.id == *id)
+                .map(|p| &p.name),
             Row::Telnet(id) => store
                 .telnet_profiles()
                 .iter()
-                .find(|p| p.id == id)
-                .map(|p| Confirm::TelnetProfile {
-                    id,
-                    name: p.name.clone(),
-                }),
-            Row::Mosh(id) => store.get_mosh_profile(&id).map(|p| Confirm::MoshProfile {
-                id,
-                name: p.name.clone(),
-            }),
-            Row::StandaloneSftp(id) => {
-                store
-                    .get_standalone_sftp_profile(&id)
-                    .map(|p| Confirm::StandaloneSftpProfile {
-                        id,
-                        name: p.name.clone(),
-                    })
-            }
-            Row::RemoteDesktop(id) => {
-                store
-                    .get_remote_desktop_profile(&id)
-                    .map(|p| Confirm::RemoteDesktopProfile {
-                        id,
-                        name: p.name.clone(),
-                    })
-            }
-            Row::Ftp(id) => Some(Confirm::Batch {
-                targets: vec![Target::Ftp(id)],
-            }),
+                .find(|p| p.id == *id)
+                .map(|p| &p.name),
+            Row::Mosh(id) => store.get_mosh_profile(id).map(|p| &p.name),
+            Row::StandaloneSftp(id) => store.get_standalone_sftp_profile(id).map(|p| &p.name),
+            Row::RemoteDesktop(id) => store.get_remote_desktop_profile(id).map(|p| &p.name),
             _ => None,
         };
-        if let Some(confirm) = confirm {
-            self.open_delete_confirmation(confirm, cx);
-        }
-    }
-
-    pub fn request_selected_delete(&mut self, cx: &mut Context<Self>) {
-        if !self.selected_items.is_empty() {
-            self.open_delete_confirmation(
-                Confirm::Batch {
-                    targets: self.selected_items.iter().cloned().collect(),
-                },
-                cx,
-            );
-        }
-    }
-
-    fn open_delete_confirmation(&mut self, confirm: Confirm, cx: &mut Context<Self>) {
-        close_session_menu_state(self);
-        self.delete_confirm = Some(confirm);
-        cx.emit(SessionManagerWorkspaceEvent::ModalBoundaryChanged);
-        cx.notify();
-    }
-
-    pub fn cancel_delete(&mut self, cx: &mut Context<Self>) {
-        if matches!(self.delete_confirm, Some(Confirm::Group { .. })) {
-            self.show_group_manager = self.reopen_group_manager_after_delete;
-            self.reopen_group_manager_after_delete = false;
-        }
-        self.take_delete(cx);
-    }
-
-    pub fn take_delete(&mut self, cx: &mut Context<Self>) -> Option<Confirm> {
-        let confirmed = self.delete_confirm.take();
-        if confirmed.is_some() {
-            cx.emit(SessionManagerWorkspaceEvent::ModalBoundaryChanged);
-            cx.notify();
-        }
-        confirmed
+        self.request_display_delete(target, name.cloned(), cx);
     }
 
     pub fn finish_single_delete(
@@ -260,30 +181,6 @@ pub fn remove_catalog_target<'a>(
         }
         _ => CatalogRemoval::Completed(delete_catalog_profile(store, target)?),
     })
-}
-
-pub enum CatalogDeletion {
-    Single(Target),
-    Batch(Vec<Target>),
-    Group(String),
-}
-
-impl SessionManagerState {
-    pub fn take_catalog_deletion(&mut self, cx: &mut Context<Self>) -> Option<CatalogDeletion> {
-        let target = match self.take_delete(cx)? {
-            Confirm::Single { id, .. } => Target::Connection(id),
-            Confirm::SerialProfile { id, .. } => Target::Serial(id),
-            Confirm::BleProfile { id, .. } => Target::Ble(id),
-            Confirm::LocalTerminalProfile { id, .. } => Target::LocalTerminal(id),
-            Confirm::TelnetProfile { id, .. } => Target::Telnet(id),
-            Confirm::MoshProfile { id, .. } => Target::Mosh(id),
-            Confirm::StandaloneSftpProfile { id, .. } => Target::StandaloneSftp(id),
-            Confirm::RemoteDesktopProfile { id, .. } => Target::RemoteDesktop(id),
-            Confirm::Batch { targets } => return Some(CatalogDeletion::Batch(targets)),
-            Confirm::Group { name } => return Some(CatalogDeletion::Group(name)),
-        };
-        Some(CatalogDeletion::Single(target))
-    }
 }
 
 pub fn delete_catalog_selection<C: DerefMut<Target = App>>(

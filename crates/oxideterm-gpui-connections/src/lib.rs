@@ -28,12 +28,13 @@ pub mod prompts;
 pub mod proxy_launch;
 #[cfg(not(target_family = "wasm"))]
 pub mod saved_auth;
-#[cfg(not(target_family = "wasm"))]
 pub mod session_manager;
 #[cfg(not(target_family = "wasm"))]
 pub mod submission;
 pub mod views;
-pub use views::NewConnectionSelect;
+pub use views::{
+    NewConnectionSelect, PortableCatalogData, PortableCatalogEvent, PortableCatalogView,
+};
 #[cfg(not(target_family = "wasm"))]
 pub mod workers;
 

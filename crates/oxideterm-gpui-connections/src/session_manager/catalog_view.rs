@@ -13,7 +13,6 @@ use gpui::{
     MouseDownEvent, MouseMoveEvent, Point, Render, Rgba, ScrollHandle, SharedString, Subscription,
     Window, anchored, deferred, div, prelude::*, px, rgb, rgba,
 };
-use oxideterm_forwarding::ForwardStatus;
 use oxideterm_gpui_ui::{
     button::{
         ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, IconButtonOptions,
@@ -36,21 +35,31 @@ use oxideterm_gpui_ui::{
 use oxideterm_i18n::I18n;
 use oxideterm_theme::ThemeTokens;
 
-use super::*;
-use crate::views::{
-    ConnectionsDispatch, ConnectionsEnvironmentSource, ConnectionsWindowRequest as Request,
+use super::catalog::{
+    session_manager_display_item_signature, session_manager_grid_row_signature,
+    session_manager_grid_rows, session_manager_grid_visible_targets,
+    session_manager_tree_row_signature, session_manager_tree_rows,
+    session_manager_tree_visible_targets,
 };
+use super::*;
+use crate::views::{ConnectionImeFrame, ConnectionsEnvironmentSource};
+#[cfg(not(target_family = "wasm"))]
+mod desktop;
+#[cfg(not(target_family = "wasm"))]
+pub use desktop::CatalogEnvironment;
+#[cfg(target_family = "wasm")]
+pub type CatalogEnvironment = CatalogFrame<CatalogRow, TunnelDisplayStatus>;
 
 mod group_dialogs;
 mod rows;
 mod surface;
 
-#[derive(Clone, Default)]
-pub struct CatalogEnvironment {
-    pub items: Vec<SessionManagerDisplayItem>,
+#[derive(Clone)]
+pub struct CatalogFrame<Row, Status> {
+    pub items: Vec<Row>,
     pub groups: (Vec<String>, HashMap<String, Vec<String>>),
     pub group_counts: HashMap<String, usize>,
-    pub tunnel_status: HashMap<String, ForwardStatus>,
+    pub tunnel_status: HashMap<String, Status>,
     pub horizontal_chrome_width: f32,
     pub chrome_divider: Rgba,
     pub has_background: bool,
@@ -60,32 +69,45 @@ pub struct CatalogEnvironment {
     pub stored_groups: Vec<String>,
 }
 
-impl CatalogEnvironment {
-    pub fn from_store(
-        manager: &SessionManagerState,
-        store: &oxideterm_connections::ConnectionStore,
-        tunnels: Vec<oxideterm_forwarding::PersistedForward>,
-        include_items: bool,
-    ) -> Self {
-        let group_counts = if include_items {
-            super::groups::connection_counts_by_group(store, &tunnels)
-        } else {
-            HashMap::new()
-        };
-        let groups = session_group_tree(store, &tunnels);
+impl<R, S> Default for CatalogFrame<R, S> {
+    fn default() -> Self {
         Self {
-            items: if include_items {
-                manager.display_catalog(store, tunnels)
-            } else {
-                Vec::new()
-            },
-            group_counts,
-            groups,
-            stored_groups: store.groups().to_vec(),
-            ..Self::default()
+            items: Default::default(),
+            groups: Default::default(),
+            group_counts: Default::default(),
+            tunnel_status: Default::default(),
+            horizontal_chrome_width: 0.,
+            chrome_divider: Default::default(),
+            has_background: false,
+            ui_font: Default::default(),
+            sidebar_background: Default::default(),
+            sidebar_sort_anchor: None,
+            stored_groups: Default::default(),
         }
     }
 }
+
+pub(super) enum CatalogRequest {
+    Catalog(CatalogAction),
+    FocusSessionInput(SessionManagerInput, MouseDownEvent),
+    DragInputSelection(MouseMoveEvent),
+    ClearComposition,
+    #[cfg(not(target_family = "wasm"))]
+    ToggleCatalogSidebarSearch,
+    QueueTooltip {
+        id: String,
+        label: String,
+        x: f32,
+        y: f32,
+    },
+    ClearTooltip(String),
+}
+use CatalogRequest as Request;
+
+pub(super) type CatalogDispatch = Rc<dyn Fn(CatalogRequest, Option<&mut Window>, &mut App)>;
+pub(super) type DisplayFrame = CatalogFrame<CatalogRow, TunnelDisplayStatus>;
+pub(super) type CatalogSource = Rc<dyn Fn(bool, &App) -> Option<DisplayFrame>>;
+pub(super) type CatalogIme = Rc<dyn Fn(SessionManagerInput, &App) -> Option<ConnectionImeFrame>>;
 
 #[derive(Clone)]
 pub enum CatalogAction {
@@ -124,9 +146,12 @@ pub enum CatalogAction {
 #[derive(Clone, Copy)]
 pub(crate) enum CatalogMount {
     Main,
+    #[cfg(not(target_family = "wasm"))]
     Rows,
     Dialogs,
+    #[cfg(not(target_family = "wasm"))]
     SidebarSearch,
+    #[cfg(not(target_family = "wasm"))]
     SidebarSearchButton,
 }
 
@@ -137,22 +162,23 @@ pub(crate) struct CatalogView {
     tokens: ThemeTokens,
     i18n: I18n,
     theme: ConnectionsEnvironmentSource,
-    query: Rc<dyn Fn(bool, &App) -> Option<CatalogEnvironment>>,
-    dispatch: ConnectionsDispatch,
-    environment: CatalogEnvironment,
+    query: CatalogSource,
+    dispatch: CatalogDispatch,
+    environment: DisplayFrame,
     anchors: RefCell<HashMap<SelectAnchorId, OverlayAnchor>>,
     batch_move_scroll: ScrollHandle,
     group_scroll: ScrollHandle,
-    ime: Rc<dyn Fn(SessionManagerInput, &App) -> Option<crate::views::ConnectionImeFrame>>,
+    ime: CatalogIme,
 }
 
 impl CatalogView {
-    pub(crate) fn new(
+    pub(super) fn mount(
         mount: CatalogMount,
         manager: Entity<SessionManagerState>,
         theme: ConnectionsEnvironmentSource,
-        bindings: &SessionManagerViewBindings,
-        dispatch: ConnectionsDispatch,
+        query: CatalogSource,
+        ime: CatalogIme,
+        dispatch: CatalogDispatch,
         cx: &mut Context<Self>,
     ) -> Self {
         let observation = cx.observe(&manager, |_, _, cx| cx.notify());
@@ -163,13 +189,13 @@ impl CatalogView {
             tokens: oxideterm_theme::default_tokens(),
             i18n: I18n::new(oxideterm_i18n::Locale::En),
             theme,
-            query: bindings.catalog.clone(),
+            query,
             dispatch,
             environment: Default::default(),
             anchors: RefCell::new(HashMap::new()),
             batch_move_scroll: ScrollHandle::new(),
             group_scroll: ScrollHandle::new(),
-            ime: bindings.ime.clone(),
+            ime,
         }
     }
 
@@ -254,6 +280,7 @@ impl CatalogView {
         );
     }
 
+    #[cfg(not(target_family = "wasm"))]
     fn render_sidebar_empty_state(
         &self,
         icon: LucideIcon,
@@ -306,12 +333,12 @@ impl CatalogView {
             .unwrap_or_default()
     }
 
-    fn ssh_tunnel_status(&self, id: &str) -> ForwardStatus {
+    fn ssh_tunnel_status(&self, id: &str) -> TunnelDisplayStatus {
         self.environment
             .tunnel_status
             .get(id)
             .cloned()
-            .unwrap_or(ForwardStatus::Stopped)
+            .unwrap_or_default()
     }
 
     fn workspace_chrome_divider(&self) -> Rgba {
@@ -322,6 +349,7 @@ impl CatalogView {
         (28.0_f32).max((self.tokens.metrics.ui_text_xs + 16.0).round())
     }
 
+    #[cfg(not(target_family = "wasm"))]
     fn render_session_tree_child_with_rails(
         &self,
         depth: usize,
@@ -588,13 +616,11 @@ impl CatalogView {
                 .flex()
                 .items_center()
                 .when(search, |input| {
-                    input
-                        .border_b_1()
-                        .bg(if matches!(self.mount, CatalogMount::SidebarSearch) {
-                            self.environment.sidebar_background
-                        } else {
-                            rgba(0).into()
-                        })
+                    input.border_b_1().bg(match self.mount {
+                        #[cfg(not(target_family = "wasm"))]
+                        CatalogMount::SidebarSearch => self.environment.sidebar_background,
+                        _ => rgba(0),
+                    })
                 })
                 .when(!search, |input| {
                     input
@@ -712,6 +738,7 @@ impl CatalogView {
 }
 
 impl CatalogView {
+    #[cfg(not(target_family = "wasm"))]
     fn render_sidebar_search_button(&self, cx: &mut Context<Self>) -> AnyElement {
         let open = self.session_manager.read(cx).sidebar_search_open;
         let theme = self.tokens.ui;
@@ -746,6 +773,7 @@ impl Render for CatalogView {
         };
         self.tokens = theme.tokens;
         self.i18n = theme.i18n;
+        #[cfg(not(target_family = "wasm"))]
         if matches!(self.mount, CatalogMount::SidebarSearchButton) {
             return self.render_sidebar_search_button(cx);
         }
@@ -756,13 +784,19 @@ impl Render for CatalogView {
         if matches!(self.mount, CatalogMount::Dialogs) && !groups && !delete {
             return div().into_any_element();
         }
-        let include_items = matches!(self.mount, CatalogMount::Main | CatalogMount::Rows);
+        let include_items = match self.mount {
+            CatalogMount::Main => true,
+            #[cfg(not(target_family = "wasm"))]
+            CatalogMount::Rows => true,
+            _ => false,
+        };
         let Some(environment) = (self.query)(include_items, cx) else {
             return div().into_any_element();
         };
         self.environment = environment;
         match self.mount {
             CatalogMount::Main => self.render_session_manager_surface(window, cx),
+            #[cfg(not(target_family = "wasm"))]
             CatalogMount::Rows => self.render_session_manager_sidebar_surface(window, cx),
             CatalogMount::Dialogs => div()
                 .absolute()
@@ -770,7 +804,9 @@ impl Render for CatalogView {
                 .children(groups.then(|| self.render_group_manager_dialog(window, cx)))
                 .children(delete.then(|| self.render_session_manager_delete_confirm(cx)))
                 .into_any_element(),
+            #[cfg(not(target_family = "wasm"))]
             CatalogMount::SidebarSearchButton => unreachable!(),
+            #[cfg(not(target_family = "wasm"))]
             CatalogMount::SidebarSearch => self.render_session_text_input(
                 SessionManagerInput::Search,
                 &self.session_manager.read(cx).search_query,
@@ -781,7 +817,7 @@ impl Render for CatalogView {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_family = "wasm")))]
 mod tests {
     use super::*;
     use crate::views::ConnectionsEnvironment;

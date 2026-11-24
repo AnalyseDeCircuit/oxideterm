@@ -1,43 +1,76 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
+#[cfg(not(target_family = "wasm"))]
 mod batch_actions;
+#[cfg(not(target_family = "wasm"))]
 mod batch_state;
+#[cfg(not(target_family = "wasm"))]
 mod batch_templates;
 mod catalog;
+#[cfg(not(target_family = "wasm"))]
+mod catalog_native;
 pub(crate) mod catalog_view;
+mod group_editor;
+#[cfg(not(target_family = "wasm"))]
 mod groups;
 mod interaction;
 mod labels;
+#[cfg(not(target_family = "wasm"))]
 mod mutations;
+#[cfg(not(target_family = "wasm"))]
 mod oxide_assets;
+#[cfg(not(target_family = "wasm"))]
 mod oxide_delivery;
+#[cfg(not(target_family = "wasm"))]
 pub(crate) mod oxide_dialogs;
+#[cfg(not(target_family = "wasm"))]
 mod oxide_keys;
+#[cfg(not(target_family = "wasm"))]
 mod oxide_models;
+#[cfg(not(target_family = "wasm"))]
 mod oxide_transfer;
+mod portable_catalog;
 mod state;
 
+#[cfg(not(target_family = "wasm"))]
 pub use batch_state::*;
+#[cfg(not(target_family = "wasm"))]
 pub use batch_templates::*;
-pub use catalog::*;
+use catalog::CatalogEntry;
+pub use catalog::{
+    CatalogRow, SessionManagerGridRow, SessionManagerItemPointerAction, SessionManagerTreeRow,
+    TunnelDisplayStatus, collect_session_group_paths, group_display_name,
+    session_manager_item_pointer_action, session_manager_tree_row_rails,
+};
+#[cfg(not(target_family = "wasm"))]
+pub use catalog_native::*;
 pub use catalog_view::{CatalogAction, CatalogEnvironment};
+pub use group_editor::CatalogDeletion;
+#[cfg(not(target_family = "wasm"))]
 pub use groups::*;
 pub use interaction::*;
 pub use labels::*;
+#[cfg(not(target_family = "wasm"))]
 pub use mutations::{
-    CatalogDeletion, CatalogRemoval, SavedConsoleProfileKind, delete_catalog_selection,
-    remove_catalog_target,
+    CatalogRemoval, SavedConsoleProfileKind, delete_catalog_selection, remove_catalog_target,
 };
+#[cfg(not(target_family = "wasm"))]
 pub use oxide_assets::*;
+#[cfg(not(target_family = "wasm"))]
 pub use oxide_delivery::*;
+#[cfg(not(target_family = "wasm"))]
 pub use oxide_dialogs::{
     BatchWindowAction, ManagerTextRole, OxideDialogAction, OxideDialogEnvironment,
     SessionManagerViewBindings,
 };
+#[cfg(not(target_family = "wasm"))]
 pub use oxide_keys::OxideKeyScope;
+#[cfg(not(target_family = "wasm"))]
 pub use oxide_models::*;
+#[cfg(not(target_family = "wasm"))]
 pub use oxide_transfer::OxideTransfer;
+pub use portable_catalog::{PortableCatalogData, PortableCatalogEvent, PortableCatalogView};
 pub use state::*;
 
 pub const BG_ACTIVE_THEME_ALPHA: u32 = 0x99; // Nested fills share the tab's sidebar-bounded tint budget.
@@ -73,5 +106,5 @@ pub const OXIDE_IMPORT_NAME_GROUP_LIST_INITIAL_ITEM_COUNT: usize = 0;
 pub const OXIDE_IMPORT_NAME_GROUP_LIST_ESTIMATED_HEIGHT: f32 = 28.0;
 pub const OXIDE_IMPORT_NAME_GROUP_LIST_OVERSCAN: usize = 6;
 
-#[cfg(test)]
+#[cfg(all(test, not(target_family = "wasm")))]
 mod tests;

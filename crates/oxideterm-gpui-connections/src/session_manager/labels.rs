@@ -4,11 +4,13 @@
 use super::*;
 use chrono::{DateTime, Datelike, Local, Utc};
 use gpui::Rgba;
+#[cfg(not(target_family = "wasm"))]
 use oxideterm_connections::AuthType;
 use oxideterm_gpui_ui::surface::{color_for_background, color_for_background_or_alpha};
 use oxideterm_i18n::I18n;
 use std::collections::HashSet;
 
+#[cfg(not(target_family = "wasm"))]
 pub fn auth_label(auth_type: AuthType) -> String {
     match auth_type {
         AuthType::Password => "Password",

@@ -249,14 +249,7 @@ impl CatalogView {
                         )
                         .when_some(
                             selected_tunnels.filter(|ids| {
-                                ids.iter().any(|id| {
-                                    !matches!(
-                                        self.ssh_tunnel_status(id),
-                                        oxideterm_forwarding::ForwardStatus::Active
-                                            | oxideterm_forwarding::ForwardStatus::Starting
-                                            | oxideterm_forwarding::ForwardStatus::Suspended
-                                    )
-                                })
+                                ids.iter().any(|id| !self.ssh_tunnel_status(id).can_stop())
                             }),
                             |actions, ids| {
                                 actions.child(self.render_session_manager_button(
@@ -667,6 +660,7 @@ impl CatalogView {
     /// Renders the session manager as a tree-only panel inside the sidebar body.
     /// Reuses the tab's tree row renderer, context menu, and sort menu, but keeps
     /// its own virtual list state so the tab and sidebar don't fight over scroll.
+    #[cfg(not(target_family = "wasm"))]
     pub(super) fn render_session_manager_sidebar_surface(
         &mut self,
         window: &Window,

@@ -7,8 +7,10 @@ use oxideterm_theme::ThemeTokens;
 mod dialog;
 mod host_key;
 mod keyboard_interactive;
+pub(crate) mod line_edit;
 mod select;
 
+pub use crate::session_manager::{PortableCatalogData, PortableCatalogEvent, PortableCatalogView};
 pub use host_key::{HostKeyDecision, HostKeyFrame, HostKeyPresentation, PortableHostKeyDialog};
 pub use keyboard_interactive::{
     KeyboardInteractiveDecision, KeyboardInteractiveFrame, KeyboardInteractivePrompt,
