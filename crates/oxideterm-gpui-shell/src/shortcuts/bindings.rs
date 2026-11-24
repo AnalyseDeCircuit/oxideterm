@@ -134,7 +134,17 @@ pub enum KeybindingSide {
 }
 
 impl KeybindingSide {
+    #[cfg(target_family = "wasm")]
+    pub fn install_browser_side(self) {
+        BROWSER_SIDE.set(self);
+    }
+
     pub fn current() -> Self {
+        #[cfg(target_family = "wasm")]
+        {
+            BROWSER_SIDE.get()
+        }
+        #[cfg(not(target_family = "wasm"))]
         if cfg!(target_os = "macos") {
             Self::Mac
         } else {
@@ -148,6 +158,11 @@ impl KeybindingSide {
             Self::Other => "other",
         }
     }
+}
+
+#[cfg(target_family = "wasm")]
+thread_local! {
+    static BROWSER_SIDE: std::cell::Cell<KeybindingSide> = const { std::cell::Cell::new(KeybindingSide::Other) };
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

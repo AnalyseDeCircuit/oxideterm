@@ -119,12 +119,14 @@ impl PortableConnectionFormView {
             },
         );
         let mut mount = |kind| {
+            let owner = cx.weak_entity();
             cx.new(|cx| {
                 ConnectionFormView::portable(
                     state.clone(),
                     anchors.clone(),
                     kind,
                     env.theme.clone(),
+                    Rc::new(move |cx| Some(owner.upgrade()?.read(cx).theme.clone())),
                     environment.clone(),
                     algorithms.clone(),
                     env.serial_ports.clone(),
@@ -158,6 +160,11 @@ impl PortableConnectionFormView {
             theme: env.theme,
             tooltip: None,
         }
+    }
+
+    pub fn set_environment(&mut self, env: ConnectionsEnvironment, cx: &mut Context<Self>) {
+        self.theme = env;
+        self.refresh(cx);
     }
 
     /// Edit a saved SSH record without fetching its protected password.

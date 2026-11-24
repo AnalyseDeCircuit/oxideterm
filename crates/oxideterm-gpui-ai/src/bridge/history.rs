@@ -16,6 +16,10 @@ pub struct HistoryReadFailed;
 
 /// Submit acknowledges the transaction only after it is durable. A rejected write can be retried.
 pub trait AiHistoryWriter {
+    /// Memory-backed writers can replace a message directly instead of storing journal deltas.
+    fn accepts_stream_deltas(&self) -> bool {
+        true
+    }
     fn submit(
         &self,
         operations: Vec<oxideterm_ai::HistoryMutation>,

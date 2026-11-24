@@ -7722,6 +7722,7 @@ dependencies = [
  "oxideterm-gpui-editor",
  "oxideterm-gpui-markdown",
  "oxideterm-gpui-ui",
+ "oxideterm-i18n",
  "oxideterm-ide-core",
  "oxideterm-ide-fs",
  "oxideterm-ssh",
@@ -7990,6 +7991,50 @@ version = "2.4.1"
 dependencies = [
  "gpui-pre",
  "oxideterm-theme",
+]
+
+[[package]]
+name = "oxideterm-gpui-web"
+version = "2.4.1"
+dependencies = [
+ "futures",
+ "gpui-pre",
+ "js-sys",
+ "oxideterm-ai",
+ "oxideterm-ai-tasks",
+ "oxideterm-connection-monitor",
+ "oxideterm-gpui-ai",
+ "oxideterm-gpui-connections",
+ "oxideterm-gpui-file-manager",
+ "oxideterm-gpui-forwards",
+ "oxideterm-gpui-host-tools",
+ "oxideterm-gpui-ide",
+ "oxideterm-gpui-onboarding",
+ "oxideterm-gpui-platform",
+ "oxideterm-gpui-quick-commands",
+ "oxideterm-gpui-settings-view",
+ "oxideterm-gpui-sftp",
+ "oxideterm-gpui-shell",
+ "oxideterm-gpui-terminal-view",
+ "oxideterm-gpui-ui",
+ "oxideterm-i18n",
+ "oxideterm-ide-core",
+ "oxideterm-local-files",
+ "oxideterm-notification-center",
+ "oxideterm-quick-commands",
+ "oxideterm-settings",
+ "oxideterm-settings-model",
+ "oxideterm-sftp",
+ "oxideterm-theme",
+ "oxideterm-topology",
+ "oxideterm-workspace",
+ "serde",
+ "serde_json",
+ "url",
+ "wasm-bindgen",
+ "web-sys",
+ "web-time",
+ "zeroize",
 ]
 
 [[package]]

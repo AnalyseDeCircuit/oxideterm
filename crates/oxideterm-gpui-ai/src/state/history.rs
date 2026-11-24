@@ -116,17 +116,22 @@ fn clear_history_source(message: &mut AiChatMessage) {
 
 impl JournalBatch {
     /// Sanitization, hashing and delta construction run off the GPUI thread.
-    fn prepare(mut self, sanitize: bool) -> Self {
+    fn prepare(mut self, sanitize: bool, stream_deltas: bool) -> Self {
         for mut pending in std::mem::take(&mut self.pending) {
             let message = pending.message.as_ref().unwrap();
             let key = (pending.conversation.clone(), message.id.clone());
-            if let Some((delta, snapshot)) = pending.base.as_ref().and_then(|base| {
-                if pending.structural {
-                    base.message_delta(message, pending.revision)
-                } else {
-                    base.delta(message, pending.revision)
-                }
-            }) {
+            if let Some((delta, snapshot)) = pending
+                .base
+                .as_ref()
+                .filter(|_| stream_deltas)
+                .and_then(|base| {
+                    if pending.structural {
+                        base.message_delta(message, pending.revision)
+                    } else {
+                        base.delta(message, pending.revision)
+                    }
+                })
+            {
                 self.operations.push(HistoryMutation::StreamText {
                     conversation_id: pending.conversation.clone(),
                     branch_id: pending.branch.clone(),
@@ -136,7 +141,8 @@ impl JournalBatch {
                 self.streams.push((key, Some(snapshot)));
                 continue;
             }
-            let snapshot = (message.is_streaming
+            let snapshot = (stream_deltas
+                && message.is_streaming
                 && message.role == oxideterm_ai::AiChatRole::Assistant)
                 .then(|| oxideterm_ai::HistoryStreamSnapshot::capture(message, pending.revision));
             self.streams.push((key, snapshot));
@@ -470,7 +476,10 @@ impl AiWorkspaceEntity {
                     pending.await;
                 }
                 if let (Some(writer), Ok(batch)) = (writer, operations) {
-                    let batch = background.spawn(async move { batch.prepare(hosted) }).await;
+                    let deltas = writer.accepts_stream_deltas();
+                    let batch = background
+                        .spawn(async move { batch.prepare(hosted, deltas) })
+                        .await;
                     if !batch.operations.is_empty() {
                         let _ = writer.submit(batch.operations).await;
                     }
@@ -1483,7 +1492,10 @@ impl AiWorkspaceEntity {
         let background = cx.background_executor().clone();
         let hosted = self.history.session.is_some();
         self.history.write = Some(cx.spawn(async move |_, _| {
-            let batch = background.spawn(async move { batch.prepare(hosted) }).await;
+            let deltas = writer.accepts_stream_deltas();
+            let batch = background
+                .spawn(async move { batch.prepare(hosted, deltas) })
+                .await;
             let result = if writer.submit(batch.operations).await.is_ok() {
                 Delivery::Written(batch.revision, batch.streams)
             } else {

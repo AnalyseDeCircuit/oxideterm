@@ -32,6 +32,7 @@ members = [
   "crates/oxideterm-gpui-terminal-view",
   "crates/oxideterm-gpui-ui",
   "crates/oxideterm-gpui-shell",
+  "crates/oxideterm-gpui-web",
   "crates/oxideterm-environment",
   "crates/oxideterm-local-command",
   "crates/oxideterm-plugin-host-api",

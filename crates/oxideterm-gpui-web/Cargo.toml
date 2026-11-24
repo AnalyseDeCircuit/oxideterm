@@ -1,0 +1,51 @@
+[lints]
+workspace = true
+
+[package]
+name = "oxideterm-gpui-web"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+gpui.workspace = true
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+js-sys.workspace = true
+url.workspace = true
+oxideterm-settings-model = { path = "../oxideterm-settings-model" }
+wasm-bindgen.workspace = true
+zeroize.workspace = true
+web-sys = { version = "=0.3.107", features = ["Window", "Location", "Navigator", "WebSocket", "MessageEvent", "Event", "UrlSearchParams"] }
+oxideterm-gpui-platform = { path = "../oxideterm-gpui-platform" }
+oxideterm-gpui-shell = { path = "../oxideterm-gpui-shell" }
+oxideterm-gpui-ui = { path = "../oxideterm-gpui-ui" }
+oxideterm-gpui-terminal-view = { path = "../oxideterm-gpui-terminal-view" }
+oxideterm-gpui-connections = { path = "../oxideterm-gpui-connections" }
+oxideterm-gpui-settings-view = { path = "../oxideterm-gpui-settings-view" }
+oxideterm-gpui-onboarding = { path = "../oxideterm-gpui-onboarding" }
+oxideterm-gpui-forwards = { path = "../oxideterm-gpui-forwards" }
+oxideterm-gpui-quick-commands = { path = "../oxideterm-gpui-quick-commands" }
+oxideterm-quick-commands = { path = "../oxideterm-quick-commands" }
+oxideterm-gpui-file-manager = { path = "../oxideterm-gpui-file-manager" }
+oxideterm-gpui-sftp = { path = "../oxideterm-gpui-sftp" }
+oxideterm-gpui-ide = { path = "../oxideterm-gpui-ide" }
+oxideterm-gpui-host-tools = { path = "../oxideterm-gpui-host-tools" }
+oxideterm-gpui-ai = { path = "../oxideterm-gpui-ai" }
+oxideterm-ai = { path = "../oxideterm-ai" }
+oxideterm-ai-tasks = { path = "../oxideterm-ai-tasks" }
+oxideterm-theme = { path = "../oxideterm-theme" }
+oxideterm-i18n = { path = "../oxideterm-i18n" }
+oxideterm-notification-center = { path = "../oxideterm-notification-center" }
+oxideterm-settings = { path = "../oxideterm-settings" }
+oxideterm-local-files = { path = "../oxideterm-local-files" }
+oxideterm-ide-core = { path = "../oxideterm-ide-core" }
+oxideterm-sftp = { path = "../oxideterm-sftp" }
+oxideterm-connection-monitor = { path = "../oxideterm-connection-monitor" }
+oxideterm-topology = { path = "../oxideterm-topology" }
+web-time.workspace = true
+oxideterm-workspace = { path = "../oxideterm-workspace", default-features = false }

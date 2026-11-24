@@ -75,6 +75,11 @@ impl IdeSurface {
         &self.load_state
     }
 
+    pub fn set_labels(&mut self, labels: IdeLabels, cx: &mut Context<Self>) {
+        self.labels = labels;
+        cx.notify();
+    }
+
     pub fn mount(&self) -> IdeSurfaceMount {
         self.mount
     }

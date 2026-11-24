@@ -283,6 +283,7 @@ impl ConnectionFormView {
         anchors: crate::form_entity::ConnectionSelectAnchorStore,
         mount: FormMount,
         theme: ConnectionsEnvironment,
+        theme_source: super::ConnectionsEnvironmentSource,
         environment: Rc<RefCell<Rc<ConnectionFormEnvironment>>>,
         capabilities: Rc<FormAlgorithmCapabilities>,
         serial_ports: Vec<crate::form_model::SerialPortInfo>,
@@ -301,12 +302,7 @@ impl ConnectionFormView {
             tokens,
             i18n,
             capabilities,
-            theme: Rc::new(move |_| {
-                Some(ConnectionsEnvironment {
-                    tokens: theme.tokens,
-                    i18n: theme.i18n.clone(),
-                })
-            }),
+            theme: theme_source,
             environment_source: Rc::new(move |_| Some(environment.borrow().clone())),
             environment: Default::default(),
             #[cfg(not(target_family = "wasm"))]

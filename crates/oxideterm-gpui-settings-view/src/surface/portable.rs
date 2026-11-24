@@ -174,6 +174,24 @@ impl PortableSettingsSurface {
     pub fn settings<'a>(&self, cx: &'a App) -> &'a PersistedSettings {
         &self.state.read(cx).settings
     }
+
+    /// Resolve the same palette and language for surfaces mounted outside settings.
+    pub fn environment(&self, dark: bool, cx: &App) -> (ThemeTokens, I18n) {
+        let state = self.state.read(cx);
+        (pages::tokens(&state.settings, dark), state.i18n.clone())
+    }
+
+    pub fn edit_preferences(&self, cx: &mut App, edit: impl FnOnce(&mut PersistedSettings)) {
+        self.state.update(cx, |state, cx| {
+            edit(&mut state.settings);
+            state.changed(cx);
+        });
+    }
+
+    pub fn open_section(&self, tab: SettingsTab, cx: &mut App) {
+        self.state
+            .update(cx, |state, cx| state.navigate(tab, None, cx));
+    }
 }
 
 fn locale(language: Language) -> Locale {

@@ -3,12 +3,15 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    fs, io,
+    io,
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
 };
 
+#[cfg(not(target_family = "wasm"))]
 use oxideterm_atomic_file::{durable_remove, durable_write_with_before_replace};
+#[cfg(not(target_family = "wasm"))]
+use std::fs;
 use web_time::{SystemTime, UNIX_EPOCH};
 
 use crate::model::{
@@ -36,6 +39,12 @@ const MAX_PARAMETER_CHOICES: usize = 64;
 const MAX_HOST_PATTERNS: usize = 32;
 const BUILTIN_CATEGORY_IDS: &[&str] = &["system", "network", "files", "docker", "custom"];
 static QUICK_COMMAND_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+// Browser profiles use the same store identity as native callers, for this page lifetime.
+#[cfg(target_family = "wasm")]
+thread_local! {
+    static SNAPSHOTS: std::cell::RefCell<HashMap<PathBuf, Vec<u8>>> = Default::default();
+}
 
 #[cfg(test)]
 thread_local! {
@@ -215,6 +224,14 @@ fn quick_command_definition_eq(left: &QuickCommand, right: &QuickCommand) -> boo
 /// Captures whether the Quick Commands file exists and its complete contents.
 pub fn capture_checkpoint(settings_path: &Path) -> Result<QuickCommandsCheckpoint, String> {
     let path = quick_commands_path(settings_path);
+    #[cfg(target_family = "wasm")]
+    let state = SNAPSHOTS
+        .with_borrow(|store| store.get(&path).cloned())
+        .map_or(
+            QuickCommandsCheckpointState::Missing,
+            QuickCommandsCheckpointState::Present,
+        );
+    #[cfg(not(target_family = "wasm"))]
     let state = match fs::metadata(&path) {
         Ok(metadata) => {
             if metadata.len() > MAX_QUICK_COMMANDS_FILE_BYTES {
@@ -358,16 +375,24 @@ fn default_snapshot() -> QuickCommandsSnapshot {
 }
 
 fn load_snapshot_from_path(path: &Path) -> Result<Option<QuickCommandsSnapshot>, String> {
-    let metadata = match fs::metadata(path) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(format!("failed to stat Quick Commands file: {error}")),
+    #[cfg(target_family = "wasm")]
+    let contents = match SNAPSHOTS.with_borrow(|store| store.get(path).cloned()) {
+        Some(bytes) => String::from_utf8(bytes).map_err(|e| e.to_string())?,
+        None => return Ok(None),
     };
-    if metadata.len() > MAX_QUICK_COMMANDS_FILE_BYTES {
-        return Err("Quick Commands file exceeds size limit".to_string());
-    }
-    let contents = fs::read_to_string(path)
-        .map_err(|error| format!("failed to read Quick Commands file: {error}"))?;
+    #[cfg(not(target_family = "wasm"))]
+    let contents = {
+        let metadata = match fs::metadata(path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(format!("failed to stat Quick Commands file: {error}")),
+        };
+        if metadata.len() > MAX_QUICK_COMMANDS_FILE_BYTES {
+            return Err("Quick Commands file exceeds size limit".to_string());
+        }
+        fs::read_to_string(path)
+            .map_err(|error| format!("failed to read Quick Commands file: {error}"))?
+    };
     if contents.trim().is_empty() {
         return Ok(None);
     }
@@ -379,6 +404,7 @@ fn load_snapshot_from_path(path: &Path) -> Result<Option<QuickCommandsSnapshot>,
 
 fn save_snapshot_to_path(path: &Path, snapshot: &QuickCommandsSnapshot) -> Result<(), String> {
     let snapshot = sanitize_snapshot(snapshot.clone())?;
+    #[cfg(not(target_family = "wasm"))]
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .map_err(|error| format!("failed to create Quick Commands directory: {error}"))?;
@@ -394,10 +420,29 @@ fn save_snapshot_to_path(path: &Path, snapshot: &QuickCommandsSnapshot) -> Resul
     Ok(())
 }
 
+#[cfg(target_family = "wasm")]
+fn atomic_write_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    if bytes.len() as u64 > MAX_QUICK_COMMANDS_FILE_BYTES {
+        return Err(io::Error::other(
+            "Quick Commands snapshot exceeds size limit",
+        ));
+    }
+    SNAPSHOTS.with_borrow_mut(|store| store.insert(path.to_owned(), bytes.to_vec()));
+    Ok(())
+}
+
+#[cfg(target_family = "wasm")]
+fn remove_file_if_present(path: &Path) -> io::Result<()> {
+    SNAPSHOTS.with_borrow_mut(|store| store.remove(path));
+    Ok(())
+}
+
+#[cfg(not(target_family = "wasm"))]
 fn atomic_write_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
     durable_write_with_before_replace(path, bytes, fail_before_atomic_replace_for_tests)
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn remove_file_if_present(path: &Path) -> io::Result<()> {
     fail_before_checkpoint_removal_for_tests()?;
     durable_remove(path)
@@ -414,7 +459,7 @@ fn fail_before_atomic_replace_for_tests() -> io::Result<()> {
     })
 }
 
-#[cfg(not(test))]
+#[cfg(not(any(test, target_family = "wasm")))]
 fn fail_before_atomic_replace_for_tests() -> io::Result<()> {
     Ok(())
 }
@@ -432,7 +477,7 @@ fn fail_before_checkpoint_removal_for_tests() -> io::Result<()> {
     })
 }
 
-#[cfg(not(test))]
+#[cfg(not(any(test, target_family = "wasm")))]
 fn fail_before_checkpoint_removal_for_tests() -> io::Result<()> {
     Ok(())
 }
