@@ -3,8 +3,10 @@
 
 use std::{path::Path, sync::Arc};
 
+#[cfg(not(target_family = "wasm"))]
 use tree_sitter::Language;
 
+#[cfg(not(target_family = "wasm"))]
 unsafe extern "C" {
     fn tree_sitter_fish() -> *const tree_sitter::ffi::TSLanguage;
 }
@@ -242,6 +244,7 @@ impl LanguageId {
         }
     }
 
+    #[cfg(not(target_family = "wasm"))]
     pub(crate) fn tree_sitter_language(&self) -> Result<Language, crate::SyntaxError> {
         Ok(match self {
             Self::Bash => tree_sitter_bash::LANGUAGE.into(),
@@ -287,6 +290,7 @@ impl LanguageId {
         })
     }
 
+    #[cfg(not(target_family = "wasm"))]
     pub(crate) fn highlight_query(&self) -> &'static str {
         crate::queries::highlight_query_for(self)
     }
@@ -332,6 +336,7 @@ fn is_dockerfile_name(file_name: &str) -> bool {
         || file_name.starts_with("containerfile.")
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn fish_language() -> Language {
     // `tree-sitter-fish` still exposes the pre-LanguageFn Rust helper, so use
     // the generated C symbol directly to stay on OxideTerm's tree-sitter ABI.

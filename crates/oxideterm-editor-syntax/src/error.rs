@@ -9,8 +9,10 @@ pub enum SyntaxError {
     LanguageUnavailable,
     #[error("Language plugin failed: {0}")]
     Plugin(String),
+    #[cfg(not(target_family = "wasm"))]
     #[error("tree-sitter language error: {0}")]
     Language(#[from] tree_sitter::LanguageError),
+    #[cfg(not(target_family = "wasm"))]
     #[error("tree-sitter query error: {0}")]
     Query(#[from] tree_sitter::QueryError),
     #[error("tree-sitter parse was cancelled")]

@@ -11,6 +11,8 @@ version.workspace = true
 oxideterm-editor-core = { path = "../oxideterm-editor-core" }
 memchr.workspace = true
 thiserror.workspace = true
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
 sha2.workspace = true
 tree-sitter.workspace = true
 tree-sitter-bash.workspace = true
@@ -28,6 +30,9 @@ tree-sitter-sequel.workspace = true
 tree-sitter-toml-ng.workspace = true
 tree-sitter-yaml.workspace = true
 tree-sitter-zsh.workspace = true
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+web-time = "1.1.0"
 
 [dev-dependencies]
 serde_json.workspace = true

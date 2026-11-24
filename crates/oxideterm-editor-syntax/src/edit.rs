@@ -1,12 +1,16 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
+#[cfg(not(target_family = "wasm"))]
 use std::{
     ops::Range,
     sync::{Arc, OnceLock},
 };
 
-use oxideterm_editor_core::{BufferOffset, EditorError, LineCol, TextBuffer, TextRange};
+#[cfg(not(target_family = "wasm"))]
+use oxideterm_editor_core::BufferOffset;
+use oxideterm_editor_core::{EditorError, LineCol, TextBuffer, TextRange};
+#[cfg(not(target_family = "wasm"))]
 use tree_sitter::{InputEdit, Point, Tree};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -56,6 +60,7 @@ impl SyntaxEdit {
         }
     }
 
+    #[cfg(not(target_family = "wasm"))]
     pub(crate) fn as_input_edit(self) -> InputEdit {
         InputEdit {
             start_byte: self.start_byte,
@@ -111,10 +116,15 @@ fn advance_position(start: LineCol, text: &str) -> LineCol {
 #[derive(Clone, Debug)]
 pub struct SyntaxChange {
     pub edit: SyntaxEdit,
+    #[cfg(not(target_family = "wasm"))]
     pub(crate) owner: Arc<()>,
+    #[cfg(not(target_family = "wasm"))]
     pub(crate) revision: u64,
+    #[cfg(not(target_family = "wasm"))]
     pub(crate) structural_ranges: OnceLock<Vec<TextRange>>,
+    #[cfg(not(target_family = "wasm"))]
     pub(crate) old_tree: Tree,
+    #[cfg(not(target_family = "wasm"))]
     pub(crate) new_tree: Tree,
 }
 
@@ -124,9 +134,17 @@ impl SyntaxChange {
     /// `edit` in both versions. Tree comparison is deferred because it can be
     /// substantial work even when incremental parsing reused most of the tree.
     pub fn structural_ranges(&self) -> impl ExactSizeIterator<Item = TextRange> {
-        self.changed_ranges().iter().copied()
+        #[cfg(not(target_family = "wasm"))]
+        {
+            self.changed_ranges().iter().copied()
+        }
+        #[cfg(target_family = "wasm")]
+        {
+            std::iter::empty()
+        }
     }
 
+    #[cfg(not(target_family = "wasm"))]
     fn changed_ranges(&self) -> &[TextRange] {
         self.structural_ranges.get_or_init(|| {
             self.old_tree
@@ -138,6 +156,7 @@ impl SyntaxChange {
         })
     }
 
+    #[cfg(not(target_family = "wasm"))]
     pub(crate) fn unchanged_old_range(&self, range: Range<usize>) -> Option<Range<usize>> {
         let changes = self.changed_ranges();
         let first = changes.partition_point(|changed| changed.end.0 < range.start);

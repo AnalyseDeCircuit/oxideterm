@@ -7308,6 +7308,7 @@ dependencies = [
  "tree-sitter-toml-ng",
  "tree-sitter-yaml",
  "tree-sitter-zsh",
+ "web-time",
  "zip",
 ]
 

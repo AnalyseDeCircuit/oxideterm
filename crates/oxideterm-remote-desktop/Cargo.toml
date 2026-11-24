@@ -16,5 +16,8 @@ thiserror.workspace = true
 uuid.workspace = true
 zeroize.workspace = true
 
+[target.'cfg(target_family = "wasm")'.dependencies]
+uuid = { workspace = true, features = ["js"] }
+
 [dev-dependencies]
 tempfile = "3"

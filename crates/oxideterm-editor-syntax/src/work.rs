@@ -2,15 +2,20 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::SyntaxError;
+#[cfg(not(target_family = "wasm"))]
+use std::ops::ControlFlow;
+#[cfg(not(target_family = "wasm"))]
+use std::time::Instant;
 use std::{
     cell::Cell,
-    ops::ControlFlow,
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
+#[cfg(target_family = "wasm")]
+use web_time::Instant;
 
 /// Cooperative slices for an owned background worker. Lexers and sorts can
 /// exceed a slice; publication cancellation must not depend on their latency.
@@ -34,6 +39,7 @@ impl SyntaxWork {
     pub fn cancelled(&self) -> bool {
         self.generation.load(Ordering::Acquire) != self.expected
     }
+    #[cfg(not(target_family = "wasm"))]
     pub(crate) fn should_pause(&self) -> bool {
         self.cancelled() || Instant::now() >= self.deadline.get()
     }
@@ -43,6 +49,7 @@ impl SyntaxWork {
             return Err(SyntaxError::ParseCancelled);
         }
         if Instant::now() >= self.deadline.get() {
+            #[cfg(not(target_family = "wasm"))]
             std::thread::yield_now();
             self.deadline.set(Instant::now() + self.slice);
         }
@@ -60,6 +67,7 @@ pub(crate) fn checkpoint(work: Option<&SyntaxWork>) -> Result<(), SyntaxError> {
     Ok(())
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub(crate) fn parse(
     parser: &mut tree_sitter::Parser,
     source: &(impl crate::TextSource + ?Sized),

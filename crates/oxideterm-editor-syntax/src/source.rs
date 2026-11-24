@@ -59,11 +59,13 @@ impl TextSource for ChunkedText<'_> {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub(crate) struct SourceSlice<'a, S: ?Sized> {
     source: &'a S,
     range: Range<usize>,
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl<'a, S: TextSource + ?Sized> SourceSlice<'a, S> {
     pub(crate) fn new(source: &'a S, range: Range<usize>) -> Self {
         debug_assert!(range.start <= range.end && range.end <= source.len());
@@ -71,6 +73,7 @@ impl<'a, S: TextSource + ?Sized> SourceSlice<'a, S> {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl<S: TextSource + ?Sized> TextSource for SourceSlice<'_, S> {
     fn len(&self) -> usize {
         self.range.len()
@@ -111,8 +114,10 @@ impl<'a, S: TextSource + ?Sized> Iterator for SourceChunks<'a, S> {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub(crate) struct QuerySource<'a, S: ?Sized>(pub(crate) &'a S);
 
+#[cfg(not(target_family = "wasm"))]
 impl<'a, S: TextSource + ?Sized> tree_sitter::TextProvider<&'a [u8]> for QuerySource<'a, S> {
     type I = SourceChunks<'a, S>;
     fn text(&mut self, node: tree_sitter::Node) -> Self::I {
@@ -120,6 +125,7 @@ impl<'a, S: TextSource + ?Sized> tree_sitter::TextProvider<&'a [u8]> for QuerySo
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub(crate) fn chars<S: TextSource + ?Sized>(
     source: &S,
     range: Range<usize>,
@@ -131,11 +137,13 @@ pub(crate) fn chars<S: TextSource + ?Sized>(
     })
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub(crate) struct SourceLines<'a, S: ?Sized> {
     source: &'a S,
     remaining: Range<usize>,
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub(crate) fn lines<S: TextSource + ?Sized>(source: &S, range: Range<usize>) -> SourceLines<'_, S> {
     SourceLines {
         source,
@@ -143,6 +151,7 @@ pub(crate) fn lines<S: TextSource + ?Sized>(source: &S, range: Range<usize>) -> 
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl<S: TextSource + ?Sized> Iterator for SourceLines<'_, S> {
     type Item = Range<usize>;
     fn next(&mut self) -> Option<Self::Item> {
