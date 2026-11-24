@@ -307,7 +307,7 @@ impl FileManagerView {
             .segmented_control_user_motion
             .begin_with_vertical_offset(id, index, offset);
         cx.spawn(async move |weak, cx| {
-            Timer::after(motion.duration).await;
+            cx.background_executor().timer(motion.duration).await;
             let _ = weak.update(cx, |this, cx| {
                 if this.segmented_control_user_motion.finish(id, generation) {
                     cx.notify();

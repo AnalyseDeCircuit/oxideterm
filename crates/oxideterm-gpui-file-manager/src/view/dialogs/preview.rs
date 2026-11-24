@@ -306,7 +306,9 @@ impl FileManagerView {
                                 _ => None,
                             };
                             if let Some(entry) = preview_entry {
-                                if let Err(error) = open_path_external(&entry.path) {
+                                if let Err(error) =
+                                    this.file_manager.read(cx).fs.open_external(&entry.path)
+                                {
                                     this.push_file_manager_toast(
                                         this.i18n.t("fileManager.error"),
                                         Some(error),
@@ -485,15 +487,8 @@ impl FileManagerView {
             .clamp(FILE_MANAGER_PREVIEW_MIN_ZOOM, FILE_MANAGER_PREVIEW_MAX_ZOOM);
         let height = 560.0 * zoom;
         let rotation = file_manager.preview_image_rotation.rem_euclid(360);
-        let source = if rotation == 0 {
-            gpui::Resource::from(std::path::PathBuf::from(path))
-        } else {
-            gpui::Resource::RotatedImage {
-                path: std::path::PathBuf::from(path).into(),
-                quarter_turns: (rotation / 90) as u8,
-            }
-        };
-        let image = gpui::img(gpui::ImageSource::Resource(source))
+        let source = file_manager.fs.image(path, (rotation / 90) as u8);
+        let image = gpui::img(source)
             .w_full()
             .h(px(height))
             .object_fit(ObjectFit::Contain)
@@ -611,7 +606,9 @@ impl FileManagerView {
                         )
                     },
                     cx.listener(move |this, _event, _window, cx| {
-                        if let Err(error) = open_path_external(&path_for_open) {
+                        if let Err(error) =
+                            this.file_manager.read(cx).fs.open_external(&path_for_open)
+                        {
                             this.push_file_manager_toast(
                                 this.i18n.t("fileManager.error"),
                                 Some(error),

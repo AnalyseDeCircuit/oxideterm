@@ -298,20 +298,11 @@ impl FileManagerView {
     pub(super) fn refresh_file_manager_with_drives(&mut self, cx: &mut Context<Self>) {
         // Explicit refresh updates both the current directory and mounted volumes.
         let path = self.file_manager.read(cx).path.clone();
-        let audit = local_file_operation("file_browse", &path);
+        let finish = (self.file_manager.read(cx).fs.browse_audit())(&path);
         self.file_manager.update(cx, |file_manager, cx| {
             file_manager.refresh_drives();
             file_manager.refresh();
-            audit.finish(
-                if file_manager.error.is_none() {
-                    oxideterm_audit::AuditOutcome::Succeeded
-                } else {
-                    oxideterm_audit::AuditOutcome::Failed
-                },
-                oxideterm_audit::AuditEvidence::Protocol,
-                None,
-                None,
-            );
+            finish(file_manager.error.is_none());
             cx.notify();
         });
     }
@@ -333,19 +324,10 @@ impl FileManagerView {
     }
 
     pub fn set_file_manager_path(&mut self, path: String, cx: &mut Context<Self>) {
-        let audit = local_file_operation("file_browse", &path);
+        let finish = (self.file_manager.read(cx).fs.browse_audit())(&path);
         self.file_manager.update(cx, |file_manager, cx| {
             file_manager.set_path(path);
-            audit.finish(
-                if file_manager.error.is_none() {
-                    oxideterm_audit::AuditOutcome::Succeeded
-                } else {
-                    oxideterm_audit::AuditOutcome::Failed
-                },
-                oxideterm_audit::AuditEvidence::Protocol,
-                None,
-                None,
-            );
+            finish(file_manager.error.is_none());
             cx.notify();
         });
     }
@@ -562,7 +544,11 @@ impl FileManagerView {
         let Some((generation, parent_path)) = request_state else {
             return;
         };
-        let entries = list_local_files(&parent_path)
+        let entries = self
+            .file_manager
+            .read(cx)
+            .fs
+            .list(&parent_path)
             .unwrap_or_default()
             .into_iter()
             .map(|entry| {
@@ -828,7 +814,7 @@ impl FileManagerView {
         entry: LocalFileEntry,
         cx: &mut Context<Self>,
     ) {
-        let details = local_file_properties(&entry);
+        let details = self.file_manager.read(cx).fs.properties(&entry);
         self.file_manager.update(cx, |file_manager, cx| {
             file_manager.properties_checksum = None;
             file_manager.properties_checksum_loading = false;
@@ -883,27 +869,7 @@ impl FileManagerView {
                 cx,
             );
         }
-        let audit = local_file_operation("file_preview", &entry.path);
-        let preview = oxideterm_local_files::local_inspection_preview(
-            &entry.path,
-            oxideterm_preview::inspection_mime_type,
-        )
-        .unwrap_or_else(|| read_local_preview(&entry.path));
-        audit.finish(
-            match &preview {
-                LocalPreview::Error(_) => oxideterm_audit::AuditOutcome::Failed,
-                LocalPreview::TooLarge { .. } | LocalPreview::Unsupported(_) => {
-                    oxideterm_audit::AuditOutcome::Unchanged
-                }
-                LocalPreview::Text { .. }
-                | LocalPreview::Markdown { .. }
-                | LocalPreview::Archive { .. } => oxideterm_audit::AuditOutcome::Succeeded,
-                _ => oxideterm_audit::AuditOutcome::Sent,
-            },
-            oxideterm_audit::AuditEvidence::Protocol,
-            None,
-            None,
-        );
+        let preview = self.file_manager.read(cx).fs.preview(&entry.path);
         match &preview {
             LocalPreview::Document { path, mime_type } => {
                 let view =
@@ -923,7 +889,8 @@ impl FileManagerView {
                     );
                 }
             }
-            LocalPreview::Font { path, .. } => match std::fs::read(path) {
+            LocalPreview::Font { path, .. } => match self.file_manager.read(cx).fs.font_bytes(path)
+            {
                 Ok(bytes) => {
                     let family = font_family_name_from_bytes(&bytes).or_else(|| {
                         std::path::Path::new(path)
@@ -971,7 +938,7 @@ impl FileManagerView {
             }
             _ => {}
         }
-        let preview_metadata = local_preview_metadata(&entry.path);
+        let preview_metadata = self.file_manager.read(cx).fs.metadata(&entry.path);
         self.file_manager.update(cx, |file_manager, cx| {
             file_manager.preview = Some(Arc::new(preview));
             file_manager.preview_metadata = preview_metadata;
@@ -1004,18 +971,10 @@ impl FileManagerView {
         let Some((path, offset)) = request else {
             return;
         };
-        let result =
-            read_local_preview_range(&path, offset, FILE_MANAGER_PREVIEW_STREAM_CHUNK_SIZE);
-        let audit = local_file_operation("file_preview", &format!("path={path}; offset={offset}"));
-        audit.finish(
-            if result.is_ok() {
-                oxideterm_audit::AuditOutcome::Succeeded
-            } else {
-                oxideterm_audit::AuditOutcome::Failed
-            },
-            oxideterm_audit::AuditEvidence::Protocol,
-            None,
-            result.as_ref().ok().map(|chunk| chunk.data.len() as u64),
+        let result = self.file_manager.read(cx).fs.preview_range(
+            &path,
+            offset,
+            FILE_MANAGER_PREVIEW_STREAM_CHUNK_SIZE,
         );
         self.file_manager.update(cx, |file_manager, cx| {
             file_manager.preview_stream.loading = false;
@@ -1238,18 +1197,8 @@ impl FileManagerView {
     }
 
     pub(super) fn browse_file_manager_folder(&mut self, cx: &mut Context<Self>) {
-        let receiver = cx.prompt_for_paths(PathPromptOptions {
-            files: false,
-            directories: true,
-            multiple: false,
-            prompt: Some(SharedString::from(self.i18n.t("fileManager.browse"))),
-        });
-        let selection = async move {
-            let Ok(Ok(Some(paths))) = receiver.await else {
-                return None;
-            };
-            paths.into_iter().next()
-        };
+        let fs = self.file_manager.read(cx).fs.clone();
+        let selection = fs.pick_folder(self.i18n.t("fileManager.browse").into(), cx);
         self.file_manager.update(cx, |file_manager, cx| {
             file_manager.start_folder_picker(selection, cx);
         });

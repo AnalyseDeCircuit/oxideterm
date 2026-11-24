@@ -2,7 +2,8 @@ use super::*;
 
 impl FileManagerState {
     fn save_bookmarks(&self) -> Result<(), String> {
-        oxideterm_local_files::save_local_bookmarks(&self.bookmarks_path, &self.bookmarks)
+        self.fs
+            .save_bookmarks(&self.bookmarks_path, &self.bookmarks)
     }
 
     fn reorder_bookmark(
@@ -11,7 +12,7 @@ impl FileManagerState {
         target: &str,
         after: bool,
     ) -> Result<bool, String> {
-        oxideterm_local_files::reorder_local_bookmarks(
+        self.fs.reorder_bookmarks(
             &mut self.bookmarks,
             &self.bookmarks_path,
             source,

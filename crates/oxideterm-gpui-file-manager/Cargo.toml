@@ -10,7 +10,6 @@ license.workspace = true
 [dependencies]
 gpui.workspace = true
 chrono.workspace = true
-oxideterm-audit = { path = "../oxideterm-audit" }
 oxideterm-editor-core = { path = "../oxideterm-editor-core" }
 oxideterm-gpui-editor = { path = "../oxideterm-gpui-editor" }
 oxideterm-gpui-markdown = { path = "../oxideterm-gpui-markdown" }
@@ -21,6 +20,12 @@ oxideterm-preview = { path = "../oxideterm-preview" }
 oxideterm-settings = { path = "../oxideterm-settings" }
 oxideterm-theme = { path = "../oxideterm-theme" }
 oxideterm-workspace = { path = "../oxideterm-workspace" }
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+oxideterm-audit = { path = "../oxideterm-audit" }
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+chrono = { workspace = true, features = ["wasmbind"] }
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }

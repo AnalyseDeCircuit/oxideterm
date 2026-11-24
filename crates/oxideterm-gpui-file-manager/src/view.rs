@@ -1,12 +1,18 @@
-use crate::{PathCompletionState, bridge::*};
+#[cfg(not(target_family = "wasm"))]
+use crate::filesystem::desktop::DesktopFileSystem;
+use crate::{
+    PathCompletionState,
+    bridge::*,
+    filesystem::{BatchHandle, FileBatch, FileSystemBridge},
+};
 use gpui::prelude::*;
 use gpui::{
     self, AnchoredPositionMode, AnyElement, AnyView, App, ClipboardItem, Context, Corner,
     CursorStyle, ElementId, Entity, EventEmitter, IntoElement, KeyDownEvent, ListAlignment,
-    ListState, MouseButton, MouseDownEvent, MouseMoveEvent, ObjectFit, ParentElement,
-    PathPromptOptions, Pixels, Point, Render, Rgba, ScrollEvent, ScrollHandle, SharedString,
-    Styled, StyledImage, Subscription, Task, Timer, UniformListScrollHandle, Window, anchored,
-    deferred, div, px, relative, rgb, rgba, svg,
+    ListState, MouseButton, MouseDownEvent, MouseMoveEvent, ObjectFit, ParentElement, Pixels,
+    Point, Render, Rgba, ScrollEvent, ScrollHandle, SharedString, Styled, StyledImage,
+    Subscription, Task, UniformListScrollHandle, Window, anchored, deferred, div, px, relative,
+    rgb, rgba, svg,
 };
 use oxideterm_editor_core::utf16::replace_utf16;
 use oxideterm_gpui_editor::{EditorContextMenuLabels, TextEditorView};
@@ -41,13 +47,10 @@ use oxideterm_local_files::{
     LocalSidebarLocationKind, LocalSortDirection, LocalSortField,
 };
 use oxideterm_local_files::{
-    PathCompletionCandidate, append_local_preview_chunk, local_file_audit_context,
-    local_file_operation, local_file_properties, local_path_completion_request, open_path_external,
-    reveal_path_external,
+    PathCompletionCandidate, append_local_preview_chunk, local_path_completion_request,
 };
 use oxideterm_preview::{
-    AudioPreviewBackend, AudioPreviewCommand, AudioPreviewState, RodioAudioPreviewBackend,
-    font_family_name_from_bytes,
+    AudioPreviewBackend, AudioPreviewCommand, AudioPreviewState, font_family_name_from_bytes,
 };
 use oxideterm_settings::{
     FILE_MANAGER_SIDEBAR_DEFAULT_WIDTH, FILE_MANAGER_SIDEBAR_MAX_WIDTH,
@@ -294,6 +297,7 @@ impl FileManagerListRow {
 }
 
 pub struct FileManagerState {
+    fs: Rc<dyn FileSystemBridge>,
     pub(super) path: String,
     pub(super) path_input: String,
     pub path_completion: PathCompletionState,
@@ -351,7 +355,7 @@ pub struct FileManagerState {
     pub(super) preview_archive_list_state: ListState,
     pub(super) preview_archive_list_cache: RefCell<VirtualListSignatureCache>,
     pub(super) preview_stream: FileManagerPreviewStreamState,
-    pub(super) preview_audio: RodioAudioPreviewBackend,
+    pub(super) preview_audio: Box<dyn AudioPreviewBackend>,
     pub(super) preview_video_surface: FileManagerVideo,
     pub(super) preview_font_family: Option<String>,
     pub(super) preview_font_error: Option<String>,
@@ -359,15 +363,25 @@ pub struct FileManagerState {
     pub(super) operation_progress: Option<FileManagerOperationProgress>,
     operation_tx: Option<delivery::ActiveDeliverySender<FileManagerOperationEvent>>,
     operation_rx: Option<std::sync::mpsc::Receiver<FileManagerOperationEvent>>,
-    operation_thread: Option<std::thread::JoinHandle<()>>,
+    operation_worker: Option<BatchHandle>,
     pub(super) properties_checksum: Option<LocalChecksumResult>,
     pub(super) properties_checksum_loading: bool,
     pub(super) properties_checksum_task: Option<Task<()>>,
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl Default for FileManagerState {
     fn default() -> Self {
-        let path = home_path();
+        Self::initial(
+            Rc::new(DesktopFileSystem),
+            oxideterm_local_files::default_file_manager_bookmarks_path(),
+        )
+    }
+}
+
+impl FileManagerState {
+    fn initial(fs: Rc<dyn FileSystemBridge>, bookmarks_path: PathBuf) -> Self {
+        let path = fs.home();
         Self {
             path: path.clone(),
             path_input: path,
@@ -398,11 +412,11 @@ impl Default for FileManagerState {
             clipboard: None,
             bookmarks: Vec::new(),
             // Resolve system folders once so paint does not repeatedly query the filesystem.
-            sidebar_locations: local_sidebar_locations(),
+            sidebar_locations: fs.sidebar_locations(),
             // Disk discovery performs synchronous system and filesystem queries.
             // Cache it outside render and refresh only at explicit interaction boundaries.
-            drives: local_drives(),
-            bookmarks_path: default_file_manager_bookmarks_path(),
+            drives: fs.drives(),
+            bookmarks_path,
             bookmarks_visible: true,
             bookmarks_surface_size: None,
             bookmarks_motion: oxideterm_gpui_ui::motion::SidebarMotion::new(
@@ -439,7 +453,8 @@ impl Default for FileManagerState {
             .measure_all(),
             preview_archive_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             preview_stream: FileManagerPreviewStreamState::default(),
-            preview_audio: RodioAudioPreviewBackend::default(),
+            preview_audio: fs.audio(),
+            fs,
             preview_video_surface: FileManagerVideo::default(),
             preview_font_family: None,
             preview_font_error: None,
@@ -447,7 +462,7 @@ impl Default for FileManagerState {
             operation_progress: None,
             operation_tx: None,
             operation_rx: None,
-            operation_thread: None,
+            operation_worker: None,
             properties_checksum: None,
             properties_checksum_loading: false,
             properties_checksum_task: None,
@@ -503,7 +518,7 @@ impl FileManagerState {
             return true;
         }
         self.dialog_exit_task = Some(cx.spawn(async move |entity, cx| {
-            Timer::after(delay).await;
+            cx.background_executor().timer(delay).await;
             let _ = entity.update(cx, |file_manager, cx| {
                 file_manager.finish_rich_dialog_exit(generation, cx);
             });
@@ -529,46 +544,23 @@ impl FileManagerState {
         if self.folder_picker_task.is_some() {
             return;
         }
-        let audit_context = local_file_audit_context(oxideterm_audit::AuditSource::User);
+        let begin_browse = self.fs.browse_audit();
         self.folder_picker_task = Some(cx.spawn(async move |entity, cx| {
             let selected_path = selection.await;
             let _ = entity.update(cx, |file_manager, cx| {
                 file_manager.folder_picker_task = None;
                 if let Some(path) = selected_path {
                     let path = path.to_string_lossy().to_string();
-                    let audit = oxideterm_audit::AuditOperation::in_context(
-                        audit_context.as_ref(),
-                        oxideterm_audit::AuditCategory::File,
-                        "file_browse",
-                        Some(&path),
-                    );
+                    let finish = begin_browse(&path);
                     file_manager.set_path(path);
-                    audit.finish(
-                        if file_manager.error.is_none() {
-                            oxideterm_audit::AuditOutcome::Succeeded
-                        } else {
-                            oxideterm_audit::AuditOutcome::Failed
-                        },
-                        oxideterm_audit::AuditEvidence::Protocol,
-                        None,
-                        None,
-                    );
+                    finish(file_manager.error.is_none());
                 }
                 cx.notify();
             });
         }));
     }
 
-    fn start_operation(
-        &mut self,
-        total: usize,
-        work: impl FnOnce(
-            delivery::ActiveDeliverySender<FileManagerOperationEvent>,
-        ) -> Result<(), String>
-        + Send
-        + 'static,
-        cx: &mut Context<Self>,
-    ) {
+    fn start_operation(&mut self, kind: FileBatch, paths: Vec<String>, cx: &mut Context<Self>) {
         if self
             .operation_progress
             .as_ref()
@@ -582,16 +574,33 @@ impl FileManagerState {
             ));
             return;
         };
+        let total = self.fs.batch_units(&paths);
         self.operation_progress = Some(FileManagerOperationProgress {
             current: 0,
             total: total.max(1),
             file_name: String::new(),
             active: true,
         });
-        self.operation_thread = Some(std::thread::spawn(move || {
-            let result = work(sender.clone());
-            let _ = sender.send(FileManagerOperationEvent::Finished(result));
-        }));
+        let updates = sender.clone();
+        self.operation_worker = Some(self.fs.start_batch(
+            kind,
+            paths,
+            total,
+            Box::new(move |progress| {
+                let _ = updates.send(FileManagerOperationEvent::Progress(
+                    FileManagerOperationProgress {
+                        current: progress.current,
+                        total: total.max(1),
+                        file_name: progress.file_name,
+                        active: true,
+                    },
+                ));
+            }),
+            Box::new(move |result| {
+                let _ = sender.send(FileManagerOperationEvent::Finished(result));
+            }),
+            cx,
+        ));
         cx.notify();
     }
 
@@ -642,10 +651,8 @@ impl FileManagerState {
                     self.operation_progress = Some(progress);
                 }
                 FileManagerOperationEvent::Finished(result) => {
-                    if let Some(worker) = self.operation_thread.take() {
-                        // Finished is sent as the worker's final action, so this
-                        // join only reaps an already-completing owned thread.
-                        let _ = worker.join();
+                    if let Some(finish) = self.operation_worker.take() {
+                        finish();
                     }
                     if let Some(progress) = self.operation_progress.as_mut() {
                         progress.active = false;
@@ -681,9 +688,7 @@ impl FileManagerState {
         let path = entry.path.clone();
         self.properties_checksum = None;
         self.properties_checksum_loading = true;
-        let checksum_task = cx
-            .background_executor()
-            .spawn(async move { calculate_local_checksum(&path) });
+        let checksum_task = self.fs.checksum(path, cx);
         self.properties_checksum_task = Some(cx.spawn(async move |entity, cx| {
             let result = checksum_task.await;
             let _ = entity.update(cx, |file_manager, cx| {
@@ -701,7 +706,7 @@ impl FileManagerState {
 
     fn refresh(&mut self) {
         self.loading = true;
-        match list_local_files(&self.path) {
+        match self.fs.list(&self.path) {
             Ok(files) => {
                 self.replace_files(files);
                 self.error = None;
@@ -716,7 +721,7 @@ impl FileManagerState {
     }
 
     fn refresh_drives(&mut self) {
-        self.drives = local_drives();
+        self.drives = self.fs.drives();
     }
 
     fn set_path(&mut self, path: String) {
@@ -902,7 +907,7 @@ impl FileManagerState {
             return;
         }
         self.context_menu_exit_task = Some(cx.spawn(async move |entity, cx| {
-            Timer::after(delay).await;
+            cx.background_executor().timer(delay).await;
             let _ = entity.update(cx, |file_manager, cx| {
                 if file_manager.context_menu_presence.finish_exit(generation) {
                     file_manager.context_menu = None;
@@ -969,19 +974,18 @@ impl FileManagerState {
         self.replace_files(Vec::new());
     }
 
-    pub(super) fn load(settings_path: &std::path::Path, cx: &mut Context<Self>) -> Self {
+    fn load(settings_path: &Path, fs: Rc<dyn FileSystemBridge>, cx: &mut Context<Self>) -> Self {
         let bookmarks_path = settings_path
             .parent()
             .unwrap_or(settings_path)
             .join(FILE_MANAGER_BOOKMARKS_FILENAME);
         let (operation_tx, operation_rx) = delivery::ActiveDeliverySender::channel();
         let mut state = Self {
-            bookmarks_path,
             operation_tx: Some(operation_tx),
             operation_rx: Some(operation_rx),
-            ..Self::default()
+            ..Self::initial(fs, bookmarks_path)
         };
-        state.bookmarks = oxideterm_local_files::load_local_bookmarks(&state.bookmarks_path);
+        state.bookmarks = state.fs.load_bookmarks(&state.bookmarks_path);
         state.schedule_operation_delivery(cx);
         state
     }
@@ -1320,6 +1324,7 @@ pub struct FileManagerViews {
 }
 
 impl FileManagerViews {
+    #[cfg(not(target_family = "wasm"))]
     pub fn new(
         path: &Path,
         video: FileManagerVideo,
@@ -1327,8 +1332,19 @@ impl FileManagerViews {
         frame: FileManagerEnvironment,
         cx: &mut App,
     ) -> Self {
+        Self::with_bridge(path, Rc::new(DesktopFileSystem), video, bindings, frame, cx)
+    }
+
+    pub fn with_bridge(
+        path: &Path,
+        fs: Rc<dyn FileSystemBridge>,
+        video: FileManagerVideo,
+        bindings: FileManagerBindings,
+        frame: FileManagerEnvironment,
+        cx: &mut App,
+    ) -> Self {
         let state = cx.new(|cx| {
-            let mut state = FileManagerState::load(path, cx);
+            let mut state = FileManagerState::load(path, fs, cx);
             state.preview_video_surface = video;
             state
         });

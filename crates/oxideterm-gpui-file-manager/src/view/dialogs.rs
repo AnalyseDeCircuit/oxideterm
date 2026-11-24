@@ -66,7 +66,9 @@ impl FileManagerView {
                     {
                         let file = file.clone();
                         move |this, _event, _window, cx| {
-                            if let Err(error) = open_path_external(&file.path) {
+                            if let Err(error) =
+                                this.file_manager.read(cx).fs.open_external(&file.path)
+                            {
                                 this.push_file_manager_toast(
                                     this.i18n.t("fileManager.error"),
                                     Some(error),
@@ -101,7 +103,7 @@ impl FileManagerView {
                     let file = menu.file.clone();
                     move |this, _event, _window, cx| {
                         if let Some(file) = file.as_ref()
-                            && let Err(error) = reveal_path_external(&file.path)
+                            && let Err(error) = this.file_manager.read(cx).fs.reveal(&file.path)
                         {
                             this.push_file_manager_toast(
                                 this.i18n.t("fileManager.error"),

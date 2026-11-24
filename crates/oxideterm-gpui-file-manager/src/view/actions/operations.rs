@@ -9,7 +9,11 @@ impl FileManagerView {
                 file_manager.path.clone(),
             )
         };
-        let result = oxideterm_local_files::create_local_folder(&current_path, &name);
+        let result = self
+            .file_manager
+            .read(cx)
+            .fs
+            .create_folder(&current_path, &name);
         match result {
             Ok(()) => {
                 self.close_file_manager_dialog(cx);
@@ -39,7 +43,11 @@ impl FileManagerView {
                 file_manager.path.clone(),
             )
         };
-        let result = oxideterm_local_files::create_local_file(&current_path, &name);
+        let result = self
+            .file_manager
+            .read(cx)
+            .fs
+            .create_file(&current_path, &name);
         match result {
             Ok(()) => {
                 self.close_file_manager_dialog(cx);
@@ -73,7 +81,11 @@ impl FileManagerView {
                 file_manager.path.clone(),
             )
         };
-        let result = oxideterm_local_files::rename_local_entry(&current_path, &old_name, &new_name);
+        let result = self
+            .file_manager
+            .read(cx)
+            .fs
+            .rename(&current_path, &old_name, &new_name);
         match result {
             Ok(()) => {
                 self.close_file_manager_dialog(cx);
@@ -101,7 +113,7 @@ impl FileManagerView {
         cx: &mut Context<Self>,
     ) {
         let current_path = self.file_manager.read(cx).path.clone();
-        let error = oxideterm_local_files::delete_local_entries(&current_path, &names);
+        let error = self.file_manager.read(cx).fs.delete(&current_path, &names);
         match error {
             Some(error) => self.push_file_manager_toast(
                 self.i18n.t("fileManager.error"),
@@ -162,21 +174,6 @@ impl FileManagerView {
         );
     }
 
-    pub(in crate::view) fn start_file_manager_operation(
-        &mut self,
-        total: usize,
-        work: impl FnOnce(
-            delivery::ActiveDeliverySender<FileManagerOperationEvent>,
-        ) -> Result<(), String>
-        + Send
-        + 'static,
-        cx: &mut Context<Self>,
-    ) {
-        self.file_manager.update(cx, |file_manager, cx| {
-            file_manager.start_operation(total, work, cx);
-        });
-    }
-
     pub(in crate::view) fn paste_file_manager_clipboard(&mut self, cx: &mut Context<Self>) {
         let (clipboard, current_path) = {
             let file_manager = self.file_manager.read(cx);
@@ -192,25 +189,9 @@ impl FileManagerView {
         let destination = current_path;
         let sources = clipboard.paths.clone();
         let mode = clipboard.mode;
-        let audit_context = super::local_file_audit_context(oxideterm_audit::AuditSource::User);
-        let total = sources
-            .iter()
-            .map(|source| local_operation_unit_count(std::path::Path::new(source)))
-            .sum::<usize>();
-        self.start_file_manager_operation(
-            total,
-            move |tx| {
-                oxideterm_local_files::paste_local_files(
-                    sources,
-                    destination,
-                    mode,
-                    total,
-                    audit_context,
-                    |progress| report_batch_progress(&tx, total, progress),
-                )
-            },
-            cx,
-        );
+        self.file_manager.update(cx, |state, cx| {
+            state.start_operation(FileBatch::Paste { destination, mode }, sources, cx)
+        });
         if clipboard.mode == LocalClipboardMode::Cut {
             self.file_manager.update(cx, |file_manager, cx| {
                 file_manager.clipboard = None;
@@ -231,23 +212,9 @@ impl FileManagerView {
             .iter()
             .map(|entry| entry.path.clone())
             .collect::<Vec<_>>();
-        let total = paths
-            .iter()
-            .map(|path| local_operation_unit_count(std::path::Path::new(path)))
-            .sum::<usize>();
-        let audit_context = super::local_file_audit_context(oxideterm_audit::AuditSource::User);
-        self.start_file_manager_operation(
-            total,
-            move |tx| {
-                oxideterm_local_files::duplicate_local_files(
-                    paths,
-                    total,
-                    audit_context,
-                    |progress| report_batch_progress(&tx, total, progress),
-                )
-            },
-            cx,
-        );
+        self.file_manager.update(cx, |state, cx| {
+            state.start_operation(FileBatch::Duplicate, paths, cx)
+        });
         self.dismiss_file_manager_context_menu(cx);
     }
 
@@ -256,33 +223,14 @@ impl FileManagerView {
         paths: &[std::path::PathBuf],
         cx: &mut Context<Self>,
     ) {
-        let sources = paths
-            .iter()
-            .filter(|path| path.exists())
-            .map(|path| path.to_string_lossy().to_string())
-            .collect::<Vec<_>>();
+        let sources = self.file_manager.read(cx).fs.resolve_drop(paths);
         if sources.is_empty() {
             return;
         }
         let destination = self.file_manager.read(cx).path.clone();
-        let total = sources
-            .iter()
-            .map(|source| local_operation_unit_count(std::path::Path::new(source)))
-            .sum::<usize>();
-        let audit_context = super::local_file_audit_context(oxideterm_audit::AuditSource::User);
-        self.start_file_manager_operation(
-            total,
-            move |tx| {
-                oxideterm_local_files::copy_dropped_local_files(
-                    sources,
-                    destination,
-                    total,
-                    audit_context,
-                    |progress| report_batch_progress(&tx, total, progress),
-                )
-            },
-            cx,
-        );
+        self.file_manager.update(cx, |state, cx| {
+            state.start_operation(FileBatch::Drop { destination }, sources, cx)
+        });
         self.dismiss_file_manager_context_menu(cx);
     }
 
@@ -297,15 +245,18 @@ impl FileManagerView {
             format!("Archive_{}.zip", chrono::Local::now().format("%Y-%m-%d"))
         };
         let current_path = self.file_manager.read(cx).path.clone();
-        let archive_path =
-            unique_copy_path(&std::path::Path::new(&current_path).join(archive_name));
+        let archive_path = Path::new(&current_path).join(archive_name);
         let paths = entries
             .iter()
             .map(|entry| entry.path.clone())
             .collect::<Vec<_>>();
-        let result = oxideterm_local_files::compress_local_files_audited(&paths, &archive_path);
+        let result = self
+            .file_manager
+            .read(cx)
+            .fs
+            .compress(&paths, &archive_path);
         match result {
-            Ok(()) => {
+            Ok(archive_path) => {
                 self.refresh_file_manager(cx);
                 self.push_file_manager_toast(
                     self.i18n.t("fileManager.operationSuccess"),
@@ -335,8 +286,11 @@ impl FileManagerView {
             return;
         }
         let current_path = self.file_manager.read(cx).path.clone();
-        let result =
-            oxideterm_local_files::extract_local_archive_audited(&entry.path, &current_path);
+        let result = self
+            .file_manager
+            .read(cx)
+            .fs
+            .extract(&entry.path, &current_path);
         match result {
             Ok(()) => {
                 self.refresh_file_manager(cx);
@@ -356,19 +310,4 @@ impl FileManagerView {
         }
         self.dismiss_file_manager_context_menu(cx);
     }
-}
-
-fn report_batch_progress(
-    tx: &delivery::ActiveDeliverySender<FileManagerOperationEvent>,
-    total: usize,
-    progress: oxideterm_local_files::LocalBatchProgress,
-) {
-    let _ = tx.send(FileManagerOperationEvent::Progress(
-        FileManagerOperationProgress {
-            current: progress.current,
-            total: total.max(1),
-            file_name: progress.file_name,
-            active: true,
-        },
-    ));
 }

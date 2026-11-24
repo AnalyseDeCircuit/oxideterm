@@ -1,12 +1,9 @@
 use super::*;
 
 pub(super) use oxideterm_local_files::{
-    bookmark_name_for_path, calculate_local_checksum, can_extract_archive,
-    default_file_manager_bookmarks_path, home_path, list_local_files, local_drives,
-    local_operation_unit_count, local_parent_path,
-    local_path_segments as file_manager_path_segments, local_preview_metadata,
-    local_sidebar_locations, new_file_manager_bookmark_id, normalize_local_path, now_ms,
-    read_local_preview, read_local_preview_range, sorted_local_files, unique_copy_path,
+    bookmark_name_for_path, can_extract_archive, local_parent_path,
+    local_path_segments as file_manager_path_segments, new_file_manager_bookmark_id,
+    normalize_local_path, now_ms, sorted_local_files,
 };
 
 pub(super) fn file_icon_for_entry(

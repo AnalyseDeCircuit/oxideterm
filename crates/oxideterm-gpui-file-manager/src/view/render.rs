@@ -402,7 +402,7 @@ impl FileManagerView {
                 self.i18n.t("fileManager.home"),
                 cx.listener(|this, _event, _window, cx| {
                     this.blur_file_manager_inline_inputs(cx);
-                    this.set_file_manager_path(home_path(), cx);
+                    this.set_file_manager_path(this.file_manager.read(cx).fs.home(), cx);
                     cx.stop_propagation();
                     cx.notify();
                 }),
