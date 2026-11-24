@@ -271,14 +271,7 @@ pub struct TerminalAutosuggestInputState {
     pub is_cursor_at_end: bool,
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub(crate) struct TransientCommandHighlight {
-    pub(crate) command_id: Arc<str>,
-    pub(crate) query: Arc<str>,
-    pub(crate) case_sensitive: bool,
-    pub(crate) output_start_global_line: usize,
-    pub(crate) output_end_global_line: Option<usize>,
-}
+pub(crate) use oxideterm_gpui_terminal_view::TransientCommandHighlight;
 
 #[derive(Debug, Eq, PartialEq)]
 struct TransientLiteralQuery {

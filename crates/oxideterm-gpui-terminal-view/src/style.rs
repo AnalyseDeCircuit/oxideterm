@@ -1,3 +1,7 @@
+use crate::{
+    metrics::TerminalMetrics,
+    theme::{TerminalUiTheme, terminal_color_from_hex},
+};
 use gpui::{
     Font, FontStyle, FontWeight, Hsla, Pixels, Rgba, StrikethroughStyle, TextRun, UnderlineStyle,
     px, rgb, rgba,
@@ -372,6 +376,54 @@ pub fn to_rgba(color: TerminalColor) -> Rgba {
 
 pub fn to_hsla(color: TerminalColor) -> Hsla {
     to_rgba(color).into()
+}
+
+pub fn canvas_text_run_for_cell(
+    cell: &TerminalCell,
+    color: Hsla,
+    link: bool,
+    metrics: &TerminalMetrics,
+) -> TextRun {
+    text_run_for_cell(cell, color, link, &metrics.font, metrics.letter_spacing)
+}
+
+pub fn canvas_marked_text_run(
+    text: &str,
+    theme: &TerminalUiTheme,
+    metrics: &TerminalMetrics,
+) -> TextRun {
+    marked_text_run(
+        text,
+        theme.foreground,
+        theme.background,
+        &metrics.font,
+        metrics.letter_spacing,
+    )
+}
+
+pub fn canvas_ghost_text_run(
+    text: &str,
+    theme: &TerminalUiTheme,
+    metrics: &TerminalMetrics,
+) -> TextRun {
+    ghost_text_run(
+        text,
+        theme.foreground,
+        &metrics.font,
+        metrics.letter_spacing,
+    )
+}
+
+pub fn canvas_timestamp_text_run(
+    text: &str,
+    theme: &TerminalUiTheme,
+    metrics: &TerminalMetrics,
+) -> TextRun {
+    timestamp_text_run(text, theme.header_foreground, &metrics.font)
+}
+
+pub fn terminal_background(theme: &TerminalUiTheme) -> Hsla {
+    to_hsla(terminal_color_from_hex(theme.background))
 }
 
 #[cfg(test)]

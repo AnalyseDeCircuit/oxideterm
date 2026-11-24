@@ -8,7 +8,7 @@ license.workspace = true
 version.workspace = true
 
 [features]
-bench = []
+bench = ["oxideterm-gpui-terminal-view/bench"]
 
 [dependencies]
 oxideterm-environment = { path = "../oxideterm-environment" }
@@ -17,7 +17,6 @@ oxideterm-audit = { path = "../oxideterm-audit" }
 anyhow.workspace = true
 async-channel.workspace = true
 chrono.workspace = true
-foldhash.workspace = true
 futures.workspace = true
 gpui.workspace = true
 oxideterm-background-media = { path = "../oxideterm-background-media" }
@@ -40,7 +39,6 @@ oxideterm-terminal-unicode = { path = "../oxideterm-terminal-unicode" }
 oxideterm-theme = { path = "../oxideterm-theme" }
 oxideterm-trzsz = { path = "../oxideterm-trzsz" }
 parking_lot.workspace = true
-regex.workspace = true
 rusqlite = { version = "0.37", features = ["bundled"] }
 serde_json.workspace = true
 tempfile = "3.23"

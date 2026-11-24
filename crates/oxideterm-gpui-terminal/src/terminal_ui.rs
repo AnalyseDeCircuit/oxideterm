@@ -1,61 +1,36 @@
-use std::{
-    hash::{Hash, Hasher},
-    sync::Arc,
-    time::Duration,
-};
-
-use gpui::{
-    Font, FontFallbacks, FontFeatures, FontStyle, FontWeight, Hsla, Pixels, Rgba, SharedString,
-    TextSystem, Window, px, rgb,
-};
+use gpui::{SharedString, Window, px};
 use oxideterm_render_policy::EffectiveRenderPolicy;
 use oxideterm_settings::{
     TerminalBackspaceSequence, TerminalDeleteSequence, TerminalRightClickAction,
     TerminalSemanticScheme,
 };
-use oxideterm_terminal::{
-    TerminalColor, TerminalCursorShape, TerminalEncoding, TerminalPalette, TerminalRow,
-    TrzszTransferPolicy,
+use oxideterm_terminal::{TerminalCursorShape, TerminalEncoding, TrzszTransferPolicy};
+use oxideterm_terminal_semantic::{CompiledSemanticScheme, SemanticShellDialect};
+use std::{sync::Arc, time::Duration};
+
+pub use oxideterm_gpui_terminal_view::metrics::{
+    ResolvedTerminalFont, TERMINAL_FONT, resolve_terminal_font, terminal_letter_spacing_for_font,
+    terminal_line_height_for_font,
 };
-use oxideterm_terminal_semantic::{
-    CompiledSemanticScheme, SemanticClass, SemanticScheme, SemanticSchemeDocument,
-    SemanticShellDialect, compile_scheme_document, compiled_builtin_scheme,
+pub use oxideterm_gpui_terminal_view::theme::{
+    MAX_HIGHLIGHT_PATTERN_LENGTH, MAX_HIGHLIGHT_RULES, TerminalHighlightMatchScope,
+    TerminalHighlightRenderMode, TerminalHighlightRule, TerminalHighlightRuleSetOverride,
+    TerminalUiTheme, resolved_terminal_semantic_scheme, terminal_semantic_color,
+    terminal_semantic_line_band, terminal_semantic_variant_color,
 };
-use oxideterm_theme::{ThemeTokens, default_tokens};
+pub(crate) use oxideterm_gpui_terminal_view::{metrics::*, theme::*};
 
 use crate::{
     command_facts::SharedTerminalCommandHistory,
     session_log::{TerminalSessionLogContext, TerminalSessionLogOptions},
 };
 
-pub const MAX_HIGHLIGHT_RULES: usize = 32;
-pub const MAX_HIGHLIGHT_PATTERN_LENGTH: usize = 512;
-
 pub(crate) const DEFAULT_COLS: usize = 120;
 pub(crate) const DEFAULT_ROWS: usize = 40;
 pub(crate) const DEFAULT_SCROLLBACK_LINES: usize = 1000;
-pub const TERMINAL_FONT: &str = oxideterm_settings::JETBRAINS_MONO_SUBSET_FAMILY;
-pub(crate) const TERMINAL_FONT_SIZE: f32 = 14.0;
-pub(crate) const TERMINAL_FONT_WEIGHT: f32 = 400.0;
-pub(crate) const TERMINAL_CHARACTER_SPACING: f32 =
-    oxideterm_settings::DEFAULT_TERMINAL_CHARACTER_SPACING as f32;
-pub(crate) const TERMINAL_LINE_HEIGHT_RATIO: f32 =
-    oxideterm_settings::DEFAULT_TERMINAL_LINE_HEIGHT as f32;
-// User padding is applied outside the element; these coordinates are grid-local.
-pub(crate) const TERMINAL_CONTENT_PADDING: f32 = 0.0;
-// Command marks do not reserve additional space before column zero.
-const NESTED_SEMANTIC_COLOR_COUNT: u8 = 6;
-const TERMINAL_SEMANTIC_ERROR_LINE_BAND_OPACITY: f32 = 0.11;
-const TERMINAL_SEMANTIC_WARNING_LINE_BAND_OPACITY: f32 = 0.08;
-pub(crate) const SCROLLBAR_WIDTH: f32 = 8.0;
-pub(crate) const SCROLLBAR_ACTIVE_WIDTH: f32 = 12.0;
 pub(crate) const SCROLLBAR_HIT_WIDTH: f32 = 16.0;
 pub(crate) const SCROLLBAR_GAP: f32 = 0.0;
 pub(crate) const SCROLLBAR_HIDE_DELAY: Duration = Duration::from_secs(1);
-pub(crate) const SCROLLBAR_MIN_THUMB: f32 = 24.0;
-pub(crate) const SEARCH_SCROLLBAR_MARKER_HEIGHT: f32 = 2.0;
-pub(crate) const TERMINAL_TIMESTAMP_LABEL_CELLS: usize = 14;
-pub(crate) const TERMINAL_TIMESTAMP_GUTTER_GAP_CELLS: f32 = 1.0;
 pub(crate) const TERMINAL_SCROLL_MULTIPLIER: f32 = 1.0;
 pub(crate) const CURSOR_BLINK_INTERVAL: Duration = Duration::from_millis(500);
 pub(crate) const TERMINAL_PASTE_PROTECTION: bool = true;
@@ -73,7 +48,6 @@ pub(crate) const TERMINAL_BACKSPACE_SEQUENCE: TerminalBackspaceSequence =
     TerminalBackspaceSequence::Delete;
 pub(crate) const TERMINAL_DELETE_SEQUENCE: TerminalDeleteSequence =
     TerminalDeleteSequence::Csi3Tilde;
-pub(crate) const TERMINAL_FONT_LIGATURES: bool = false;
 pub(crate) const TERMINAL_BIDI_ENABLED: bool = true;
 pub(crate) const TERMINAL_COMMAND_MARKS_ENABLED: bool = true;
 pub(crate) const TERMINAL_COMMAND_MARKS_SHOW_HOVER_ACTIONS: bool = true;
@@ -316,22 +290,6 @@ impl Default for TerminalUiPreferences {
     }
 }
 
-pub fn resolved_terminal_semantic_scheme(
-    built_in: TerminalSemanticScheme,
-    custom: Option<&SemanticSchemeDocument>,
-) -> Arc<CompiledSemanticScheme> {
-    if let Some(custom) = custom
-        && let Ok(compiled) = compile_scheme_document(custom)
-    {
-        return Arc::new(compiled);
-    }
-    let built_in = match built_in {
-        TerminalSemanticScheme::Balanced => SemanticScheme::Balanced,
-        TerminalSemanticScheme::Conservative => SemanticScheme::Conservative,
-    };
-    Arc::new(compiled_builtin_scheme(built_in).clone())
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum TerminalRenderTier {
     Boost,
@@ -355,11 +313,6 @@ impl TerminalRenderTier {
             Self::Idle => 0x94a3b8,
         }
     }
-}
-
-pub(crate) fn terminal_scrollbar_x_for_viewport(viewport_width: Pixels) -> Pixels {
-    // Overlay the viewport edge independently of rounded PTY columns.
-    px((f32::from(viewport_width) - TERMINAL_CONTENT_PADDING - SCROLLBAR_WIDTH).max(0.0))
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -848,42 +801,6 @@ impl Default for TerminalPasteLabels {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum TerminalHighlightRenderMode {
-    #[default]
-    Background,
-    Underline,
-    Outline,
-}
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum TerminalHighlightMatchScope {
-    #[default]
-    Match,
-    LogicalLine,
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct TerminalHighlightRule {
-    pub id: String,
-    pub pattern: String,
-    pub is_regex: bool,
-    pub case_sensitive: bool,
-    pub foreground: Option<String>,
-    pub background: Option<String>,
-    pub render_mode: TerminalHighlightRenderMode,
-    pub match_scope: TerminalHighlightMatchScope,
-    pub preserve_background: bool,
-    pub enabled: bool,
-    pub priority: i64,
-}
-
-#[derive(Clone)]
-pub struct TerminalHighlightRuleSetOverride {
-    pub id: String,
-    pub rules: Arc<[TerminalHighlightRule]>,
-}
-
 pub use oxideterm_gpui_background::{
     BackgroundFit as TerminalBackgroundFit, BackgroundPreferences as TerminalBackgroundPreferences,
 };
@@ -948,565 +865,14 @@ impl TerminalUiSettings {
     }
 }
 
-#[derive(Clone)]
-pub struct TerminalUiTheme {
-    // Terminal-owned overlays still use app-level UI tokens for Radix-mapped
-    // surfaces such as context menus; terminal colors alone are not enough.
-    pub tokens: ThemeTokens,
-    pub background: u32,
-    pub(crate) bell_background: u32,
-    pub foreground: u32,
-    pub(crate) header_foreground: u32,
-    pub(crate) selection_background: Hsla,
-}
-
-impl Default for TerminalUiTheme {
-    fn default() -> Self {
-        Self::from_tokens(default_tokens())
-    }
-}
-
-pub(crate) fn terminal_color_from_hex(hex: u32) -> TerminalColor {
-    TerminalColor::rgb(
-        ((hex >> 16) & 0xff) as u8,
-        ((hex >> 8) & 0xff) as u8,
-        (hex & 0xff) as u8,
-    )
-}
-
-/// Resolves a semantic class through the custom scheme before falling back to terminal colors.
-pub fn terminal_semantic_color(
-    theme: &TerminalUiTheme,
-    class: SemanticClass,
-    semantic_scheme: &CompiledSemanticScheme,
-) -> u32 {
-    terminal_semantic_color_from_palette(theme.tokens.terminal, class, semantic_scheme)
-}
-
-pub(crate) fn terminal_semantic_color_from_palette(
-    terminal: oxideterm_theme::TerminalTheme,
-    class: SemanticClass,
-    semantic_scheme: &CompiledSemanticScheme,
-) -> u32 {
-    if let Some(color) = semantic_scheme
-        .color(class)
-        .and_then(|color| u32::from_str_radix(color.strip_prefix('#')?, 16).ok())
-    {
-        return color;
-    }
-    match class {
-        SemanticClass::Command => terminal.green,
-        SemanticClass::Keyword => terminal.bright_magenta,
-        SemanticClass::Option => terminal.cyan,
-        // Keep punctuation/operators visually neutral so `=` and `--` stay distinct from
-        // adjacent yellow string values and cyan option names across both dark and light themes.
-        SemanticClass::Operator => {
-            blend_terminal_hex(terminal.foreground, terminal.bright_black, 0.45)
-        }
-        SemanticClass::String => terminal.yellow,
-        SemanticClass::Variable => terminal.bright_blue,
-        SemanticClass::Link => terminal.bright_cyan,
-        SemanticClass::Path => terminal.blue,
-        SemanticClass::Address => terminal.bright_green,
-        SemanticClass::Weekday => terminal.cyan,
-        SemanticClass::Month => terminal.yellow,
-        SemanticClass::Timestamp => terminal.green,
-        SemanticClass::PermissionRead => terminal.bright_cyan,
-        SemanticClass::PermissionWrite => terminal.bright_yellow,
-        SemanticClass::PermissionExecute => terminal.bright_green,
-        SemanticClass::PermissionSpecial => terminal.bright_magenta,
-        SemanticClass::Number => terminal.magenta,
-        // Explicitly uncolored: fall back to the terminal's default foreground so
-        // columns that should stay plain are not tinted.
-        SemanticClass::Plain => terminal.foreground,
-        SemanticClass::Comment => terminal.bright_black,
-        SemanticClass::Error => terminal.bright_red,
-        SemanticClass::Warning => terminal.bright_yellow,
-        SemanticClass::Success => terminal.bright_green,
-        SemanticClass::Info => terminal.bright_blue,
-    }
-}
-
-fn blend_terminal_hex(base: u32, toward: u32, ratio: f32) -> u32 {
-    let blend = |shift: u32| -> u32 {
-        let a = ((base >> shift) & 0xff) as f32;
-        let b = ((toward >> shift) & 0xff) as f32;
-        (a + (b - a) * ratio).round().clamp(0.0, 255.0) as u32
-    };
-    (blend(16) << 16) | (blend(8) << 8) | blend(0)
-}
-
-/// Resolves presentation variants while keeping the base semantic palette shared by every view.
-pub fn terminal_semantic_variant_color(
-    theme: &TerminalUiTheme,
-    class: SemanticClass,
-    style_variant: Option<u8>,
-    semantic_scheme: &CompiledSemanticScheme,
-) -> u32 {
-    terminal_semantic_variant_color_from_palette(
-        theme.tokens.terminal,
-        class,
-        style_variant,
-        semantic_scheme,
-    )
-}
-
-pub(crate) fn terminal_semantic_variant_color_from_palette(
-    terminal: oxideterm_theme::TerminalTheme,
-    class: SemanticClass,
-    style_variant: Option<u8>,
-    semantic_scheme: &CompiledSemanticScheme,
-) -> u32 {
-    let Some(depth) = style_variant.filter(|_| class == SemanticClass::Operator) else {
-        return terminal_semantic_color_from_palette(terminal, class, semantic_scheme);
-    };
-    // Six terminal-theme colors keep nested delimiters distinct without creating a second palette.
-    match depth % NESTED_SEMANTIC_COLOR_COUNT {
-        0 => terminal.yellow,
-        1 => terminal.cyan,
-        2 => terminal.green,
-        3 => terminal.blue,
-        4 => terminal.red,
-        _ => terminal.magenta,
-    }
-}
-
-/// Returns the restrained line treatment used for explicit error and warning envelopes.
-pub fn terminal_semantic_line_band(
-    theme: &TerminalUiTheme,
-    class: SemanticClass,
-) -> Option<(u32, f32)> {
-    terminal_semantic_line_band_from_colors(theme.tokens.ui.error, theme.tokens.ui.warning, class)
-}
-
-pub(crate) fn terminal_semantic_line_band_from_colors(
-    error_color: u32,
-    warning_color: u32,
-    class: SemanticClass,
-) -> Option<(u32, f32)> {
-    // Low-opacity bands retain the original terminal background and keep token text dominant.
-    match class {
-        SemanticClass::Error => Some((error_color, TERMINAL_SEMANTIC_ERROR_LINE_BAND_OPACITY)),
-        SemanticClass::Warning => {
-            Some((warning_color, TERMINAL_SEMANTIC_WARNING_LINE_BAND_OPACITY))
-        }
-        _ => None,
-    }
-}
-
-fn terminal_selection_background(theme: oxideterm_theme::TerminalTheme) -> Hsla {
-    // Parse once with the theme, not while laying out each selected cell.
-    let value = theme.selection_background.trim();
-    let color = Rgba::try_from(value).ok().or_else(|| {
-        let lower = value.to_ascii_lowercase();
-        let (components, has_alpha) = if let Some(value) = lower.strip_prefix("rgba(") {
-            (value.strip_suffix(')')?, true)
-        } else {
-            (lower.strip_prefix("rgb(")?.strip_suffix(')')?, false)
-        };
-        let mut parts = components.split(',').map(|part| {
-            part.trim()
-                .parse::<f32>()
-                .ok()
-                .filter(|value| value.is_finite())
-        });
-        let r = parts.next()??.round().clamp(0.0, 255.0) / 255.0;
-        let g = parts.next()??.round().clamp(0.0, 255.0) / 255.0;
-        let b = parts.next()??.round().clamp(0.0, 255.0) / 255.0;
-        let a = if has_alpha {
-            parts.next()??.clamp(0.0, 1.0)
-        } else {
-            1.0
-        };
-        parts.next().is_none().then_some(Rgba { r, g, b, a })
-    });
-    color
-        .unwrap_or_else(|| rgb(theme.foreground).alpha(0.2))
-        .into()
-}
-
-impl TerminalUiTheme {
-    pub fn new(background: u32, foreground: u32, cursor: u32) -> Self {
-        Self {
-            background,
-            foreground,
-            header_foreground: cursor,
-            ..Self::default()
-        }
-    }
-
-    pub fn from_tokens(tokens: ThemeTokens) -> Self {
-        Self {
-            background: tokens.terminal.background,
-            bell_background: 0x17131a,
-            foreground: tokens.terminal.foreground,
-            header_foreground: tokens.terminal.cursor,
-            selection_background: terminal_selection_background(tokens.terminal),
-            tokens,
-        }
-    }
-
-    /// Colors the terminal backend resolves for default, ANSI, and color-query slots, so
-    /// emulator output and pane chrome share one theme.
-    pub fn palette(&self) -> TerminalPalette {
-        TerminalPalette::new(
-            terminal_color_from_hex(self.foreground),
-            terminal_color_from_hex(self.background),
-            terminal_color_from_hex(self.header_foreground),
-            terminal_theme_ansi_colors(self.tokens.terminal),
-        )
-    }
-
-    pub fn visual_colors_eq(&self, other: &Self) -> bool {
-        self.background == other.background
-            && self.bell_background == other.bell_background
-            && self.foreground == other.foreground
-            && self.header_foreground == other.header_foreground
-            && self.selection_background == other.selection_background
-            && self.tokens.ui == other.tokens.ui
-            && self.tokens.terminal == other.tokens.terminal
-    }
-
-    /// Interpolates visual theme colors without re-parsing selection strings or mutating backend state.
-    pub fn interpolate(from: &Self, to: &Self, progress: f32) -> Self {
-        let t = progress.clamp(0.0, 1.0);
-        let mut tokens = to.tokens;
-        tokens.ui = from.tokens.ui.interpolate(to.tokens.ui, t);
-        tokens.terminal = from.tokens.terminal.interpolate(to.tokens.terminal, t);
-        Self {
-            tokens,
-            background: lerp_hex_color(from.background, to.background, t),
-            bell_background: lerp_hex_color(from.bell_background, to.bell_background, t),
-            foreground: lerp_hex_color(from.foreground, to.foreground, t),
-            header_foreground: lerp_hex_color(from.header_foreground, to.header_foreground, t),
-            selection_background: lerp_hsla_rgba(
-                from.selection_background,
-                to.selection_background,
-                t,
-            ),
-        }
-    }
-}
-
-fn terminal_theme_ansi_colors(terminal: oxideterm_theme::TerminalTheme) -> [TerminalColor; 16] {
-    [
-        terminal.black,
-        terminal.red,
-        terminal.green,
-        terminal.yellow,
-        terminal.blue,
-        terminal.magenta,
-        terminal.cyan,
-        terminal.white,
-        terminal.bright_black,
-        terminal.bright_red,
-        terminal.bright_green,
-        terminal.bright_yellow,
-        terminal.bright_blue,
-        terminal.bright_magenta,
-        terminal.bright_cyan,
-        terminal.bright_white,
-    ]
-    .map(terminal_color_from_hex)
-}
-
-fn dim_terminal_color(color: TerminalColor) -> TerminalColor {
-    TerminalColor::rgb(
-        (color.r as f32 * 0.7) as u8,
-        (color.g as f32 * 0.7) as u8,
-        (color.b as f32 * 0.7) as u8,
-    )
-}
-
-fn lerp_u8_channel(from: u8, to: u8, progress: f32) -> u8 {
-    oxideterm_gpui_ui::motion::lerp(from as f32, to as f32, progress)
-        .round()
-        .clamp(0.0, 255.0) as u8
-}
-
-fn lerp_hex_color(from: u32, to: u32, progress: f32) -> u32 {
-    let r = lerp_u8_channel(
-        ((from >> 16) & 0xff) as u8,
-        ((to >> 16) & 0xff) as u8,
-        progress,
-    );
-    let g = lerp_u8_channel(
-        ((from >> 8) & 0xff) as u8,
-        ((to >> 8) & 0xff) as u8,
-        progress,
-    );
-    let b = lerp_u8_channel((from & 0xff) as u8, (to & 0xff) as u8, progress);
-    ((r as u32) << 16) | ((g as u32) << 8) | (b as u32)
-}
-
-fn lerp_terminal_color(from: TerminalColor, to: TerminalColor, progress: f32) -> TerminalColor {
-    TerminalColor::rgb(
-        lerp_u8_channel(from.r, to.r, progress),
-        lerp_u8_channel(from.g, to.g, progress),
-        lerp_u8_channel(from.b, to.b, progress),
-    )
-}
-
-fn lerp_hsla_rgba(from: Hsla, to: Hsla, progress: f32) -> Hsla {
-    let from: Rgba = from.into();
-    let to: Rgba = to.into();
-    Rgba {
-        r: oxideterm_gpui_ui::motion::lerp(from.r, to.r, progress),
-        g: oxideterm_gpui_ui::motion::lerp(from.g, to.g, progress),
-        b: oxideterm_gpui_ui::motion::lerp(from.b, to.b, progress),
-        a: oxideterm_gpui_ui::motion::lerp(from.a, to.a, progress),
-    }
-    .into()
-}
-
-pub(crate) fn terminal_color_to_hsla(color: TerminalColor) -> Hsla {
-    Rgba {
-        r: color.r as f32 / 255.0,
-        g: color.g as f32 / 255.0,
-        b: color.b as f32 / 255.0,
-        a: 1.0,
-    }
-    .into()
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
-pub(crate) enum TerminalTransitionColorKey {
-    Static,
-    TerminalBackground,
-    DefaultForeground,
-    DefaultDimForeground,
-    CursorBackground,
-    SelectionBackground,
-    PaletteColor(TerminalColor),
-}
-
-/// Maps already-resolved target snapshot colors to their mid-transition colors so
-/// the terminal view can animate cleanly after a single backend `set_palette`.
-#[derive(Clone, Copy)]
-pub(crate) struct TerminalTransitionColors {
-    pub(crate) target_background: TerminalColor,
-    pub(crate) target_background_hsla: Hsla,
-    pub(crate) target_foreground: TerminalColor,
-    pub(crate) target_foreground_hsla: Hsla,
-    pub(crate) target_dim_foreground: TerminalColor,
-    pub(crate) target_dim_foreground_hsla: Hsla,
-    pub(crate) target_header_foreground: Hsla,
-    pub(crate) target_selection_background: Hsla,
-    pub(crate) interpolated_foreground: Hsla,
-    pub(crate) interpolated_dim_foreground: Hsla,
-    pub(crate) interpolated_header_foreground: Hsla,
-    pub(crate) interpolated_selection_background: Hsla,
-    pub(crate) ansi_pairs: [(TerminalColor, Hsla); 16],
-    pub(crate) dim_ansi_pairs: [(TerminalColor, Hsla); 8],
-    pub(crate) target_terminal: oxideterm_theme::TerminalTheme,
-    pub(crate) target_ui_error: u32,
-    pub(crate) target_ui_warning: u32,
-    /// Constant across the entire transition so `TerminalLayoutCache` keeps row layouts warm.
-    pub(crate) layout_signature: u64,
-}
-
-impl TerminalTransitionColors {
-    pub(crate) fn new(
-        from: &TerminalUiTheme,
-        to: &TerminalUiTheme,
-        interpolated: &TerminalUiTheme,
-        progress: f32,
-    ) -> Self {
-        let t = progress.clamp(0.0, 1.0);
-        let from_fg = terminal_color_from_hex(from.foreground);
-        let to_fg = terminal_color_from_hex(to.foreground);
-        let to_bg = terminal_color_from_hex(to.background);
-        let to_dim_fg = dim_terminal_color(to_fg);
-        let from_ansi = terminal_theme_ansi_colors(from.tokens.terminal);
-        let to_ansi = terminal_theme_ansi_colors(to.tokens.terminal);
-        let interp_ansi = terminal_theme_ansi_colors(interpolated.tokens.terminal);
-        let mut layout_hasher = std::collections::hash_map::DefaultHasher::new();
-        from.background.hash(&mut layout_hasher);
-        to.background.hash(&mut layout_hasher);
-        from.foreground.hash(&mut layout_hasher);
-        to.foreground.hash(&mut layout_hasher);
-        from.header_foreground.hash(&mut layout_hasher);
-        to.header_foreground.hash(&mut layout_hasher);
-        to.selection_background.hash(&mut layout_hasher);
-        from_ansi.hash(&mut layout_hasher);
-        to_ansi.hash(&mut layout_hasher);
-
-        Self {
-            target_background: to_bg,
-            target_background_hsla: terminal_color_to_hsla(to_bg),
-            target_foreground: to_fg,
-            target_foreground_hsla: terminal_color_to_hsla(to_fg),
-            target_dim_foreground: to_dim_fg,
-            target_dim_foreground_hsla: terminal_color_to_hsla(to_dim_fg),
-            target_header_foreground: terminal_color_to_hsla(terminal_color_from_hex(
-                to.header_foreground,
-            )),
-            target_selection_background: to.selection_background,
-            interpolated_foreground: terminal_color_to_hsla(terminal_color_from_hex(
-                interpolated.foreground,
-            )),
-            interpolated_dim_foreground: terminal_color_to_hsla(lerp_terminal_color(
-                dim_terminal_color(from_fg),
-                to_dim_fg,
-                t,
-            )),
-            interpolated_header_foreground: terminal_color_to_hsla(terminal_color_from_hex(
-                interpolated.header_foreground,
-            )),
-            interpolated_selection_background: interpolated.selection_background,
-            ansi_pairs: std::array::from_fn(|index| {
-                (to_ansi[index], terminal_color_to_hsla(interp_ansi[index]))
-            }),
-            dim_ansi_pairs: std::array::from_fn(|index| {
-                let interpolated_dim = lerp_terminal_color(
-                    dim_terminal_color(from_ansi[index]),
-                    dim_terminal_color(to_ansi[index]),
-                    t,
-                );
-                (
-                    dim_terminal_color(to_ansi[index]),
-                    terminal_color_to_hsla(interpolated_dim),
-                )
-            }),
-            target_terminal: to.tokens.terminal,
-            target_ui_error: to.tokens.ui.error,
-            target_ui_warning: to.tokens.ui.warning,
-            layout_signature: layout_hasher.finish(),
-        }
-    }
-
-    pub(crate) fn map_ansi_color(&self, color: TerminalColor) -> Option<Hsla> {
-        self.ansi_pairs
-            .iter()
-            .chain(&self.dim_ansi_pairs)
-            .find_map(|&(target, interpolated)| (target == color).then_some(interpolated))
-    }
-
-    pub(crate) fn resolve_row_color(
-        &self,
-        key: TerminalTransitionColorKey,
-        static_color: Hsla,
-        live_terminal_background: Hsla,
-    ) -> Hsla {
-        match key {
-            TerminalTransitionColorKey::Static => static_color,
-            TerminalTransitionColorKey::TerminalBackground => live_terminal_background,
-            TerminalTransitionColorKey::DefaultForeground => self.interpolated_foreground,
-            TerminalTransitionColorKey::DefaultDimForeground => self.interpolated_dim_foreground,
-            TerminalTransitionColorKey::CursorBackground => self.interpolated_header_foreground,
-            TerminalTransitionColorKey::SelectionBackground => {
-                self.interpolated_selection_background
-            }
-            TerminalTransitionColorKey::PaletteColor(color) => {
-                self.map_ansi_color(color).unwrap_or(static_color)
-            }
-        }
-    }
-}
-
 pub(crate) use oxideterm_gpui_terminal_view::input::TerminalBlinkMode;
 
-#[derive(Clone)]
-pub(crate) struct TerminalMetrics {
-    pub(crate) font: Font,
-    pub(crate) font_size: Pixels,
-    pub(crate) cell_width: Pixels,
-    // Keep platform shaping in sync with scaled `cell_width` so small multipliers
-    // (for example 1.05x) do not hit `apply_force_width_to_layout`'s 1px snap threshold.
-    pub(crate) letter_spacing: Option<Pixels>,
-    pub(crate) line_height: Pixels,
-    pub(crate) primary_ascent: Pixels,
-    pub(crate) primary_descent: Pixels,
+pub(crate) trait TerminalMetricsExt {
+    fn measure_with_preferences(window: &mut Window, preferences: &TerminalUiPreferences) -> Self;
 }
 
-fn primary_font_vertical_metrics(
-    text_system: &TextSystem,
-    font_id: gpui::FontId,
-    font_size: Pixels,
-) -> (Pixels, Pixels) {
-    let ascent = px(f32::from(text_system.ascent(font_id, font_size)).max(0.0));
-    let descent = px(f32::from(text_system.descent(font_id, font_size)).abs());
-    (ascent, descent)
-}
-
-/// Snaps terminal row height to an integer physical pixel step so every row shares the same
-/// vertical subpixel phase for uniform glyph sharpness and `LinePaintCache` reuse across rows.
-fn snap_line_height_to_device_pixel(line_height: Pixels, scale_factor: f32) -> Pixels {
-    let scale = if scale_factor.is_finite() && scale_factor > 0.0 {
-        scale_factor
-    } else {
-        1.0
-    };
-    px(((f32::from(line_height) * scale).round().max(1.0)) / scale)
-}
-
-/// Computes terminal line height by scaling the primary font's natural
-/// `ascent + |descent|` box rather than bare `font_size`, matching macOS Terminal.
-pub fn terminal_line_height_for_font(
-    text_system: &TextSystem,
-    font: &Font,
-    font_size: Pixels,
-    line_height_multiplier: f32,
-) -> Pixels {
-    let font_id = text_system.resolve_font(font);
-    let (ascent, descent) = primary_font_vertical_metrics(text_system, font_id, font_size);
-    let natural = f32::from(ascent + descent);
-    let base = if natural > 0.0 {
-        natural
-    } else {
-        f32::from(font_size)
-    };
-    px((base * line_height_multiplier).max(1.0))
-}
-
-fn sanitize_character_spacing(multiplier: f32) -> f32 {
-    if multiplier.is_finite() {
-        multiplier.clamp(
-            oxideterm_settings::MIN_TERMINAL_CHARACTER_SPACING as f32,
-            oxideterm_settings::MAX_TERMINAL_CHARACTER_SPACING as f32,
-        )
-    } else {
-        TERMINAL_CHARACTER_SPACING
-    }
-}
-
-fn base_cell_width_for_font(text_system: &TextSystem, font: &Font, font_size: Pixels) -> Pixels {
-    let font_id = text_system.resolve_font(font);
-    text_system
-        .advance(font_id, font_size, 'm')
-        .map(|advance| advance.width)
-        .unwrap_or_else(|_| text_system.layout_width(font_id, font_size, 'm'))
-        .max(px(1.0))
-}
-
-fn scaled_cell_width_and_letter_spacing(
-    base_width: Pixels,
-    character_spacing: f32,
-) -> (Pixels, Option<Pixels>) {
-    let spacing = sanitize_character_spacing(character_spacing);
-    let effective_scale =
-        spacing * (oxideterm_settings::TERMINAL_CHARACTER_SPACING_BASELINE_SCALE as f32);
-    let cell_width = (base_width * effective_scale).max(px(1.0));
-    let delta = cell_width - base_width;
-    let letter_spacing = (delta.as_f32().abs() > 0.001).then_some(delta);
-    (cell_width, letter_spacing)
-}
-
-pub fn terminal_letter_spacing_for_font(
-    text_system: &TextSystem,
-    font: &Font,
-    font_size: Pixels,
-    character_spacing: f32,
-) -> Option<Pixels> {
-    let base_width = base_cell_width_for_font(text_system, font, font_size);
-    scaled_cell_width_and_letter_spacing(base_width, character_spacing).1
-}
-
-impl TerminalMetrics {
-    pub(crate) fn measure_with_preferences(
-        window: &mut Window,
-        preferences: &TerminalUiPreferences,
-    ) -> Self {
+impl TerminalMetricsExt for TerminalMetrics {
+    fn measure_with_preferences(window: &mut Window, preferences: &TerminalUiPreferences) -> Self {
         let font_size = px(preferences.font_size);
         let font = resolve_terminal_font(
             window.text_system(),
@@ -1516,239 +882,20 @@ impl TerminalMetrics {
             preferences.font_weight,
         )
         .font;
-        let font_id = window.text_system().resolve_font(&font);
-        let (primary_ascent, primary_descent) =
-            primary_font_vertical_metrics(window.text_system(), font_id, font_size);
-        let line_height = snap_line_height_to_device_pixel(
-            terminal_line_height_for_font(
-                window.text_system(),
-                &font,
-                font_size,
-                preferences.line_height,
-            ),
-            window.scale_factor(),
-        );
-        let base_width = base_cell_width_for_font(window.text_system(), &font, font_size);
-        let (cell_width, letter_spacing) =
-            scaled_cell_width_and_letter_spacing(base_width, preferences.character_spacing);
 
-        Self {
+        Self::measure(
+            window,
             font,
             font_size,
-            cell_width,
-            letter_spacing,
-            line_height,
-            primary_ascent,
-            primary_descent,
-        }
-    }
-
-    pub(crate) fn cell_width_f32(&self) -> f32 {
-        f32::from(self.cell_width)
-    }
-
-    pub(crate) fn line_height_f32(&self) -> f32 {
-        f32::from(self.line_height)
-    }
-}
-
-pub(crate) fn terminal_timestamp_gutter_width(metrics: &TerminalMetrics, enabled: bool) -> f32 {
-    if enabled {
-        (TERMINAL_TIMESTAMP_LABEL_CELLS as f32 + TERMINAL_TIMESTAMP_GUTTER_GAP_CELLS)
-            * metrics.cell_width_f32()
-    } else {
-        0.0
-    }
-}
-
-/// Emulator-owned identity is stable across scrolling, eviction and local row movement.
-pub(crate) fn terminal_row_timestamp_identity(row: &TerminalRow) -> u64 {
-    row.source_id as u64
-}
-
-pub struct ResolvedTerminalFont {
-    pub font: Font,
-    pub unavailable_families: Vec<String>,
-}
-
-/// Resolves the primary family before either measuring or shaping terminal cells.
-pub fn resolve_terminal_font(
-    text_system: &TextSystem,
-    family: &str,
-    cjk_family: Option<&str>,
-    font_ligatures: bool,
-    font_weight: f32,
-) -> ResolvedTerminalFont {
-    let mut font =
-        terminal_font_with_family_and_cjk(family, cjk_family, font_ligatures, font_weight);
-    let configured = oxideterm_gpui_ui::css_font_family_stack(family);
-    let available = |family: &str| {
-        // A glyph fallback must not disguise an unavailable configured family.
-        text_system
-            .font_id(&Font {
-                family: terminal_font_family_name(family),
-                fallbacks: None,
-                ..font.clone()
-            })
-            .is_ok()
-    };
-    let mut unavailable_families = Vec::new();
-    for name in configured.iter().map(|name| name.as_ref()) {
-        let name = name.trim();
-        if !name.is_empty() && !available(name) {
-            push_font_fallback(&mut unavailable_families, name);
-        }
-    }
-    let primary = configured
-        .iter()
-        .find(|family| available(family))
-        .map(|family| terminal_font_family_name(family))
-        .unwrap_or_else(|| TERMINAL_FONT.into());
-    // Keep glyph fallbacks intact: CJK and symbol-only fonts need not be usable as a primary.
-    font.family = primary;
-    ResolvedTerminalFont {
-        font,
-        unavailable_families,
-    }
-}
-
-fn terminal_font_family_name(family: &str) -> SharedString {
-    if family.eq_ignore_ascii_case("monospace") || family.eq_ignore_ascii_case("ui-monospace") {
-        TERMINAL_FONT.into()
-    } else {
-        oxideterm_gpui_ui::gpui_font_family_name(family)
-    }
-}
-
-pub(crate) fn terminal_font_with_family_and_cjk(
-    family: &str,
-    cjk_family: Option<&str>,
-    font_ligatures: bool,
-    font_weight: f32,
-) -> Font {
-    let configured_families = oxideterm_gpui_ui::css_font_family_stack(family);
-    let primary_family = configured_families
-        .first()
-        .cloned()
-        .unwrap_or_else(|| SharedString::from(TERMINAL_FONT));
-    let mut fallback_families = Vec::new();
-    // Preserve the user-defined stack before appending built-in recovery fonts.
-    for configured_fallback in configured_families.iter().skip(1) {
-        push_font_fallback(&mut fallback_families, configured_fallback);
-    }
-    // A bundled Latin monospace must precede optional CJK and system fallbacks.
-    push_font_fallback(
-        &mut fallback_families,
-        oxideterm_settings::JETBRAINS_MONO_SUBSET_FAMILY,
-    );
-    if let Some(cjk_family) = cjk_family {
-        push_font_fallback(&mut fallback_families, cjk_family);
-    }
-    if cjk_family.is_none_or(|family| {
-        family.trim().is_empty() || family.trim() == oxideterm_settings::MAPLE_MONO_SUBSET_FAMILY
-    }) {
-        // The large bundled CJK fallback is available only for Auto or an explicit Maple choice.
-        push_font_fallback(
-            &mut fallback_families,
-            oxideterm_settings::MAPLE_MONO_SUBSET_FAMILY,
-        );
-        push_font_fallback(&mut fallback_families, "Maple Mono NF CN");
-    }
-    for fallback in [
-        "JetBrainsMono Nerd Font",
-        "JetBrains Mono NF (Subset)",
-        "JetBrains Mono",
-        "JetBrainsMonoNL Nerd Font Mono",
-        oxideterm_settings::MESLO_SUBSET_FAMILY,
-        "MesloLGS Nerd Font Mono",
-        "Symbols Nerd Font Mono",
-        "Symbols Nerd Font",
-        "ui-monospace",
-        "SF Mono",
-        "Menlo",
-        "Monaco",
-        "Cascadia Mono",
-        "DejaVu Sans Mono",
-        "Noto Sans Mono",
-        "Liberation Mono",
-        "Courier New",
-        // Terminal output often contains emoji such as ℹ️ / 🆄. Without the
-        // platform emoji font they fall back to arbitrary symbol fonts, whose box
-        // size and baseline do not line up with the surrounding text.
-        "Segoe UI Emoji",
-        "Apple Color Emoji",
-        "Noto Color Emoji",
-    ] {
-        push_font_fallback(&mut fallback_families, fallback);
-    }
-
-    Font {
-        family: primary_family,
-        features: terminal_font_features(font_ligatures),
-        fallbacks: Some(FontFallbacks::from_fonts(fallback_families)),
-        weight: FontWeight(font_weight.clamp(100.0, 900.0)),
-        style: FontStyle::Normal,
-    }
-}
-
-fn push_font_fallback(fallbacks: &mut Vec<String>, family: &str) {
-    let family = family.trim();
-    if family.is_empty() || fallbacks.iter().any(|existing| existing == family) {
-        return;
-    }
-    fallbacks.push(family.to_string());
-}
-
-pub(crate) fn terminal_font_features(font_ligatures: bool) -> FontFeatures {
-    if font_ligatures {
-        // GPUI enables the font's default OpenType features when no override is supplied.
-        FontFeatures::default()
-    } else {
-        // Standard Latin ligatures must follow the same switch as contextual
-        // programming ligatures; required script shaping remains enabled.
-        FontFeatures(Arc::new(
-            ["liga", "clig", "calt"]
-                .map(|tag| (tag.to_owned(), 0))
-                .into(),
-        ))
+            preferences.line_height,
+            preferences.character_spacing,
+        )
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn disabling_terminal_ligatures_covers_standard_and_contextual_features() {
-        let features = terminal_font_features(false);
-        for tag in ["calt", "liga", "clig"] {
-            assert!(
-                features
-                    .tag_value_list()
-                    .iter()
-                    .any(|(name, value)| name == tag && *value == 0),
-                "{tag} must be disabled"
-            );
-        }
-        assert!(terminal_font_features(true).tag_value_list().is_empty());
-    }
-
-    #[test]
-    fn custom_font_stack_uses_first_family_and_preserves_fallback_order() {
-        let font = terminal_font_with_family_and_cjk(
-            "\"Maple Mono\",\"Maple Mono NF CN\"",
-            None,
-            false,
-            400.0,
-        );
-        let fallbacks = font.fallbacks.expect("terminal font fallbacks");
-
-        assert_eq!(font.family.as_ref(), "Maple Mono");
-        assert_eq!(
-            fallbacks.fallback_list().first().map(String::as_str),
-            Some("Maple Mono NF CN")
-        );
-    }
 
     #[test]
     fn host_overrides_replace_only_terminal_protocol_defaults() {
@@ -1770,50 +917,5 @@ mod tests {
         );
         assert_eq!(preferences.delete_sequence, TerminalDeleteSequence::Delete);
         assert_eq!(preferences.font_family, original_font_family);
-    }
-
-    #[test]
-    fn character_spacing_scales_cell_width_and_derives_matching_letter_spacing() {
-        let base_width = px(10.0);
-        let assert_scaled =
-            |input: f32, expected_cell: f32, expected_letter_spacing: Option<f32>| {
-                let (cell_width, letter_spacing) =
-                    scaled_cell_width_and_letter_spacing(base_width, input);
-                assert!(
-                    (f32::from(cell_width) - expected_cell).abs() < 1e-4,
-                    "input {input}: cell_width={cell_width:?}, expected {expected_cell}"
-                );
-                match (letter_spacing, expected_letter_spacing) {
-                    (Some(actual), Some(expected)) => assert!(
-                        (f32::from(actual) - expected).abs() < 1e-4,
-                        "input {input}: letter_spacing={actual:?}, expected {expected}"
-                    ),
-                    (None, None) => {}
-                    (actual, expected) => {
-                        panic!("input {input}: letter_spacing={actual:?}, expected={expected:?}")
-                    }
-                }
-            };
-
-        assert_scaled(1.0, 9.3, Some(-0.7));
-        assert_scaled(1.1, 10.23, Some(0.23));
-        assert_scaled(0.85, 7.905, Some(-2.095));
-        assert_scaled(5.0, 18.6, Some(8.6));
-        assert_scaled(f32::NAN, 9.3, Some(-0.7));
-    }
-
-    #[test]
-    fn line_height_snaps_to_integer_device_pixels_per_scale_factor() {
-        assert_eq!(snap_line_height_to_device_pixel(px(16.632), 2.0), px(16.5));
-        assert_eq!(snap_line_height_to_device_pixel(px(16.632), 1.0), px(17.0));
-        assert_eq!(
-            snap_line_height_to_device_pixel(px(16.632), 1.5),
-            px(25.0 / 1.5)
-        );
-        assert_eq!(snap_line_height_to_device_pixel(px(0.1), 2.0), px(0.5));
-        assert_eq!(
-            snap_line_height_to_device_pixel(px(16.632), f32::NAN),
-            px(17.0)
-        );
     }
 }

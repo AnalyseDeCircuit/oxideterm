@@ -1,15 +1,15 @@
 use std::ops::Range;
 
 use gpui::{Bounds, Pixels, point, px, rgba, size};
-use oxideterm_terminal::{TerminalSearchMatch, TerminalSnapshot};
+use oxideterm_terminal_emulator::{TerminalSearchMatch, TerminalSnapshot};
 use oxideterm_terminal_unicode::visual_line_for_row_if_bidi;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
-use crate::terminal_ui::*;
-use crate::terminal_view::element::{TerminalHorizontalScrollbar, TerminalRect, TerminalScrollbar};
+use crate::element::{TerminalHorizontalScrollbar, TerminalRect, TerminalScrollbar};
+use crate::metrics::*;
 
-pub(crate) fn terminal_scrollbar_for_viewport_display_offset(
+pub fn terminal_scrollbar_for_viewport_display_offset(
     snapshot: &TerminalSnapshot,
     metrics: &TerminalMetrics,
     viewport_rows: usize,
@@ -35,7 +35,7 @@ pub(crate) fn terminal_scrollbar_for_viewport_display_offset(
     })
 }
 
-pub(crate) fn search_scrollbar_markers(
+pub fn search_scrollbar_markers(
     matches: &[TerminalSearchMatch],
     history: usize,
     viewport_rows: usize,
@@ -65,7 +65,7 @@ pub(crate) fn search_scrollbar_markers(
         .collect()
 }
 
-pub(crate) fn terminal_horizontal_scrollbar_for_viewport(
+pub fn terminal_horizontal_scrollbar_for_viewport(
     viewport_width: f32,
     max_scroll: f32,
     scroll_offset: f32,
@@ -138,7 +138,7 @@ mod scrollbar_tests {
     }
 }
 
-pub(crate) fn terminal_visible_rows_for_limit(
+pub fn terminal_visible_rows_for_limit(
     bounds: Bounds<Pixels>,
     metrics: &TerminalMetrics,
     row_limit: usize,
@@ -153,14 +153,11 @@ pub(crate) fn terminal_visible_rows_for_limit(
 }
 
 #[allow(dead_code)]
-pub(crate) fn search_match_rects(
-    snapshot: &TerminalSnapshot,
-    query: Option<&str>,
-) -> Vec<TerminalRect> {
+pub fn search_match_rects(snapshot: &TerminalSnapshot, query: Option<&str>) -> Vec<TerminalRect> {
     search_match_rects_for_rows(snapshot, query, 0..snapshot.lines.len())
 }
 
-pub(crate) fn search_match_rects_for_rows(
+pub fn search_match_rects_for_rows(
     snapshot: &TerminalSnapshot,
     query: Option<&str>,
     rows: Range<usize>,
@@ -197,7 +194,7 @@ pub(crate) fn search_match_rects_for_rows(
     rects
 }
 
-pub(crate) fn visible_search_match_rects(
+pub fn visible_search_match_rects(
     matches: &[TerminalSearchMatch],
     display_offset: usize,
     rows: Range<usize>,
@@ -230,7 +227,7 @@ pub(crate) fn visible_search_match_rects(
         .collect()
 }
 
-pub(crate) fn terminal_content_bounds_for_rows(
+pub fn terminal_content_bounds_for_rows(
     origin: gpui::Point<Pixels>,
     rows: usize,
     cols: usize,
@@ -250,7 +247,7 @@ pub(crate) fn terminal_content_bounds_for_rows(
 /// IME ranges are UTF-16 offsets, while the preedit is painted on the terminal
 /// grid. An offset inside a grapheme advances to its trailing edge, never splitting
 /// surrogate pairs, combining marks, or joined emoji into separate cells.
-pub(crate) fn marked_text_cells_before_utf16(text: &str, utf16_offset: usize) -> usize {
+pub fn marked_text_cells_before_utf16(text: &str, utf16_offset: usize) -> usize {
     let mut utf16_position = 0;
     let mut cells = 0;
     for grapheme in text.graphemes(true) {
@@ -263,7 +260,7 @@ pub(crate) fn marked_text_cells_before_utf16(text: &str, utf16_offset: usize) ->
     cells
 }
 
-pub(crate) fn ime_cursor_bounds_for_snapshot(
+pub fn ime_cursor_bounds_for_snapshot(
     snapshot: &TerminalSnapshot,
     metrics: &TerminalMetrics,
 ) -> Option<Bounds<Pixels>> {

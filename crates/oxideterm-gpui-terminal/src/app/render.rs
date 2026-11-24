@@ -290,7 +290,7 @@ impl Render for TerminalPane {
         if self.preferences.show_performance_overlay {
             // Element timings are published after prepaint and paint, so the pane displays the
             // most recently completed frame without scheduling an extra diagnostic repaint.
-            let performance = self.layout_cache.lock().performance();
+            let performance = self.layout_cache.borrow().performance();
             self.render_stats.layout_micros = performance.layout_micros;
             self.render_stats.paint_micros = performance.paint_micros;
             self.render_stats.layout_cache_hit_percent = performance.cache_hit_percent;
@@ -594,10 +594,13 @@ impl Render for TerminalPane {
                 self.command_marks
                     .iter()
                     .cloned()
-                    .map(|mark| self.displayed_command_mark(mark))
+                    .map(|mark| command_mark_annotation(&self.displayed_command_mark(mark)))
                     .collect()
             } else {
-                Arc::from(self.command_marks.clone())
+                self.command_marks
+                    .iter()
+                    .map(command_mark_annotation)
+                    .collect()
             };
             self.command_marks_render_cache_dirty = false;
         }
@@ -646,7 +649,7 @@ impl Render for TerminalPane {
         .detect_file_paths_as_links(self.settings.detect_file_paths_as_links)
         .precomputed_search_matches()
         .selection_highlight_query(selection_highlight_query)
-        .command_marks(
+        .command_annotations(
             if command_actions_visible {
                 self.command_marks_render_cache.clone()
             } else {

@@ -18,6 +18,7 @@ pub use app::{
     TerminalPluginTextAction, TerminalSearchStatus, TerminalSerialAction, TerminalSerialStatus,
     TerminalShortcut, TerminalTelnetAction, TerminalWorkingDirectorySource,
 };
+pub use app::{TerminalRenderedImage, TerminalRowTimestamp, TerminalRowTimestampStore};
 pub use background_cache::{
     BackgroundImageRenderCache, BackgroundImageTargetSize, background_display_target,
 };
@@ -26,6 +27,7 @@ pub use command_facts::{
     TerminalAutosuggestInputState, TerminalCommandFact, TerminalCommandFactStatus,
     TerminalHistoryStore,
 };
+pub use oxideterm_gpui_terminal_view::{CommandMarkAnnotation, TransientCommandHighlight};
 pub use oxideterm_terminal::TerminalOutputProcessor;
 pub use oxideterm_terminal_recording::{TerminalRecordingState, TerminalRecordingStatus};
 pub use oxideterm_terminal_semantic::SemanticShellDialect;

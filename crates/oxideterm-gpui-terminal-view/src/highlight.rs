@@ -8,13 +8,13 @@ use foldhash::{HashMap, HashMapExt, HashSet, HashSetExt};
 use gpui::{Hsla, rgba};
 use regex::RegexBuilder;
 
-use crate::command_facts::TransientCommandHighlight;
-use crate::terminal_ui::{
+use crate::TransientCommandHighlight;
+use crate::element::{TerminalRect, to_hsla};
+use crate::theme::{
     MAX_HIGHLIGHT_PATTERN_LENGTH, MAX_HIGHLIGHT_RULES, TerminalHighlightMatchScope,
     TerminalHighlightRenderMode, TerminalHighlightRule,
 };
-use crate::terminal_view::element::{TerminalRect, to_hsla};
-use oxideterm_terminal::{TerminalColor, TerminalRow, TerminalSnapshot};
+use oxideterm_terminal_emulator::{TerminalColor, TerminalRow, TerminalSnapshot};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct TerminalHighlightForeground {

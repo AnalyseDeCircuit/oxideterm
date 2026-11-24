@@ -1,4 +1,11 @@
-use super::*;
+use crate::metrics::TERMINAL_CONTENT_PADDING;
+use gpui::{Bounds, Pixels, point, px, rgb, size};
+use std::sync::Arc;
+type TerminalElement = crate::TerminalElement<()>;
+use super::snapshot::*;
+use super::{TerminalCell, TerminalColor, TerminalCursorShape, TerminalSnapshot, test_metrics};
+use crate::{TransientCommandHighlight, element::*, selection::*, theme::*};
+use oxideterm_terminal_emulator::TerminalSearchMatch;
 
 #[test]
 fn terminal_element_batches_adjacent_cells_with_same_style() {
@@ -332,7 +339,7 @@ fn transparent_powerline_default_background_is_not_painted_as_a_solid_glyph() {
     for cell in snapshot.lines[0].cells_mut().iter_mut().take(4) {
         cell.fg = terminal_color_from_hex(TerminalUiTheme::default().background);
         cell.bg = TerminalColor::rgb(0, 128, 128);
-        cell.style_origin = oxideterm_terminal::TerminalStyleOrigin::new(true, true)
+        cell.style_origin = oxideterm_terminal_emulator::TerminalStyleOrigin::new(true, true)
             .with_foreground_default_background();
     }
     snapshot.lines[0].refresh_signature();
@@ -555,7 +562,7 @@ fn terminal_element_maps_scrollback_search_matches_into_visible_rows() {
             line: -3,
             start_col: 8,
             end_col: 13,
-            ranges: vec![oxideterm_terminal::TerminalSearchRange {
+            ranges: vec![oxideterm_terminal_emulator::TerminalSearchRange {
                 line: -3,
                 start_col: 8,
                 end_col: 13,
@@ -565,7 +572,7 @@ fn terminal_element_maps_scrollback_search_matches_into_visible_rows() {
             line: -1,
             start_col: 0,
             end_col: 5,
-            ranges: vec![oxideterm_terminal::TerminalSearchRange {
+            ranges: vec![oxideterm_terminal_emulator::TerminalSearchRange {
                 line: -1,
                 start_col: 0,
                 end_col: 5,
@@ -709,4 +716,176 @@ fn selection_matches_preserve_wide_cells_and_soft_wraps() {
             .collect::<Vec<_>>(),
         vec![(0, 0, 3), (1, 0, 2), (1, 2, 1)]
     );
+}
+
+fn cursor_snapshot() -> TerminalSnapshot {
+    let mut snapshot = test_snapshot(0, 0);
+    snapshot.cols = 2;
+    snapshot.rows = 1;
+    snapshot.cursor_col = 0;
+    snapshot.cursor_row = 0;
+    snapshot.lines = vec![oxideterm_terminal_emulator::TerminalRow {
+        line_id: 0,
+        source_id: 0,
+        absolute_line: 0,
+        wrapped: false,
+        active_input: false,
+        signature: 0,
+        cells: Arc::new(vec![
+            TerminalCell {
+                ch: ' ',
+                wide: false,
+                fg: TerminalColor::rgb(0xe6, 0xe8, 0xeb),
+                bg: TerminalColor::rgb(0x0d, 0x0f, 0x12),
+                style_origin: Default::default(),
+                attrs: Default::default(),
+                extra: None,
+                cursor: true,
+            },
+            TerminalCell {
+                ch: 'x',
+                wide: false,
+                fg: TerminalColor::rgb(0xe6, 0xe8, 0xeb),
+                bg: TerminalColor::rgb(0x0d, 0x0f, 0x12),
+                style_origin: Default::default(),
+                attrs: Default::default(),
+                extra: None,
+                cursor: false,
+            },
+        ]),
+    }];
+    for row in &mut snapshot.lines {
+        row.refresh_signature();
+    }
+    snapshot
+}
+
+#[test]
+fn terminal_element_hides_cursor_when_blink_cycle_is_invisible() {
+    let visible = TerminalElement::new(
+        cursor_snapshot(),
+        None,
+        test_metrics(),
+        true,
+        None,
+        None,
+        Vec::new(),
+        None,
+        None,
+        None,
+    )
+    .layout();
+    assert!(visible.cursor.is_some());
+    assert_eq!(visible.text_runs.first().unwrap().text, " ");
+    assert_eq!(visible.text_runs.get(1).unwrap().text, "x");
+
+    let hidden = TerminalElement::new(
+        cursor_snapshot(),
+        None,
+        test_metrics(),
+        false,
+        None,
+        None,
+        Vec::new(),
+        None,
+        None,
+        None,
+    )
+    .layout();
+    assert!(hidden.cursor.is_none());
+    assert_eq!(hidden.text_runs.first().unwrap().text, "x");
+    assert_eq!(hidden.text_runs.first().unwrap().col, 1);
+
+    let bounds = hidden.ime_cursor_bounds.unwrap();
+    assert_eq!(bounds.origin.x, px(0.0));
+    assert_eq!(bounds.origin.y, px(0.0));
+    assert_eq!(bounds.size.width, px(8.0));
+    assert_eq!(bounds.size.height, px(10.0));
+}
+
+#[test]
+fn ime_cursor_bounds_expand_for_wide_cursor_cell() {
+    let mut snapshot = cursor_snapshot();
+    snapshot.lines[0].cells_mut()[0].ch = '界';
+    snapshot.lines[0].cells_mut()[0].wide = true;
+    snapshot.lines[0].refresh_signature();
+
+    let bounds = ime_cursor_bounds_for_snapshot(&snapshot, &test_metrics()).unwrap();
+
+    assert_eq!(bounds.size.width, px(16.0));
+    assert_eq!(bounds.size.height, px(10.0));
+}
+
+#[test]
+fn marked_text_is_laid_out_at_terminal_cursor() {
+    for (foreground, background) in [(0x102030, 0xfdf6e3), (0xe6e8eb, 0x0d0f12)] {
+        let theme = TerminalUiTheme {
+            foreground,
+            background,
+            ..Default::default()
+        };
+        let layout = TerminalElement::new_with_images(
+            cursor_snapshot(),
+            Vec::new(),
+            None,
+            test_metrics(),
+            theme,
+            true,
+            Some("拼".to_string()),
+            None,
+            Vec::new(),
+            None,
+            None,
+            None,
+        )
+        .layout();
+
+        let marked_text = layout.marked_text.unwrap();
+        assert_eq!(marked_text.row, 0);
+        assert_eq!(marked_text.col, 0);
+        assert_eq!(marked_text.text, "拼");
+        assert_eq!(marked_text.style.color, rgb(foreground).into());
+        assert_eq!(
+            marked_text.style.background_color,
+            Some(rgb(background).into())
+        );
+        assert!(layout.ime_cursor_bounds.is_some());
+    }
+}
+
+#[test]
+fn selection_rects_track_grid_lines_when_scrollback_offset_changes() {
+    let mut snapshot = multirow_snapshot(&["row0", "row1", "row2", "row3"]);
+    snapshot.display_offset = 2;
+    snapshot.scrollback_lines = 4;
+    let layout = TerminalElement::new(
+        snapshot,
+        Some(TerminalSelection {
+            anchor: TerminalGridPoint { line: 1, col: 0 },
+            head: TerminalGridPoint { line: 1, col: 3 },
+            mode: TerminalSelectionMode::Simple,
+        }),
+        test_metrics(),
+        true,
+        None,
+        None,
+        Vec::new(),
+        None,
+        None,
+        None,
+    )
+    .layout_for_bounds(visible_layout_bounds(4));
+
+    assert_eq!(layout.selections.len(), 1);
+    assert_eq!(layout.selections[0].row, 3);
+}
+
+pub(crate) fn visible_layout_bounds(rows: usize) -> Bounds<Pixels> {
+    Bounds::new(
+        point(px(0.0), px(0.0)),
+        size(
+            px(400.0),
+            px(TERMINAL_CONTENT_PADDING * 2.0 + rows as f32 * test_metrics().line_height_f32()),
+        ),
+    )
 }

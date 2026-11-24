@@ -1,7 +1,6 @@
 use std::{
-    collections::{HashMap, HashSet, VecDeque, hash_map::DefaultHasher},
+    collections::{HashMap, HashSet, VecDeque},
     env,
-    hash::{Hash, Hasher},
     ops::Range,
     rc::Rc,
     sync::{
@@ -25,12 +24,12 @@ use oxideterm_terminal::{
     KittyFileTransmissionPrompt, LocalPtyConfig, SerialControlLine, SerialControlState,
     SerialDisplayMode, SerialLineEnding, SerialRuntimeOptions, SerialSendMode, SerialSessionConfig,
     ShellIntegrationLifecycleState, ShellIntegrationStatus, SshSessionConfig, TelnetSessionConfig,
-    TermMode, TerminalCell, TerminalCommandMark, TerminalCommandMarkClosedBy,
-    TerminalCommandMarkConfidence, TerminalCommandMarkDetectionSource, TerminalCommandMarkEvent,
+    TermMode, TerminalCommandMark, TerminalCommandMarkClosedBy, TerminalCommandMarkConfidence,
+    TerminalCommandMarkDetectionSource, TerminalCommandMarkEvent,
     TerminalCwdIntegrationLaunchState, TerminalDrainBudget, TerminalDrainReport,
     TerminalEditorApplication, TerminalEditorClipboardOperation, TerminalEditorIntegrationEvent,
     TerminalEvent, TerminalLifecycle, TerminalOutputProcessor, TerminalProcessInfo,
-    TerminalProcessProbe, TerminalRow, TerminalSearchMatch, TerminalSession, TerminalSessionKind,
+    TerminalProcessProbe, TerminalSearchMatch, TerminalSession, TerminalSessionKind,
     TerminalSnapshot, TmuxSeparator, TmuxSeparatorDirection, TrzszTransferDirection,
     TrzszTransferSelection, serial_list_ports,
 };
@@ -78,7 +77,7 @@ use crate::trzsz_worker::{
     run_trzsz_worker_job,
 };
 use image_cache::ImageRenderCache;
-pub(crate) use image_cache::TerminalRenderedImage;
+pub use image_cache::TerminalRenderedImage;
 pub(crate) use ime::TerminalInputHandler;
 use scrollbar::{
     HorizontalScrollbarDrag, HorizontalScrollbarGeometry, ScrollbarDrag, ScrollbarGeometry,
@@ -613,7 +612,7 @@ pub struct TerminalPane {
     editor_integration: Option<ActiveTerminalEditorIntegration>,
     pending_editor_clipboard: Option<PendingTerminalEditorClipboard>,
     command_marks: Vec<TerminalCommandMark>,
-    command_marks_render_cache: Arc<[TerminalCommandMark]>,
+    command_marks_render_cache: Arc<[CommandMarkAnnotation]>,
     command_marks_render_cache_dirty: bool,
     selected_command_mark_id: Option<String>,
     command_mark_id_aliases: HashMap<String, String>,
@@ -686,7 +685,7 @@ pub struct TerminalPane {
     input_latency_samples_micros: VecDeque<u64>,
     last_latency_sampled_input: Option<Instant>,
     image_cache: ImageRenderCache,
-    layout_cache: Arc<Mutex<TerminalLayoutCache>>,
+    layout_cache: Rc<std::cell::RefCell<TerminalLayoutCache>>,
     background_image_cache: BackgroundImageRenderCache,
     background_image_poll_active: bool,
     bounds: Option<Bounds<Pixels>>,
@@ -790,36 +789,12 @@ struct PendingTerminalCwd {
     created_at: Instant,
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct TerminalRowTimestamp {
-    pub(crate) label: String,
-    signature: u64,
-    source_signature: u64,
-}
-
-/// Visual metadata follows the emulator row, independent of viewport coordinates.
-#[derive(Clone, Default)]
-pub(crate) struct TerminalRowTimestampStore {
-    pub(crate) entries: HashMap<u64, TerminalRowTimestamp>,
-}
-
-impl TerminalRowTimestampStore {
-    pub(crate) fn get(&self, identity: u64) -> Option<&TerminalRowTimestamp> {
-        self.entries.get(&identity)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn insert_label(&mut self, identity: u64, label: impl Into<String>) {
-        self.entries.insert(
-            identity,
-            TerminalRowTimestamp {
-                label: label.into(),
-                signature: 0,
-                source_signature: 0,
-            },
-        );
-    }
-}
+pub use oxideterm_gpui_terminal_view::timestamps::{
+    TerminalRowTimestamp, TerminalRowTimestampStore,
+};
+use oxideterm_gpui_terminal_view::timestamps::{
+    record_timestampable_snapshot_rows, trim_row_timestamp_history,
+};
 
 #[derive(Clone)]
 struct TerminalSearchCache {
@@ -1534,7 +1509,7 @@ impl TerminalPane {
                 cache.set_byte_limit(preferences.render_policy.image_cache_bytes);
                 cache
             },
-            layout_cache: Arc::new(Mutex::new(TerminalLayoutCache::default())),
+            layout_cache: Rc::default(),
             background_image_cache: {
                 let mut cache = BackgroundImageRenderCache::default();
                 cache.set_byte_limit(preferences.render_policy.image_cache_bytes);
@@ -1649,7 +1624,7 @@ impl TerminalPane {
             cx.notify();
         } else {
             // Protocol pixels and animation clocks survive; display resources can be rebuilt.
-            self.layout_cache.lock().clear();
+            self.layout_cache.borrow_mut().clear();
             let images = self.image_cache.suspend();
             // Defer until the current window is back in App.windows too.
             cx.defer(move |cx| {
@@ -5357,103 +5332,6 @@ fn terminal_timestamp_label(hour: u32, minute: u32, second: u32, millis: u32) ->
     format!("[{hour:02}:{minute:02}:{second:02}.{millis:03}]")
 }
 
-fn record_timestampable_snapshot_rows(
-    store: &mut TerminalRowTimestampStore,
-    snapshot: &TerminalSnapshot,
-    label: &str,
-) {
-    for row in &snapshot.lines {
-        let key = terminal_row_timestamp_identity(row);
-        if key == 0 {
-            continue;
-        }
-        // The snapshot signature is a cheap invalidation key. Cursor-only changes
-        // still fall through to the content signature comparison below.
-        if store
-            .entries
-            .get(&key)
-            .is_some_and(|timestamp| timestamp.source_signature == row.signature)
-        {
-            continue;
-        }
-
-        if terminal_row_has_timestamp_content(row) {
-            let timestamp_signature = terminal_row_timestamp_signature(row);
-            if let Some(timestamp) = store.entries.get_mut(&key) {
-                if timestamp.signature != timestamp_signature {
-                    timestamp.label = label.to_string();
-                    timestamp.signature = timestamp_signature;
-                }
-                timestamp.source_signature = row.signature;
-            } else {
-                store.entries.insert(
-                    key,
-                    TerminalRowTimestamp {
-                        label: label.to_string(),
-                        signature: timestamp_signature,
-                        source_signature: row.signature,
-                    },
-                );
-            }
-        } else {
-            // Blank viewport rows are recycled later. Removing their metadata
-            // prevents new output from inheriting a stale line-modification time.
-            store.entries.remove(&key);
-        }
-    }
-}
-
-fn trim_row_timestamp_history(
-    row_timestamps: &mut HashMap<u64, TerminalRowTimestamp>,
-    retained_rows: usize,
-) {
-    // IDs are process-wide; other terminals can make them arbitrarily sparse.
-    // Batch pruning bounds memory without scanning the cache on every frame.
-    if row_timestamps.len() <= retained_rows.saturating_add(1024) {
-        return;
-    }
-    let mut identities: Vec<_> = row_timestamps.keys().copied().collect();
-    let remove_count = identities.len() - retained_rows;
-    identities.select_nth_unstable(remove_count);
-    let min_identity = identities[remove_count];
-    row_timestamps.retain(|identity, _| *identity >= min_identity);
-}
-
-fn terminal_row_timestamp_signature(row: &TerminalRow) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    row.wrapped.hash(&mut hasher);
-    // Ignore unstyled trailing padding so a grid resize does not restamp output.
-    // Styled blanks and links remain part of the content signature.
-    let content_end = row.cells.iter().rposition(terminal_cell_has_content);
-    let Some(content_end) = content_end else {
-        return hasher.finish();
-    };
-    for cell in &row.cells[..=content_end] {
-        cell.ch.hash(&mut hasher);
-        cell.zerowidth().hash(&mut hasher);
-        cell.wide.hash(&mut hasher);
-        cell.fg.hash(&mut hasher);
-        cell.bg.hash(&mut hasher);
-        cell.attrs.hash(&mut hasher);
-        cell.hyperlink().hash(&mut hasher);
-    }
-    hasher.finish()
-}
-
-fn terminal_row_has_timestamp_content(row: &TerminalRow) -> bool {
-    row.cells.iter().any(terminal_cell_has_content)
-}
-
-/// Explicit styling and links distinguish meaningful blanks from grid padding.
-fn terminal_cell_has_content(cell: &TerminalCell) -> bool {
-    !cell.ch.is_whitespace()
-        || !cell.zerowidth().is_empty()
-        || cell.style_origin.foreground_explicit()
-        || cell.style_origin.background_explicit()
-        || cell.attrs != Default::default()
-        || cell.hyperlink().is_some()
-}
-
 fn hex_color(color: u32) -> String {
     format!("#{:06x}", color & 0x00ff_ffff)
 }
@@ -5500,7 +5378,9 @@ mod tests {
     use std::{cell::Cell, collections::HashMap, sync::Arc};
 
     use gpui::{AppContext, IntoElement, Render, TestAppContext, div};
-    use oxideterm_terminal::{TerminalAttrs, TerminalCell, TerminalColor, TerminalCursorShape};
+    use oxideterm_terminal::{
+        TerminalAttrs, TerminalCell, TerminalColor, TerminalCursorShape, TerminalRow,
+    };
 
     #[gpui::test]
     fn plugin_text_action_captures_selection_before_focus_or_output_changes(

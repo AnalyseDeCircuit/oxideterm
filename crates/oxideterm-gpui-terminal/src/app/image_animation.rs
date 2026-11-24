@@ -4,11 +4,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) struct ImagePlayback {
-    pub frame: usize,
-    pub next: Option<Duration>,
-}
+pub(crate) use oxideterm_gpui_terminal_view::ImagePlayback;
 
 pub(super) struct ImageClock {
     source: Arc<TerminalImageData>,

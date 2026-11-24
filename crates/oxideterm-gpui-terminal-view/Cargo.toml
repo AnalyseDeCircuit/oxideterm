@@ -7,11 +7,21 @@ edition.workspace = true
 license.workspace = true
 version.workspace = true
 
+[features]
+bench = []
+
 [dependencies]
+foldhash.workspace = true
 gpui.workspace = true
 oxideterm-gpui-ui = { path = "../oxideterm-gpui-ui" }
 oxideterm-settings = { path = "../oxideterm-settings" }
 oxideterm-terminal-emulator = { path = "../oxideterm-terminal-emulator" }
+oxideterm-terminal-semantic = { path = "../oxideterm-terminal-semantic", default-features = false }
+oxideterm-terminal-unicode = { path = "../oxideterm-terminal-unicode" }
+oxideterm-theme = { path = "../oxideterm-theme" }
+regex.workspace = true
+unicode-segmentation.workspace = true
+unicode-width.workspace = true
 zeroize.workspace = true
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]

@@ -14,12 +14,7 @@ use crate::image_budget::{release_image_bytes, try_reserve_image_bytes};
 const DEFAULT_RENDER_IMAGE_CACHE_BYTES: usize = 64 * 1024 * 1024;
 const IMAGE_PREPARATION_RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(1);
 
-#[derive(Clone)]
-pub(crate) struct TerminalRenderedImage {
-    pub(crate) snapshot: TerminalImageSnapshot,
-    pub(crate) render_image: Option<Arc<RenderImage>>,
-    pub(crate) playback: ImagePlayback,
-}
+pub use oxideterm_gpui_terminal_view::TerminalRenderedImage;
 
 pub(crate) struct ImageRenderCache {
     entries: HashMap<ImageCacheKey, CachedRenderImage>,

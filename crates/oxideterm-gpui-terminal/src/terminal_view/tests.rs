@@ -1,181 +1,24 @@
 use super::*;
-use std::sync::Arc;
 
-use gpui::{Bounds, Pixels, point, px, rgb, size};
+use gpui::rgb;
+use oxideterm_gpui_terminal_view::metrics;
+#[path = "../../../oxideterm-gpui-terminal-view/tests/support/metrics.rs"]
+mod geometry;
+use geometry::*;
 use oxideterm_terminal::{
     TerminalCell, TerminalColor, TerminalCommandMark, TerminalCommandMarkClosedBy,
     TerminalCommandMarkConfidence, TerminalCommandMarkDetectionSource, TerminalCursorShape,
-    TerminalRow, TerminalSearchMatch, TerminalSnapshot,
+    TerminalRow, TerminalSnapshot,
 };
 
-use crate::command_facts::TransientCommandHighlight;
-use crate::terminal_ui::*;
-
-fn test_metrics() -> TerminalMetrics {
-    TerminalMetrics {
-        font: terminal_font_with_family_and_cjk(
-            TERMINAL_FONT,
-            None,
-            TERMINAL_FONT_LIGATURES,
-            TERMINAL_FONT_WEIGHT,
-        ),
-        font_size: px(14.0),
-        cell_width: px(8.0),
-        letter_spacing: None,
-        line_height: px(10.0),
-        primary_ascent: px(7.5),
-        primary_descent: px(2.5),
-    }
-}
+#[cfg(windows)]
+use crate::terminal_ui::TerminalUiPreferences;
+use oxideterm_gpui_terminal_view::semantic::semantic_line_role_for_rows;
+use oxideterm_terminal_semantic::SemanticLineRole;
 
 #[path = "../../../oxideterm-gpui-terminal-view/tests/support/snapshot.rs"]
 mod snapshot;
 use snapshot::*;
-
-fn cursor_snapshot() -> TerminalSnapshot {
-    let mut snapshot = test_snapshot(0, 0);
-    snapshot.cols = 2;
-    snapshot.rows = 1;
-    snapshot.cursor_col = 0;
-    snapshot.cursor_row = 0;
-    snapshot.lines = vec![oxideterm_terminal::TerminalRow {
-        line_id: 0,
-        source_id: 0,
-        absolute_line: 0,
-        wrapped: false,
-        active_input: false,
-        signature: 0,
-        cells: Arc::new(vec![
-            TerminalCell {
-                ch: ' ',
-                wide: false,
-                fg: TerminalColor::rgb(0xe6, 0xe8, 0xeb),
-                bg: TerminalColor::rgb(0x0d, 0x0f, 0x12),
-                style_origin: Default::default(),
-                attrs: Default::default(),
-                extra: None,
-                cursor: true,
-            },
-            TerminalCell {
-                ch: 'x',
-                wide: false,
-                fg: TerminalColor::rgb(0xe6, 0xe8, 0xeb),
-                bg: TerminalColor::rgb(0x0d, 0x0f, 0x12),
-                style_origin: Default::default(),
-                attrs: Default::default(),
-                extra: None,
-                cursor: false,
-            },
-        ]),
-    }];
-    for row in &mut snapshot.lines {
-        row.refresh_signature();
-    }
-    snapshot
-}
-
-fn visible_layout_bounds(rows: usize) -> Bounds<Pixels> {
-    Bounds::new(
-        point(px(0.0), px(0.0)),
-        size(
-            px(400.0),
-            px(TERMINAL_CONTENT_PADDING * 2.0 + rows as f32 * test_metrics().line_height_f32()),
-        ),
-    )
-}
-
-#[test]
-fn terminal_element_hides_cursor_when_blink_cycle_is_invisible() {
-    let visible = TerminalElement::new(
-        cursor_snapshot(),
-        None,
-        test_metrics(),
-        true,
-        None,
-        None,
-        Vec::new(),
-        None,
-        None,
-        None,
-    )
-    .layout();
-    assert!(visible.cursor.is_some());
-    assert_eq!(visible.text_runs.first().unwrap().text, " ");
-    assert_eq!(visible.text_runs.get(1).unwrap().text, "x");
-
-    let hidden = TerminalElement::new(
-        cursor_snapshot(),
-        None,
-        test_metrics(),
-        false,
-        None,
-        None,
-        Vec::new(),
-        None,
-        None,
-        None,
-    )
-    .layout();
-    assert!(hidden.cursor.is_none());
-    assert_eq!(hidden.text_runs.first().unwrap().text, "x");
-    assert_eq!(hidden.text_runs.first().unwrap().col, 1);
-
-    let bounds = hidden.ime_cursor_bounds.unwrap();
-    assert_eq!(bounds.origin.x, px(0.0));
-    assert_eq!(bounds.origin.y, px(0.0));
-    assert_eq!(bounds.size.width, px(8.0));
-    assert_eq!(bounds.size.height, px(10.0));
-}
-
-#[test]
-fn ime_cursor_bounds_expand_for_wide_cursor_cell() {
-    let mut snapshot = cursor_snapshot();
-    snapshot.lines[0].cells_mut()[0].ch = '界';
-    snapshot.lines[0].cells_mut()[0].wide = true;
-    snapshot.lines[0].refresh_signature();
-
-    let bounds = ime_cursor_bounds_for_snapshot(&snapshot, &test_metrics()).unwrap();
-
-    assert_eq!(bounds.size.width, px(16.0));
-    assert_eq!(bounds.size.height, px(10.0));
-}
-
-#[test]
-fn marked_text_is_laid_out_at_terminal_cursor() {
-    for (foreground, background) in [(0x102030, 0xfdf6e3), (0xe6e8eb, 0x0d0f12)] {
-        let theme = TerminalUiTheme {
-            foreground,
-            background,
-            ..Default::default()
-        };
-        let layout = TerminalElement::new_with_images(
-            cursor_snapshot(),
-            Vec::new(),
-            None,
-            test_metrics(),
-            theme,
-            true,
-            Some("拼".to_string()),
-            None,
-            Vec::new(),
-            None,
-            None,
-            None,
-        )
-        .layout();
-
-        let marked_text = layout.marked_text.unwrap();
-        assert_eq!(marked_text.row, 0);
-        assert_eq!(marked_text.col, 0);
-        assert_eq!(marked_text.text, "拼");
-        assert_eq!(marked_text.style.color, rgb(foreground).into());
-        assert_eq!(
-            marked_text.style.background_color,
-            Some(rgb(background).into())
-        );
-        assert!(layout.ime_cursor_bounds.is_some());
-    }
-}
 
 #[test]
 fn open_command_mark_overlay_uses_transient_prompt_boundary() {
@@ -335,8 +178,27 @@ pub(super) fn test_command_mark(
     }
 }
 
+#[test]
+fn ps_command_marks_select_the_structured_output_role() {
+    let mut snapshot = selection_snapshot("root 1 0.0 0.0 1 1 ? Ss 6月22 0:00 node");
+    snapshot.scrollback_lines = 1;
+    snapshot.lines[0].absolute_line = 1;
+    let mut mark = test_command_mark("ps-1", 0, Some(1), Some(0));
+    mark.command = Some("ps aux | grep node".to_string());
+
+    assert_eq!(
+        semantic_line_role_for_rows(&snapshot, &[command_mark_annotation(&mark)], 0..1),
+        SemanticLineRole::PsAuxOutput
+    );
+    assert!(mark.trim_history(1));
+    snapshot.scrollback_lines = 0;
+    snapshot.lines[0].absolute_line = 0;
+    assert_eq!(
+        semantic_line_role_for_rows(&snapshot, &[command_mark_annotation(&mark)], 0..1),
+        SemanticLineRole::PsAuxOutput
+    );
+}
+
 #[cfg(windows)]
 mod input_tests;
-mod layout_tests;
 mod link_tests;
-mod selection_tests;

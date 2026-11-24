@@ -7898,7 +7898,6 @@ dependencies = [
  "chrono",
  "criterion 0.8.2",
  "crossbeam-channel",
- "foldhash 0.2.0",
  "futures",
  "gpui-pre",
  "gpui-pre-platform",
@@ -7925,7 +7924,6 @@ dependencies = [
  "oxideterm-trzsz",
  "parking_lot",
  "rand 0.10.2",
- "regex",
  "rusqlite",
  "russh",
  "serde_json",
@@ -7942,10 +7940,17 @@ dependencies = [
 name = "oxideterm-gpui-terminal-view"
 version = "2.4.1"
 dependencies = [
+ "foldhash 0.2.0",
  "gpui-pre",
  "oxideterm-gpui-ui",
  "oxideterm-settings",
  "oxideterm-terminal-emulator",
+ "oxideterm-terminal-semantic",
+ "oxideterm-terminal-unicode",
+ "oxideterm-theme",
+ "regex",
+ "unicode-segmentation",
+ "unicode-width",
  "url",
  "zeroize",
 ]

@@ -1,35 +1,35 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
+use crate::CommandMarkAnnotation;
 use std::ops::Range;
 
 use foldhash::{HashSet, HashSetExt};
-use oxideterm_terminal::{TerminalAttrs, TerminalCommandMark, TerminalSnapshot};
+use oxideterm_terminal_emulator::{TerminalAttrs, TerminalSnapshot};
 use oxideterm_terminal_semantic::{
     CompiledSemanticScheme, SemanticClass, SemanticLineRole, SemanticShellDialect, SemanticSpan,
     classify_line_with_compiled_scheme_and_shell, semantic_line_emphasis,
-    semantic_output_role_for_command,
 };
 #[cfg(test)]
 use oxideterm_terminal_semantic::{
     SemanticScheme, built_in_scheme_document, compile_scheme_document, compiled_builtin_scheme,
 };
 
+use crate::element::{TerminalRect, to_hsla};
+use crate::highlight::{
+    TerminalHighlightForeground, TerminalHighlightLayout, build_logical_line, logical_line_range,
+};
 #[cfg(test)]
-use crate::terminal_ui::TerminalUiTheme;
-use crate::terminal_ui::{
+use crate::theme::TerminalUiTheme;
+use crate::theme::{
     terminal_color_from_hex, terminal_semantic_color_from_palette,
     terminal_semantic_line_band_from_colors, terminal_semantic_variant_color_from_palette,
-};
-use crate::terminal_view::element::{TerminalRect, to_hsla};
-use crate::terminal_view::highlight::{
-    TerminalHighlightForeground, TerminalHighlightLayout, build_logical_line, logical_line_range,
 };
 
 #[cfg(test)]
 pub(super) fn append_terminal_semantics_for_rows(
     snapshot: &TerminalSnapshot,
-    command_marks: &[TerminalCommandMark],
+    command_marks: &[CommandMarkAnnotation],
     rows: Range<usize>,
     theme: &TerminalUiTheme,
     semantic_scheme: &CompiledSemanticScheme,
@@ -54,7 +54,7 @@ pub(super) fn append_terminal_semantics_for_rows(
 #[allow(clippy::too_many_arguments)]
 pub(super) fn append_terminal_semantics_with_palette(
     snapshot: &TerminalSnapshot,
-    command_marks: &[TerminalCommandMark],
+    command_marks: &[CommandMarkAnnotation],
     rows: Range<usize>,
     terminal_palette: oxideterm_theme::TerminalTheme,
     ui_error: u32,
@@ -219,9 +219,9 @@ fn semantic_component_class(class: SemanticClass, ch: char, option_prefix: bool)
     }
 }
 
-pub(super) fn semantic_line_role_for_rows(
+pub fn semantic_line_role_for_rows(
     snapshot: &TerminalSnapshot,
-    command_marks: &[TerminalCommandMark],
+    command_marks: &[CommandMarkAnnotation],
     rows: Range<usize>,
 ) -> SemanticLineRole {
     let context = snapshot.logical_context_for_row(rows.start);
@@ -249,15 +249,11 @@ pub(super) fn semantic_line_role_for_rows(
         return SemanticLineRole::Command;
     }
     if let Some(mark) = command_marks.iter().rev().find(|mark| {
-        let output_start = mark.output_start_line();
+        let output_start = mark.output_start_line;
         let output_end = mark.end_line.unwrap_or(end_line);
         output_start <= end_line && output_end >= start_line
     }) {
-        return mark
-            .command
-            .as_deref()
-            .map(semantic_output_role_for_command)
-            .unwrap_or(SemanticLineRole::Output);
+        return mark.output_role;
     }
     SemanticLineRole::Unknown
 }
@@ -311,14 +307,13 @@ fn semantic_foreground_for_variant_in_palette(
 mod tests {
     use std::sync::Arc;
 
-    use oxideterm_terminal::{
-        TerminalCell, TerminalColor, TerminalCommandMarkClosedBy, TerminalCommandMarkConfidence,
-        TerminalCommandMarkDetectionSource, TerminalCursorShape, TerminalRow, TerminalStyleOrigin,
+    use oxideterm_terminal_emulator::{
+        TerminalCell, TerminalColor, TerminalCursorShape, TerminalRow, TerminalStyleOrigin,
     };
     use oxideterm_theme::{ThemeTokens, theme_by_id};
 
     use super::*;
-    use crate::terminal_ui::terminal_semantic_line_band;
+    use crate::theme::terminal_semantic_line_band;
 
     fn cell(ch: char, foreground_explicit: bool) -> TerminalCell {
         styled_cell(ch, foreground_explicit, false)
@@ -371,14 +366,13 @@ mod tests {
 
     #[test]
     fn wrapped_strings_keep_their_color_across_viewport_boundaries() {
-        let mut terminal =
-            oxideterm_terminal::TerminalSession::recording_playback(10, 4, Default::default(), 100);
-        terminal.feed_recording_output(b"before\r\n'abcdefghijklmnopqrstuvwx'\r\nafter\r\nend\r\n");
+        let mut terminal = crate::tests::emulator(10, 4);
+        let _ = terminal.feed_bytes(b"before\r\n'abcdefghijklmnopqrstuvwx'\r\nafter\r\nend\r\n");
         let theme = TerminalUiTheme::default();
         let scheme = compiled_builtin_scheme(SemanticScheme::Balanced);
         let string = semantic_foreground(&theme, SemanticClass::String, scheme);
         for offset in 0..=terminal.snapshot().scrollback_lines {
-            let snapshot = terminal.snapshot_with_display_offset(offset, 4, None);
+            let snapshot = crate::tests::viewport(&mut terminal, offset, 4);
             let mut layout = TerminalHighlightLayout::empty();
             append_terminal_semantics_for_rows(
                 &snapshot,
@@ -411,9 +405,8 @@ mod tests {
 
     #[test]
     fn wide_wrapped_strings_preserve_ansi_and_combining_character_colors() {
-        let mut terminal =
-            oxideterm_terminal::TerminalSession::recording_playback(10, 4, Default::default(), 100);
-        terminal.feed_recording_output("'abcdefgh界e\u{301}\x1b[31mX\x1b[0m'\r\nDONE".as_bytes());
+        let mut terminal = crate::tests::emulator(10, 4);
+        let _ = terminal.feed_bytes("'abcdefgh界e\u{301}\x1b[31mX\x1b[0m'\r\nDONE".as_bytes());
         let snapshot = terminal.snapshot();
         let theme = TerminalUiTheme::default();
         let scheme = compiled_builtin_scheme(SemanticScheme::Balanced);
@@ -594,46 +587,6 @@ mod tests {
         assert_eq!(
             semantic_line_role_for_rows(&snapshot, &[], 0..1),
             SemanticLineRole::Command
-        );
-    }
-
-    #[test]
-    fn ps_command_marks_select_the_structured_output_role() {
-        let mut snapshot = snapshot("root 1 0.0 0.0 1 1 ? Ss 6月22 0:00 node", 0..0);
-        snapshot.scrollback_lines = 1;
-        snapshot.lines[0].absolute_line = 1;
-        let mut mark = TerminalCommandMark {
-            command_id: "ps-1".to_string(),
-            command: Some("ps aux | grep node".to_string()),
-            start_line: 0,
-            command_line: 0,
-            command_line_clipped: false,
-            output_start: None,
-            output_end: None,
-            end_line: Some(1),
-            is_closed: true,
-            closed_by: Some(TerminalCommandMarkClosedBy::ShellIntegration),
-            exit_code: Some(0),
-            duration_ms: Some(1),
-            detection_source: TerminalCommandMarkDetectionSource::ShellIntegration,
-            submitted_by: None,
-            confidence: TerminalCommandMarkConfidence::High,
-            output_confidence: TerminalCommandMarkConfidence::High,
-            stale: false,
-            started_at: 1,
-            finished_at: Some(2),
-        };
-
-        assert_eq!(
-            semantic_line_role_for_rows(&snapshot, &[mark.clone()], 0..1),
-            SemanticLineRole::PsAuxOutput
-        );
-        assert!(mark.trim_history(1));
-        snapshot.scrollback_lines = 0;
-        snapshot.lines[0].absolute_line = 0;
-        assert_eq!(
-            semantic_line_role_for_rows(&snapshot, &[mark], 0..1),
-            SemanticLineRole::PsAuxOutput
         );
     }
 

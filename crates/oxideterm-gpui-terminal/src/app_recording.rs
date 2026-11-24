@@ -236,7 +236,7 @@ impl TerminalPane {
     #[cfg(feature = "bench")]
     #[doc(hidden)]
     pub fn benchmark_render_stage_micros(&self) -> (u64, u64, u64, u64, u64) {
-        let performance = self.layout_cache.lock().performance();
+        let performance = self.layout_cache.borrow().performance();
         (
             self.render_stats.snapshot_micros,
             self.benchmark_backend_snapshot_micros,
@@ -249,19 +249,19 @@ impl TerminalPane {
     #[cfg(feature = "bench")]
     #[doc(hidden)]
     pub fn benchmark_link_stage_micros(&self) -> u64 {
-        self.layout_cache.lock().performance().links_micros
+        self.layout_cache.borrow().performance().links_micros
     }
 
     #[cfg(feature = "bench")]
     #[doc(hidden)]
     pub fn benchmark_layout_cache_hit_percent(&self) -> u8 {
-        self.layout_cache.lock().performance().cache_hit_percent
+        self.layout_cache.borrow().performance().cache_hit_percent
     }
 
     #[cfg(feature = "bench")]
     #[doc(hidden)]
     pub fn benchmark_semantic_stage_micros(&self) -> (u64, u64, usize) {
-        let performance = self.layout_cache.lock().performance();
+        let performance = self.layout_cache.borrow().performance();
         (
             performance.semantic_roles_micros,
             performance.highlights_micros,
