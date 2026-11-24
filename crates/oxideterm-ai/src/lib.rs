@@ -1,5 +1,20 @@
+#[cfg(not(target_family = "wasm"))]
 mod acp;
-pub use acp::{CursorAskQuestion, CursorCreatePlan, CursorRequest, CursorResponseSender};
+#[path = "acp/model.rs"]
+mod acp_model;
+#[path = "acp/cursor.rs"]
+mod cursor;
+#[path = "acp/handoff.rs"]
+mod handoff;
+pub use acp_model::*;
+#[cfg(not(target_family = "wasm"))]
+pub use cursor::CursorResponseSender;
+pub use cursor::{CursorAskQuestion, CursorCreatePlan, CursorRequest};
+pub use handoff::{
+    AcpConversationHandoffCursor, AiMessageBackendKind, AiMessageBackendProvenance,
+    acp_conversation_handoff_cursor, ai_message_backend_provenance, build_acp_conversation_handoff,
+    store_ai_message_backend_provenance,
+};
 pub mod agent;
 mod application_tools;
 mod chat;
@@ -7,20 +22,31 @@ pub mod chat_tools;
 mod context_sanitizer;
 mod context_window;
 mod images;
+#[cfg(not(target_family = "wasm"))]
 mod key_store;
+#[cfg(not(target_family = "wasm"))]
+pub use images::prepare_image_attachment;
 pub use images::{
     AI_IMAGE_MAX_ATTACHMENTS, AI_IMAGE_MAX_BYTES, AI_IMAGE_MAX_PIXELS, AI_IMAGE_REQUEST_BYTES,
     AiImageAttachment, AiImageInput, AiImageTokenEstimate, estimate_image_tokens, message_images,
-    model_image_input, prepare_image_attachment, prepare_image_history, set_message_images,
+    model_image_input, prepare_image_history, set_message_images,
 };
+#[path = "persistence/view.rs"]
+mod history_view;
+#[path = "persistence/live_windows.rs"]
+mod live_windows;
 mod mcp;
 mod orchestrator;
+#[cfg(not(target_family = "wasm"))]
 mod persistence;
 mod policy;
 mod profiles;
 mod provider_embeddings;
 mod providers;
+#[cfg(not(target_family = "wasm"))]
 mod rag;
+#[path = "rag/model.rs"]
+mod rag_model;
 mod reasoning;
 mod references;
 mod responses_state;
@@ -28,10 +54,12 @@ mod runtime_context;
 mod settings;
 mod slash;
 pub mod stream_state;
+#[cfg(not(target_family = "wasm"))]
 mod streaming;
 mod suggestions;
 mod target_projection;
 pub mod terminal_observation;
+#[cfg(not(target_family = "wasm"))]
 pub mod tool_loop;
 mod tool_protocol;
 pub mod tool_resources;
@@ -39,32 +67,24 @@ pub mod tool_result_protocol;
 mod types;
 pub mod web;
 
+#[cfg(not(target_family = "wasm"))]
 pub use acp::{
-    AcpAgentRuntime, AcpAuthMethod, AcpAuthMethodKind, AcpClientEvent, AcpClientEventSender,
-    AcpConnectionError, AcpConnectionManager, AcpConnectionState, AcpConversationHandoffCursor,
-    AcpHostCapabilityPolicy, AcpLaunchConfig, AcpLaunchConfigError, AcpLaunchModelHint,
-    AcpManagedEvent, AcpManagedPromptRequest, AcpPermissionOptionProjection,
-    AcpPermissionRequestProjection, AcpPromptSessionOutcome, AcpSessionConfigChoice,
-    AcpSessionConfigOption, AcpSessionConfigSelection, AcpSessionMode, AcpSessionModeState,
-    AcpSessionStateUpdate, AcpStdioLauncher, AcpTerminalCreateSpec, AiMessageBackendKind,
-    AiMessageBackendProvenance, acp_auth_methods, acp_client_event_to_ai_stream_events,
-    acp_conversation_handoff_cursor, acp_internal_error, acp_kill_terminal_request_id,
-    acp_kill_terminal_response, acp_launch_command_available, acp_launch_model_hint,
-    acp_method_not_found, acp_model_config_option,
-    acp_model_report_is_available_during_session_start,
-    acp_model_report_is_deferred_until_first_prompt, acp_permission_cancelled_response,
-    acp_permission_request_projection, acp_permission_response_for_decision,
-    acp_permission_response_for_option, acp_release_terminal_request_id,
-    acp_release_terminal_response, acp_selected_config_choice, acp_session_config_options,
+    AcpAgentRuntime, AcpClientEvent, AcpClientEventSender, AcpConnectionError,
+    AcpConnectionManager, AcpLaunchConfig, AcpLaunchConfigError, AcpManagedEvent,
+    AcpManagedPromptRequest, AcpStdioLauncher, AcpTerminalCreateSpec, acp_auth_methods,
+    acp_client_event_to_ai_stream_events, acp_internal_error, acp_kill_terminal_request_id,
+    acp_kill_terminal_response, acp_launch_command_available, acp_method_not_found,
+    acp_permission_cancelled_response, acp_permission_request_projection,
+    acp_permission_response_for_decision, acp_permission_response_for_option,
+    acp_release_terminal_request_id, acp_release_terminal_response, acp_session_config_options,
     acp_session_mode_state, acp_session_notification_to_ai_stream_events, acp_session_state_update,
     acp_terminal_create_spec, acp_terminal_created_response, acp_terminal_not_found_error,
     acp_terminal_output_request_id, acp_terminal_output_response, acp_wait_terminal_request_id,
-    acp_wait_terminal_response, ai_message_backend_provenance, build_acp_conversation_handoff,
-    build_acp_initialize_request, build_acp_stdio_launcher, discover_acp_session_config_options,
-    initialize_acp_agent, next_acp_file_review_id, next_acp_terminal_id,
-    resolve_acp_read_text_file_request, resolve_acp_terminal_working_directory,
-    resolve_acp_write_text_file_request, resolve_acp_write_text_file_target,
-    store_ai_message_backend_provenance, with_acp_agent_runtime, with_acp_agent_runtime_events,
+    acp_wait_terminal_response, build_acp_initialize_request, build_acp_stdio_launcher,
+    discover_acp_session_config_options, initialize_acp_agent, next_acp_file_review_id,
+    next_acp_terminal_id, resolve_acp_read_text_file_request,
+    resolve_acp_terminal_working_directory, resolve_acp_write_text_file_request,
+    resolve_acp_write_text_file_target, with_acp_agent_runtime, with_acp_agent_runtime_events,
     write_acp_validated_text_file,
 };
 pub use chat::{ai_conversation_turn_count, apply_chat_request_overrides, generate_chat_title};
@@ -80,23 +100,29 @@ pub use context_window::{
     ContextWindowSource, DEFAULT_CONTEXT_WINDOW, ModelContextWindowInfo,
     extract_context_window_from_model_name, model_context_window, model_context_window_info,
 };
+pub use history_view::{
+    AgentCommunicationPage, ConversationHead, HISTORY_CACHE_BYTES, HISTORY_PAGE_SIZE,
+    HistoryContentCursor, HistoryContentPage, HistoryCursor, HistoryEventLocation,
+    HistoryMessageView, HistoryPage, MessageDescriptor, MessagePage, PersistedDiagnosticEvent,
+    PersistedTranscriptEntry, agent_history_branch,
+};
+#[cfg(not(target_family = "wasm"))]
 pub use key_store::AiProviderKeyStore;
+pub use live_windows::{live_content_page, live_message_view};
+#[cfg(not(target_family = "wasm"))]
+pub use mcp::McpRegistry;
 pub use mcp::{
-    McpAuthHeaderMode, McpCallToolResult, McpRegistry, McpResource, McpResourceContent,
-    McpServerConfig, McpServerStateSnapshot, McpTransport, is_mcp_tool_name, mcp_resource_output,
-    mcp_tool_output,
+    McpAuthHeaderMode, McpCallToolResult, McpResource, McpResourceContent, McpServerConfig,
+    McpServerStateSnapshot, McpTransport, is_mcp_tool_name, mcp_resource_output, mcp_tool_output,
 };
 pub use orchestrator::{
     OrchestratorArgumentError, canonicalize_orchestrator_tool_arguments,
     orchestrator_tool_definitions,
 };
+#[cfg(not(target_family = "wasm"))]
 pub use persistence::{
-    AgentCommunicationPage, AiChatPersistenceStore, ConversationHead, ConversationStore,
-    HISTORY_CACHE_BYTES, HISTORY_PAGE_SIZE, HISTORY_PENDING_BYTES, HistoryContentCursor,
-    HistoryContentPage, HistoryCursor, HistoryEventLocation, HistoryMessageView, HistoryMutation,
-    HistoryPage, HistoryStreamDelta, HistoryStreamSnapshot, HistoryWriteState, HistoryWriter,
-    MessageDescriptor, MessagePage, PersistedDiagnosticEvent, PersistedTranscriptEntry,
-    agent_history_branch, live_content_page, live_message_view,
+    AiChatPersistenceStore, ConversationStore, HISTORY_PENDING_BYTES, HistoryMutation,
+    HistoryStreamDelta, HistoryStreamSnapshot, HistoryWriteState, HistoryWriter,
 };
 pub use policy::{
     AiActionRisk, AiPolicyDecision, AiPolicyDecisionKind, AiPolicySafetyMode, AiToolUsePolicy,
@@ -107,35 +133,42 @@ pub use profiles::{AiExecutionBackend, resolve_ai_reasoning_effort, tool_policy_
 pub use provider_embeddings::{
     AiChatEmbeddingApiKeyDecision, AiEmbeddingMode, AiEmbeddingProviderReason,
     ResolvedAiEmbeddingProvider, ai_embedding_requires_api_key, ai_provider_supports_embeddings,
-    embed_query_text, embed_texts, resolve_ai_embedding_provider, resolve_chat_embedding_api_key,
+    resolve_ai_embedding_provider, resolve_chat_embedding_api_key,
 };
+#[cfg(not(target_family = "wasm"))]
+pub use provider_embeddings::{embed_query_text, embed_texts};
 pub use providers::{
-    AI_PROVIDER_TEMPLATES, active_model_selection, active_provider_view,
-    check_model_selector_provider_online, check_openai_compatible_model_selector_provider_online,
-    fetch_provider_models, generated_provider_id, is_local_provider_url,
-    model_selector_display_name, model_selector_truncated_label,
+    AI_PROVIDER_TEMPLATES, active_model_selection, active_provider_view, generated_provider_id,
+    is_local_provider_url, model_selector_display_name, model_selector_truncated_label,
     model_selector_visible_provider_groups, new_provider_from_template, provider_id,
     provider_string, provider_template_by_type, provider_view, provider_views,
     resolve_model_selector_provider_probe, update_provider,
 };
+#[cfg(not(target_family = "wasm"))]
+pub use providers::{
+    check_model_selector_provider_online, check_openai_compatible_model_selector_provider_online,
+    fetch_provider_models,
+};
+#[cfg(not(target_family = "wasm"))]
 pub use rag::{
+    RagError, RagStore, rag_add_document, rag_copy_document, rag_create_blank_document,
+    rag_create_collection, rag_delete_collection, rag_document_semantic_index_state,
+    rag_get_collection_stats, rag_get_document, rag_get_document_content,
+    rag_get_pending_embeddings, rag_keyword_index_state, rag_list_collections, rag_list_documents,
+    rag_reindex_collection, rag_reindex_collection_with_progress, rag_remove_document,
+    rag_save_document, rag_search, rag_store_embeddings, rag_update_document,
+};
+pub use rag_model::{
     AddDocumentRequest as RagAddDocumentRequest, CollectionResponse as RagCollectionResponse,
     CreateBlankDocumentRequest as RagCreateBlankDocumentRequest,
-    CreateCollectionRequest as RagCreateCollectionRequest, DocScope,
+    CreateCollectionRequest as RagCreateCollectionRequest, DocChunk as RagDocChunk, DocScope,
     DocScopeRequest as RagDocScopeRequest, DocumentContentResponse as RagDocumentContentResponse,
     DocumentResponse as RagDocumentResponse, DocumentSaveOutcome as RagDocumentSaveOutcome,
     EmbeddingInputRequest as RagEmbeddingInputRequest, KeywordIndexState as RagKeywordIndexState,
     PaginatedDocuments as RagPaginatedDocuments,
-    PendingEmbeddingResponse as RagPendingEmbeddingResponse, RagError, RagStore,
-    SearchRequest as RagSearchRequest, SearchResultResponse as RagSearchResultResponse,
-    SemanticIndexState as RagSemanticIndexState, StatsResponse as RagStatsResponse,
-    StoreEmbeddingsRequest as RagStoreEmbeddingsRequest, rag_add_document, rag_copy_document,
-    rag_create_blank_document, rag_create_collection, rag_delete_collection,
-    rag_document_semantic_index_state, rag_get_collection_stats, rag_get_document,
-    rag_get_document_content, rag_get_pending_embeddings, rag_keyword_index_state,
-    rag_list_collections, rag_list_documents, rag_reindex_collection,
-    rag_reindex_collection_with_progress, rag_remove_document, rag_save_document, rag_search,
-    rag_store_embeddings, rag_update_document,
+    PendingEmbeddingResponse as RagPendingEmbeddingResponse, SearchRequest as RagSearchRequest,
+    SearchResultResponse as RagSearchResultResponse, SemanticIndexState as RagSemanticIndexState,
+    StatsResponse as RagStatsResponse, StoreEmbeddingsRequest as RagStoreEmbeddingsRequest,
 };
 pub use reasoning::{
     AiModelReasoningCapability, AiReasoningLevel, AiReasoningRequestFormat,
@@ -148,13 +181,16 @@ pub use references::{
 pub use responses_state::{
     append_responses_round, has_responses_history, responses_round_state, scope_responses_history,
 };
+#[cfg(not(target_family = "wasm"))]
 pub use runtime_context::{
-    AiRunCommandOwner, AiRuntimeAuthority, AiSftpRuntimeOwner, RUNTIME_CONTEXT_MESSAGE_ID,
-    RuntimeCapability, RuntimeCapabilityRegistry, RuntimeContextError, RuntimeContextSnapshot,
+    AiRunCommandOwner, AiRuntimeAuthority, AiSftpRuntimeOwner, RuntimeCapabilityRegistry,
+    RuntimeOwnerRegistration, ValidatedRuntimeHandle,
+};
+pub use runtime_context::{
+    RUNTIME_CONTEXT_MESSAGE_ID, RuntimeCapability, RuntimeContextError, RuntimeContextSnapshot,
     RuntimeHandleId, RuntimeHandleProjection, RuntimeOwnerGeneration, RuntimeOwnerKey,
-    RuntimeOwnerKind, RuntimeOwnerRegistration, RuntimeRegistryEpoch, RuntimeRevocationReason,
-    RuntimeValidationError, RuntimeValidationFailure, StableResourceKind, StableResourceRef,
-    ToolSessionId, ValidatedRuntimeHandle,
+    RuntimeOwnerKind, RuntimeRegistryEpoch, RuntimeRevocationReason, RuntimeValidationError,
+    RuntimeValidationFailure, StableResourceKind, StableResourceRef, ToolSessionId,
 };
 pub use settings::{
     AiProviderKeyDisplayState, AiProviderRefreshKeyPolicy, add_provider_from_template,
@@ -173,7 +209,8 @@ pub use slash::{
     resolve_ai_slash_command, slash_task_system_prompt,
 };
 pub use stream_state::*;
-pub use streaming::{stream_chat_completion, stream_error_http_status, stream_error_label};
+#[cfg(not(target_family = "wasm"))]
+pub use streaming::stream_chat_completion;
 pub use suggestions::{
     AiSuggestionParseResult, ai_has_partial_suggestions_block, ai_visible_suggestion_content,
     parse_ai_suggestions,
@@ -196,8 +233,8 @@ pub use types::{
     AiChatStreamConfig, AiConversation, AiFollowUpSuggestion, AiHistoryRange, AiMessageBranches,
     AiProviderTemplate, AiProviderView, AiStreamEvent, AiToolCall, AiToolChoice, AiToolDefinition,
     ModelSelectorProviderGroup, ModelSelectorProviderProbe, ProviderModelRefresh,
-    SharedAiProviderKey,
+    SharedAiProviderKey, stream_error_http_status, stream_error_label,
 };
 
-#[cfg(test)]
+#[cfg(all(test, not(target_family = "wasm")))]
 mod tests;

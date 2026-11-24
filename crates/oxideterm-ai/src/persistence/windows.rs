@@ -1,4 +1,7 @@
 use super::{records::*, *};
+pub(super) use crate::history_view::{
+    HistoryContentCursor, HistoryEventLocation, HistoryMessageView,
+};
 
 const WINDOW_BYTES: usize = CONTENT_CHUNK_BYTES;
 const WINDOW_ITEMS: usize = HISTORY_PAGE_SIZE;
@@ -99,43 +102,6 @@ pub(super) fn delete_tool_parts(
         table.remove((conversation, storage_id, key.as_str()))?;
     }
     Ok(())
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct HistoryEventLocation {
-    pub family: String,
-    pub id: String,
-    pub sequence: u64,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct HistoryContentCursor {
-    pub event: Option<HistoryEventLocation>,
-    pub conversation_id: String,
-    pub storage_id: String,
-    pub revision: u64,
-    pub path: Vec<String>,
-    pub offset: u64,
-    pub byte_offset: usize,
-    pub after_key: Option<String>,
-}
-
-pub struct HistoryContentPage {
-    pub value: Value,
-    pub more: Vec<HistoryContentCursor>,
-}
-
-pub struct HistoryMessageView {
-    pub message: AiChatMessage,
-    pub first_section: u64,
-    pub section: u64,
-    pub sections: u64,
-    pub more: Vec<HistoryContentCursor>,
-}
-
-impl HistoryMessageView {
-    // Each activity has its own 64 KiB payload window; old rounds stay on disk.
-    pub const ACTIVITY_WINDOW: u64 = 16;
 }
 
 impl ConversationStore {

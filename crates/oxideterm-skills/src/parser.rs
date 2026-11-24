@@ -21,7 +21,7 @@ struct SkillFrontmatter {
     compatibility: Option<String>,
 }
 
-pub(crate) struct ParsedSkill {
+pub struct ParsedSkill {
     pub name: String,
     pub description: String,
     pub compatibility: Option<String>,
@@ -29,18 +29,23 @@ pub(crate) struct ParsedSkill {
     pub content_hash: String,
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub(crate) fn parse_skill_file(path: &Path) -> Result<ParsedSkill, SkillRegistryError> {
     let bytes = std::fs::read(path).map_err(|source| SkillRegistryError::Io {
         path: path.to_path_buf(),
         source,
     })?;
+    parse_skill(path, &bytes)
+}
+
+pub fn parse_skill(path: &Path, bytes: &[u8]) -> Result<ParsedSkill, SkillRegistryError> {
     if bytes.len() > MAX_SKILL_FILE_BYTES {
         return Err(SkillRegistryError::Invalid {
             path: path.to_path_buf(),
             message: format!("SKILL.md exceeds {MAX_SKILL_FILE_BYTES} bytes"),
         });
     }
-    let text = std::str::from_utf8(&bytes).map_err(|_| SkillRegistryError::Invalid {
+    let text = std::str::from_utf8(bytes).map_err(|_| SkillRegistryError::Invalid {
         path: path.to_path_buf(),
         message: "SKILL.md is not valid UTF-8".to_string(),
     })?;
@@ -72,7 +77,7 @@ pub(crate) fn parse_skill_file(path: &Path) -> Result<ParsedSkill, SkillRegistry
             message: "skill name must match its parent directory".to_string(),
         });
     }
-    let content_hash = format!("{:x}", Sha256::digest(&bytes));
+    let content_hash = format!("{:x}", Sha256::digest(bytes));
     Ok(ParsedSkill {
         name: metadata.name,
         description: metadata.description.trim().to_string(),

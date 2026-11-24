@@ -623,74 +623,6 @@ fn redacted_mcp_config(config: &McpServerConfig) -> McpServerConfig {
     redacted
 }
 
-fn redact_sensitive_args(args: &[String]) -> Vec<String> {
-    let mut redact_next = false;
-    args.iter()
-        .map(|arg| {
-            if redact_next {
-                redact_next = false;
-                return "[redacted]".to_string();
-            }
-
-            let trimmed = arg.trim();
-            let lower = trimmed.to_ascii_lowercase();
-            let sensitive_name = lower
-                .trim_start_matches('-')
-                .split_once('=')
-                .map(|(name, _)| name)
-                .unwrap_or_else(|| lower.trim_start_matches('-'));
-            let is_sensitive_flag = matches!(
-                sensitive_name,
-                "apikey"
-                    | "api-key"
-                    | "api_key"
-                    | "auth"
-                    | "authorization"
-                    | "bearer"
-                    | "password"
-                    | "secret"
-                    | "token"
-            );
-
-            if is_sensitive_flag && trimmed.contains('=') {
-                trimmed
-                    .split_once('=')
-                    .map(|(name, _)| format!("{name}=[redacted]"))
-                    .unwrap_or_else(|| trimmed.to_string())
-            } else if is_sensitive_flag {
-                redact_next = true;
-                trimmed.to_string()
-            } else {
-                trimmed.to_string()
-            }
-        })
-        .collect()
-}
-
-pub fn is_mcp_tool_name(name: &str) -> bool {
-    name.starts_with("mcp::")
-}
-
-pub fn mcp_tool_output(result: &McpCallToolResult) -> (bool, String, bool) {
-    let mut parts = result
-        .content
-        .iter()
-        .filter(|content| content.content_type == "text")
-        .filter_map(|content| content.text.as_deref())
-        .map(str::to_string)
-        .collect::<Vec<_>>();
-    if let Some(structured_content) = &result.structured_content {
-        parts.push(
-            serde_json::to_string_pretty(structured_content)
-                .unwrap_or_else(|_| structured_content.to_string()),
-        );
-    }
-    let text = parts.join("\n");
-    let truncated = !result.is_error && text.chars().count() > MCP_TOOL_OUTPUT_MAX_CHARS;
-    let output = truncate_chars(&text, MCP_TOOL_OUTPUT_MAX_CHARS);
-    (!result.is_error, output, truncated)
-}
-
 impl McpCallToolResult {
     /// Consume binary image fields before the remaining MCP payload enters text diagnostics.
     pub fn take_images(&mut self) -> anyhow::Result<Vec<crate::AiImageAttachment>> {
@@ -740,38 +672,4 @@ impl McpCallToolResult {
         self.content.retain(|part| part.content_type != "image");
         Ok(images)
     }
-}
-
-pub fn mcp_resource_output(contents: &[McpResourceContent]) -> (String, bool) {
-    let multiple = contents.len() > 1;
-    let text = contents
-        .iter()
-        .map(|content| {
-            let body = content.text.clone().unwrap_or_else(|| {
-                content
-                    .blob
-                    .as_ref()
-                    .map(|blob| {
-                        format!(
-                            "[base64 binary, {} chars, mime={}]",
-                            blob.len(),
-                            content.mime_type.as_deref().unwrap_or("unknown")
-                        )
-                    })
-                    .unwrap_or_else(|| "(empty)".to_string())
-            });
-            if multiple {
-                format!("[{}]\n{body}", content.uri)
-            } else {
-                body
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n\n");
-    let truncated = text.chars().count() > MCP_TOOL_OUTPUT_MAX_CHARS;
-    (truncate_chars(&text, MCP_TOOL_OUTPUT_MAX_CHARS), truncated)
-}
-
-fn truncate_chars(text: &str, max_chars: usize) -> String {
-    text.chars().take(max_chars).collect()
 }

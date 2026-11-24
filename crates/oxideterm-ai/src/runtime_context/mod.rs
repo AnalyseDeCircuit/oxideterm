@@ -1,8 +1,10 @@
+#[cfg(not(target_family = "wasm"))]
 mod authority;
 mod capability;
 mod error;
 mod identity;
 mod projection;
+#[cfg(not(target_family = "wasm"))]
 mod registry;
 
 pub const RUNTIME_CONTEXT_MESSAGE_ID: &str = "runtime-context-v2";
@@ -28,6 +30,7 @@ pub(crate) fn is_user_context_system_message(message: &crate::AiChatMessage) -> 
         )
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub use authority::{AiRunCommandOwner, AiRuntimeAuthority, AiSftpRuntimeOwner};
 pub use capability::RuntimeCapability;
 pub use error::{
@@ -38,4 +41,5 @@ pub use identity::{
     RuntimeRegistryEpoch, StableResourceKind, StableResourceRef, ToolSessionId,
 };
 pub use projection::{RuntimeContextSnapshot, RuntimeHandleProjection};
+#[cfg(not(target_family = "wasm"))]
 pub use registry::{RuntimeCapabilityRegistry, RuntimeOwnerRegistration, ValidatedRuntimeHandle};

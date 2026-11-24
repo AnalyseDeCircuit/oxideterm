@@ -1,14 +1,17 @@
+#[cfg(not(target_family = "wasm"))]
 use agent_client_protocol::JsonRpcRequest;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use zeroize::Zeroize;
 
+#[cfg(not(target_family = "wasm"))]
 pub type CursorResponseSender =
     tokio::sync::oneshot::Sender<Result<Value, agent_client_protocol::Error>>;
 
-#[derive(Clone, Serialize, Deserialize, JsonRpcRequest)]
+#[derive(Clone, Serialize, Deserialize)]
+#[cfg_attr(not(target_family = "wasm"), derive(JsonRpcRequest))]
 #[serde(rename_all = "camelCase")]
-#[request(method = "cursor/ask_question", response = Value)]
+#[cfg_attr(not(target_family = "wasm"), request(method = "cursor/ask_question", response = Value))]
 pub struct CursorAskQuestion {
     pub tool_call_id: String,
     pub title: Option<String>,
@@ -31,9 +34,10 @@ pub struct CursorQuestionOption {
     pub label: String,
 }
 
-#[derive(Clone, Serialize, Deserialize, JsonRpcRequest)]
+#[derive(Clone, Serialize, Deserialize)]
+#[cfg_attr(not(target_family = "wasm"), derive(JsonRpcRequest))]
 #[serde(rename_all = "camelCase")]
-#[request(method = "cursor/create_plan", response = Value)]
+#[cfg_attr(not(target_family = "wasm"), request(method = "cursor/create_plan", response = Value))]
 pub struct CursorCreatePlan {
     pub tool_call_id: String,
     pub name: Option<String>,
@@ -165,7 +169,7 @@ impl Drop for CursorCreatePlan {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::acp::*;
+    use crate::{AcpClientEvent, AcpHostCapabilityPolicy, with_acp_agent_runtime_events};
     use agent_client_protocol::{
         Agent,
         schema::v1::{

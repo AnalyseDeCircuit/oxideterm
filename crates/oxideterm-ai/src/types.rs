@@ -344,3 +344,65 @@ impl AiChatStreamConfig {
         format!("responses:{:x}", identity.finalize())
     }
 }
+
+/// An allowlist of transport categories, never remote error text.
+pub fn stream_error_label(error: &str) -> Option<&'static str> {
+    let error = provider_http_error(error).map_or(error, |(code, _)| code);
+    match error {
+        "ai_image_model_unsupported" => Some("ai.images.model_unavailable"),
+        "ai_image_missing" => Some("ai.images.missing"),
+        "ai_image_request_limit" => Some("ai.images.request_limit"),
+        "agent_compaction_failed" => Some("settings_view.ai.agent_compaction_failed"),
+        "agent_context_full" => Some("settings_view.ai.agent_context_full"),
+        "ai_stream_interrupted" => Some("settings_view.ai.stream_interrupted"),
+        "ai_output_incomplete" => Some("settings_view.ai.output_incomplete"),
+        "stream_failed" => Some("settings_view.ai.stream_failed"),
+        "chat_rejected" => Some("settings_view.ai.chat_rejected"),
+        "chat_endpoint" => Some("settings_view.ai.chat_endpoint"),
+        "chat_timeout" => Some("settings_view.ai.chat_timeout"),
+        "chat_network" => Some("settings_view.ai.chat_network"),
+        "chat_balance" => Some("settings_view.ai.chat_balance"),
+        "chat_thinking_context" => Some("settings_view.ai.chat_thinking_context"),
+        "chat_invalid_stream" => Some("settings_view.ai.chat_invalid_stream"),
+        "responses_failed" => Some("settings_view.ai.responses_failed"),
+        "responses_auth" | "chat_auth" => Some("settings_view.ai.responses_auth"),
+        "responses_endpoint" => Some("settings_view.ai.responses_endpoint"),
+        "responses_timeout" => Some("settings_view.ai.responses_timeout"),
+        "responses_rate_limit" | "chat_rate_limit" => Some("settings_view.ai.responses_rate_limit"),
+        "responses_unavailable" | "chat_unavailable" => {
+            Some("settings_view.ai.responses_unavailable")
+        }
+        "responses_rejected" => Some("settings_view.ai.responses_rejected"),
+        "responses_tool_context" => Some("settings_view.ai.responses_tool_context"),
+        "responses_model_unavailable" | "chat_model_unavailable" => {
+            Some("settings_view.ai.responses_model_unavailable")
+        }
+        "responses_context_limit" | "chat_context_limit" => {
+            Some("settings_view.ai.responses_context_limit")
+        }
+        "responses_invalid_stream" => Some("settings_view.ai.responses_invalid_stream"),
+        "responses_network" => Some("settings_view.ai.responses_network"),
+        "responses_incomplete_limit" => Some("settings_view.ai.responses_incomplete_limit"),
+        "responses_incomplete_filter" => Some("settings_view.ai.responses_incomplete_filter"),
+        "responses_incomplete" | "chat_aborted" => Some("settings_view.ai.responses_incomplete"),
+        "responses_disconnected" => Some("settings_view.ai.responses_disconnected"),
+        _ => None,
+    }
+}
+
+fn provider_http_error(error: &str) -> Option<(&str, u16)> {
+    let (code, status) = error.split_once(':')?;
+    if !(code.starts_with("responses_") || code.starts_with("chat_"))
+        || status.len() != 3
+        || !status.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return None;
+    }
+    let status = status.parse().ok()?;
+    (300..=599).contains(&status).then_some((code, status))
+}
+
+pub fn stream_error_http_status(error: &str) -> Option<u16> {
+    stream_error_label(error)?;
+    provider_http_error(error).map(|(_, status)| status)
+}

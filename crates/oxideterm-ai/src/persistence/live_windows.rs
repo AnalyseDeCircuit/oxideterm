@@ -1,5 +1,9 @@
-use super::records::CONTENT_CHUNK_BYTES;
-use super::*;
+use std::collections::HashSet;
+
+use anyhow::{Result, anyhow};
+use serde_json::Value;
+
+use crate::{AiChatMessage, history_view::*};
 
 /// Default views include all display activity; explicit sections retain bounded seek support.
 pub fn live_message_view(

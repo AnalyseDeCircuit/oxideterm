@@ -339,6 +339,7 @@ pub fn ai_build_transcript_lookup_prompt_reference(transcript_ref: serde_json::V
     .join(" ")
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub async fn collect_ai_compaction_summary(
     mut rx: tokio::sync::mpsc::UnboundedReceiver<crate::AiStreamEvent>,
 ) -> (String, bool) {

@@ -32,31 +32,24 @@ mod records;
 mod stream_delta;
 mod text;
 mod tool_payloads;
-pub use agent_queries::{AgentCommunicationPage, agent_history_branch};
 pub use stream_delta::{HistoryStreamDelta, HistoryStreamSnapshot};
 mod archives;
 mod cache;
 mod compaction;
 mod decoding;
-mod live_windows;
 mod migration;
 mod mutations;
 mod queries;
 mod store;
 mod windows;
 mod writer;
-pub use live_windows::{live_content_page, live_message_view};
+#[cfg(test)]
+use crate::live_windows::{live_content_page, live_message_view};
 pub use mutations::HistoryMutation;
-pub use records::{
-    ConversationHead, HISTORY_CACHE_BYTES, HISTORY_PAGE_SIZE, HistoryCursor, HistoryPage,
-    MessageDescriptor, MessagePage,
-};
 pub use store::ConversationStore;
-pub use windows::{
-    HistoryContentCursor, HistoryContentPage, HistoryEventLocation, HistoryMessageView,
-};
 pub use writer::{HISTORY_PENDING_BYTES, HistoryWriteState, HistoryWriter};
 
+use crate::history_view::*;
 use crate::{
     AiChatMessage, AiChatMessageMetadata, AiChatRole, AiChatState, AiConversation,
     AiMessageBranches,
@@ -733,129 +726,6 @@ fn message_from_persisted(message: PersistedMessage) -> AiChatMessage {
     message
 }
 
-fn normalize_interrupted_assistant_projection(message: &mut AiChatMessage) {
-    if message.role != AiChatRole::Assistant {
-        return;
-    }
-    if let Some(turn) = message.turn.as_mut() {
-        if turn.get("status").and_then(Value::as_str) == Some("streaming")
-            && let Some(object) = turn.as_object_mut()
-        {
-            object.insert("status".to_string(), Value::String("complete".to_string()));
-        }
-        if let Some(parts) = turn.get_mut("parts").and_then(Value::as_array_mut) {
-            for part in parts {
-                if part.get("type").and_then(Value::as_str) == Some("thinking")
-                    && let Some(object) = part.as_object_mut()
-                {
-                    object.insert("streaming".to_string(), Value::Bool(false));
-                }
-            }
-        }
-    }
-    let mut rejected_tool_ids = HashSet::new();
-    for call in &mut message.tool_calls {
-        if ai_tool_call_is_unfinished(call) {
-            let id = call
-                .get("id")
-                .and_then(Value::as_str)
-                .map(str::to_string)
-                .unwrap_or_default();
-            let result = interrupted_tool_result_payload(call);
-            if let Some(object) = call.as_object_mut() {
-                object.insert("status".to_string(), Value::String("rejected".to_string()));
-                object.insert(
-                    "summary".to_string(),
-                    Value::String("Generation was stopped.".to_string()),
-                );
-                object.insert("result".to_string(), result);
-            }
-            if !id.is_empty() {
-                rejected_tool_ids.insert(id);
-            }
-        }
-    }
-    if rejected_tool_ids.is_empty() {
-        return;
-    }
-    if let Some(rounds) = message
-        .turn
-        .as_mut()
-        .and_then(|turn| turn.get_mut("toolRounds"))
-        .and_then(Value::as_array_mut)
-    {
-        for round in rounds {
-            let Some(tool_calls) = round.get_mut("toolCalls").and_then(Value::as_array_mut) else {
-                continue;
-            };
-            for tool_call in tool_calls {
-                let id = tool_call
-                    .get("id")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default();
-                if !rejected_tool_ids.contains(id) {
-                    continue;
-                }
-                if let Some(object) = tool_call.as_object_mut() {
-                    object.insert(
-                        "approvalState".to_string(),
-                        Value::String("rejected".to_string()),
-                    );
-                    object.insert(
-                        "executionState".to_string(),
-                        Value::String("error".to_string()),
-                    );
-                }
-            }
-        }
-    }
-}
-
-pub(crate) fn ai_tool_call_is_unfinished(call: &Value) -> bool {
-    // Waiting tools carry progress in `result`; only the execution state is terminal evidence.
-    matches!(
-        call.get("status").and_then(Value::as_str),
-        Some(
-            "pending"
-                | "approved"
-                | "running"
-                | "pending_user_approval"
-                | "pending_approval"
-                | "pending_user_selection"
-                | "waiting_user"
-                | "waiting_condition"
-                | "waiting_connection"
-        )
-    )
-}
-
-fn interrupted_tool_result_payload(call: &Value) -> Value {
-    let tool_name = call
-        .get("name")
-        .and_then(Value::as_str)
-        .unwrap_or("tool")
-        .to_string();
-    serde_json::json!({
-        "ok": false,
-        "summary": "Generation was stopped.",
-        "output": "Generation was stopped.",
-        "data": Value::Null,
-        "error": {
-            "code": "generation_stopped",
-            "message": "Generation was stopped.",
-            "recoverable": true,
-        },
-        "targets": [],
-        "meta": {
-            "toolName": tool_name,
-            "durationMs": 0,
-            "verified": false,
-            "capability": Value::Null,
-            "truncated": false,
-        }
-    })
-}
-
 #[derive(Debug, Clone)]
 struct TranscriptRoundSummary {
     message_id: Option<String>,
@@ -1483,37 +1353,6 @@ pub struct ConversationMeta {
     pub turn_count: Option<usize>,
     #[serde(default)]
     pub archived: bool,
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct PersistedTranscriptEntry {
-    pub id: String,
-    pub conversation_id: String,
-    #[serde(default)]
-    pub turn_id: Option<String>,
-    #[serde(default)]
-    pub parent_id: Option<String>,
-    pub timestamp: i64,
-    pub kind: String,
-    #[serde(default)]
-    pub payload: Value,
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct PersistedDiagnosticEvent {
-    pub id: String,
-    pub conversation_id: String,
-    #[serde(default)]
-    pub turn_id: Option<String>,
-    #[serde(default)]
-    pub round_id: Option<String>,
-    pub timestamp: i64,
-    #[serde(rename = "type")]
-    pub event_type: String,
-    #[serde(default)]
-    pub data: Value,
 }
 
 #[cfg(test)]

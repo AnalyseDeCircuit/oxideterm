@@ -1,36 +1,13 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{
-    collections::BTreeMap,
-    io,
-    path::{Path, PathBuf},
-};
-
-use thiserror::Error;
+use std::{collections::BTreeMap, path::Path};
 
 use crate::{
     SkillCatalogEntry, SkillDiagnostic, SkillDiagnosticKind, SkillDiscoveryOptions, SkillRecord,
-    discovery::discovery_roots, parser::parse_skill_file,
+    SkillRegistryError, discovery::discovery_roots, model::MAX_RESOURCE_BYTES,
+    parser::parse_skill_file,
 };
-
-const MAX_RESOURCE_BYTES: usize = 1024 * 1024;
-
-#[derive(Debug, Error)]
-pub enum SkillRegistryError {
-    #[error("failed to read {path}: {source}")]
-    Io { path: PathBuf, source: io::Error },
-    #[error("invalid skill at {path}: {message}")]
-    Invalid { path: PathBuf, message: String },
-    #[error("skill not found: {0}")]
-    NotFound(String),
-    #[error("skill resource escapes its root")]
-    ResourceOutsideRoot,
-    #[error("skill resource exceeds {MAX_RESOURCE_BYTES} bytes")]
-    ResourceTooLarge,
-    #[error("skill resource is not valid UTF-8")]
-    ResourceNotUtf8,
-}
 
 #[derive(Clone, Debug, Default)]
 pub struct SkillRegistry {

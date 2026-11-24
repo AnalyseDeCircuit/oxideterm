@@ -1,6 +1,6 @@
 pub fn ai_memory_now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    web_time::SystemTime::now()
+        .duration_since(web_time::UNIX_EPOCH)
         .map(|duration| duration.as_millis().min(i64::MAX as u128) as i64)
         .unwrap_or(0)
 }
@@ -394,6 +394,7 @@ pub fn ai_manage_memory_entry(
     Ok(serde_json::json!({ "accepted": true, "action": action, "entry": result }))
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub fn ai_remember_preference_payload<'a>(
     snapshot: &super::AiOrchestratorRuntimeSnapshot,
     args: &'a serde_json::Value,
@@ -456,6 +457,7 @@ pub fn save_ai_user_preference(
     });
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub fn ai_preference_saved(
     snapshot: &super::AiOrchestratorRuntimeSnapshot,
 ) -> super::AiActionResultLite {

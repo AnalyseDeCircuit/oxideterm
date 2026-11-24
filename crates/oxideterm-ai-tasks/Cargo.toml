@@ -8,17 +8,23 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
-oxideterm-audit = { path = "../oxideterm-audit" }
-async-trait.workspace = true
 chrono.workspace = true
-parking_lot.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
-tokio.workspace = true
 uuid.workspace = true
 zeroize.workspace = true
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+oxideterm-audit = { path = "../oxideterm-audit" }
+async-trait.workspace = true
+parking_lot.workspace = true
+tokio.workspace = true
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+chrono = { workspace = true, features = ["wasmbind"] }
+uuid = { workspace = true, features = ["js"] }
 
 [dev-dependencies]
 tempfile = "3.23"

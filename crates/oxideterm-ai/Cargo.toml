@@ -8,11 +8,24 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+anyhow.workspace = true
+base64.workspace = true
+oxideterm-settings = { path = "../oxideterm-settings" }
+parking_lot.workspace = true
+regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+url.workspace = true
+web-time.workspace = true
+uuid.workspace = true
+zeroize.workspace = true
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
 bytes.workspace = true
 agent-client-protocol.workspace = true
-anyhow.workspace = true
 async-process.workspace = true
-base64.workspace = true
 image.workspace = true
 chrono.workspace = true
 libc.workspace = true
@@ -24,7 +37,6 @@ oxideterm-acp-host-tools = { path = "../oxideterm-acp-host-tools" }
 oxideterm-audit = { path = "../oxideterm-audit" }
 oxideterm-connections = { path = "../oxideterm-connections" }
 oxideterm-forwarding = { path = "../oxideterm-forwarding", default-features = false }
-oxideterm-settings = { path = "../oxideterm-settings" }
 oxideterm-workspace = { path = "../oxideterm-workspace" }
 oxideterm-ssh = { path = "../oxideterm-ssh" }
 oxideterm-sftp = { path = "../oxideterm-sftp" }
@@ -33,23 +45,18 @@ oxideterm-atomic-file = { path = "../oxideterm-atomic-file" }
 oxideterm-network-proxy = { path = "../oxideterm-network-proxy" }
 oxideterm-portable-runtime = { path = "../oxideterm-portable-runtime" }
 oxideterm-secret-store = { path = "../oxideterm-secret-store" }
-parking_lot.workspace = true
 rand.workspace = true
 redb = "2.1"
-regex.workspace = true
 reqwest.workspace = true
 rmp-serde.workspace = true
 rust-stemmers = "1"
-serde.workspace = true
-serde_json.workspace = true
-sha2.workspace = true
-thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
-uuid.workspace = true
 whoami.workspace = true
-zeroize.workspace = true
 zstd = "0.13"
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+uuid = { workspace = true, features = ["js"] }
 
 [dev-dependencies]
 tempfile = "3.23"

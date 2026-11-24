@@ -3,6 +3,8 @@
 
 use serde::{Deserialize, Serialize};
 
+pub use crate::rag_model::{DocChunk, DocScope};
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Core Types
 // ═══════════════════════════════════════════════════════════════════════════
@@ -15,15 +17,6 @@ pub struct DocCollection {
     pub scope: DocScope,
     pub created_at: i64,
     pub updated_at: i64,
-}
-
-/// Scope determines which sessions can see a collection.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum DocScope {
-    /// Visible to all sessions.
-    Global,
-    /// Visible only when connected to the given connection_id.
-    Connection(String),
 }
 
 /// Metadata for an imported document.
@@ -47,26 +40,6 @@ pub struct DocMetadata {
 pub enum DocFormat {
     Markdown,
     PlainText,
-}
-
-/// A chunk of text split from a document.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DocChunk {
-    pub id: String,
-    pub doc_id: String,
-    /// Heading path for Markdown, e.g. "Deployment > Docker > Troubleshooting"
-    pub section_path: Option<String>,
-    pub content: String,
-    pub tokens_estimate: usize,
-    /// Character offset in the original document.
-    pub offset: usize,
-    /// Content length in characters.
-    pub length: usize,
-    /// Contextual header derived from document title + section_path.
-    /// Prepended to content for BM25 indexing and embedding to improve
-    /// retrieval quality (inspired by Anthropic Contextual Retrieval).
-    #[serde(default)]
-    pub context_prefix: Option<String>,
 }
 
 /// Stored vector embedding for a chunk.

@@ -10,6 +10,7 @@ pub const AI_IMAGE_MAX_ATTACHMENTS: usize = 8;
 pub const AI_IMAGE_REQUEST_BYTES: usize = 12 * 1024 * 1024;
 
 /// Normalizes uploaded and tool-returned pixels through the same bounded decoder.
+#[cfg(not(target_family = "wasm"))]
 pub fn prepare_image_attachment(name: String, bytes: Vec<u8>) -> anyhow::Result<AiImageAttachment> {
     use image::ImageDecoder;
     use std::io::Cursor;
@@ -153,6 +154,7 @@ impl AiImageAttachment {
             .map(|data| format!("data:{};base64,{data}", self.mime_type))
     }
 
+    #[cfg(not(target_family = "wasm"))]
     pub(crate) fn validate(&self) -> anyhow::Result<()> {
         anyhow::ensure!(
             self.width > 0
@@ -200,6 +202,7 @@ pub fn set_message_images(message: &mut AiChatMessage, images: Vec<AiImageAttach
         .images = images;
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub(crate) fn validate_image_request<'a>(
     images: impl Iterator<Item = &'a AiImageAttachment>,
 ) -> anyhow::Result<()> {
@@ -213,10 +216,12 @@ pub(crate) fn validate_image_request<'a>(
     Ok(())
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub(crate) fn image_message_content(message: &AiChatMessage, protocol: &str) -> serde_json::Value {
     image_content_parts(&message.content, message_images(message), protocol)
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub(crate) fn image_content_parts(
     text: &str,
     images: &[AiImageAttachment],

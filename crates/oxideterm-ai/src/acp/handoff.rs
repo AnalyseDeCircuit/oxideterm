@@ -98,6 +98,7 @@ fn store_message_backend(
     true
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub(crate) fn migrate_message_backends(
     message: &mut crate::AiChatMessage,
     legacy: &serde_json::Value,

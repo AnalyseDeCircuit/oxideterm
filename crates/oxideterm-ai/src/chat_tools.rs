@@ -1,5 +1,6 @@
 //! Native chat tool advertisements and RAG request arguments.
 
+#[cfg(not(target_family = "wasm"))]
 pub fn ai_stream_tool_definitions(
     tool_use_enabled: bool,
     skills_enabled: bool,
@@ -31,6 +32,7 @@ pub fn ai_stream_tool_definitions(
     tools
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub fn ai_active_tool_count(
     tool_use_enabled: bool,
     skills_enabled: bool,

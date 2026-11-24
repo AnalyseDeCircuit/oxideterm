@@ -16,7 +16,6 @@ use oxideterm_audit::{
     AuditCategory, AuditContext, AuditEvidence, AuditOperation, AuditOutcome, AuditSource,
 };
 use parking_lot::Mutex;
-use sha2::{Digest, Sha256};
 use tokio::{sync::Notify, task::AbortHandle};
 use zeroize::Zeroizing;
 
@@ -524,12 +523,6 @@ fn condition_matches(
         BackgroundTaskCondition::ExecutionFails => false,
         BackgroundTaskCondition::ExecutionRecovers => had_failure,
     }
-}
-
-pub fn fingerprint_json(value: &serde_json::Value) -> String {
-    let mut digest = Sha256::new();
-    digest.update(serde_json::to_vec(value).unwrap_or_default());
-    format!("{:x}", digest.finalize())
 }
 
 #[cfg(test)]

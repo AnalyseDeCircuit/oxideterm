@@ -4,9 +4,13 @@ use crate::AiToolDefinition;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+#[cfg(not(target_family = "wasm"))]
 const SEARCH_URL: &str = "https://api.deepseek.com/v1/tools/search";
+#[cfg(not(target_family = "wasm"))]
 const FETCH_URL: &str = "https://api.deepseek.com/v1/tools/fetch";
+#[cfg(not(target_family = "wasm"))]
 const MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
+#[cfg(not(target_family = "wasm"))]
 const MAX_PAGE_CHARS: usize = 10_000;
 
 #[derive(Clone, Copy, Debug, thiserror::Error)]
@@ -67,7 +71,7 @@ pub fn is_web_tool(name: &str) -> bool {
 
 pub fn official_deepseek_provider(provider: &crate::AiProviderView) -> bool {
     provider.provider_type == "deepseek"
-        && reqwest::Url::parse(&provider.base_url).is_ok_and(|url| {
+        && url::Url::parse(&provider.base_url).is_ok_and(|url| {
             url.scheme() == "https"
                 && url.host_str() == Some("api.deepseek.com")
                 && url.port_or_known_default() == Some(443)
@@ -80,7 +84,7 @@ pub fn official_deepseek_provider(provider: &crate::AiProviderView) -> bool {
 }
 
 pub fn public_web_url(value: &str) -> bool {
-    let Ok(url) = reqwest::Url::parse(value) else {
+    let Ok(url) = url::Url::parse(value) else {
         return false;
     };
     if value.chars().count() > 8192
@@ -186,6 +190,7 @@ pub(crate) fn tool_definitions() -> Vec<AiToolDefinition> {
 }
 
 /// Credentials are read by the caller from the existing provider key store.
+#[cfg(not(target_family = "wasm"))]
 pub async fn execute(name: &str, args: &Value, key: &str) -> Result<WebResult, WebError> {
     validate_arguments(name, args)?;
     if key.trim().is_empty() {
@@ -210,6 +215,7 @@ pub async fn execute(name: &str, args: &Value, key: &str) -> Result<WebResult, W
     parse_result(name, args, payload)
 }
 
+#[cfg(not(target_family = "wasm"))]
 async fn read_response(request: reqwest::RequestBuilder) -> Result<Value, WebError> {
     let mut response = request
         .timeout(std::time::Duration::from_secs(30))
@@ -235,6 +241,7 @@ async fn read_response(request: reqwest::RequestBuilder) -> Result<Value, WebErr
     serde_json::from_slice(&bytes).map_err(|_| WebError::Response)
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn parse_result(name: &str, args: &Value, payload: Value) -> Result<WebResult, WebError> {
     let mut sources = Vec::new();
     let mut output = String::from(
@@ -334,6 +341,7 @@ pub fn configured_provider_id(
         .ok_or(WebError::Configuration)
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub async fn complete_authorized_request(
     tool_call_id: String,
     tool_name: String,

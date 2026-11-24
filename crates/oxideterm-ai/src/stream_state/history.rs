@@ -414,7 +414,7 @@ pub fn should_retain_stopped_ai_message(message: &AiChatMessage) -> bool {
 }
 
 pub fn cancel_rejected_tool_call(call: &serde_json::Value) -> Option<(String, String, String)> {
-    if !crate::persistence::ai_tool_call_is_unfinished(call) {
+    if !ai_tool_call_is_unfinished(call) {
         return None;
     }
     let id = call.get("id").and_then(serde_json::Value::as_str)?;
@@ -1001,4 +1001,22 @@ fn ai_chat_response_reserve(config: &crate::AiChatStreamConfig, context_window: 
         .and_then(|tokens| usize::try_from(tokens).ok())
         .filter(|tokens| *tokens > 0)
         .unwrap_or_else(|| ai_response_reserve(context_window))
+}
+
+pub(crate) fn ai_tool_call_is_unfinished(call: &serde_json::Value) -> bool {
+    // Waiting tools carry progress in `result`; only the execution state is terminal evidence.
+    matches!(
+        call.get("status").and_then(serde_json::Value::as_str),
+        Some(
+            "pending"
+                | "approved"
+                | "running"
+                | "pending_user_approval"
+                | "pending_approval"
+                | "pending_user_selection"
+                | "waiting_user"
+                | "waiting_condition"
+                | "waiting_connection"
+        )
+    )
 }

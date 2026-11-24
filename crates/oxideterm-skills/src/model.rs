@@ -1,9 +1,10 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::path::PathBuf;
+use std::{io, path::PathBuf};
 
 use serde::Serialize;
+use thiserror::Error;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -77,4 +78,22 @@ pub struct SkillDiagnostic {
     pub path: PathBuf,
     pub kind: SkillDiagnosticKind,
     pub message: String,
+}
+
+pub(crate) const MAX_RESOURCE_BYTES: usize = 1024 * 1024;
+
+#[derive(Debug, Error)]
+pub enum SkillRegistryError {
+    #[error("failed to read {path}: {source}")]
+    Io { path: PathBuf, source: io::Error },
+    #[error("invalid skill at {path}: {message}")]
+    Invalid { path: PathBuf, message: String },
+    #[error("skill not found: {0}")]
+    NotFound(String),
+    #[error("skill resource escapes its root")]
+    ResourceOutsideRoot,
+    #[error("skill resource exceeds {MAX_RESOURCE_BYTES} bytes")]
+    ResourceTooLarge,
+    #[error("skill resource is not valid UTF-8")]
+    ResourceNotUtf8,
 }

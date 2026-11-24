@@ -5,6 +5,7 @@ use std::fmt;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use zeroize::{Zeroize, Zeroizing};
 
 const MAX_TASK_SUMMARY_CHARS: usize = 4_096;
@@ -112,6 +113,7 @@ impl BackgroundTaskSpec {
 }
 
 /// Represents one executor handoff. The argument copy is cleared after the call completes.
+#[cfg(not(target_family = "wasm"))]
 pub struct BackgroundTaskExecution {
     pub audit_context: Option<oxideterm_audit::AuditContext>,
     pub task_id: BackgroundTaskId,
@@ -120,6 +122,7 @@ pub struct BackgroundTaskExecution {
     pub run_number: u32,
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl fmt::Debug for BackgroundTaskExecution {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -197,4 +200,10 @@ fn zeroize_json(value: &mut serde_json::Value) {
         serde_json::Value::Object(values) => values.values_mut().for_each(zeroize_json),
         serde_json::Value::Null | serde_json::Value::Bool(_) | serde_json::Value::Number(_) => {}
     }
+}
+
+pub fn fingerprint_json(value: &serde_json::Value) -> String {
+    let mut digest = Sha256::new();
+    digest.update(serde_json::to_vec(value).unwrap_or_default());
+    format!("{:x}", digest.finalize())
 }

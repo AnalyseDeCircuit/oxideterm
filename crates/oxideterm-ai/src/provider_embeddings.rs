@@ -1,10 +1,18 @@
-use std::{fmt, time::Duration};
+use std::fmt;
+#[cfg(not(target_family = "wasm"))]
+use std::time::Duration;
 
-use crate::{AiProviderView, SharedAiProviderKey, provider_view, sanitize_for_ai};
+#[cfg(not(target_family = "wasm"))]
+use crate::sanitize_for_ai;
+use crate::{AiProviderView, SharedAiProviderKey, provider_view};
+#[cfg(not(target_family = "wasm"))]
 use anyhow::{Context, Result, anyhow};
+#[cfg(not(target_family = "wasm"))]
 use serde::Deserialize;
+#[cfg(not(target_family = "wasm"))]
 use zeroize::Zeroize;
 
+#[cfg(not(target_family = "wasm"))]
 const EMBEDDING_TIMEOUT: Duration = Duration::from_secs(3);
 const OPENAI_DEFAULT_EMBEDDING_MODEL: &str = "text-embedding-3-small";
 
@@ -191,6 +199,7 @@ pub fn resolve_chat_embedding_api_key<'a>(
     AiChatEmbeddingApiKeyDecision::Skip
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub async fn embed_texts(
     provider: &AiProviderView,
     api_key: Option<&SharedAiProviderKey>,
@@ -206,6 +215,7 @@ pub async fn embed_texts(
     dispatch_sanitized_embeddings(provider, api_key, model, texts).await
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub async fn embed_query_text(
     provider: &AiProviderView,
     api_key: Option<&SharedAiProviderKey>,
@@ -218,6 +228,7 @@ pub async fn embed_query_text(
     dispatch_sanitized_embeddings(provider, api_key, model, texts).await
 }
 
+#[cfg(not(target_family = "wasm"))]
 async fn dispatch_sanitized_embeddings(
     provider: &AiProviderView,
     api_key: Option<&SharedAiProviderKey>,
@@ -235,6 +246,7 @@ async fn dispatch_sanitized_embeddings(
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn sanitize_embedding_texts(texts: Vec<String>) -> Vec<String> {
     texts
         .into_iter()
@@ -246,6 +258,7 @@ fn sanitize_embedding_texts(texts: Vec<String>) -> Vec<String> {
         .collect()
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn sanitize_embedding_query(query: &str) -> Vec<String> {
     vec![sanitize_for_ai(query)]
 }
@@ -282,6 +295,7 @@ fn ai_embedding_reason(
     AiEmbeddingProviderReason::Ready
 }
 
+#[cfg(not(target_family = "wasm"))]
 async fn embed_openai_compatible(
     base_url: &str,
     api_key: Option<&SharedAiProviderKey>,
@@ -316,6 +330,7 @@ async fn embed_openai_compatible(
     Ok(data.into_iter().map(|item| item.embedding).collect())
 }
 
+#[cfg(not(target_family = "wasm"))]
 async fn embed_ollama(
     base_url: &str,
     api_key: Option<&SharedAiProviderKey>,
@@ -351,23 +366,27 @@ async fn embed_ollama(
     Ok(parsed.embeddings)
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn embedding_client() -> Result<reqwest::Client> {
     // Embeddings share transport state, but their API keys remain scoped to each request.
     oxideterm_network_proxy::application_http_client()
         .context("failed to acquire application embedding client")
 }
 
+#[cfg(not(target_family = "wasm"))]
 #[derive(Deserialize)]
 struct OpenAiEmbeddingResponse {
     data: Vec<OpenAiEmbeddingItem>,
 }
 
+#[cfg(not(target_family = "wasm"))]
 #[derive(Deserialize)]
 struct OpenAiEmbeddingItem {
     index: usize,
     embedding: Vec<f32>,
 }
 
+#[cfg(not(target_family = "wasm"))]
 #[derive(Deserialize)]
 struct OllamaEmbeddingResponse {
     embeddings: Vec<Vec<f32>>,

@@ -1,15 +1,6 @@
 use super::{records::*, *};
 
-pub fn agent_history_branch(run: &crate::agent::AgentRunId) -> String {
-    format!("agent:{run}")
-}
-
-pub struct AgentCommunicationPage {
-    pub message: crate::agent::AgentMessage,
-    pub sequence: u64,
-    pub before: Option<u64>,
-    pub more: Vec<HistoryContentCursor>,
-}
+pub(super) use crate::history_view::agent_history_branch;
 
 impl ConversationStore {
     /// Communication pages contain one bounded message; older messages and long text remain queryable.

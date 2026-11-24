@@ -2,21 +2,35 @@
 
 use std::collections::BTreeMap;
 
+#[cfg(not(target_family = "wasm"))]
 mod application;
+#[cfg(not(target_family = "wasm"))]
 pub use application::*;
+#[cfg(not(target_family = "wasm"))]
 mod discovery;
+#[cfg(not(target_family = "wasm"))]
 mod terminal;
+#[cfg(not(target_family = "wasm"))]
 pub use terminal::*;
+#[cfg(not(target_family = "wasm"))]
 mod live_executor;
+#[cfg(not(target_family = "wasm"))]
 pub use live_executor::{AiLiveFileOwner, AiLiveToolServices, capture_live_transfers};
+#[cfg(not(target_family = "wasm"))]
 mod live_files;
+#[cfg(not(target_family = "wasm"))]
 mod local_command;
+#[cfg(not(target_family = "wasm"))]
 pub use discovery::*;
+#[cfg(not(target_family = "wasm"))]
 pub use live_files::*;
+#[cfg(not(target_family = "wasm"))]
 pub use local_command::{ai_command_with_cwd, run_local_ai_command};
 mod memory;
 pub use memory::*;
+#[cfg(not(target_family = "wasm"))]
 mod snapshot;
+#[cfg(not(target_family = "wasm"))]
 pub use snapshot::*;
 
 #[derive(Clone)]

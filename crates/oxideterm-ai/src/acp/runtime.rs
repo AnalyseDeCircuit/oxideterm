@@ -22,22 +22,13 @@ use tokio::{
 use zeroize::Zeroizing;
 
 use super::{
-    AcpActiveSession, AcpAgentRuntime, AcpClientEvent, AcpHostCapabilityPolicy, AcpLaunchConfig,
-    AcpLaunchConfigError, AcpPromptSessionOutcome, AcpSessionConfigSelection,
+    AcpActiveSession, AcpAgentRuntime, AcpClientEvent, AcpConnectionState, AcpHostCapabilityPolicy,
+    AcpLaunchConfig, AcpLaunchConfigError, AcpPromptSessionOutcome, AcpSessionConfigSelection,
     acp_session_config_options, acp_session_mode_state, build_acp_stdio_launcher,
     with_acp_agent_runtime_events,
 };
 
 static ACP_CONNECTION_COUNTER: AtomicU64 = AtomicU64::new(1);
-
-/// Identifies the lifecycle of one external ACP agent connection.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum AcpConnectionState {
-    Connecting,
-    Ready,
-    Stopped,
-    Failed,
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AcpControlOperation {

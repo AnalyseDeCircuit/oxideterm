@@ -1,5 +1,8 @@
-use super::{AgentRunRef, AgentRuntime, AgentText};
+use super::AgentText;
+#[cfg(not(target_family = "wasm"))]
+use super::{AgentRunRef, AgentRuntime};
 use serde::{Deserialize, Serialize};
+#[cfg(not(target_family = "wasm"))]
 use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -38,6 +41,7 @@ fn restore_resource_state<'de, D: serde::Deserializer<'de>>(
     })
 }
 
+#[cfg(not(target_family = "wasm"))]
 struct ResourceRecord {
     runtime: AgentRuntime,
     run: AgentRunRef,
@@ -45,6 +49,7 @@ struct ResourceRecord {
     kind: OwnedResourceKind,
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl Drop for ResourceRecord {
     fn drop(&mut self) {
         let state = if self.kind == OwnedResourceKind::Observation {
@@ -57,9 +62,11 @@ impl Drop for ResourceRecord {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 #[derive(Clone)]
 pub struct AgentResourceRecord(Arc<ResourceRecord>);
 
+#[cfg(not(target_family = "wasm"))]
 impl AgentResourceRecord {
     pub(super) fn new(
         runtime: AgentRuntime,

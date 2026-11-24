@@ -283,21 +283,21 @@ pub fn ai_terminal_input_wait_reason(
 }
 
 pub struct AiTerminalCommandWait {
-    deadline: std::time::Instant,
+    deadline: web_time::Instant,
 }
 
 impl AiTerminalCommandWait {
-    pub fn with_timeout(now: std::time::Instant, timeout: Duration) -> Self {
+    pub fn with_timeout(now: web_time::Instant, timeout: Duration) -> Self {
         Self {
             deadline: now + timeout.min(Duration::from_secs(30)),
         }
     }
 
-    pub fn deadline(&self) -> std::time::Instant {
+    pub fn deadline(&self) -> web_time::Instant {
         self.deadline
     }
 
-    pub fn expired(&self, now: std::time::Instant) -> bool {
+    pub fn expired(&self, now: web_time::Instant) -> bool {
         now >= self.deadline
     }
 }

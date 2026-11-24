@@ -74,6 +74,7 @@ fn hash_message(message: &AiChatMessage, hash: &mut DefaultHasher) {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl AiRequestPrefix {
     pub(crate) fn capture(
         config: &AiChatStreamConfig,
@@ -108,6 +109,7 @@ impl AiRequestPrefix {
 }
 
 impl AiInputUsage {
+    #[cfg(not(target_family = "wasm"))]
     pub(crate) fn record(&self, prefix: AiRequestPrefix, input: usize) {
         *self.0.lock() = Some((prefix, input));
     }

@@ -1,6 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
-    fmt,
+    collections::HashSet,
     sync::{
         Arc,
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -12,8 +11,6 @@ use base64::Engine as _;
 use futures_util::{FutureExt as _, StreamExt as _, future::BoxFuture};
 use parking_lot::RwLock;
 use reqwest::{StatusCode, header::HeaderName};
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use tokio::{
     io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader},
     process::{Child, Command},
@@ -30,7 +27,6 @@ const MAX_MCP_MESSAGE_BYTES: usize = 10 * 1024 * 1024;
 const MCP_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const MCP_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(3);
 const MCP_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(3);
-const MCP_TOOL_OUTPUT_MAX_CHARS: usize = 8_192;
 const MCP_MAX_RETRIES: u32 = 3;
 const MCP_RETRY_BASE_DELAY: Duration = Duration::from_secs(1);
 const MCP_MAX_MULTI_ROUND_TRIPS: usize = 16;
@@ -41,172 +37,12 @@ const MCP_TASK_MAX_POLL_INTERVAL: Duration = Duration::from_secs(30);
 
 type PendingMap = Arc<Mutex<HashMap<u64, oneshot::Sender<Result<Value, McpError>>>>>;
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum McpTransport {
-    Stdio,
-    StreamableHttp,
-    LegacySse,
-    Sse,
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 enum McpEffectiveTransport {
     Stdio,
     StreamableHttp,
     LegacySse,
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum McpAuthHeaderMode {
-    Bearer,
-    Raw,
-    None,
-}
-
-#[derive(Clone, Deserialize, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct McpServerConfig {
-    pub id: String,
-    pub name: String,
-    pub transport: McpTransport,
-    pub url: Option<String>,
-    pub command: Option<String>,
-    #[serde(default)]
-    pub args: Vec<String>,
-    #[serde(default)]
-    pub env: HashMap<String, String>,
-    pub auth_header_name: Option<String>,
-    pub auth_header_mode: Option<McpAuthHeaderMode>,
-    #[serde(default)]
-    pub headers: HashMap<String, String>,
-    #[serde(default)]
-    pub enabled: bool,
-    #[serde(default)]
-    pub retry_on_disconnect: bool,
-    #[serde(default)]
-    pub auth_token: Option<String>,
-}
-
-impl fmt::Debug for McpServerConfig {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("McpServerConfig")
-            .field("id", &self.id)
-            .field("name", &self.name)
-            .field("transport", &self.transport)
-            .field("url", &self.url)
-            .field("command", &self.command)
-            .field("args", &redact_sensitive_args(&self.args))
-            .field("env", &redacted_map_debug(&self.env))
-            .field("auth_header_name", &self.auth_header_name)
-            .field("auth_header_mode", &self.auth_header_mode)
-            .field("headers", &redacted_map_debug(&self.headers))
-            .field("enabled", &self.enabled)
-            .field("retry_on_disconnect", &self.retry_on_disconnect)
-            .field(
-                "auth_token",
-                &self.auth_token.as_ref().map(|_| "[redacted token]"),
-            )
-            .finish()
-    }
-}
-
-fn redacted_map_debug(map: &HashMap<String, String>) -> HashMap<&str, &'static str> {
-    map.keys()
-        .map(|key| (key.as_str(), "[redacted]"))
-        .collect::<HashMap<_, _>>()
-}
-
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct McpServerCapabilities {
-    #[serde(default)]
-    pub tools: Option<Value>,
-    #[serde(default)]
-    pub resources: Option<Value>,
-    #[serde(default)]
-    pub prompts: Option<Value>,
-    #[serde(default)]
-    pub extensions: Option<HashMap<String, Value>>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct McpToolSchema {
-    pub name: String,
-    pub description: Option<String>,
-    pub input_schema: Value,
-    #[serde(default)]
-    pub output_schema: Option<Value>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct McpResource {
-    pub uri: String,
-    pub name: String,
-    pub description: Option<String>,
-    pub mime_type: Option<String>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct McpResourceContent {
-    pub uri: String,
-    pub mime_type: Option<String>,
-    pub text: Option<String>,
-    pub blob: Option<String>,
-}
-
-#[derive(Clone, Deserialize, Serialize)]
-pub struct McpCallContent {
-    #[serde(rename = "type")]
-    pub content_type: String,
-    pub text: Option<String>,
-    pub data: Option<String>,
-    #[serde(rename = "mimeType", alias = "mime_type")]
-    pub mime_type: Option<String>,
-}
-
-impl std::fmt::Debug for McpCallContent {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("McpCallContent")
-            .field("content_type", &self.content_type)
-            .field("mime_type", &self.mime_type)
-            .finish_non_exhaustive()
-    }
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct McpCallToolResult {
-    #[serde(default)]
-    pub content: Vec<McpCallContent>,
-    #[serde(default)]
-    pub is_error: bool,
-    #[serde(default)]
-    pub structured_content: Option<Value>,
-}
-
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct McpServerStateSnapshot {
-    pub config: McpServerConfig,
-    pub status: &'static str,
-    pub error: Option<String>,
-    pub capabilities: Option<McpServerCapabilities>,
-    pub tools: Vec<McpToolSchema>,
-    pub resources: Vec<McpResource>,
-    pub runtime_id: Option<String>,
-    pub endpoint_url: Option<String>,
-    pub resolved_transport: Option<String>,
-    pub session_id: Option<String>,
-    pub protocol_era: Option<String>,
-    pub protocol_version: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -234,8 +70,11 @@ impl McpError {
         match self {
             Self::Timeout(_) => Recovery::Transient,
             Self::NotConnected(_) => Recovery::NeedsUser,
-            Self::HttpStatus(status, _) | Self::Rpc { status: Some(status), .. }
-                if status.as_u16() == 401 || status.as_u16() == 403 => Recovery::NeedsUser,
+            Self::HttpStatus(status, _)
+            | Self::Rpc {
+                status: Some(status),
+                ..
+            } if status.as_u16() == 401 || status.as_u16() == 403 => Recovery::NeedsUser,
             Self::Rpc { code: -32602, .. } => Recovery::InvalidCall,
             _ => Recovery::OutcomeUnknown,
         }

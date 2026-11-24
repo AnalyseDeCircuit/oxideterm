@@ -1,9 +1,6 @@
 use super::*;
+pub(super) use crate::history_view::CONTENT_CHUNK_BYTES;
 use std::collections::BTreeMap;
-
-pub const HISTORY_PAGE_SIZE: usize = 50;
-pub const HISTORY_CACHE_BYTES: usize = 64 * 1024 * 1024;
-pub const CONTENT_CHUNK_BYTES: usize = 64 * 1024;
 
 pub(super) const HEADS: TableDefinition<&str, &[u8]> = TableDefinition::new("v4_conversations");
 pub(super) const BRANCHES: TableDefinition<(&str, &str), &[u8]> =
@@ -100,16 +97,6 @@ pub(super) fn record_revision(tx: &redb::WriteTransaction, revision: u64) -> Res
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ConversationHead {
-    pub conversation: AiConversation,
-    pub revision: u64,
-    pub metadata_revision: u64,
-    pub title_revision: u64,
-    pub structure_revision: u64,
-    pub active_branch: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
 pub(super) struct Branch {
     pub parent: Option<BranchParent>,
     pub owner: BranchOwner,
@@ -133,42 +120,6 @@ pub(super) struct BranchParent {
     pub branch_id: String,
     pub first_sequence: u64,
     pub last_sequence: u64,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct HistoryCursor {
-    pub conversation_id: String,
-    pub branch_id: String,
-    pub revision: u64,
-    pub before_sequence: u64,
-}
-
-#[derive(Clone, Debug)]
-pub struct HistoryPage {
-    pub messages: Vec<AiChatMessage>,
-    pub before: Option<HistoryCursor>,
-    pub revision: u64,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct MessageDescriptor {
-    pub id: String,
-    pub storage_id: String,
-    pub sequence: u64,
-    pub role: AiChatRole,
-    pub timestamp_ms: i64,
-    pub preview: String,
-    pub turn_count: usize,
-    pub history_count: usize,
-    pub revision: u64,
-}
-
-#[derive(Clone, Debug)]
-pub struct MessagePage {
-    pub messages: Vec<MessageDescriptor>,
-    pub before: Option<HistoryCursor>,
-    pub after: Option<HistoryCursor>,
-    pub revision: u64,
 }
 
 #[derive(Clone, Serialize, Deserialize)]

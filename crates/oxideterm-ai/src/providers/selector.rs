@@ -1,14 +1,18 @@
+#[cfg(not(target_family = "wasm"))]
 use std::time::Duration;
 
+#[cfg(not(target_family = "wasm"))]
 use zeroize::Zeroizing;
 
+#[cfg(not(target_family = "wasm"))]
 use super::discovery_http::fetch_openai_compatible_json;
 use crate::{AiProviderView, ModelSelectorProviderGroup, ModelSelectorProviderProbe};
 
+#[cfg(not(target_family = "wasm"))]
 const MODEL_SELECTOR_ONLINE_TIMEOUT: Duration = Duration::from_secs(3);
 
 pub fn is_local_provider_url(base_url: &str) -> bool {
-    let Ok(url) = reqwest::Url::parse(base_url) else {
+    let Ok(url) = url::Url::parse(base_url) else {
         return false;
     };
     let Some(host) = url.host_str().map(str::to_ascii_lowercase) else {
@@ -103,6 +107,7 @@ pub fn model_selector_visible_provider_groups(
         .collect()
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub async fn check_model_selector_provider_online(base_url: &str, endpoint: &str) -> bool {
     let base = base_url.trim().trim_end_matches('/');
     if base.is_empty() || endpoint.trim().is_empty() {
@@ -123,6 +128,7 @@ pub async fn check_model_selector_provider_online(base_url: &str, endpoint: &str
         .unwrap_or(false)
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub async fn check_openai_compatible_model_selector_provider_online(
     base_url: &str,
     api_key: Option<Zeroizing<String>>,

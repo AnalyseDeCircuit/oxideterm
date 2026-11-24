@@ -1,18 +1,22 @@
 use std::{
     fmt,
-    fmt::Write as _,
     hash::{Hash, Hasher},
 };
 
+#[cfg(not(target_family = "wasm"))]
 use rand::{RngCore as _, rngs::OsRng};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
+#[cfg(not(target_family = "wasm"))]
+use std::fmt::Write as _;
 use uuid::Uuid;
 use zeroize::Zeroize;
 
 use super::RuntimeContextError;
 
 const RUNTIME_HANDLE_PREFIX: &str = "rt_";
+#[cfg(not(target_family = "wasm"))]
 const TOOL_SESSION_PREFIX: &str = "tool_";
+#[cfg(not(target_family = "wasm"))]
 const OWNER_KEY_PREFIX: &str = "owner_";
 const REGISTRY_EPOCH_PREFIX: &str = "epoch_";
 const MAX_IDENTIFIER_LENGTH: usize = 160;
@@ -23,6 +27,7 @@ const MAX_LABEL_LENGTH: usize = 256;
 pub struct RuntimeRegistryEpoch(String);
 
 impl RuntimeRegistryEpoch {
+    #[cfg(not(target_family = "wasm"))]
     pub fn new() -> Self {
         Self(random_control_identifier(REGISTRY_EPOCH_PREFIX))
     }
@@ -38,6 +43,7 @@ impl RuntimeRegistryEpoch {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl Default for RuntimeRegistryEpoch {
     fn default() -> Self {
         Self::new()
@@ -74,6 +80,7 @@ impl<'de> Deserialize<'de> for RuntimeRegistryEpoch {
 pub struct RuntimeHandleId(String);
 
 impl RuntimeHandleId {
+    #[cfg(not(target_family = "wasm"))]
     pub fn new() -> Self {
         Self(random_control_identifier(RUNTIME_HANDLE_PREFIX))
     }
@@ -92,6 +99,7 @@ impl RuntimeHandleId {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl Default for RuntimeHandleId {
     fn default() -> Self {
         Self::new()
@@ -140,6 +148,7 @@ impl<'de> Deserialize<'de> for RuntimeHandleId {
 pub struct RuntimeOwnerKey(String);
 
 impl RuntimeOwnerKey {
+    #[cfg(not(target_family = "wasm"))]
     pub fn new() -> Self {
         Self(random_control_identifier(OWNER_KEY_PREFIX))
     }
@@ -149,6 +158,7 @@ impl RuntimeOwnerKey {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl Default for RuntimeOwnerKey {
     fn default() -> Self {
         Self::new()
@@ -178,11 +188,13 @@ impl fmt::Debug for RuntimeOwnerKey {
 pub struct ToolSessionId(String);
 
 impl ToolSessionId {
+    #[cfg(not(target_family = "wasm"))]
     pub fn new() -> Self {
         Self(random_control_identifier(TOOL_SESSION_PREFIX))
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl Default for ToolSessionId {
     fn default() -> Self {
         Self::new()
@@ -349,6 +361,7 @@ fn valid_uuid_identifier(value: &str, prefix: &str) -> bool {
         && Uuid::parse_str(&value[prefix.len()..]).is_ok()
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn random_control_identifier(prefix: &str) -> String {
     // Use all 128 random bits. UUID v4 text would reserve version and variant
     // bits, which is below the capability-token entropy required by this boundary.
