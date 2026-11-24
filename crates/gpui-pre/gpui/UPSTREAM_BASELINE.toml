@@ -63,3 +63,10 @@ local_path = "crates/gpui-pre/gpui_wgpu"
 zed_crate = "gpui_wgpu"
 zed_version = "0.1.0"
 registry_checksum = "dc76608d385f6d0dcbad44504b1bf669dac3b7d7ffa2885acdb7c1c358caf852"
+
+[[crates]]
+name = "gpui-pre-web"
+local_path = "crates/gpui-pre/gpui_web"
+zed_crate = "gpui_web"
+zed_version = "0.1.0"
+registry_checksum = "a85e775c6874257c63f9cf51d99f0aba13b3bc615ed8d47e7d5338e3b5941f6a"

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify OxideTerm's six local gpui-pre patches and their source licenses."""
+"""Verify OxideTerm's seven local gpui-pre patches and their source licenses."""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--registry-archives",
         type=Path,
-        help="Optional directory containing the six pristine <package-name>.crate archives.",
+        help="Optional directory containing the seven pristine <package-name>.crate archives.",
     )
     parser.add_argument(
         "--gpui-ce-checkout",
@@ -79,8 +79,8 @@ def main() -> None:
     crates = baseline["crates"]
     names = {entry["name"] for entry in crates}
     paths = {entry["local_path"] for entry in crates}
-    if len(crates) != 6 or len(names) != 6 or len(paths) != 6:
-        raise RuntimeError("baseline must describe six distinct local GPUI patch packages")
+    if len(crates) != 7 or len(names) != 7 or len(paths) != 7:
+        raise RuntimeError("baseline must describe seven distinct local GPUI patch packages")
     workspace = load_toml(ROOT_DIR / "Cargo.toml")
     missing = paths - set(workspace["workspace"]["members"])
     if missing:
@@ -92,7 +92,7 @@ def main() -> None:
     }
     expected_patches = {entry["name"]: {"path": entry["local_path"]} for entry in crates}
     if patches != expected_patches:
-        raise RuntimeError("root crates.io patches differ from the six recorded GPUI paths")
+        raise RuntimeError("root crates.io patches differ from the seven recorded GPUI paths")
 
     canonical_license = CANONICAL_LICENSE.read_bytes()
     ROOT_UPSTREAM_LICENSE.read_bytes()
@@ -145,7 +145,7 @@ def main() -> None:
         ):
             raise RuntimeError("retained GPUI-CE root license differs from historical source")
     print(
-        f"verified six gpui-pre {baseline['gpui_pre_version']} local patches "
+        f"verified seven gpui-pre {baseline['gpui_pre_version']} local patches "
         f"with Zed source metadata {baseline['zed_commit']}"
     )
 

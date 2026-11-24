@@ -1,7 +1,7 @@
 # OxideTerm GPUI Vendor Ledger
 
 OxideTerm uses Longbridge's crates.io `gpui-pre` 0.3.12 publication, the version
-pinned by GPUI Kit v0.9.1. The six locally patched packages retain
+pinned by GPUI Kit v0.9.1. The seven locally patched packages retain
 OxideTerm framework changes and selected capabilities inherited from GPUI-CE.
 This is not an unmodified Zed tree.
 
@@ -24,7 +24,7 @@ samples with that graph.
 
 ## Local Patch Boundary
 
-Six published GPUI packages are patched to local workspace members:
+Seven published GPUI packages are patched to local workspace members:
 
 | Published package | Local directory |
 | --- | --- |
@@ -34,9 +34,10 @@ Six published GPUI packages are patched to local workspace members:
 | `gpui-pre-windows` | `crates/gpui-pre/gpui_windows` |
 | `gpui-pre-linux` | `crates/gpui-pre/gpui_linux` |
 | `gpui-pre-wgpu` | `crates/gpui-pre/gpui_wgpu` |
+| `gpui-pre-web` | `crates/gpui-pre/gpui_web` |
 
 The root `[patch.crates-io]` mapping makes the product and registry platform
-packages use the same six patched packages. Other gpui-pre dependencies are
+packages use the same seven patched packages. Other gpui-pre dependencies are
 resolved from crates.io, including utility, collection, macro, scheduling,
 platform, and metrics packages. Their registry checksums are enforced by Cargo.
 The old 18-directory CE closure is not the new dependency boundary.
@@ -744,6 +745,14 @@ The `Timer` and `Corner` aliases are migration compatibility layers, not new GPU
 Remove either alias only after all OxideTerm call sites have moved to the
 gpui-pre API and the full workspace builds without it.
 
+### Web platform (`gpui_web`) compatibility
+
+`crates/gpui-pre/gpui_web` adapts the upstream `gpui-pre-web` 0.3.12 backend to OxideTerm's local `gpui-pre` extensions and stable single-threaded WASM builds:
+
+- `src/text_system.rs` forwards `FontRun.letter_spacing` when mapping canvas fallback runs to the underlying `CosmicTextSystem`;
+- `src/platform.rs` maps `CursorStyle::None` to CSS `"none"`;
+- `Cargo.toml` activates `parking_lot/nightly` under the `multithreaded` feature rather than unconditionally on `wasm`, so single-threaded `--no-default-features` WASM builds compile on stable Rust while `multithreaded` preserves upstream's behavior.
+
 ## Product-Owned Remote Desktop Integration
 
 Remote desktop behavior belongs to OxideTerm product crates and must not be
@@ -772,9 +781,9 @@ framebuffer uses `DynamicTexture`.
 
 Refresh only in an isolated migration branch or worktree.
 
-1. Select the gpui-pre publication version and obtain the six pristine registry
+1. Select the gpui-pre publication version and obtain the seven pristine registry
    archives. Verify their registry checksums and Zed metadata before importing.
-2. Update only the six recorded local patch directories. Keep other package
+2. Update only the seven recorded local patch directories. Keep other package
    dependencies registry-resolved; do not import unrelated application crates,
    examples, font assets, Blade code, or an assumed fixed dependency closure.
 3. Reconcile each local patch above with the candidate source and preserve
