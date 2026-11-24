@@ -769,7 +769,7 @@ flowchart TB
 
 对于共用基线且采用整数纵向栅格化的字形，批次以取整后的设备基线为锚点。纵向滚动时可以直接平移批次，避免重复准备字形，并保持原有栅格位置。带额外纵向排版偏移的字形继续按设备像素相位判断缓存是否有效。颜色在准备阶段完成色相归一化，每次绘制再应用当前不透明度。空白格跳过无用的前景色转换，主题默认背景复用已经转换的颜色。
 
-这些职责分别位于[行布局](../../../crates/oxideterm-gpui-terminal/src/terminal_view/element.rs)、[GPUI 字形绘制](../../../crates/gpui-ce/gpui/src/text_system/line.rs)、[图像缓存](../../../crates/oxideterm-gpui-terminal/src/app/image_cache.rs)和[图像与网格同步](../../../crates/oxideterm-terminal-graphics/src/graphics/grid.rs)中。
+这些职责分别位于[行布局](../../../crates/oxideterm-gpui-terminal/src/terminal_view/element.rs)、[GPUI 字形绘制](../../../crates/gpui-pre/gpui/src/text_system/line.rs)、[图像缓存](../../../crates/oxideterm-gpui-terminal/src/app/image_cache.rs)和[图像与网格同步](../../../crates/oxideterm-terminal-graphics/src/graphics/grid.rs)中。
 
 ### 提权与文件传输辅助
 

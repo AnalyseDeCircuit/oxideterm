@@ -14,7 +14,7 @@ import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
 VENDOR_ROOTS = (
-    Path("crates/gpui-ce"),
+    Path("crates/gpui-pre"),
     Path("crates/alacritty-terminal"),
     Path("crates/russh-sftp"),
     Path("crates/vte"),

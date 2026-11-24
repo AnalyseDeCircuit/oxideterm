@@ -1,6 +1,6 @@
 # Building Product Pages With GPUI
 
-Use this guide when adding a control or page to the desktop application. Start with the feature's existing implementation and its runtime owner. Framework maintenance has a separate [GPUI CE guide](gpui-ce.md).
+Use this guide when adding a control or page to the desktop application. Start with the feature's existing implementation and its runtime owner. Framework maintenance has a separate [GPUI maintenance guide](gpui-pre.md).
 
 ## Find A Complete Example
 

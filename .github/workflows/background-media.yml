@@ -7,7 +7,7 @@ on:
     paths:
       - 'crates/oxideterm-background-media/**'
       - 'crates/oxideterm-gpui-background/**'
-      - 'crates/gpui-ce/**'
+      - 'crates/gpui-pre/**'
       - 'Cargo.lock'
       - 'Cargo.toml'
       - '.github/workflows/background-media.yml'

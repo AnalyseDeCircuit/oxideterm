@@ -180,7 +180,7 @@ mod tests {
     #[test]
     fn jpeg_scaled_decode_respects_orientation() {
         let bytes = include_bytes!(
-            "../../gpui-ce/gpui/examples/legacy/image/exif-orientation-rotate-180.jpg"
+            "../../gpui-pre/gpui/examples/legacy/image/exif-orientation-rotate-180.jpg"
         );
         let info = ImageInfo::read(bytes, None).unwrap().unwrap();
         let pixels = info.decode(bytes, (8, 16)).unwrap().unwrap();

@@ -34,8 +34,8 @@ class ProjectStatsTests(unittest.TestCase):
                 ".github/workflows/check.yml": "name: Check\n",
                 "crates/fernomade/wire/Cargo.toml": '[package]\nname = "fernomade-wire"\n',
                 "crates/fernomade/wire/src/lib.rs": "pub fn wire() {}\n",
-                "crates/gpui-ce/gpui/Cargo.toml": '[package]\nname = "gpui"\n',
-                "crates/gpui-ce/gpui/src/lib.rs": "pub fn draw() {}\n",
+                "crates/gpui-pre/gpui/Cargo.toml": '[package]\nname = "gpui"\n',
+                "crates/gpui-pre/gpui/src/lib.rs": "pub fn draw() {}\n",
                 "agent/Cargo.toml": '[package]\nname = "oxideterm-agent"\n',
                 "agent/src/main.rs": "fn main() {}\n",
                 "scripts/build/build-agent.sh": "echo build\n",
@@ -62,12 +62,12 @@ class ProjectStatsTests(unittest.TestCase):
             self.assertEqual(set(map(str, project_stats.collect_files(root))), expected)
             self.assertEqual(
                 set(map(str, project_stats.collect_files(root, True))),
-                expected | {"crates/gpui-ce/gpui/Cargo.toml", "crates/gpui-ce/gpui/src/lib.rs"},
+                expected | {"crates/gpui-pre/gpui/Cargo.toml", "crates/gpui-pre/gpui/src/lib.rs"},
             )
             for relative, package in [
                 ("crates/fernomade/wire/src/lib.rs", "fernomade-wire"),
                 ("agent/src/main.rs", "oxideterm-agent"),
-                ("crates/gpui-ce/gpui/src/lib.rs", "gpui"),
+                ("crates/gpui-pre/gpui/src/lib.rs", "gpui"),
             ]:
                 self.assertEqual(project_stats.crate_name(root, Path(relative), {}), package)
             result = subprocess.run(

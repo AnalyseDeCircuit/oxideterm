@@ -426,7 +426,7 @@ crates/
 ├── oxideterm-ai/              # OxideSens: providers, MCP, RAG
 ├── oxideterm-cli/             # The oxideterm command
 ├── oxideterm-i18n/            # Locale catalogs for the 11 interface languages
-└── gpui-ce/                   # Patched copy of GPUI
+└── gpui-pre/                   # Patched copy of GPUI
 ```
 
 延伸閱讀（英文）：[開發指南](../../docs/development/README.md)、[crate 地圖](../../docs/development/crate-map.md)和[架構概覽](../../docs/user-guide/en/architecture.md)。

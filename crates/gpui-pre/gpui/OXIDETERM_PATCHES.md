@@ -28,12 +28,12 @@ Six published GPUI packages are patched to local workspace members:
 
 | Published package | Local directory |
 | --- | --- |
-| `gpui-pre` | `crates/gpui-ce/gpui` |
-| `gpui-pre-apple` | `crates/gpui-ce/gpui_apple` |
-| `gpui-pre-macos` | `crates/gpui-ce/gpui_macos` |
-| `gpui-pre-windows` | `crates/gpui-ce/gpui_windows` |
-| `gpui-pre-linux` | `crates/gpui-ce/gpui_linux` |
-| `gpui-pre-wgpu` | `crates/gpui-ce/gpui_wgpu` |
+| `gpui-pre` | `crates/gpui-pre/gpui` |
+| `gpui-pre-apple` | `crates/gpui-pre/gpui_apple` |
+| `gpui-pre-macos` | `crates/gpui-pre/gpui_macos` |
+| `gpui-pre-windows` | `crates/gpui-pre/gpui_windows` |
+| `gpui-pre-linux` | `crates/gpui-pre/gpui_linux` |
+| `gpui-pre-wgpu` | `crates/gpui-pre/gpui_wgpu` |
 
 The root `[patch.crates-io]` mapping makes the product and registry platform
 packages use the same six patched packages. Other gpui-pre dependencies are
@@ -111,7 +111,7 @@ continues to encode the renderer's four-scalar shader layout.
 
 ### WGPU shader-transfer contract
 
-`crates/gpui-ce/gpui_wgpu/src/wgpu_renderer.rs` must not upload scene structures as raw
+`crates/gpui-pre/gpui_wgpu/src/wgpu_renderer.rs` must not upload scene structures as raw
 memory. Scene structures can contain Rust enums, booleans, private fields, or
 padding that do not share WGSL's representation. Preserve these rules:
 
@@ -152,7 +152,7 @@ numbers are intentionally omitted because upstream refreshes move code.
 
 ### Benchmark frame-cost reporting
 
-`crates/gpui-ce/gpui/src/app/bench_context.rs` extends renderer benchmark reports with the
+`crates/gpui-pre/gpui/src/app/bench_context.rs` extends renderer benchmark reports with the
 platform presentation duration and final-frame scene primitive, GPU batch, and replay-operation
 counts. Scene accounting runs after Criterion's timed iteration loop because walking the batch
 iterator again is diagnostic work rather than product rendering. Preserve that separation so
@@ -170,10 +170,10 @@ Compare performance only after both versions have settled at the same viewport a
 
 ### Pointer capture and Windows cursor recovery
 
-`crates/gpui-ce/gpui/src/window.rs` cancels logical pointer capture and application drag state when
+`crates/gpui-pre/gpui/src/window.rs` cancels logical pointer capture and application drag state when
 a platform window loses focus or hover ownership. Native platforms may revoke capture without a
 final mouse-up event, and retaining the old hitbox makes a text input remain globally hovered and
-consume later clicks. `crates/gpui-ce/gpui_windows/src/events.rs` immediately applies a changed
+consume later clicks. `crates/gpui-pre/gpui_windows/src/events.rs` immediately applies a changed
 cursor handle to the currently hovered window while respecting cursor hiding, clears an unreleased
 non-client caption press when the pointer leaves the window, and converts `WM_CAPTURECHANGED` or
 `WM_CANCELMODE` into exactly one deferred mouse-up event. The deferred delivery is required because
@@ -200,7 +200,7 @@ DirectWrite alone, without requiring a GPU or optional language font packs.
 
 ### Windows DirectX blur state restoration
 
-`crates/gpui-ce/gpui_windows/src/directx_renderer.rs` restores the scene batch constant buffer
+`crates/gpui-pre/gpui_windows/src/directx_renderer.rs` restores the scene batch constant buffer
 after each completed blur composite. The blur shaders and ordinary scene vertex shaders both use
 constant-buffer slot `b1`; leaving `BlurParams` bound makes primitives after a backdrop read an
 invalid batch offset, so a modal backdrop can appear while its foreground panel is blank. Preserve
@@ -231,8 +231,8 @@ blocking, causing the parent window to reject all later input.
 
 ### Optional continuous Bézier corners
 
-`crates/gpui-ce/gpui/src/scene.rs` defines `CornerShape`, and
-`crates/gpui-ce/gpui/src/window.rs` exposes `Window::set_corner_shape`.
+`crates/gpui-pre/gpui/src/scene.rs` defines `CornerShape`, and
+`crates/gpui-pre/gpui/src/window.rs` exposes `Window::set_corner_shape`.
 Circular corners remain the default. The application maps its persisted
 `appearance.cornerStyle` setting to this window-local option for both main and
 detached windows; the existing radius setting continues to control corner size.
@@ -268,7 +268,7 @@ equal- and unequal-width borders. Settings persistence, the selector, and its
 
 ### Transparent border-only quad overdraw
 
-`crates/gpui-ce/gpui/src/window.rs` limits transparent, border-only quads to four clipped
+`crates/gpui-pre/gpui/src/window.rs` limits transparent, border-only quads to four clipped
 border regions before inserting them into the scene:
 
 - the quad retains its original bounds, corner radii, border widths, and border style so the
@@ -302,7 +302,7 @@ priority mapping. Its failed-submission path permits a raw runnable leak;
 OxideTerm's explicit failed-submission and failed-timer cleanup remains a
 local ownership patch rather than an upstream-equivalent replacement.
 
-`crates/gpui-ce/gpui_windows/src/dispatcher.rs` schedules background work with the native
+`crates/gpui-pre/gpui_windows/src/dispatcher.rs` schedules background work with the native
 Win32 thread-pool API instead of the WinRT `Windows::System::Threading` projection:
 
 - immediate tasks use `TrySubmitThreadpoolCallback` with the requested Win32 callback priority;
@@ -327,19 +327,19 @@ cross-thread messages and nested COM/OLE loops used by clipboard and drag-and-dr
 OxideTerm therefore carries one coordinated draw-lifetime patch across the generic GPUI and
 Windows platform layers:
 
-- `crates/gpui-ce/gpui/src/arena.rs` counts active draw scopes. `clear` defers while any
+- `crates/gpui-pre/gpui/src/arena.rs` counts active draw scopes. `clear` defers while any
   enclosing scope remains active, and `Drop` force-clears only when the arena itself is destroyed.
   Allocation bounds are checked in address space before a pointer is constructed, avoiding an
   out-of-bounds pointer on chunk spill.
-- `crates/gpui-ce/gpui/src/window.rs` enters and exits the App-owned arena scope for every draw.
+- `crates/gpui-pre/gpui/src/window.rs` enters and exits the App-owned arena scope for every draw.
   Scope teardown is a guard operation so normal return and panic unwinding both balance the
   nesting count. The resulting clear token validates the owning App before clearing.
 - The generic `on_request_frame` callback rejects a request received while a GPUI draw is already
   on the current thread's stack. A deferred forced render remains pending across both re-entry
   and frame throttling.
-- `crates/gpui-ce/gpui_windows/src/events.rs`,
-  `crates/gpui-ce/gpui_windows/src/platform.rs`, and
-  `crates/gpui-ce/gpui_windows/src/window.rs` share one platform-owned draw coordinator across all
+- `crates/gpui-pre/gpui_windows/src/events.rs`,
+  `crates/gpui-pre/gpui_windows/src/platform.rs`, and
+  `crates/gpui-pre/gpui_windows/src/window.rs` share one platform-owned draw coordinator across all
   windows. A nested Windows paint validates the update region to prevent a `WM_PAINT` busy loop;
   the existing vsync thread invalidates all windows again on the next tick. External redraw wakeups
   use one coalesced posted message per window so input-triggered redraws do not depend on
@@ -347,10 +347,10 @@ Windows platform layers:
   the existing vsync provider invalidates windows for the next frame. Reposting from an animation
   callback would keep the posted-message queue nonempty and starve Win32 hardware input.
   Forced device-recovery renders remain pending until a draw acquires the coordinator.
-- Synchronous draw helpers in `crates/gpui-ce/gpui/src/app.rs`,
-  `crates/gpui-ce/gpui/src/app/test_app.rs`,
-  `crates/gpui-ce/gpui/src/app/test_context.rs`, and
-  `crates/gpui-ce/gpui/src/elements/div.rs` clear through the same App-validated token. Product
+- Synchronous draw helpers in `crates/gpui-pre/gpui/src/app.rs`,
+  `crates/gpui-pre/gpui/src/app/test_app.rs`,
+  `crates/gpui-pre/gpui/src/app/test_context.rs`, and
+  `crates/gpui-pre/gpui/src/elements/div.rs` clear through the same App-validated token. Product
   benchmark and test helpers in `oxideterm-gpui-ui`, `oxideterm-gpui-editor`,
   `oxideterm-gpui-ide`, and `oxideterm-gpui-app` pass their App context through the same API.
 
@@ -363,7 +363,7 @@ frame dispatch, presentation, IME updates, and multiple windows.
 
 ### Metal intermediate texture lifetime
 
-`crates/gpui-ce/gpui_apple/src/metal_renderer.rs` allocates its full-window intermediate
+`crates/gpui-pre/gpui_apple/src/metal_renderer.rs` allocates its full-window intermediate
 textures lazily. Preserve these lifecycle rules:
 
 - updating the drawable size records the valid size and invalidates intermediates created for a
@@ -400,7 +400,7 @@ all glyph-backed text and icons disappear.
 
 Terminal row caches retain `Arc<LineLayout>` rather than `ShapedLine`, whose
 32-entry inline decoration storage is too large for hundreds of cached rows.
-`crates/gpui-ce/gpui/src/text_system/line.rs`, `scene.rs`, and `window.rs`
+`crates/gpui-pre/gpui/src/text_system/line.rs`, `scene.rs`, and `window.rs`
 provide a separate `LinePaintCache` that retains prepared atlas tiles and
 relative glyph bounds without putting decorations back into the layout cache.
 
@@ -416,7 +416,7 @@ layer before using it so draw ordering does not collapse across unrelated rows.
 
 ### Scheduler-owned animation clock
 
-`crates/gpui-ce/gpui/src/elements/animation.rs` advances ordinary and spring
+`crates/gpui-pre/gpui/src/elements/animation.rs` advances ordinary and spring
 animations with the platform background executor's clock. Production platforms
 still use monotonic wall time, while `TestAppContext` can advance the same clock
 deterministically. Do not restore direct `Instant::now` or `Instant::elapsed`
@@ -437,8 +437,8 @@ do not explicitly compose styles.
 ### Nested scroll ownership
 
 OxideTerm contains nested ordinary overflow regions and virtual lists. Preserve the event
-ownership rules in `crates/gpui-ce/gpui/src/elements/div.rs` and
-`crates/gpui-ce/gpui/src/elements/list.rs`:
+ownership rules in `crates/gpui-pre/gpui/src/elements/div.rs` and
+`crates/gpui-pre/gpui/src/elements/list.rs`:
 
 - the innermost hovered scroll region consumes a wheel event when its offset changes;
 - an event continues bubbling only when that region is already at its boundary;
@@ -450,7 +450,7 @@ which makes the GPUI-CE build feel substantially more sensitive than the previou
 
 ### SVG font sources and character fallback
 
-`crates/gpui-ce/gpui/src/svg_renderer.rs` loads only the font asset paths returned
+`crates/gpui-pre/gpui/src/svg_renderer.rs` loads only the font asset paths returned
 by `AssetSource::list("fonts")`. The application supplies JetBrainsMono and
 MapleMono regular faces through `NativeAssets`; MapleMono uses the existing
 decompression path. Do not restore hard-coded IBM Plex Sans or Lilex asset
@@ -465,7 +465,7 @@ fonts and fonts without the requested glyph are excluded. Successful fallback
 uses debug logging; asset listing/loading failures and usvg's unresolved-glyph
 warnings remain visible.
 
-`crates/gpui-ce/gpui_apple/src/text_system.rs` logs successful PostScript-name
+`crates/gpui-pre/gpui_apple/src/text_system.rs` logs successful PostScript-name
 deduplication at debug level. Invalid-font and missing-required-glyph diagnostics
 remain warnings.
 
@@ -482,7 +482,7 @@ same-name faces that swap glyph IDs. It also checks reuse at different sizes.
 
 ### Zero-area SVG paint semantics
 
-`crates/gpui-ce/gpui/src/window.rs` treats SVG bounds that become empty after device-pixel
+`crates/gpui-pre/gpui/src/window.rs` treats SVG bounds that become empty after device-pixel
 snapping as a successful no-op before consulting the sprite atlas or SVG rasterizer. Product
 layout transitions can intentionally collapse a clipping viewport to zero while its content
 remains mounted, so an empty paint has no visible work and is not a renderer failure. Keep the
@@ -494,11 +494,11 @@ at the window paint boundary, where logical layout bounds have been snapped to d
 Preserve the explicit temporary bindings that release internal locks before processing owned
 results or entering later dispatch work:
 
-- `crates/gpui-ce/gpui_apple/src/text_system.rs` releases the font database read lock before
+- `crates/gpui-pre/gpui_apple/src/text_system.rs` releases the font database read lock before
   extending the family-name result;
-- `crates/gpui-ce/gpui_macos/src/window.rs` releases the window-state lock before returning from
+- `crates/gpui-pre/gpui_macos/src/window.rs` releases the window-state lock before returning from
   the input method command branches;
-- `crates/gpui-ce/gpui/src/text_system/line_layout.rs` releases the previous-frame cache lock
+- `crates/gpui-pre/gpui/src/text_system/line_layout.rs` releases the previous-frame cache lock
   before promoting a cached line or shaping a replacement.
 
 These are semantic lock-scope safeguards migrated from the previous GPUI vendor tree. Do not
@@ -506,7 +506,7 @@ collapse the bindings back into `if let` scrutinee temporaries during cleanup.
 
 ### macOS frame callbacks during window teardown
 
-`crates/gpui-ce/gpui_macos/src/window.rs` marks the window closed and disposes of its
+`crates/gpui-pre/gpui_macos/src/window.rs` marks the window closed and disposes of its
 frame source before renderer destruction or asynchronous AppKit close. The native close
 entry point also stops the frame source immediately. Display-link startup must reject
 closed windows.
@@ -522,7 +522,7 @@ Preserve these teardown boundaries across vendor refreshes (see #599).
 
 ### Windows DirectWrite callback and glyph readback safety
 
-`crates/gpui-ce/gpui_windows/src/direct_write.rs` carries the Windows text-rendering hardening
+`crates/gpui-pre/gpui_windows/src/direct_write.rs` carries the Windows text-rendering hardening
 landed in `zed-industries/zed@89e8a4b9ec7e` after the historical GPUI-CE baseline:
 
 - the renderer context passed to `IDWriteTextLayout::Draw` is a mutable binding and the callback
@@ -551,14 +551,14 @@ of rebuilding many immutable `RenderImage` tiles.
 
 Core changes:
 
-- `crates/gpui-ce/gpui/src/assets.rs`
+- `crates/gpui-pre/gpui/src/assets.rs`
   - defines `DynamicTextureId`, hidden `DynamicTextureParams`, and
     `DynamicTexture` with a stable identity and fixed device-pixel size;
-- `crates/gpui-ce/gpui/src/platform.rs`
+- `crates/gpui-pre/gpui/src/platform.rs`
   - adds `AtlasKey::DynamicTexture` as a polychrome atlas entry;
   - adds `PlatformAtlas::update` for relative dirty-region uploads;
   - adds `PlatformAtlas::resource_generation` for GPU-resource invalidation;
-- `crates/gpui-ce/gpui/src/window.rs`
+- `crates/gpui-pre/gpui/src/window.rs`
   - validates positive dimensions, bounds, overflow, and exact four-byte BGRA
     upload length;
   - exposes `update_dynamic_texture`, `paint_dynamic_texture`,
@@ -566,7 +566,7 @@ Core changes:
   - records the atlas generation used by every rendered scene, forces a full
     repaint after a generation change, and refuses to present a stale scene;
   - creates a blank stable atlas entry when an update precedes first paint;
-- `crates/gpui-ce/gpui/src/platform/test/window.rs`
+- `crates/gpui-pre/gpui/src/platform/test/window.rs`
   - records dynamic texture allocations and uploads in the test atlas;
   - exposes a controllable test resource generation.
 
@@ -582,21 +582,21 @@ The public upload contract is strict:
 
 Backend changes:
 
-- `crates/gpui-ce/gpui_wgpu/src/wgpu_atlas.rs`
+- `crates/gpui-pre/gpui_wgpu/src/wgpu_atlas.rs`
   - uses exact-size dedicated WGPU allocations for dynamic textures;
   - queues and validates sub-region uploads;
   - advances `resource_generation` whenever atlas resources are invalidated,
     including device recovery;
-- `crates/gpui-ce/gpui_macos/src/metal_atlas.rs`
+- `crates/gpui-pre/gpui_macos/src/metal_atlas.rs`
   - uses exact-size dedicated Metal textures and relative region uploads;
   - currently returns generation `0` because the Metal atlas is not recreated
     by the current backend;
-- `crates/gpui-ce/gpui_windows/src/directx_atlas.rs`
+- `crates/gpui-pre/gpui_windows/src/directx_atlas.rs`
   - uses exact-size dedicated Direct3D textures and `UpdateSubresource`-style
     relative region uploads;
   - clears ordinary and dynamic atlas resources through one reset path on
     device loss and advances `resource_generation` exactly once per reset;
-- `crates/gpui-ce/gpui/src/platform/test/window.rs`
+- `crates/gpui-pre/gpui/src/platform/test/window.rs`
   - provides the deterministic headless implementation used by GPUI tests.
 
 Any future backend that replaces or clears resources behind a stable
@@ -609,7 +609,7 @@ generation of zero.
 
 The locally patched WGPU path carries OxideTerm-specific VM and recovery behavior:
 
-- `crates/gpui-ce/gpui_wgpu/src/wgpu_context.rs`
+- `crates/gpui-pre/gpui_wgpu/src/wgpu_context.rs`
   - recognizes the case-insensitive
     `OXIDETERM_GPU_BACKEND=auto|vulkan|opengl` contract and safely falls back
     to auto after warning about an invalid value;
@@ -620,7 +620,7 @@ The locally patched WGPU path carries OxideTerm-specific VM and recovery behavio
   - ranks explicit device, compositor match, device type, and backend in a
     deterministic order;
   - tests real surface configuration before accepting an adapter;
-- `crates/gpui-ce/gpui_wgpu/src/wgpu_renderer.rs`
+- `crates/gpui-pre/gpui_wgpu/src/wgpu_renderer.rs`
   - coordinates device recovery across windows;
   - uses exponential retry backoff from 100 milliseconds to 5 seconds without
     sleeping on the render thread;
@@ -629,18 +629,18 @@ The locally patched WGPU path carries OxideTerm-specific VM and recovery behavio
   - clears recoverable frame resources without terminating the application;
   - recreates resources transactionally and notifies the atlas only after a
     replacement context succeeds;
-- `crates/gpui-ce/gpui_wgpu/src/gpui_wgpu.rs`
+- `crates/gpui-pre/gpui_wgpu/src/gpui_wgpu.rs`
   - exports the recovery status contract consumed by platform render loops;
-- `crates/gpui-ce/gpui_linux/src/linux/wayland/client.rs`,
-  `crates/gpui-ce/gpui_linux/src/linux/x11/client.rs`, and
-  `crates/gpui-ce/gpui_windows/src/window.rs`
+- `crates/gpui-pre/gpui_linux/src/linux/wayland/client.rs`,
+  `crates/gpui-pre/gpui_linux/src/linux/x11/client.rs`, and
+  `crates/gpui-pre/gpui_windows/src/window.rs`
   - initialize the shared WGPU context and recovery state through the
     OxideTerm recovery-aware context wrapper;
-- `crates/gpui-ce/gpui_linux/src/linux/wayland/window.rs` and
-  `crates/gpui-ce/gpui_linux/src/linux/x11/window.rs`
+- `crates/gpui-pre/gpui_linux/src/linux/wayland/window.rs` and
+  `crates/gpui-pre/gpui_linux/src/linux/x11/window.rs`
   - request another frame after recovered or deferred attempts and stop the
     automatic frame loop after terminal recovery exhaustion;
-- `crates/gpui-ce/gpui_wgpu/src/wgpu_atlas.rs`
+- `crates/gpui-pre/gpui_wgpu/src/wgpu_atlas.rs`
   - drops stale uploads and advances the renderer resource generation when the
     WGPU resources are cleared or replaced.
 
@@ -688,19 +688,19 @@ compositor-constrained windows.
 Remote desktop must be able to hide the local system pointer while painting a
 remote cursor. Preserve `CursorStyle::None` across the full platform split:
 
-- `crates/gpui-ce/gpui/src/platform.rs` defines the public variant;
-- `crates/gpui-ce/gpui/src/window.rs` exposes the resolved cursor under the
+- `crates/gpui-pre/gpui/src/platform.rs` defines the public variant;
+- `crates/gpui-pre/gpui/src/window.rs` exposes the resolved cursor under the
   test-support feature so product interaction tests observe the painted result;
-- `crates/gpui-ce/gpui_linux/src/linux/wayland.rs` and
-  `crates/gpui-ce/gpui_linux/src/linux/wayland/client.rs` preserve explicit hiding
+- `crates/gpui-pre/gpui_linux/src/linux/wayland.rs` and
+  `crates/gpui-pre/gpui_linux/src/linux/wayland/client.rs` preserve explicit hiding
   across Wayland pointer events;
-- `crates/gpui-ce/gpui_linux/src/linux/x11/client.rs` uses the cached transparent X11
+- `crates/gpui-pre/gpui_linux/src/linux/x11/client.rs` uses the cached transparent X11
   cursor;
-- `crates/gpui-ce/gpui_linux/src/linux/platform.rs` rejects accidental generic mapping
+- `crates/gpui-pre/gpui_linux/src/linux/platform.rs` rejects accidental generic mapping
   after the Linux clients have handled the variant;
-- `crates/gpui-ce/gpui_macos/src/window.rs` hides the AppKit cursor and avoids restoring
+- `crates/gpui-pre/gpui_macos/src/window.rs` hides the AppKit cursor and avoids restoring
   a visible cursor region;
-- `crates/gpui-ce/gpui_windows/src/util.rs` maps the variant to a null Win32 cursor
+- `crates/gpui-pre/gpui_windows/src/util.rs` maps the variant to a null Win32 cursor
   handle.
 
 ### Virtual GPU metadata
@@ -708,11 +708,11 @@ remote cursor. Preserve `CursorStyle::None` across the full platform split:
 OxideTerm render policy must distinguish virtual adapters from CPU software
 rasterizers and physical GPUs.
 
-- `crates/gpui-ce/gpui/src/gpui.rs` adds the serde-defaulted
+- `crates/gpui-pre/gpui/src/gpui.rs` adds the serde-defaulted
   `GpuSpecs::is_virtual_gpu` field;
-- `crates/gpui-ce/gpui_wgpu/src/wgpu_renderer.rs` maps WGPU
+- `crates/gpui-pre/gpui_wgpu/src/wgpu_renderer.rs` maps WGPU
   `DeviceType::VirtualGpu` directly;
-- `crates/gpui-ce/gpui_windows/src/directx_renderer.rs` recognizes the maintained PCI
+- `crates/gpui-pre/gpui_windows/src/directx_renderer.rs` recognizes the maintained PCI
   vendor ID set for common hypervisor adapters;
 - `crates/oxideterm-gpui-platform/src/rendering.rs` converts the metadata into
   product render-policy input;
@@ -725,20 +725,22 @@ adapter classification.
 
 ### UniformList overscan
 
-`crates/gpui-ce/gpui/src/elements/uniform_list.rs` adds `with_overscan` and expands the
+`crates/gpui-pre/gpui/src/elements/uniform_list.rs` adds `with_overscan` and expands the
 visible range by a bounded number of rows on both sides. The default is zero,
 which preserves upstream behavior. Keep the clamping and edge-range unit test;
 this patch prevents empty edges during fast scrolling without changing the
 list's ownership of scrolling.
 
-### Timer and Corner compatibility exports
+### Timer, Instant, and Corner compatibility exports
 
-`crates/gpui-ce/gpui/src/gpui.rs` temporarily re-exports:
+`crates/gpui-pre/gpui/src/gpui.rs` temporarily re-exports:
 
-- `smol::Timer` as `gpui::Timer` for existing asynchronous delays;
+- `smol::Timer` as `gpui::Timer` on non-`wasm` targets (`#[cfg(not(target_family = "wasm"))]`) for existing asynchronous delays; the `smol` dependency is gated to `not(target_family = "wasm")` so `gpui-pre` does not pull `async-io` / `errno` into `wasm32-unknown-unknown` builds;
 - `geometry::Anchor` as `gpui::Corner` for existing anchored overlays.
 
-These aliases are migration compatibility layers, not new GPUI abstractions.
+`crates/gpui-pre/gpui/src/executor.rs` also re-exports `scheduler::Instant` as `gpui::Instant` so cross-platform UI crates can name the return type of `BackgroundExecutor::now()` on both native (`std::time::Instant`) and `wasm` (`web_time::Instant`). `crates/gpui-pre/gpui/src/gpu_submission.rs` uses `scheduler::Instant` for the same reason, and `crates/gpui-pre/gpui_wgpu/src/wgpu_renderer.rs` gates its native `std::thread::spawn` submission-polling loop to `not(target_family = "wasm")`.
+
+The `Timer` and `Corner` aliases are migration compatibility layers, not new GPUI abstractions.
 Remove either alias only after all OxideTerm call sites have moved to the
 gpui-pre API and the full workspace builds without it.
 

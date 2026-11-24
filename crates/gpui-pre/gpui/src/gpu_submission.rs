@@ -1,11 +1,12 @@
 use parking_lot::Mutex;
+use scheduler::Instant;
 use std::{
     any::Any,
     sync::{
         Arc,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 /// Completion of an actual renderer submission, including retained upload resources.

@@ -59,7 +59,7 @@ https://github.com/zed-industries/zed at commit
 1a28cff4b409169bac058bca40dfbfeb7621d19b, retaining selected GPUI-CE capabilities
 from https://github.com/gpui-ce/gpui-ce at commit
 9949f8b2d27bb1d6dbc1efe90be039634cf1fb6b. OxideTerm modifications are
-recorded in crates/gpui-ce/gpui/OXIDETERM_PATCHES.md.
+recorded in crates/gpui-pre/gpui/OXIDETERM_PATCHES.md.
 
 IBM Plex Sans and Lilex
 The GPUI regression suite includes IBM Plex Sans and Lilex test fonts.

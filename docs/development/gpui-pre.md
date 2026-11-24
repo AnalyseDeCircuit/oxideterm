@@ -1,6 +1,6 @@
 # GPUI Maintenance Boundary
 
-`crates/gpui-ce/` contains six local patches to Longbridge's `gpui-pre` 0.3.7 packages, the version used by GPUI Kit v0.7.0. Other gpui-pre packages resolve through crates.io. The six patches retain OxideTerm behavior and community-derived GPUI-CE filters, colors, and window capabilities; this is not an unmodified Zed distribution. The authoritative provenance and local-delta records are [`UPSTREAM_BASELINE.toml`](../../crates/gpui-ce/gpui/UPSTREAM_BASELINE.toml) and [`OXIDETERM_PATCHES.md`](../../crates/gpui-ce/gpui/OXIDETERM_PATCHES.md).
+`crates/gpui-pre/` contains six local patches to Longbridge's `gpui-pre` 0.3.7 packages, the version used by GPUI Kit v0.7.0. Other gpui-pre packages resolve through crates.io. The six patches retain OxideTerm behavior and community-derived GPUI-CE filters, colors, and window capabilities; this is not an unmodified Zed distribution. The authoritative provenance and local-delta records are [`UPSTREAM_BASELINE.toml`](../../crates/gpui-pre/gpui/UPSTREAM_BASELINE.toml) and [`OXIDETERM_PATCHES.md`](../../crates/gpui-pre/gpui/OXIDETERM_PATCHES.md).
 
 ## Decide The Layer First
 
@@ -19,7 +19,7 @@ Do not copy unrelated Zed application code into product fixes. A framework refre
 
 | Concern | Primary location | Evidence required before changing it |
 | --- | --- | --- |
-| Shared element, layout, input, and window abstractions | `crates/gpui-ce/gpui` | A minimal framework-level reproduction or a product path that cannot own the behavior |
+| Shared element, layout, input, and window abstractions | `crates/gpui-pre/gpui` | A minimal framework-level reproduction or a product path that cannot own the behavior |
 | Windows windowing, input, cursor, and Direct3D | `gpui_windows` | Windows reproduction, message/input sequence, and native check |
 | macOS AppKit, text, windowing, and Metal | `gpui_macos` and `gpui_apple` | macOS reproduction and native check |
 | Linux windowing | `gpui_linux` | Explicit Wayland or X11 reproduction |

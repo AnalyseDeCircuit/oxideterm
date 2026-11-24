@@ -5,7 +5,7 @@ This guide is the entry point for contributors working on the native desktop app
 ## Start Here
 
 1. Read the repository [contribution guidance](../CONTRIBUTING.md) and the root `AGENTS.md` before choosing an implementation.
-2. Use the [crate map](crate-map.md) to identify the owning layer. Product behavior normally belongs outside `crates/gpui-ce/`.
+2. Use the [crate map](crate-map.md) to identify the owning layer. Product behavior normally belongs outside `crates/gpui-pre/`.
 3. Set up a local machine with [local development](local-development.md), then run the narrow checks in the [verification matrix](verification.md).
 4. Read [runtime ownership](runtime-ownership.md) before changing SSH nodes, terminal panes, SFTP, forwarding, reconnection, or background work.
 
@@ -48,7 +48,7 @@ Move inward only when evidence says the outer layer is correct. For example, an 
 | Combine, detach, reopen, or close workspace pages | [Page, pane, and window lifetime](runtime-ownership.md#pages-panes-and-window-mounts) |
 | Record an operation or integrate terminal-output recording | [Audit integration](audit-integration.md) |
 | Change parent/child AI runs, approvals or execution coordination | [AI agent collaboration](ai-agents.md) |
-| Investigate or modify the vendored UI framework | [GPUI CE maintenance](gpui-ce.md) |
+| Investigate or modify the vendored UI framework | [GPUI maintenance](gpui-pre.md) |
 | Collect a minimal reproduction, logs, or a performance sample | [Debugging](debugging.md) |
 | Write or review regression coverage and fixtures | [Testing and fixtures](testing-and-fixtures.md) |
 | Add product copy or a localized control | [Internationalization and product copy](i18n-and-product-copy.md) |

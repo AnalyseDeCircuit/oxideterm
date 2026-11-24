@@ -95,29 +95,29 @@ members = [
   "crates/oxideterm-x11-forwarding",
   "crates/alacritty-terminal",
   "crates/vte",
-  "crates/gpui-ce/gpui",
-  "crates/gpui-ce/gpui_apple",
-  "crates/gpui-ce/gpui_linux",
-  "crates/gpui-ce/gpui_macos",
-  "crates/gpui-ce/gpui_wgpu",
-  "crates/gpui-ce/gpui_windows",
-  "crates/gpui-ce/xim-ctext",
-  "crates/gpui-ce/zed-xim",
+  "crates/gpui-pre/gpui",
+  "crates/gpui-pre/gpui_apple",
+  "crates/gpui-pre/gpui_linux",
+  "crates/gpui-pre/gpui_macos",
+  "crates/gpui-pre/gpui_wgpu",
+  "crates/gpui-pre/gpui_windows",
+  "crates/gpui-pre/xim-ctext",
+  "crates/gpui-pre/zed-xim",
   "crates/russh-sftp",
 ]
 default-members = ["crates/oxideterm-gpui-app"]
 resolver = "2"
 
 [patch.crates-io]
-xim-ctext = { path = "crates/gpui-ce/xim-ctext" }
-zed-xim = { path = "crates/gpui-ce/zed-xim" }
+xim-ctext = { path = "crates/gpui-pre/xim-ctext" }
+zed-xim = { path = "crates/gpui-pre/zed-xim" }
 alacritty_terminal = { path = "crates/alacritty-terminal" }
-gpui-pre = { path = "crates/gpui-ce/gpui" }
-gpui-pre-apple = { path = "crates/gpui-ce/gpui_apple" }
-gpui-pre-macos = { path = "crates/gpui-ce/gpui_macos" }
-gpui-pre-windows = { path = "crates/gpui-ce/gpui_windows" }
-gpui-pre-linux = { path = "crates/gpui-ce/gpui_linux" }
-gpui-pre-wgpu = { path = "crates/gpui-ce/gpui_wgpu" }
+gpui-pre = { path = "crates/gpui-pre/gpui" }
+gpui-pre-apple = { path = "crates/gpui-pre/gpui_apple" }
+gpui-pre-macos = { path = "crates/gpui-pre/gpui_macos" }
+gpui-pre-windows = { path = "crates/gpui-pre/gpui_windows" }
+gpui-pre-linux = { path = "crates/gpui-pre/gpui_linux" }
+gpui-pre-wgpu = { path = "crates/gpui-pre/gpui_wgpu" }
 # Keep the SSH protocol fork independent from application lint and test targets.
 russh = { git = "https://github.com/AnalyseDeCircuit/russh", rev = "630bc79d7d759d11354855a7dd5b3e663d14c3ab" }
 russh-sftp = { path = "crates/russh-sftp" }

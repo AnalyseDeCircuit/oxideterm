@@ -16,7 +16,7 @@ The workspace is intentionally split by responsibility. Start from the user-visi
 | Internationalization and theme | `crates/oxideterm-i18n/locales`, `crates/oxideterm-theme` | `oxideterm-gpui-ui` | Every user-visible UI key must exist in every locale catalog |
 | Remote desktop and media | `crates/oxideterm-remote-desktop`, `crates/oxideterm-gpui-remote-desktop` | Marketplace `plugins/rdp` and `plugins/vnc` in `oxideterm-plugins`; host audio in `oxideterm-pcm-audio` | Protocol helpers are installed plugins; the host owns profiles and viewer sessions separately from terminal and SSH-node consumers |
 | Plugins, CLI, and automation | `crates/oxideterm-plugin-*`, `crates/oxideterm-cli`, `crates/oxideterm-public-mcp` | `scripts/`, `agent/` | Capability APIs must not bypass the application runtime or secret boundary |
-| Framework and native platform code | `crates/gpui-ce/gpui` | `gpui-pre-apple`, `gpui-pre-windows`, `gpui-pre-macos`, `gpui-pre-linux`, `gpui-pre-wgpu`, `gpui-pre-platform` | Six locally patched packages with registry helpers; see [GPUI maintenance](gpui-ce.md) |
+| Framework and native platform code | `crates/gpui-pre/gpui` | `gpui-pre-apple`, `gpui-pre-windows`, `gpui-pre-macos`, `gpui-pre-linux`, `gpui-pre-wgpu`, `gpui-pre-platform` | Six locally patched packages with registry helpers; see [GPUI maintenance](gpui-pre.md) |
 
 ## Main Runtime Path
 
@@ -52,7 +52,7 @@ The [architecture guide](../user-guide/en/architecture.md) maps these owners and
 - A terminal display or input problem: start in `oxideterm-gpui-terminal`; inspect `oxideterm-terminal` and then `alacritty-terminal` only if the snapshot is already wrong.
 - An SSH, reconnect, jump-host, SFTP, or forwarding problem: start in the relevant `workspace` module and trace the registered `ConnectionConsumer` through `NodeRouter` and `SshConnectionRegistry`.
 - A settings page or text-field problem: start in `oxideterm-gpui-app/src/workspace/settings/`, then `oxideterm-settings`, `oxideterm-i18n`, and shared UI primitives as needed.
-- A platform-only window, cursor, text, or renderer problem: reproduce it on that platform before considering `crates/gpui-ce/`.
+- A platform-only window, cursor, text, or renderer problem: reproduce it on that platform before considering `crates/gpui-pre/`.
 
 Use `cargo tree -p <crate>` when a dependency boundary is unclear. A crate name is not proof of ownership: follow the runtime owner and the persisted-data owner before adding state or a background task.
 

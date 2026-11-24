@@ -16,7 +16,7 @@ VENDORED_CRATE_DIRS = frozenset(
     {
         "alacritty-terminal",
         "fernomade",
-        "gpui-ce",
+        "gpui-pre",
         "russh-sftp",
         "vte",
     }

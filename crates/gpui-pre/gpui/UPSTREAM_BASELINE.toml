@@ -10,7 +10,7 @@ gpui_ce_repository = "https://github.com/gpui-ce/gpui-ce.git"
 gpui_ce_commit = "9949f8b2d27bb1d6dbc1efe90be039634cf1fb6b"
 previous_zed_commit = "0969b0dba3f3411592fce801d00f8d81b8dcf902"
 upstream_license = "Apache-2.0"
-upstream_root_license = "crates/gpui-ce/gpui/GPUI_CE_ROOT_LICENSE.md"
+upstream_root_license = "crates/gpui-pre/gpui/GPUI_CE_ROOT_LICENSE.md"
 packaged_license = "licenses/third-party/GPUI-CE-LICENSE-APACHE"
 previous_imported_on = "2026-08-25"
 imported_on = "2026-11-13"
@@ -18,48 +18,48 @@ migration_parent_commit = "1d2be3d30c117b9926a6e311214c157bb1600829"
 oxideterm_import_parent_commit = "f462f86a7bcbc5d2803b55b118f6763a3b7c89b6"
 oxideterm_rust_toolchain = "1.94.1"
 oxideterm_cargo_resolver = "2"
-local_patch_ledger = "crates/gpui-ce/gpui/OXIDETERM_PATCHES.md"
+local_patch_ledger = "crates/gpui-pre/gpui/OXIDETERM_PATCHES.md"
 
 # Checksums identify pristine crates.io archives, not the locally patched trees.
 
 [[crates]]
 name = "gpui-pre"
-local_path = "crates/gpui-ce/gpui"
+local_path = "crates/gpui-pre/gpui"
 zed_crate = "gpui"
 zed_version = "0.2.2"
 registry_checksum = "29db89613527079737f53752eab27fb65c9a7dd94979256c65a0e590c9fd34d8"
 
 [[crates]]
 name = "gpui-pre-apple"
-local_path = "crates/gpui-ce/gpui_apple"
+local_path = "crates/gpui-pre/gpui_apple"
 zed_crate = "gpui_apple"
 zed_version = "0.1.0"
 registry_checksum = "a460605ec4e8cbcc9b213462a84b1d6cc3efe4ed8f0e18669659f07b2d5c6aec"
 
 [[crates]]
 name = "gpui-pre-macos"
-local_path = "crates/gpui-ce/gpui_macos"
+local_path = "crates/gpui-pre/gpui_macos"
 zed_crate = "gpui_macos"
 zed_version = "0.1.0"
 registry_checksum = "2de7d3f4ad51ac387e822495db363fcc1188d349793365731d054444c4cb06ee"
 
 [[crates]]
 name = "gpui-pre-windows"
-local_path = "crates/gpui-ce/gpui_windows"
+local_path = "crates/gpui-pre/gpui_windows"
 zed_crate = "gpui_windows"
 zed_version = "0.1.0"
 registry_checksum = "7201762420222d5b5ce5bdf0056996199212a3349bfb2457a3a0238c688681f3"
 
 [[crates]]
 name = "gpui-pre-linux"
-local_path = "crates/gpui-ce/gpui_linux"
+local_path = "crates/gpui-pre/gpui_linux"
 zed_crate = "gpui_linux"
 zed_version = "0.1.0"
 registry_checksum = "54bab418d0b7c027af9495f278619b46887362b3bd6446e246c87c5b0fa167df"
 
 [[crates]]
 name = "gpui-pre-wgpu"
-local_path = "crates/gpui-ce/gpui_wgpu"
+local_path = "crates/gpui-pre/gpui_wgpu"
 zed_crate = "gpui_wgpu"
 zed_version = "0.1.0"
 registry_checksum = "dc76608d385f6d0dcbad44504b1bf669dac3b7d7ffa2885acdb7c1c358caf852"

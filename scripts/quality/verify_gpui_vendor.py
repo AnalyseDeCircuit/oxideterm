@@ -12,7 +12,7 @@ from pathlib import Path
 
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
-GPUI_VENDOR_DIR = ROOT_DIR / "crates" / "gpui-ce"
+GPUI_VENDOR_DIR = ROOT_DIR / "crates" / "gpui-pre"
 BASELINE_PATH = GPUI_VENDOR_DIR / "gpui" / "UPSTREAM_BASELINE.toml"
 CANONICAL_LICENSE = ROOT_DIR / "licenses/third-party/GPUI-CE-LICENSE-APACHE"
 ROOT_UPSTREAM_LICENSE = GPUI_VENDOR_DIR / "gpui/GPUI_CE_ROOT_LICENSE.md"

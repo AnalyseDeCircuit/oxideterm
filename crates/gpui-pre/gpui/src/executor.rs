@@ -3,14 +3,14 @@ use crate::{ActivityGuard, App, PlatformDispatcher, PlatformScheduler};
 use futures::channel::mpsc;
 use futures::prelude::*;
 use gpui_util::{TryFutureExt, TryFutureExtBacktrace};
-use scheduler::Instant;
 use scheduler::Scheduler;
 use std::{future::Future, marker::PhantomData, rc::Rc, sync::Arc, time::Duration};
 #[cfg(not(target_family = "wasm"))]
 use std::{mem, pin::Pin};
 
 pub use scheduler::{
-    DedicatedExecutor, FallibleTask, LocalExecutor as SchedulerLocalExecutor, Priority, Task,
+    DedicatedExecutor, FallibleTask, Instant, LocalExecutor as SchedulerLocalExecutor, Priority,
+    Task,
 };
 
 /// A pointer to the executor that is currently running,

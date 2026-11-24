@@ -148,6 +148,7 @@ pub use refineable::*;
 pub use scene::*;
 pub use shared_uri::*;
 /// OxideTerm compatibility re-export for existing detached task delays.
+#[cfg(not(target_family = "wasm"))]
 pub use smol::Timer;
 pub use spring::*;
 pub use style::*;

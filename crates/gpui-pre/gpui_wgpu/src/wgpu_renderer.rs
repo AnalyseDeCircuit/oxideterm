@@ -851,6 +851,7 @@ pub struct WgpuRenderer {
     #[allow(dead_code)]
     compositor_gpu: Option<CompositorGpuHint>,
     state: RendererState,
+    #[cfg_attr(target_family = "wasm", allow(dead_code))]
     extra_requirements: Option<WgpuDeviceRequirements>,
     #[cfg(not(target_family = "wasm"))]
     recovery_backoff: RecoveryBackoff,
@@ -2524,14 +2525,19 @@ impl WgpuRendererCore {
             .queue
             .submit(std::iter::once(encoder.finish()));
         if !submissions.is_empty() {
+            #[cfg(not(target_family = "wasm"))]
             let progress = submissions.clone();
+            #[cfg(not(target_family = "wasm"))]
             let device = self.resources().device.clone();
             self.resources().queue.on_submitted_work_done(move || {
                 for submission in submissions {
                     submission.complete();
                 }
             });
-            // Completion must keep progressing even when the window closes or stops drawing.
+            // On native backends, completion must keep progressing even when the window closes
+            // or stops drawing. On wasm, WebGPU completion callbacks are driven by browser
+            // promises and `wgpu::Device` is single-threaded.
+            #[cfg(not(target_family = "wasm"))]
             std::thread::spawn(move || {
                 while progress.iter().any(|submission| !submission.is_complete()) {
                     if device.poll(wgpu::PollType::Poll).is_err() {
@@ -2543,6 +2549,8 @@ impl WgpuRendererCore {
                     std::thread::sleep(std::time::Duration::from_millis(8));
                 }
             });
+            #[cfg(target_family = "wasm")]
+            let _ = self.resources().device.poll(wgpu::PollType::Poll);
         }
         Ok(index)
     }

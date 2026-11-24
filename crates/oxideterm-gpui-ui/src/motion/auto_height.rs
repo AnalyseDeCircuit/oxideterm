@@ -1,7 +1,7 @@
 use super::{MotionDuration, spring_config};
 use gpui::{
-    AnyElement, App, Bounds, Element, ElementId, GlobalElementId, InspectorElementId, IntoElement,
-    LayoutId, ParentElement, Pixels, Styled, Window, div, prelude::*, px,
+    AnyElement, App, Bounds, Element, ElementId, GlobalElementId, InspectorElementId, Instant,
+    IntoElement, LayoutId, ParentElement, Pixels, Styled, Window, div, prelude::*, px,
 };
 use oxideterm_theme::ThemeTokens;
 use std::{cell::RefCell, rc::Rc};
@@ -11,7 +11,7 @@ struct HeightState {
     velocity: f32,
     target: f32,
     current: f32,
-    updated_at: Option<std::time::Instant>,
+    updated_at: Option<Instant>,
 }
 
 /// Animates the occupied space of a bounded composer region. Removed content

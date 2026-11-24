@@ -775,7 +775,7 @@ Terminal drawing passes through these boundaries:
 
 For glyphs that share a baseline and use integer vertical rasterization, the batch anchor is the rounded device baseline. Vertical scrolling can then translate the batch without repeating glyph preparation or changing rasterized positions. Glyphs with additional vertical shaping offsets retain device-phase invalidation. Prepared colors normalize hue once, while each draw applies current opacity. Blank cells avoid unused foreground conversion, and theme-default backgrounds reuse the converted background color.
 
-The [row layout](../../../crates/oxideterm-gpui-terminal/src/terminal_view/element.rs), [GPUI glyph painter](../../../crates/gpui-ce/gpui/src/text_system/line.rs), [image cache](../../../crates/oxideterm-gpui-terminal/src/app/image_cache.rs) and [graphics/grid synchronization](../../../crates/oxideterm-terminal-graphics/src/graphics/grid.rs) own these boundaries.
+The [row layout](../../../crates/oxideterm-gpui-terminal/src/terminal_view/element.rs), [GPUI glyph painter](../../../crates/gpui-pre/gpui/src/text_system/line.rs), [image cache](../../../crates/oxideterm-gpui-terminal/src/app/image_cache.rs) and [graphics/grid synchronization](../../../crates/oxideterm-terminal-graphics/src/graphics/grid.rs) own these boundaries.
 
 ### Privilege And File-Transfer Helpers
 
