@@ -1032,7 +1032,7 @@ impl HostToolsEntity {
             return true;
         }
         cx.spawn(async move |weak, cx| {
-            Timer::after(delay).await;
+            cx.background_executor().timer(delay).await;
             let _ = weak.update(cx, |entity, cx| {
                 if entity
                     .host_packages

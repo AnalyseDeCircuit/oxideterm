@@ -27,7 +27,7 @@ impl HostToolsEntity {
                     .any(|connection| connection.connection_id == *selected_id)
             })
             .unwrap_or(fallback_connection_id);
-        let current = self.profiler_registry().current(&selected_connection_id);
+        let current = self.profiler_current(&selected_connection_id);
         let metrics = current.as_ref().and_then(|(metrics, _)| metrics.as_ref());
         let rows = metrics
             .map(|metrics| {
@@ -41,10 +41,7 @@ impl HostToolsEntity {
             .map(|metrics| metrics.docker.status.clone())
             .unwrap_or_default();
         if matches!(status, ResourceDockerStatus::Unknown)
-            && self
-                .profiler_registry()
-                .failure(&selected_connection_id)
-                .is_some()
+            && self.profiler_failure(&selected_connection_id).is_some()
         {
             status = ResourceDockerStatus::Incomplete;
         }

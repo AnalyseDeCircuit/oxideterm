@@ -190,11 +190,11 @@ pub fn kind_is_destructive(kind: HostContainerConfirmKind) -> bool {
 /// rides along), so captures and actions decide success by their output: a
 /// capture with content and an action whose merged output does not start with
 /// an error line both count as succeeded.
-fn container_capture_succeeded(output: &oxideterm_ssh::SshCommandOutput) -> bool {
+fn container_capture_succeeded(output: &HostCommandOutput) -> bool {
     output.exit_code.unwrap_or(0) == 0 || !output.stdout.trim().is_empty()
 }
 
-fn container_action_succeeded(output: &oxideterm_ssh::SshCommandOutput) -> bool {
+fn container_action_succeeded(output: &HostCommandOutput) -> bool {
     if output.exit_code.unwrap_or(0) == 0 {
         return true;
     }
@@ -3559,7 +3559,7 @@ impl HostToolsEntity {
             return true;
         }
         cx.spawn(async move |weak, cx| {
-            Timer::after(delay).await;
+            cx.background_executor().timer(delay).await;
             let _ = weak.update(cx, |entity, cx| {
                 if entity
                     .host_container

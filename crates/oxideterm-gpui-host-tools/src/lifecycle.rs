@@ -98,7 +98,7 @@ impl HostToolsEntity {
         visibility: HostToolsVisibility,
         monitoring: oxideterm_settings::HostToolsSettings,
         sampling_config: oxideterm_connection_monitor::ResourceSamplingConfig,
-        runtime: tokio::runtime::Handle,
+        runtime: HostToolsRuntime,
         force_pool_refresh: bool,
         cx: &mut Context<Self>,
     ) {
@@ -151,7 +151,7 @@ impl HostToolsEntity {
         &mut self,
         connections: Vec<MonitorConnectionOption>,
         sampling_config: oxideterm_connection_monitor::ResourceSamplingConfig,
-        runtime: tokio::runtime::Handle,
+        runtime: HostToolsRuntime,
         cx: &mut Context<Self>,
     ) {
         let live_connection_ids = connections
@@ -202,7 +202,7 @@ impl HostToolsEntity {
         visibility: HostToolsVisibility,
         monitoring: oxideterm_settings::HostToolsSettings,
         sampling_config: oxideterm_connection_monitor::ResourceSamplingConfig,
-        runtime: tokio::runtime::Handle,
+        runtime: HostToolsRuntime,
         cx: &mut Context<Self>,
     ) {
         self.visibility = visibility;

@@ -503,7 +503,7 @@ impl HostToolsEntity {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if host == LOCAL_HOST_CONNECTION_ID {
+        if self.is_local_target(host) {
             window.dispatch_action(
                 Box::new(HostToolsWindowRequest::new(
                     HostToolsWindowIntent::OpenLocalMultiplexer {

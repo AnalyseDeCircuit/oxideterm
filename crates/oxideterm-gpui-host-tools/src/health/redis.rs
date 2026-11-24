@@ -116,7 +116,7 @@ impl HostToolsEntity {
     pub(crate) fn request_redis_snapshot(
         &mut self,
         connection_id: String,
-        runtime: tokio::runtime::Handle,
+        runtime: HostToolsRuntime,
         connection_fallback: String,
         failure_fallback: String,
         cx: &mut Context<Self>,
@@ -144,7 +144,7 @@ impl HostToolsEntity {
     fn start_redis_snapshot(
         &mut self,
         request: HostRedisSnapshotRequest,
-        runtime: tokio::runtime::Handle,
+        runtime: HostToolsRuntime,
         cx: &mut Context<Self>,
     ) {
         let Some(os_type) = self.connection_os_type(&request.connection_id) else {
@@ -324,7 +324,7 @@ impl HostToolsEntity {
     fn request_redis_keys(
         &mut self,
         connection_id: String,
-        runtime: tokio::runtime::Handle,
+        runtime: HostToolsRuntime,
         failure_fallback: String,
         cx: &mut Context<Self>,
     ) {
@@ -355,7 +355,7 @@ impl HostToolsEntity {
     fn start_redis_keys(
         &mut self,
         request: HostRedisKeysRequest,
-        runtime: tokio::runtime::Handle,
+        runtime: HostToolsRuntime,
         cx: &mut Context<Self>,
     ) {
         // A queued read may have outlived the selection that asked for it.
@@ -3000,7 +3000,7 @@ impl HostToolsEntity {
     fn start_redis_value(
         &mut self,
         request: HostRedisValueRequest,
-        runtime: tokio::runtime::Handle,
+        runtime: HostToolsRuntime,
         cx: &mut Context<Self>,
     ) {
         let Some(os_type) = self.connection_os_type(&request.connection_id) else {

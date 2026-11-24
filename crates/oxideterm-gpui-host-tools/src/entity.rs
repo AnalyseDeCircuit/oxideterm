@@ -5,53 +5,61 @@ mod ai;
 mod capture;
 
 use gpui::Task;
+#[cfg(not(target_family = "wasm"))]
 use oxideterm_connection_monitor::ResourceSampler;
 use oxideterm_connection_monitor::multiplexer::Multiplexer;
 use oxideterm_editor_core::utf16::replace_utf16;
 use oxideterm_topology::ConnectionTopologySnapshot;
 
-pub(crate) fn finish_host_query_audit(
-    audit: oxideterm_audit::AuditOperation,
-    result: &Result<oxideterm_ssh::SshCommandOutput, ()>,
-) {
-    let exit_code = result.as_ref().ok().and_then(|output| output.exit_code);
-    let output_bytes = result
-        .as_ref()
-        .ok()
-        .map(|output| output.stdout.len().saturating_add(output.stderr.len()) as u64);
-    let outcome = match (result, exit_code) {
-        (Err(_), _) => oxideterm_audit::AuditOutcome::Failed,
-        (_, Some(0)) => oxideterm_audit::AuditOutcome::Succeeded,
-        (_, None) => oxideterm_audit::AuditOutcome::Unknown,
-        (_, Some(_)) => oxideterm_audit::AuditOutcome::Failed,
-    };
-    audit.finish(
-        outcome,
-        if exit_code.is_some() {
-            oxideterm_audit::AuditEvidence::ExitCode
-        } else {
-            oxideterm_audit::AuditEvidence::Protocol
-        },
-        exit_code,
-        output_bytes,
-    );
+#[cfg(not(target_family = "wasm"))]
+mod audit;
+#[cfg(not(target_family = "wasm"))]
+use audit::{AuditCaptureKind, HostAudit};
+#[cfg(not(target_family = "wasm"))]
+mod desktop;
+#[cfg(not(target_family = "wasm"))]
+use desktop::DesktopHost;
+
+struct PendingHostCapture {
+    target: HostCaptureTarget,
+    #[cfg(not(target_family = "wasm"))]
+    audit: Option<HostAudit>,
 }
 
-#[derive(Clone)]
-struct HostToolsSshConsumerContext {
-    node_router: NodeRouter,
-    prompt_handler: Arc<dyn SshPromptHandler>,
-    managed_key_resolver: ManagedKeyResolver,
+impl PendingHostCapture {
+    async fn run_command_capture(
+        self,
+        command: &str,
+        timeout: Duration,
+        max_output_size: usize,
+    ) -> Result<HostCommandOutput, ()> {
+        let result = self
+            .target
+            .run_command_capture(command, timeout, max_output_size)
+            .await;
+        #[cfg(not(target_family = "wasm"))]
+        if let Some(audit) = self.audit {
+            audit.finish_capture(&result);
+        }
+        result
+    }
+}
+
+enum HostBackend {
+    #[cfg(not(target_family = "wasm"))]
+    Desktop(DesktopHost),
+    Bridge(Box<dyn HostToolsBridge>),
 }
 
 /// Owns Host Tools sampling state independently from WorkspaceApp and SSH nodes.
 pub struct HostToolsEntity {
     // This handle is private to the Entity. Host Tools exposes snapshots and
     // sampler acquisition only; page code cannot disconnect shared nodes.
-    ssh_registry: SshConnectionRegistry,
-    ssh_consumer_context: Option<HostToolsSshConsumerContext>,
+    backend: HostBackend,
+    pub(crate) updates: HostSamplerUpdates,
+    bridge_gpu: Option<String>,
+    #[cfg(not(target_family = "wasm"))]
     pub profiler_registry: ProfilerRegistry,
-    pub(crate) profiler_update_tx: tokio::sync::mpsc::Sender<()>,
     pub(crate) sampler_delivery_wake: oxideterm_workspace::delivery::ActiveDeliveryWake,
     pub(crate) sampler_delivery_rx:
         std::sync::mpsc::Receiver<super::delivery::HostToolsSamplerDelivery>,
@@ -91,14 +99,14 @@ pub struct HostToolsEntity {
     pub visibility: HostToolsVisibility,
     // These inputs let the Entity refresh its own samplers after an action.
     // The runtime handle has no registry release or disconnect capability.
-    pub(crate) lifecycle_runtime: Option<tokio::runtime::Handle>,
+    pub(crate) lifecycle_runtime: Option<HostToolsRuntime>,
     pub(crate) sampling_config: oxideterm_connection_monitor::ResourceSamplingConfig,
     // Host Tools receives one read-only settings snapshot. Persistent writes
     // remain owned by SettingsStore and are applied back through lifecycle.
     pub monitoring: oxideterm_settings::HostToolsSettings,
     pub(crate) messages: Option<HostToolsMessages>,
     pub(crate) lifecycle_refresh_task: Option<Task<()>>,
-    #[cfg(test)]
+    #[cfg(all(test, not(target_family = "wasm")))]
     test_resource_sampler: Option<Arc<dyn ResourceSampler>>,
     #[cfg(test)]
     test_snapshot_dispatches: Option<Vec<ContextSidebarTool>>,
@@ -117,33 +125,99 @@ pub struct HostToolsEntity {
 }
 
 impl HostToolsEntity {
-    pub(crate) fn host_tool_audit(
-        &self,
-        connection_id: &str,
-        action: &str,
-        detail: Option<&str>,
-    ) -> oxideterm_audit::AuditOperation {
-        let context = self
-            .ssh_registry
-            .get(connection_id)
-            .and_then(|handle| handle.audit_context());
-        if let Some(context) = context {
-            oxideterm_audit::AuditOperation::in_request(
-                Some(&context),
-                oxideterm_audit::AuditCategory::Host,
-                action,
-                detail,
-            )
-        } else {
-            oxideterm_audit::AuditOperation::begin(
-                oxideterm_audit::AuditCategory::Host,
-                action,
-                Some(connection_id),
-                detail,
-            )
+    #[cfg(not(target_family = "wasm"))]
+    fn desktop_registry(&self) -> Option<&SshConnectionRegistry> {
+        match &self.backend {
+            HostBackend::Desktop(host) => Some(&host.registry),
+            HostBackend::Bridge(_) => None,
         }
     }
 
+    pub(crate) fn profiler_current(
+        &self,
+        id: &str,
+    ) -> Option<(
+        Option<ResourceMetrics>,
+        oxideterm_connection_monitor::ProfilerState,
+    )> {
+        match &self.backend {
+            HostBackend::Bridge(b) => b.profiler_snapshot(id).map(|s| (s.metrics, s.state)),
+            #[cfg(not(target_family = "wasm"))]
+            HostBackend::Desktop(_) => self.profiler_registry.current(id),
+        }
+    }
+    pub(crate) fn profiler_failure(
+        &self,
+        id: &str,
+    ) -> Option<oxideterm_connection_monitor::ProfilerFailure> {
+        match &self.backend {
+            HostBackend::Bridge(b) => b.profiler_snapshot(id).and_then(|s| s.failure),
+            #[cfg(not(target_family = "wasm"))]
+            HostBackend::Desktop(_) => self.profiler_registry.failure(id),
+        }
+    }
+    pub(crate) fn profiler_trend_history(
+        &self,
+        id: &str,
+    ) -> Vec<oxideterm_connection_monitor::ResourceTrendSample> {
+        match &self.backend {
+            HostBackend::Bridge(b) => b
+                .profiler_snapshot(id)
+                .into_iter()
+                .flat_map(|s| s.history)
+                .map(|m| oxideterm_connection_monitor::ResourceTrendSample {
+                    timestamp_ms: m.timestamp_ms,
+                    cpu_percent: m.cpu_percent,
+                    rx_bytes_per_sec: m.net_rx_bytes_per_sec,
+                    tx_bytes_per_sec: m.net_tx_bytes_per_sec,
+                })
+                .collect(),
+            #[cfg(not(target_family = "wasm"))]
+            HostBackend::Desktop(_) => self.profiler_registry.trend_history(id),
+        }
+    }
+    fn cancel_bridge_captures(&self, id: Option<&str>) {
+        match &self.backend {
+            HostBackend::Bridge(b) => b.cancel_captures(id),
+            #[cfg(not(target_family = "wasm"))]
+            HostBackend::Desktop(_) => {}
+        }
+    }
+    pub(crate) fn stop_page_sampling(&mut self) {
+        self.stop_profiler_sampling();
+        match &self.backend {
+            HostBackend::Bridge(b) => {
+                if let Some(id) = self.bridge_gpu.take() {
+                    b.stop_gpu(&id);
+                }
+                b.cancel_captures(None);
+            }
+            #[cfg(not(target_family = "wasm"))]
+            HostBackend::Desktop(_) => {
+                if let Some(task) = self.host_gpu.sampling_task.take() {
+                    task.stop();
+                }
+            }
+        }
+    }
+    pub(crate) fn is_local_target(&self, id: &str) -> bool {
+        match &self.backend {
+            HostBackend::Bridge(b) => b.is_local(id),
+            #[cfg(not(target_family = "wasm"))]
+            HostBackend::Desktop(_) => id == LOCAL_HOST_CONNECTION_ID,
+        }
+    }
+    pub(crate) fn active_gpu_id(&self) -> Option<&str> {
+        match &self.backend {
+            HostBackend::Bridge(_) => self.bridge_gpu.as_deref(),
+            #[cfg(not(target_family = "wasm"))]
+            HostBackend::Desktop(_) => self
+                .host_gpu
+                .sampling_task
+                .as_ref()
+                .map(|task| task.connection_id()),
+        }
+    }
     pub fn window_modal_snapshot(&self) -> Option<HostToolsWindowModalSnapshot> {
         if self.host_schedules.logs_dialog.is_some() {
             Some(HostToolsWindowModalSnapshot::ScheduleLogs)
@@ -199,10 +273,34 @@ impl HostToolsEntity {
         }
     }
 
+    #[cfg(not(target_family = "wasm"))]
     pub fn new(
         profiler_update_tx: tokio::sync::mpsc::Sender<()>,
         profiler_update_rx: tokio::sync::mpsc::Receiver<()>,
         ssh_registry: SshConnectionRegistry,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        Self::initialize(
+            HostBackend::Desktop(DesktopHost::new(ssh_registry, profiler_update_tx)),
+            Some(profiler_update_rx),
+            cx,
+        )
+    }
+
+    pub fn with_bridge(bridge: Box<dyn HostToolsBridge>, cx: &mut Context<Self>) -> Self {
+        Self::initialize(
+            HostBackend::Bridge(bridge),
+            #[cfg(not(target_family = "wasm"))]
+            None,
+            cx,
+        )
+    }
+
+    fn initialize(
+        backend: HostBackend,
+        #[cfg(not(target_family = "wasm"))] profiler_update_rx: Option<
+            tokio::sync::mpsc::Receiver<()>,
+        >,
         cx: &mut Context<Self>,
     ) -> Self {
         let sampler_delivery_wake = oxideterm_workspace::delivery::ActiveDeliveryWake::default();
@@ -210,6 +308,7 @@ impl HostToolsEntity {
             oxideterm_workspace::delivery::ActiveDeliverySender::channel_with_wake(
                 sampler_delivery_wake.clone(),
             );
+        #[cfg(not(target_family = "wasm"))]
         let (gpu_update_tx, gpu_update_rx) = tokio::sync::mpsc::unbounded_channel();
         let reliable_delivery_wake = oxideterm_workspace::delivery::ActiveDeliveryWake::default();
         let (reliable_delivery_tx, reliable_delivery_rx) =
@@ -217,10 +316,11 @@ impl HostToolsEntity {
                 reliable_delivery_wake.clone(),
             );
         let mut entity = Self {
-            ssh_registry,
-            ssh_consumer_context: None,
+            backend,
+            updates: HostSamplerUpdates(sampler_delivery_tx),
+            bridge_gpu: None,
+            #[cfg(not(target_family = "wasm"))]
             profiler_registry: ProfilerRegistry::new(),
-            profiler_update_tx,
             sampler_delivery_wake,
             sampler_delivery_rx,
             reliable_delivery_wake,
@@ -233,7 +333,10 @@ impl HostToolsEntity {
             host_services: HostServicesState::new(),
             host_redis: HostRedisState::new(),
             host_tmux: HostTmuxState::new(),
-            host_gpu: HostGpuViewState::new(gpu_update_tx),
+            host_gpu: HostGpuViewState::new(
+                #[cfg(not(target_family = "wasm"))]
+                gpu_update_tx,
+            ),
             host_logs: HostLogsState::new(),
             host_ports: HostPortsState::new(),
             host_filesystems: FilesystemPanel::default(),
@@ -252,7 +355,7 @@ impl HostToolsEntity {
             monitoring: oxideterm_settings::HostToolsSettings::default(),
             messages: None,
             lifecycle_refresh_task: None,
-            #[cfg(test)]
+            #[cfg(all(test, not(target_family = "wasm")))]
             test_resource_sampler: None,
             #[cfg(test)]
             test_snapshot_dispatches: None,
@@ -274,30 +377,26 @@ impl HostToolsEntity {
             compact_monitor_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             monitor_expanded_cpu_connections: RefCell::new(HashSet::new()),
         };
-        entity.schedule_sampler_delivery(
-            super::delivery::HostToolsDeliveryBridges {
-                profiler_update_rx,
-                gpu_update_rx,
-                sampler_delivery_tx,
-            },
-            cx,
-        );
+        #[cfg(not(target_family = "wasm"))]
+        if let Some(rx) = profiler_update_rx {
+            entity.forward_desktop_updates(rx, gpu_update_rx, cx);
+        }
+        entity.schedule_sampler_delivery(cx);
         entity.schedule_reliable_delivery(cx);
         entity.schedule_lifecycle_refresh(cx);
         entity
     }
 
+    #[cfg(not(target_family = "wasm"))]
     pub fn set_ssh_consumer_context(
         &mut self,
         node_router: NodeRouter,
         prompt_handler: Arc<dyn SshPromptHandler>,
         managed_key_resolver: ManagedKeyResolver,
     ) {
-        self.ssh_consumer_context = Some(HostToolsSshConsumerContext {
-            node_router,
-            prompt_handler,
-            managed_key_resolver,
-        });
+        if let HostBackend::Desktop(host) = &mut self.backend {
+            host.set_consumer_context(node_router, prompt_handler, managed_key_resolver);
+        }
     }
 
     pub fn filesystem_search_value(&self) -> Option<&str> {
@@ -374,14 +473,26 @@ impl HostToolsEntity {
         true
     }
 
+    #[cfg(not(target_family = "wasm"))]
     pub fn profiler_registry(&self) -> &ProfilerRegistry {
         &self.profiler_registry
     }
 
     pub fn refresh_pool_snapshot(&mut self, cx: &mut Context<Self>) {
-        self.pool_stats = Some(self.ssh_registry.monitor_stats());
-        self.pool_summaries = self.ssh_registry.list_connection_summaries();
-        self.topology_snapshot = Some(self.ssh_registry.connection_topology_snapshot());
+        match &self.backend {
+            HostBackend::Bridge(bridge) => {
+                let pool = bridge.pool_snapshot();
+                self.pool_stats = pool.stats;
+                self.pool_summaries = pool.summaries;
+                self.topology_snapshot = pool.topology;
+            }
+            #[cfg(not(target_family = "wasm"))]
+            HostBackend::Desktop(host) => {
+                self.pool_stats = Some(host.registry.monitor_stats());
+                self.pool_summaries = host.registry.list_connection_summaries();
+                self.topology_snapshot = Some(host.registry.connection_topology_snapshot());
+            }
+        }
         self.last_pool_refresh = Some(Instant::now());
         cx.notify();
     }
@@ -406,63 +517,58 @@ impl HostToolsEntity {
     }
 
     pub fn monitor_connections(&self) -> Vec<MonitorConnectionOption> {
-        let mut connections = if !self.pool_summaries.is_empty() {
-            self.pool_summaries
-                .iter()
-                .filter(|summary| summary.is_displayed_in_pool())
-                .map(MonitorConnectionOption::from_pool_summary)
-                .collect::<Vec<_>>()
-        } else {
-            let mut connections = self
-                .ssh_registry
-                .list()
-                .into_iter()
-                .map(MonitorConnectionOption::from_connection_info)
-                .collect::<Vec<_>>();
-            connections.sort_by(|left, right| {
-                monitor_connection_label(left).cmp(&monitor_connection_label(right))
-            });
-            connections
-        };
-        // The local target stays last so an existing SSH selection keeps its
-        // position. It appears once the localized label has been delivered.
-        if let Some(label) = self
-            .messages
-            .as_ref()
-            .map(|messages| messages.local_connection_label.clone())
-        {
-            connections.push(MonitorConnectionOption::local(label));
+        match &self.backend {
+            HostBackend::Bridge(bridge) => bridge.connections(),
+            #[cfg(not(target_family = "wasm"))]
+            HostBackend::Desktop(host) => {
+                host.monitor_connections(&self.pool_summaries, self.messages.as_ref())
+            }
         }
-        connections
     }
 
     pub(crate) fn connection_os_type(&self, connection_id: &str) -> Option<String> {
-        if connection_id == LOCAL_HOST_CONNECTION_ID {
-            return Some(local_host_os_type().to_string());
+        match &self.backend {
+            HostBackend::Bridge(bridge) => bridge.os_type(connection_id),
+            #[cfg(not(target_family = "wasm"))]
+            HostBackend::Desktop(host) => host.connection_os_type(connection_id),
         }
-        self.ssh_registry.get(connection_id).map(|handle| {
-            handle
-                .remote_env()
-                .map(|environment| environment.os_type)
-                .unwrap_or_else(|| "Unknown".to_string())
-        })
     }
 
     /// Resolves the execution target for one Host Tools connection. The local
     /// target runs the same generated command lines without an SSH node.
-    pub(crate) fn host_command_target(&self, connection_id: &str) -> Option<HostCommandTarget> {
-        if connection_id == LOCAL_HOST_CONNECTION_ID {
-            return Some(HostCommandTarget::Local);
+    pub(crate) fn host_command_target(&self, connection_id: &str) -> Option<HostCaptureTarget> {
+        match &self.backend {
+            HostBackend::Bridge(bridge) => bridge.target(connection_id),
+            #[cfg(not(target_family = "wasm"))]
+            HostBackend::Desktop(host) => host.host_command_target(connection_id),
         }
-        self.ssh_registry
-            .get(connection_id)
-            .map(HostCommandTarget::Ssh)
+    }
+
+    fn capture_target(
+        &self,
+        id: &str,
+        #[cfg(not(target_family = "wasm"))] audit: Option<HostAudit>,
+    ) -> Option<PendingHostCapture> {
+        let Some(target) = self.host_command_target(id) else {
+            #[cfg(not(target_family = "wasm"))]
+            if let Some(audit) = audit {
+                audit.unavailable();
+            }
+            return None;
+        };
+        Some(PendingHostCapture {
+            target,
+            #[cfg(not(target_family = "wasm"))]
+            audit,
+        })
     }
 
     pub(crate) fn remote_env_detection_running(&self, connection_id: &str) -> bool {
-        self.ssh_registry
-            .get(connection_id)
-            .is_some_and(|handle| handle.remote_env_detection_running())
+        match &self.backend {
+            HostBackend::Bridge(bridge) => bridge.detecting_os(connection_id),
+            #[cfg(not(target_family = "wasm"))]
+            HostBackend::Desktop(host) => host.remote_env_detection_running(connection_id),
+        }
     }
 
     pub(crate) fn compact_monitor_list_state(&self) -> ListState {
@@ -483,25 +589,36 @@ impl HostToolsEntity {
     }
 
     pub fn request_profiler_refresh(&mut self, connection_id: String, cx: &mut Context<Self>) {
-        if !self.visibility.sidebar_is_visible() || self.sampling_config.is_empty() {
-            return;
+        match &self.backend {
+            HostBackend::Bridge(bridge) => {
+                if self.visibility.sidebar_is_visible() && !self.sampling_config.is_empty() {
+                    bridge.refresh_profiler(&connection_id);
+                    cx.notify();
+                }
+            }
+            #[cfg(not(target_family = "wasm"))]
+            HostBackend::Desktop(host) => {
+                if !self.visibility.sidebar_is_visible() || self.sampling_config.is_empty() {
+                    return;
+                }
+                if host
+                    .registry
+                    .get(&connection_id)
+                    .is_some_and(|handle| handle.remote_env().is_none())
+                {
+                    host.registry.retry_remote_env_detection(&connection_id);
+                    cx.notify();
+                    return;
+                }
+                if self.profiler_registry.request_refresh(&connection_id) {
+                    return;
+                }
+                let Some(runtime) = self.lifecycle_runtime.clone() else {
+                    return;
+                };
+                self.start_profiler(connection_id, self.sampling_config, runtime, cx);
+            }
         }
-        if self
-            .ssh_registry
-            .get(&connection_id)
-            .is_some_and(|handle| handle.remote_env().is_none())
-        {
-            self.ssh_registry.retry_remote_env_detection(&connection_id);
-            cx.notify();
-            return;
-        }
-        if self.profiler_registry.request_refresh(&connection_id) {
-            return;
-        }
-        let Some(runtime) = self.lifecycle_runtime.clone() else {
-            return;
-        };
-        self.start_profiler(connection_id, self.sampling_config, runtime, cx);
     }
 
     pub fn set_runtime_section(&mut self, section: ConnectionRuntimeSection) -> bool {
@@ -541,7 +658,7 @@ impl HostToolsEntity {
         request: HostRedisSnapshotRequest,
         timeout: Duration,
         max_output_size: usize,
-        runtime: tokio::runtime::Handle,
+        runtime: HostToolsRuntime,
     ) -> bool {
         let Some(target) = self.host_command_target(&request.connection_id) else {
             return false;
@@ -566,7 +683,7 @@ impl HostToolsEntity {
         request: HostRedisKeysRequest,
         timeout: Duration,
         max_output_size: usize,
-        runtime: tokio::runtime::Handle,
+        runtime: HostToolsRuntime,
     ) -> bool {
         let Some(target) = self.host_command_target(&request.connection_id) else {
             return false;
@@ -597,7 +714,7 @@ impl HostToolsEntity {
         request: HostRedisValueRequest,
         timeout: Duration,
         max_output_size: usize,
-        runtime: tokio::runtime::Handle,
+        runtime: HostToolsRuntime,
     ) -> bool {
         let Some(target) = self.host_command_target(&request.connection_id) else {
             return false;
@@ -628,7 +745,7 @@ impl HostToolsEntity {
         request: HostRedisSetValueRequest,
         timeout: Duration,
         max_output_size: usize,
-        runtime: tokio::runtime::Handle,
+        runtime: HostToolsRuntime,
     ) -> bool {
         let Some(target) = self.host_command_target(&request.connection_id) else {
             return false;
@@ -662,7 +779,7 @@ impl HostToolsEntity {
         request: HostRedisCreateKeyRequest,
         timeout: Duration,
         max_output_size: usize,
-        runtime: tokio::runtime::Handle,
+        runtime: HostToolsRuntime,
     ) -> bool {
         let Some(target) = self.host_command_target(&request.connection_id) else {
             return false;
@@ -696,7 +813,7 @@ impl HostToolsEntity {
         request: HostRedisMutationRequest,
         timeout: Duration,
         max_output_size: usize,
-        runtime: tokio::runtime::Handle,
+        runtime: HostToolsRuntime,
     ) -> bool {
         let Some(target) = self.host_command_target(&request.connection_id) else {
             return false;
@@ -743,7 +860,7 @@ impl HostToolsEntity {
         request: HostContainerCaptureRequest,
         timeout: Duration,
         max_output_size: usize,
-        runtime: tokio::runtime::Handle,
+        runtime: HostToolsRuntime,
     ) -> bool {
         self.spawn_container_capture_handle(command, request, timeout, max_output_size, runtime)
             .is_some()
@@ -757,8 +874,8 @@ impl HostToolsEntity {
         request: HostContainerCaptureRequest,
         timeout: Duration,
         max_output_size: usize,
-        runtime: tokio::runtime::Handle,
-    ) -> Option<tokio::task::JoinHandle<()>> {
+        runtime: HostToolsRuntime,
+    ) -> Option<HostCaptureTask> {
         let target = self.host_command_target(&request.connection_id)?;
         let delivery_tx = self.reliable_delivery_tx.clone();
         // Capture output stays inside the Entity and is parsed before render.
@@ -791,51 +908,31 @@ impl HostToolsEntity {
         request: HostContainerConfirmRequest,
         timeout: Duration,
         max_output_size: usize,
-        runtime: tokio::runtime::Handle,
+        runtime: HostToolsRuntime,
     ) -> bool {
-        let audit = self.host_tool_audit(
+        let Some(target) = self.capture_target(
             &request.connection_id,
-            "container_action",
-            Some(&format!("resource={:?}", request.kind)),
-        );
-        let Some(target) = self.host_command_target(&request.connection_id) else {
-            audit.finish(
-                oxideterm_audit::AuditOutcome::Failed,
-                oxideterm_audit::AuditEvidence::Request,
-                None,
-                None,
-            );
+            #[cfg(not(target_family = "wasm"))]
+            Some(self.host_tool_audit(
+                AuditCaptureKind::Action,
+                &request.connection_id,
+                "container_action",
+                Some(&format!("resource={:?}", request.kind)),
+            )),
+        ) else {
             return false;
         };
         let delivery_tx = self.reliable_delivery_tx.clone();
         runtime.spawn(async move {
-            let mut audit_exit_code = None;
             let result = target
                 .run_command_capture(&command, timeout, max_output_size)
                 .await
                 .map(|mut output| {
-                    audit_exit_code = output.exit_code;
                     zeroize::Zeroize::zeroize(&mut output.stdout);
                     zeroize::Zeroize::zeroize(&mut output.stderr);
                     output
                 })
                 .map_err(|_| ());
-            let audit_outcome = match (&result, audit_exit_code) {
-                (Err(_), _) => oxideterm_audit::AuditOutcome::Failed,
-                (_, Some(0)) => oxideterm_audit::AuditOutcome::Succeeded,
-                (_, Some(_)) => oxideterm_audit::AuditOutcome::Failed,
-                (_, None) => oxideterm_audit::AuditOutcome::Unknown,
-            };
-            audit.finish(
-                audit_outcome,
-                if audit_exit_code.is_some() {
-                    oxideterm_audit::AuditEvidence::ExitCode
-                } else {
-                    oxideterm_audit::AuditEvidence::Protocol
-                },
-                audit_exit_code,
-                None,
-            );
             let _ = delivery_tx.send(super::delivery::HostToolsReliableDelivery::ContainerAction(
                 HostContainerConfirmDelivery { request, result },
             ));
@@ -1057,6 +1154,9 @@ impl HostToolsEntity {
         cx: &mut Context<Self>,
     ) {
         if self.selected_connection_id.as_deref() != Some(connection_id.as_str()) {
+            if let Some(id) = self.selected_connection_id() {
+                self.cancel_bridge_captures(Some(id));
+            }
             self.host_tmux.mux.clear_host();
             // The Redis password belongs to the host it was typed for: never
             // send it to the next host, and drop the old host's key tree so a
@@ -1257,6 +1357,9 @@ impl HostToolsEntity {
     pub fn take_selected_connection(&mut self, cx: &mut Context<Self>) -> Option<String> {
         self.ui.host_redis_password = zeroize::Zeroizing::default();
         let selected = self.selected_connection_id.take();
+        if let Some(id) = selected.as_deref() {
+            self.cancel_bridge_captures(Some(id));
+        }
         self.close_selector(true, cx);
         selected
     }
@@ -1293,15 +1396,35 @@ impl HostToolsEntity {
     }
 
     pub(crate) fn stop_profiler_sampling(&self) {
-        self.profiler_registry.stop_all();
+        match &self.backend {
+            HostBackend::Bridge(bridge) => {
+                for id in bridge.profiler_ids() {
+                    bridge.stop_profiler(&id);
+                }
+            }
+            #[cfg(not(target_family = "wasm"))]
+            HostBackend::Desktop(_) => {
+                self.profiler_registry.stop_all();
+            }
+        }
     }
 
     pub(crate) fn profiler_connection_ids(&self) -> Vec<String> {
-        self.profiler_registry.connection_ids()
+        match &self.backend {
+            HostBackend::Bridge(bridge) => bridge.profiler_ids(),
+            #[cfg(not(target_family = "wasm"))]
+            HostBackend::Desktop(_) => self.profiler_registry.connection_ids(),
+        }
     }
 
     pub(crate) fn remove_profiler_connection(&self, connection_id: &str) {
-        self.profiler_registry.remove(connection_id);
+        match &self.backend {
+            HostBackend::Bridge(b) => b.stop_profiler(connection_id),
+            #[cfg(not(target_family = "wasm"))]
+            HostBackend::Desktop(_) => {
+                self.profiler_registry.remove(connection_id);
+            }
+        }
         self.monitor_expanded_cpu_connections
             .borrow_mut()
             .remove(connection_id);
@@ -1326,143 +1449,113 @@ impl HostToolsEntity {
     }
 
     pub(crate) fn profiler_connection_missing(&self, connection_id: &str) -> bool {
-        self.profiler_registry.state(connection_id).is_none()
+        match &self.backend {
+            HostBackend::Bridge(bridge) => {
+                !bridge.profiler_ids().iter().any(|id| id == connection_id)
+            }
+            #[cfg(not(target_family = "wasm"))]
+            HostBackend::Desktop(_) => self.profiler_registry.state(connection_id).is_none(),
+        }
     }
 
     pub(crate) fn start_profiler(
         &self,
         connection_id: String,
         sampling_config: oxideterm_connection_monitor::ResourceSamplingConfig,
-        runtime: tokio::runtime::Handle,
+        runtime: HostToolsRuntime,
         cx: &mut Context<Self>,
     ) {
-        if connection_id == LOCAL_HOST_CONNECTION_ID {
-            // The local machine has no SSH handle; its samples run through the
-            // same command builders via one-shot local captures.
-            self.profiler_registry.start_with_sampler_on_config(
-                connection_id,
-                Arc::new(LocalResourceSampler),
-                local_host_os_type(),
-                sampling_config,
-                Some(self.profiler_update_tx.clone()),
-                runtime,
-            );
-            cx.notify();
-            return;
+        match &self.backend {
+            HostBackend::Bridge(bridge) => {
+                let _ = runtime;
+                bridge.start_profiler(&connection_id, sampling_config, self.updates.clone());
+                cx.notify();
+            }
+            #[cfg(not(target_family = "wasm"))]
+            HostBackend::Desktop(host) => {
+                let Some((sampler, os_type)) = self.desktop_sampler(host, &connection_id) else {
+                    return;
+                };
+                self.profiler_registry.start_with_sampler_on_config(
+                    connection_id,
+                    sampler,
+                    os_type,
+                    sampling_config,
+                    Some(host.profiler_update_tx.clone()),
+                    runtime,
+                );
+                cx.notify();
+            }
         }
-        let Some(handle) = self.ssh_registry.get(&connection_id) else {
-            return;
-        };
-        let Some(os_type) = handle.remote_env().map(|environment| environment.os_type) else {
-            // Environment detection owns OS selection; never guess a probe dialect.
-            return;
-        };
-        let sampler = self.resource_sampler(handle);
-        self.profiler_registry.start_with_sampler_on_config(
-            connection_id,
-            sampler,
-            os_type,
-            sampling_config,
-            Some(self.profiler_update_tx.clone()),
-            runtime,
-        );
-        cx.notify();
     }
 
     pub(crate) fn sync_gpu_sampling(
         &mut self,
         enabled_and_visible: bool,
         selected_connection_id: Option<String>,
-        runtime: tokio::runtime::Handle,
+        runtime: HostToolsRuntime,
         cx: &mut Context<Self>,
     ) {
-        if !enabled_and_visible {
-            if let Some(task) = self.host_gpu.sampling_task.take() {
-                task.stop();
+        match &self.backend {
+            HostBackend::Bridge(bridge) => {
+                let _ = runtime;
+                let next = selected_connection_id.filter(|_| enabled_and_visible);
+                if self.bridge_gpu == next {
+                    return;
+                }
+                if let Some(old) = self.bridge_gpu.take() {
+                    bridge.stop_gpu(&old);
+                }
+                if let Some(id) = next {
+                    self.host_gpu.snapshot_connection_id = Some(id.clone());
+                    self.host_gpu.snapshot = None;
+                    self.host_gpu.expanded_uuid = None;
+                    if bridge.start_gpu(&id, self.updates.clone()) {
+                        self.bridge_gpu = Some(id);
+                    }
+                    cx.notify();
+                }
             }
-            return;
-        }
+            #[cfg(not(target_family = "wasm"))]
+            HostBackend::Desktop(host) => {
+                if !enabled_and_visible {
+                    if let Some(task) = self.host_gpu.sampling_task.take() {
+                        task.stop();
+                    }
+                    return;
+                }
 
-        let Some(connection_id) = selected_connection_id else {
-            return;
-        };
-        if self
-            .host_gpu
-            .sampling_task
-            .as_ref()
-            .is_some_and(|task| task.connection_id() == connection_id)
-        {
-            return;
+                let Some(connection_id) = selected_connection_id else {
+                    return;
+                };
+                if self
+                    .host_gpu
+                    .sampling_task
+                    .as_ref()
+                    .is_some_and(|task| task.connection_id() == connection_id)
+                {
+                    return;
+                }
+                if let Some(task) = self.host_gpu.sampling_task.take() {
+                    task.stop();
+                }
+                let Some((sampler, os_type)) = self.desktop_sampler(host, &connection_id) else {
+                    return;
+                };
+                self.host_gpu.snapshot_connection_id = Some(connection_id.clone());
+                self.host_gpu.snapshot = None;
+                self.host_gpu.expanded_uuid = None;
+                // The Entity owns only the page sampler shell; the registry retains the shared node.
+                self.host_gpu.sampling_task = Some(start_gpu_sampling_on(
+                    connection_id,
+                    sampler,
+                    os_type,
+                    self.host_gpu.update_tx.clone(),
+                    runtime,
+                ));
+                cx.notify();
+            }
         }
-        if let Some(task) = self.host_gpu.sampling_task.take() {
-            task.stop();
-        }
-        if connection_id == LOCAL_HOST_CONNECTION_ID {
-            self.host_gpu.snapshot_connection_id = Some(connection_id.clone());
-            self.host_gpu.snapshot = None;
-            self.host_gpu.expanded_uuid = None;
-            self.host_gpu.sampling_task = Some(start_gpu_sampling_on(
-                connection_id,
-                Arc::new(LocalResourceSampler),
-                local_host_os_type().to_string(),
-                self.host_gpu.update_tx.clone(),
-                runtime,
-            ));
-            cx.notify();
-            return;
-        }
-        let Some(handle) = self.ssh_registry.get(&connection_id) else {
-            return;
-        };
-        let Some(os_type) = handle.remote_env().map(|environment| environment.os_type) else {
-            return;
-        };
-        let sampler = self.resource_sampler(handle);
-        self.host_gpu.snapshot_connection_id = Some(connection_id.clone());
-        self.host_gpu.snapshot = None;
-        self.host_gpu.expanded_uuid = None;
-        // The Entity owns only the page sampler shell; the registry retains the shared node.
-        self.host_gpu.sampling_task = Some(start_gpu_sampling_on(
-            connection_id,
-            sampler,
-            os_type,
-            self.host_gpu.update_tx.clone(),
-            runtime,
-        ));
-        cx.notify();
-    }
-
-    fn resource_sampler(
-        &self,
-        handle: oxideterm_ssh::SshConnectionHandle,
-    ) -> Arc<dyn ResourceSampler> {
-        #[cfg(test)]
-        if let Some(sampler) = self.test_resource_sampler.as_ref() {
-            // Tests share one counting sampler across profiler and GPU tasks.
-            return sampler.clone();
-        }
-        if let Some(context) = self.ssh_consumer_context.as_ref()
-            && let Some(node_id) = context
-                .node_router
-                .node_id_for_connection(handle.connection_id())
-            && context
-                .node_router
-                .node_runtime_snapshot(&node_id)
-                .is_some_and(|snapshot| {
-                    snapshot
-                        .config
-                        .ssh_channel_strategy
-                        .requires_dedicated_consumers()
-                })
-        {
-            return Arc::new(oxideterm_ssh::DedicatedNodeResourceSampler::new(
-                context.node_router.clone(),
-                node_id,
-                context.prompt_handler.clone(),
-                context.managed_key_resolver.clone(),
-            ));
-        }
-        Arc::new(handle)
     }
 
     pub(crate) fn gpu_snapshot_for(&self, connection_id: &str) -> Option<GpuSnapshot> {
@@ -1474,10 +1567,18 @@ impl HostToolsEntity {
     }
 
     pub(crate) fn gpu_sampling_is_running(&self, connection_id: &str) -> bool {
-        self.host_gpu
-            .sampling_task
-            .as_ref()
-            .is_some_and(|task| task.connection_id() == connection_id && !task.is_finished())
+        match &self.backend {
+            HostBackend::Bridge(bridge) => {
+                self.bridge_gpu.as_deref() == Some(connection_id)
+                    && bridge.gpu_running(connection_id)
+            }
+            #[cfg(not(target_family = "wasm"))]
+            HostBackend::Desktop(_) => {
+                self.host_gpu.sampling_task.as_ref().is_some_and(|task| {
+                    task.connection_id() == connection_id && !task.is_finished()
+                })
+            }
+        }
     }
 
     pub(crate) fn gpu_list_state(&self) -> ListState {
@@ -1547,17 +1648,28 @@ impl HostToolsEntity {
         connection_id: String,
         enabled_and_visible: bool,
         selected_connection_id: Option<String>,
-        runtime: tokio::runtime::Handle,
+        runtime: HostToolsRuntime,
         cx: &mut Context<Self>,
     ) {
-        if self
-            .host_gpu
-            .sampling_task
-            .as_ref()
-            .is_some_and(|task| task.connection_id() == connection_id)
-            && let Some(task) = self.host_gpu.sampling_task.take()
-        {
-            task.stop();
+        match &self.backend {
+            HostBackend::Bridge(bridge) => {
+                if self.bridge_gpu.as_deref() == Some(connection_id.as_str()) {
+                    bridge.stop_gpu(&connection_id);
+                    self.bridge_gpu = None;
+                }
+            }
+            #[cfg(not(target_family = "wasm"))]
+            HostBackend::Desktop(_) => {
+                if self
+                    .host_gpu
+                    .sampling_task
+                    .as_ref()
+                    .is_some_and(|task| task.connection_id() == connection_id)
+                    && let Some(task) = self.host_gpu.sampling_task.take()
+                {
+                    task.stop();
+                }
+            }
         }
         self.host_gpu.snapshot = None;
         self.sync_gpu_sampling(enabled_and_visible, selected_connection_id, runtime, cx);

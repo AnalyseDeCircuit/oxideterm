@@ -7,27 +7,23 @@ impl HostToolsEntity {
         request: HostLogSnapshotRequest,
         timeout: Duration,
         max_output_size: usize,
-        runtime: tokio::runtime::Handle,
+        runtime: HostToolsRuntime,
     ) -> bool {
-        let audit = request.feedback.should_toast().then(|| {
-            self.host_tool_audit(
-                &request.connection_id,
-                "query_host_logs",
-                Some(&format!(
-                    "preset={:?} limit={}",
-                    request.preset, request.limit
-                )),
-            )
-        });
-        let Some(target) = self.host_command_target(&request.connection_id) else {
-            if let Some(audit) = audit {
-                audit.finish(
-                    oxideterm_audit::AuditOutcome::Failed,
-                    oxideterm_audit::AuditEvidence::Request,
-                    None,
-                    None,
-                );
-            }
+        let Some(target) = self.capture_target(
+            &request.connection_id,
+            #[cfg(not(target_family = "wasm"))]
+            request.feedback.should_toast().then(|| {
+                self.host_tool_audit(
+                    AuditCaptureKind::Query,
+                    &request.connection_id,
+                    "query_host_logs",
+                    Some(&format!(
+                        "preset={:?} limit={}",
+                        request.preset, request.limit
+                    )),
+                )
+            }),
+        ) else {
             return false;
         };
         let delivery_tx = self.reliable_delivery_tx.clone();
@@ -38,9 +34,6 @@ impl HostToolsEntity {
                 .run_command_capture(&command, timeout, max_output_size)
                 .await
                 .map_err(|_| ());
-            if let Some(audit) = audit {
-                finish_host_query_audit(audit, &result);
-            }
             let _ = delivery_tx.send(super::delivery::HostToolsReliableDelivery::LogSnapshot(
                 HostLogSnapshotDelivery { request, result },
             ));
@@ -54,21 +47,20 @@ impl HostToolsEntity {
         request: HostPortSnapshotRequest,
         timeout: Duration,
         max_output_size: usize,
-        runtime: tokio::runtime::Handle,
+        runtime: HostToolsRuntime,
     ) -> bool {
-        let audit = request
-            .feedback
-            .should_toast()
-            .then(|| self.host_tool_audit(&request.connection_id, "query_host_ports", None));
-        let Some(target) = self.host_command_target(&request.connection_id) else {
-            if let Some(audit) = audit {
-                audit.finish(
-                    oxideterm_audit::AuditOutcome::Failed,
-                    oxideterm_audit::AuditEvidence::Request,
+        let Some(target) = self.capture_target(
+            &request.connection_id,
+            #[cfg(not(target_family = "wasm"))]
+            request.feedback.should_toast().then(|| {
+                self.host_tool_audit(
+                    AuditCaptureKind::Query,
+                    &request.connection_id,
+                    "query_host_ports",
                     None,
-                    None,
-                );
-            }
+                )
+            }),
+        ) else {
             return false;
         };
         let delivery_tx = self.reliable_delivery_tx.clone();
@@ -79,9 +71,6 @@ impl HostToolsEntity {
                 .run_command_capture(&command, timeout, max_output_size)
                 .await
                 .map_err(|_| ());
-            if let Some(audit) = audit {
-                finish_host_query_audit(audit, &result);
-            }
             let _ = delivery_tx.send(super::delivery::HostToolsReliableDelivery::PortSnapshot(
                 HostPortSnapshotDelivery { request, result },
             ));
@@ -95,20 +84,20 @@ impl HostToolsEntity {
         request: FilesystemSnapshotRequest,
         timeout: Duration,
         max_output_size: usize,
-        runtime: tokio::runtime::Handle,
+        runtime: HostToolsRuntime,
     ) -> bool {
-        let audit = request
-            .notify
-            .then(|| self.host_tool_audit(&request.connection_id, "query_host_filesystems", None));
-        let Some(target) = self.host_command_target(&request.connection_id) else {
-            if let Some(audit) = audit {
-                audit.finish(
-                    oxideterm_audit::AuditOutcome::Failed,
-                    oxideterm_audit::AuditEvidence::Request,
+        let Some(target) = self.capture_target(
+            &request.connection_id,
+            #[cfg(not(target_family = "wasm"))]
+            request.notify.then(|| {
+                self.host_tool_audit(
+                    AuditCaptureKind::Query,
+                    &request.connection_id,
+                    "query_host_filesystems",
                     None,
-                    None,
-                );
-            }
+                )
+            }),
+        ) else {
             return false;
         };
         let delivery_tx = self.reliable_delivery_tx.clone();
@@ -119,9 +108,6 @@ impl HostToolsEntity {
                 .run_command_capture(&command, timeout, max_output_size)
                 .await
                 .map_err(|_| ());
-            if let Some(audit) = audit {
-                finish_host_query_audit(audit, &result);
-            }
             let _ = delivery_tx.send(
                 super::delivery::HostToolsReliableDelivery::FilesystemSnapshot(
                     HostFilesystemSnapshotDelivery { request, result },
@@ -137,21 +123,20 @@ impl HostToolsEntity {
         request: HostPackageSnapshotRequest,
         timeout: Duration,
         max_output_size: usize,
-        runtime: tokio::runtime::Handle,
+        runtime: HostToolsRuntime,
     ) -> bool {
-        let audit = request
-            .feedback
-            .should_toast()
-            .then(|| self.host_tool_audit(&request.connection_id, "query_host_packages", None));
-        let Some(target) = self.host_command_target(&request.connection_id) else {
-            if let Some(audit) = audit {
-                audit.finish(
-                    oxideterm_audit::AuditOutcome::Failed,
-                    oxideterm_audit::AuditEvidence::Request,
+        let Some(target) = self.capture_target(
+            &request.connection_id,
+            #[cfg(not(target_family = "wasm"))]
+            request.feedback.should_toast().then(|| {
+                self.host_tool_audit(
+                    AuditCaptureKind::Query,
+                    &request.connection_id,
+                    "query_host_packages",
                     None,
-                    None,
-                );
-            }
+                )
+            }),
+        ) else {
             return false;
         };
         let delivery_tx = self.reliable_delivery_tx.clone();
@@ -162,9 +147,6 @@ impl HostToolsEntity {
                 .run_command_capture(&command, timeout, max_output_size)
                 .await
                 .map_err(|_| ());
-            if let Some(audit) = audit {
-                finish_host_query_audit(audit, &result);
-            }
             let _ = delivery_tx.send(super::delivery::HostToolsReliableDelivery::PackageSnapshot(
                 HostPackageSnapshotDelivery { request, result },
             ));
@@ -178,21 +160,20 @@ impl HostToolsEntity {
         request: HostScheduleSnapshotRequest,
         timeout: Duration,
         max_output_size: usize,
-        runtime: tokio::runtime::Handle,
+        runtime: HostToolsRuntime,
     ) -> bool {
-        let audit = request
-            .feedback
-            .should_toast()
-            .then(|| self.host_tool_audit(&request.connection_id, "query_host_schedules", None));
-        let Some(target) = self.host_command_target(&request.connection_id) else {
-            if let Some(audit) = audit {
-                audit.finish(
-                    oxideterm_audit::AuditOutcome::Failed,
-                    oxideterm_audit::AuditEvidence::Request,
+        let Some(target) = self.capture_target(
+            &request.connection_id,
+            #[cfg(not(target_family = "wasm"))]
+            request.feedback.should_toast().then(|| {
+                self.host_tool_audit(
+                    AuditCaptureKind::Query,
+                    &request.connection_id,
+                    "query_host_schedules",
                     None,
-                    None,
-                );
-            }
+                )
+            }),
+        ) else {
             return false;
         };
         let delivery_tx = self.reliable_delivery_tx.clone();
@@ -203,9 +184,6 @@ impl HostToolsEntity {
                 .run_command_capture(&command, timeout, max_output_size)
                 .await
                 .map_err(|_| ());
-            if let Some(audit) = audit {
-                finish_host_query_audit(audit, &result);
-            }
             let _ = delivery_tx.send(
                 super::delivery::HostToolsReliableDelivery::ScheduleSnapshot(
                     HostScheduleSnapshotDelivery { request, result },
@@ -221,20 +199,18 @@ impl HostToolsEntity {
         request: HostScheduleLogsRequest,
         timeout: Duration,
         max_output_size: usize,
-        runtime: tokio::runtime::Handle,
+        runtime: HostToolsRuntime,
     ) -> bool {
-        let audit = self.host_tool_audit(
+        let Some(target) = self.capture_target(
             &request.connection_id,
-            "query_scheduled_task_logs",
-            Some(&format!("task_id={}", request.task_id)),
-        );
-        let Some(target) = self.host_command_target(&request.connection_id) else {
-            audit.finish(
-                oxideterm_audit::AuditOutcome::Failed,
-                oxideterm_audit::AuditEvidence::Request,
-                None,
-                None,
-            );
+            #[cfg(not(target_family = "wasm"))]
+            Some(self.host_tool_audit(
+                AuditCaptureKind::Query,
+                &request.connection_id,
+                "query_scheduled_task_logs",
+                Some(&format!("task_id={}", request.task_id)),
+            )),
+        ) else {
             return false;
         };
         let delivery_tx = self.reliable_delivery_tx.clone();
@@ -244,7 +220,6 @@ impl HostToolsEntity {
                 .run_command_capture(&command, timeout, max_output_size)
                 .await
                 .map_err(|_| ());
-            finish_host_query_audit(audit, &result);
             let _ = delivery_tx.send(super::delivery::HostToolsReliableDelivery::ScheduleLogs(
                 HostScheduleLogsDelivery { request, result },
             ));
@@ -258,34 +233,30 @@ impl HostToolsEntity {
         request: HostScheduleActionRequest,
         timeout: Duration,
         max_output_size: usize,
-        runtime: tokio::runtime::Handle,
+        runtime: HostToolsRuntime,
     ) -> bool {
-        let audit = self.host_tool_audit(
+        let Some(target) = self.capture_target(
             &request.connection_id,
-            "scheduled_task_action",
-            Some(&format!(
-                "task={} action={:?}",
-                request.task_id, request.action
+            #[cfg(not(target_family = "wasm"))]
+            Some(self.host_tool_audit(
+                AuditCaptureKind::Action,
+                &request.connection_id,
+                "scheduled_task_action",
+                Some(&format!(
+                    "task={} action={:?}",
+                    request.task_id, request.action
+                )),
             )),
-        );
-        let Some(target) = self.host_command_target(&request.connection_id) else {
-            audit.finish(
-                oxideterm_audit::AuditOutcome::Failed,
-                oxideterm_audit::AuditEvidence::Request,
-                None,
-                None,
-            );
+        ) else {
             return false;
         };
         let delivery_tx = self.reliable_delivery_tx.clone();
         // Action output is reduced to a success bit before it enters delivery.
         runtime.spawn(async move {
-            let mut audit_exit_code = None;
             let result = target
                 .run_command_capture(&command, timeout, max_output_size)
                 .await
                 .map(|mut output| {
-                    audit_exit_code = output.exit_code;
                     let succeeded = output.exit_code.unwrap_or(0) == 0;
                     // Captured action text may contain credentials and has no UI consumer.
                     zeroize::Zeroize::zeroize(&mut output.stdout);
@@ -293,22 +264,6 @@ impl HostToolsEntity {
                     succeeded
                 })
                 .map_err(|_| ());
-            let audit_outcome = match (&result, audit_exit_code) {
-                (Err(_), _) => oxideterm_audit::AuditOutcome::Failed,
-                (_, Some(0)) => oxideterm_audit::AuditOutcome::Succeeded,
-                (_, Some(_)) => oxideterm_audit::AuditOutcome::Failed,
-                (_, None) => oxideterm_audit::AuditOutcome::Unknown,
-            };
-            audit.finish(
-                audit_outcome,
-                if audit_exit_code.is_some() {
-                    oxideterm_audit::AuditEvidence::ExitCode
-                } else {
-                    oxideterm_audit::AuditEvidence::Protocol
-                },
-                audit_exit_code,
-                None,
-            );
             let _ = delivery_tx.send(super::delivery::HostToolsReliableDelivery::ScheduleAction(
                 HostScheduleActionDelivery { request, result },
             ));
@@ -322,54 +277,34 @@ impl HostToolsEntity {
         request: HostProcessActionRun,
         timeout: Duration,
         max_output_size: usize,
-        runtime: tokio::runtime::Handle,
+        runtime: HostToolsRuntime,
     ) -> bool {
-        let audit = self.host_tool_audit(
+        let Some(target) = self.capture_target(
             &request.connection_id,
-            "process_action",
-            Some(&format!("pid={} action={:?}", request.pid, request.action)),
-        );
-        let Some(target) = self.host_command_target(&request.connection_id) else {
-            audit.finish(
-                oxideterm_audit::AuditOutcome::Failed,
-                oxideterm_audit::AuditEvidence::Request,
-                None,
-                None,
-            );
+            #[cfg(not(target_family = "wasm"))]
+            Some(self.host_tool_audit(
+                AuditCaptureKind::Action,
+                &request.connection_id,
+                "process_action",
+                Some(&format!("pid={} action={:?}", request.pid, request.action)),
+            )),
+        ) else {
             return false;
         };
         let delivery_tx = self.reliable_delivery_tx.clone();
         // Remote process output has no UI consumer. Reduce it in the worker
         // and clear both buffers before crossing the Entity delivery boundary.
         runtime.spawn(async move {
-            let mut audit_exit_code = None;
             let result = target
                 .run_command_capture(&command, timeout, max_output_size)
                 .await
                 .map(|mut output| {
-                    audit_exit_code = output.exit_code;
                     let succeeded = output.exit_code.unwrap_or(0) == 0;
                     zeroize::Zeroize::zeroize(&mut output.stdout);
                     zeroize::Zeroize::zeroize(&mut output.stderr);
                     succeeded
                 })
                 .map_err(|_| ());
-            let audit_outcome = match (&result, audit_exit_code) {
-                (Err(_), _) => oxideterm_audit::AuditOutcome::Failed,
-                (_, Some(0)) => oxideterm_audit::AuditOutcome::Succeeded,
-                (_, Some(_)) => oxideterm_audit::AuditOutcome::Failed,
-                (_, None) => oxideterm_audit::AuditOutcome::Unknown,
-            };
-            audit.finish(
-                audit_outcome,
-                if audit_exit_code.is_some() {
-                    oxideterm_audit::AuditEvidence::ExitCode
-                } else {
-                    oxideterm_audit::AuditEvidence::Protocol
-                },
-                audit_exit_code,
-                None,
-            );
             let _ = delivery_tx.send(super::delivery::HostToolsReliableDelivery::ProcessAction(
                 HostProcessActionDelivery { request, result },
             ));
@@ -383,56 +318,36 @@ impl HostToolsEntity {
         request: HostDockerActionRequest,
         timeout: Duration,
         max_output_size: usize,
-        runtime: tokio::runtime::Handle,
+        runtime: HostToolsRuntime,
     ) -> bool {
-        let audit = self.host_tool_audit(
+        let Some(target) = self.capture_target(
             &request.connection_id,
-            "container_action",
-            Some(&format!(
-                "container={} action={:?}",
-                request.container_id, request.action
+            #[cfg(not(target_family = "wasm"))]
+            Some(self.host_tool_audit(
+                AuditCaptureKind::Action,
+                &request.connection_id,
+                "container_action",
+                Some(&format!(
+                    "container={} action={:?}",
+                    request.container_id, request.action
+                )),
             )),
-        );
-        let Some(target) = self.host_command_target(&request.connection_id) else {
-            audit.finish(
-                oxideterm_audit::AuditOutcome::Failed,
-                oxideterm_audit::AuditEvidence::Request,
-                None,
-                None,
-            );
+        ) else {
             return false;
         };
         let delivery_tx = self.reliable_delivery_tx.clone();
         // Docker action output is not product data. Clear it before delivery.
         runtime.spawn(async move {
-            let mut audit_exit_code = None;
             let result = target
                 .run_command_capture(&command, timeout, max_output_size)
                 .await
                 .map(|mut output| {
-                    audit_exit_code = output.exit_code;
                     let succeeded = output.exit_code.unwrap_or(0) == 0;
                     zeroize::Zeroize::zeroize(&mut output.stdout);
                     zeroize::Zeroize::zeroize(&mut output.stderr);
                     succeeded
                 })
                 .map_err(|_| ());
-            let audit_outcome = match (&result, audit_exit_code) {
-                (Err(_), _) => oxideterm_audit::AuditOutcome::Failed,
-                (_, Some(0)) => oxideterm_audit::AuditOutcome::Succeeded,
-                (_, Some(_)) => oxideterm_audit::AuditOutcome::Failed,
-                (_, None) => oxideterm_audit::AuditOutcome::Unknown,
-            };
-            audit.finish(
-                audit_outcome,
-                if audit_exit_code.is_some() {
-                    oxideterm_audit::AuditEvidence::ExitCode
-                } else {
-                    oxideterm_audit::AuditEvidence::Protocol
-                },
-                audit_exit_code,
-                None,
-            );
             let _ = delivery_tx.send(super::delivery::HostToolsReliableDelivery::DockerAction(
                 HostDockerActionDelivery { request, result },
             ));
@@ -446,20 +361,18 @@ impl HostToolsEntity {
         request: HostDockerLogsRequest,
         timeout: Duration,
         max_output_size: usize,
-        runtime: tokio::runtime::Handle,
+        runtime: HostToolsRuntime,
     ) -> bool {
-        let audit = self.host_tool_audit(
+        let Some(target) = self.capture_target(
             &request.connection_id,
-            "query_container_logs",
-            Some(&format!("container_id={}", request.container_id)),
-        );
-        let Some(target) = self.host_command_target(&request.connection_id) else {
-            audit.finish(
-                oxideterm_audit::AuditOutcome::Failed,
-                oxideterm_audit::AuditEvidence::Request,
-                None,
-                None,
-            );
+            #[cfg(not(target_family = "wasm"))]
+            Some(self.host_tool_audit(
+                AuditCaptureKind::Query,
+                &request.connection_id,
+                "query_container_logs",
+                Some(&format!("container_id={}", request.container_id)),
+            )),
+        ) else {
             return false;
         };
         let delivery_tx = self.reliable_delivery_tx.clone();
@@ -469,7 +382,6 @@ impl HostToolsEntity {
                 .run_command_capture(&command, timeout, max_output_size)
                 .await
                 .map_err(|_| ());
-            finish_host_query_audit(audit, &result);
             let _ = delivery_tx.send(super::delivery::HostToolsReliableDelivery::DockerLogs(
                 HostDockerLogsDelivery { request, result },
             ));
@@ -483,7 +395,7 @@ impl HostToolsEntity {
         request: HostServiceSnapshotRequest,
         timeout: Duration,
         max_output_size: usize,
-        runtime: tokio::runtime::Handle,
+        runtime: HostToolsRuntime,
     ) -> bool {
         let Some(target) = self.host_command_target(&request.connection_id) else {
             return false;
@@ -508,56 +420,36 @@ impl HostToolsEntity {
         request: HostServiceActionRequest,
         timeout: Duration,
         max_output_size: usize,
-        runtime: tokio::runtime::Handle,
+        runtime: HostToolsRuntime,
     ) -> bool {
-        let audit = self.host_tool_audit(
+        let Some(target) = self.capture_target(
             &request.connection_id,
-            "service_action",
-            Some(&format!(
-                "service={} action={:?}",
-                request.service_id, request.action
+            #[cfg(not(target_family = "wasm"))]
+            Some(self.host_tool_audit(
+                AuditCaptureKind::Action,
+                &request.connection_id,
+                "service_action",
+                Some(&format!(
+                    "service={} action={:?}",
+                    request.service_id, request.action
+                )),
             )),
-        );
-        let Some(target) = self.host_command_target(&request.connection_id) else {
-            audit.finish(
-                oxideterm_audit::AuditOutcome::Failed,
-                oxideterm_audit::AuditEvidence::Request,
-                None,
-                None,
-            );
+        ) else {
             return false;
         };
         let delivery_tx = self.reliable_delivery_tx.clone();
         // Service action output has no UI consumer and is cleared in the worker.
         runtime.spawn(async move {
-            let mut audit_exit_code = None;
             let result = target
                 .run_command_capture(&command, timeout, max_output_size)
                 .await
                 .map(|mut output| {
-                    audit_exit_code = output.exit_code;
                     let succeeded = output.exit_code.unwrap_or(0) == 0;
                     zeroize::Zeroize::zeroize(&mut output.stdout);
                     zeroize::Zeroize::zeroize(&mut output.stderr);
                     succeeded
                 })
                 .map_err(|_| ());
-            let audit_outcome = match (&result, audit_exit_code) {
-                (Err(_), _) => oxideterm_audit::AuditOutcome::Failed,
-                (_, Some(0)) => oxideterm_audit::AuditOutcome::Succeeded,
-                (_, Some(_)) => oxideterm_audit::AuditOutcome::Failed,
-                (_, None) => oxideterm_audit::AuditOutcome::Unknown,
-            };
-            audit.finish(
-                audit_outcome,
-                if audit_exit_code.is_some() {
-                    oxideterm_audit::AuditEvidence::ExitCode
-                } else {
-                    oxideterm_audit::AuditEvidence::Protocol
-                },
-                audit_exit_code,
-                None,
-            );
             let _ = delivery_tx.send(super::delivery::HostToolsReliableDelivery::ServiceAction(
                 HostServiceActionDelivery { request, result },
             ));
@@ -571,20 +463,18 @@ impl HostToolsEntity {
         request: HostServiceLogsRequest,
         timeout: Duration,
         max_output_size: usize,
-        runtime: tokio::runtime::Handle,
+        runtime: HostToolsRuntime,
     ) -> bool {
-        let audit = self.host_tool_audit(
+        let Some(target) = self.capture_target(
             &request.connection_id,
-            "query_service_logs",
-            Some(&format!("service_id={}", request.service_id)),
-        );
-        let Some(target) = self.host_command_target(&request.connection_id) else {
-            audit.finish(
-                oxideterm_audit::AuditOutcome::Failed,
-                oxideterm_audit::AuditEvidence::Request,
-                None,
-                None,
-            );
+            #[cfg(not(target_family = "wasm"))]
+            Some(self.host_tool_audit(
+                AuditCaptureKind::Query,
+                &request.connection_id,
+                "query_service_logs",
+                Some(&format!("service_id={}", request.service_id)),
+            )),
+        ) else {
             return false;
         };
         let delivery_tx = self.reliable_delivery_tx.clone();
@@ -594,7 +484,6 @@ impl HostToolsEntity {
                 .run_command_capture(&command, timeout, max_output_size)
                 .await
                 .map_err(|_| ());
-            finish_host_query_audit(audit, &result);
             let _ = delivery_tx.send(super::delivery::HostToolsReliableDelivery::ServiceLogs(
                 HostServiceLogsDelivery { request, result },
             ));
@@ -612,21 +501,20 @@ impl HostToolsEntity {
         request: MuxSnapshotRequest,
         timeout: Duration,
         max_output_size: usize,
-        runtime: tokio::runtime::Handle,
-    ) -> Option<tokio::task::JoinHandle<()>> {
-        let provider = request.provider.name();
-        let audit = request.feedback.should_toast().then(|| {
-            self.host_tool_audit(&request.connection_id, "query_multiplexer", Some(provider))
-        });
-        let Some(target) = self.host_command_target(&request.connection_id) else {
-            if let Some(audit) = audit {
-                audit.finish(
-                    oxideterm_audit::AuditOutcome::Failed,
-                    oxideterm_audit::AuditEvidence::Request,
-                    None,
-                    None,
-                );
-            }
+        runtime: HostToolsRuntime,
+    ) -> Option<HostCaptureTask> {
+        let Some(target) = self.capture_target(
+            &request.connection_id,
+            #[cfg(not(target_family = "wasm"))]
+            request.feedback.should_toast().then(|| {
+                self.host_tool_audit(
+                    AuditCaptureKind::Query,
+                    &request.connection_id,
+                    "query_multiplexer",
+                    Some(request.provider.name()),
+                )
+            }),
+        ) else {
             return None;
         };
         let delivery_tx = self.reliable_delivery_tx.clone();
@@ -635,9 +523,6 @@ impl HostToolsEntity {
                 .run_command_capture(&command, timeout, max_output_size)
                 .await
                 .map_err(|_| ());
-            if let Some(audit) = audit {
-                finish_host_query_audit(audit, &result);
-            }
             let _ = delivery_tx.send(super::delivery::HostToolsReliableDelivery::MuxSnapshot(
                 MuxSnapshotDelivery { request, result },
             ));
@@ -650,24 +535,22 @@ impl HostToolsEntity {
         request: MuxDetailRequest,
         timeout: Duration,
         max_output_size: usize,
-        runtime: tokio::runtime::Handle,
-    ) -> Option<tokio::task::JoinHandle<()>> {
-        let audit = self.host_tool_audit(
+        runtime: HostToolsRuntime,
+    ) -> Option<HostCaptureTask> {
+        let Some(target) = self.capture_target(
             &request.connection_id,
-            "query_multiplexer",
-            Some(&format!(
-                "provider={} session={}",
-                request.provider.name(),
-                request.session
+            #[cfg(not(target_family = "wasm"))]
+            Some(self.host_tool_audit(
+                AuditCaptureKind::Query,
+                &request.connection_id,
+                "query_multiplexer",
+                Some(&format!(
+                    "provider={} session={}",
+                    request.provider.name(),
+                    request.session
+                )),
             )),
-        );
-        let Some(target) = self.host_command_target(&request.connection_id) else {
-            audit.finish(
-                oxideterm_audit::AuditOutcome::Failed,
-                oxideterm_audit::AuditEvidence::Request,
-                None,
-                None,
-            );
+        ) else {
             return None;
         };
         let delivery_tx = self.reliable_delivery_tx.clone();
@@ -677,7 +560,6 @@ impl HostToolsEntity {
                 .run_command_capture(&command, timeout, max_output_size)
                 .await
                 .map_err(|_| ());
-            finish_host_query_audit(audit, &result);
             let _ = delivery_tx.send(super::delivery::HostToolsReliableDelivery::MuxDetail(
                 MuxDetailDelivery { request, result },
             ));
@@ -693,30 +575,32 @@ impl HostToolsEntity {
         request: MuxActionRun,
         timeout: Duration,
         max_output_size: usize,
-        runtime: tokio::runtime::Handle,
-    ) -> Option<tokio::task::JoinHandle<()>> {
+        runtime: HostToolsRuntime,
+    ) -> Option<HostCaptureTask> {
+        #[cfg(not(target_family = "wasm"))]
         let audit = self.host_tool_audit(
+            AuditCaptureKind::Action,
             &request.connection_id,
             "manage_multiplexer",
             Some(provider.name()),
         );
         let Some(target) = self.host_command_target(&request.connection_id) else {
-            audit.finish(
-                oxideterm_audit::AuditOutcome::Failed,
-                oxideterm_audit::AuditEvidence::Request,
-                None,
-                None,
-            );
+            #[cfg(not(target_family = "wasm"))]
+            audit.unavailable();
             return None;
         };
         let delivery_tx = self.reliable_delivery_tx.clone();
         Some(runtime.spawn(async move {
+            #[cfg(not(target_family = "wasm"))]
             let mut audit_exit_code = None;
             let result = target
                 .run_command_capture(command.as_str(), timeout, max_output_size)
                 .await
                 .map(|mut output| {
-                    audit_exit_code = output.exit_code;
+                    #[cfg(not(target_family = "wasm"))]
+                    {
+                        audit_exit_code = output.exit_code;
+                    }
                     // A provider may report failure inside its envelope while
                     // still exiting zero, so the envelope decides; a truncated
                     // capture holds only part of it and decides nothing.
@@ -730,20 +614,8 @@ impl HostToolsEntity {
                     succeeded
                 })
                 .map_err(|_| ());
-            let audit_outcome = match &result {
-                Ok(true) => oxideterm_audit::AuditOutcome::Succeeded,
-                Ok(false) | Err(_) => oxideterm_audit::AuditOutcome::Failed,
-            };
-            audit.finish(
-                audit_outcome,
-                if audit_exit_code.is_some() {
-                    oxideterm_audit::AuditEvidence::ExitCode
-                } else {
-                    oxideterm_audit::AuditEvidence::Protocol
-                },
-                audit_exit_code,
-                None,
-            );
+            #[cfg(not(target_family = "wasm"))]
+            audit.finish(Some(matches!(result, Ok(true))), audit_exit_code, None);
             let _ = delivery_tx.send(super::delivery::HostToolsReliableDelivery::MuxAction(
                 MuxActionDelivery { request, result },
             ));
@@ -756,24 +628,22 @@ impl HostToolsEntity {
         request: MuxReadRequest,
         timeout: Duration,
         max_output_size: usize,
-        runtime: tokio::runtime::Handle,
-    ) -> Option<tokio::task::JoinHandle<()>> {
-        let audit = self.host_tool_audit(
+        runtime: HostToolsRuntime,
+    ) -> Option<HostCaptureTask> {
+        let Some(target) = self.capture_target(
             &request.connection_id,
-            "query_multiplexer",
-            Some(&format!(
-                "provider={} target={}",
-                request.provider.name(),
-                request.target_id
+            #[cfg(not(target_family = "wasm"))]
+            Some(self.host_tool_audit(
+                AuditCaptureKind::Query,
+                &request.connection_id,
+                "query_multiplexer",
+                Some(&format!(
+                    "provider={} target={}",
+                    request.provider.name(),
+                    request.target_id
+                )),
             )),
-        );
-        let Some(target) = self.host_command_target(&request.connection_id) else {
-            audit.finish(
-                oxideterm_audit::AuditOutcome::Failed,
-                oxideterm_audit::AuditEvidence::Request,
-                None,
-                None,
-            );
+        ) else {
             return None;
         };
         let delivery_tx = self.reliable_delivery_tx.clone();
@@ -783,7 +653,6 @@ impl HostToolsEntity {
                 .run_command_capture(&command, timeout, max_output_size)
                 .await
                 .map_err(|_| ());
-            finish_host_query_audit(audit, &result);
             let _ = delivery_tx.send(super::delivery::HostToolsReliableDelivery::MuxRead(
                 MuxReadDelivery { request, result },
             ));
@@ -796,21 +665,20 @@ impl HostToolsEntity {
         request: HostTmuxSnapshotRequest,
         timeout: Duration,
         max_output_size: usize,
-        runtime: tokio::runtime::Handle,
+        runtime: HostToolsRuntime,
     ) -> bool {
-        let audit = request
-            .feedback
-            .should_toast()
-            .then(|| self.host_tool_audit(&request.connection_id, "query_host_tmux", None));
-        let Some(target) = self.host_command_target(&request.connection_id) else {
-            if let Some(audit) = audit {
-                audit.finish(
-                    oxideterm_audit::AuditOutcome::Failed,
-                    oxideterm_audit::AuditEvidence::Request,
+        let Some(target) = self.capture_target(
+            &request.connection_id,
+            #[cfg(not(target_family = "wasm"))]
+            request.feedback.should_toast().then(|| {
+                self.host_tool_audit(
+                    AuditCaptureKind::Query,
+                    &request.connection_id,
+                    "query_host_tmux",
                     None,
-                    None,
-                );
-            }
+                )
+            }),
+        ) else {
             return false;
         };
         let delivery_tx = self.reliable_delivery_tx.clone();
@@ -820,9 +688,6 @@ impl HostToolsEntity {
                 .run_command_capture(&command, timeout, max_output_size)
                 .await
                 .map_err(|_| ());
-            if let Some(audit) = audit {
-                finish_host_query_audit(audit, &result);
-            }
             let _ = delivery_tx.send(super::delivery::HostToolsReliableDelivery::TmuxSnapshot(
                 HostTmuxSnapshotDelivery { request, result },
             ));
@@ -836,54 +701,34 @@ impl HostToolsEntity {
         request: HostTmuxActionRun,
         timeout: Duration,
         max_output_size: usize,
-        runtime: tokio::runtime::Handle,
+        runtime: HostToolsRuntime,
     ) -> bool {
-        let audit = self.host_tool_audit(
+        let Some(target) = self.capture_target(
             &request.connection_id,
-            "tmux_action",
-            Some(&format!("session={}", request.session_id)),
-        );
-        let Some(target) = self.host_command_target(&request.connection_id) else {
-            audit.finish(
-                oxideterm_audit::AuditOutcome::Failed,
-                oxideterm_audit::AuditEvidence::Request,
-                None,
-                None,
-            );
+            #[cfg(not(target_family = "wasm"))]
+            Some(self.host_tool_audit(
+                AuditCaptureKind::Action,
+                &request.connection_id,
+                "tmux_action",
+                Some(&format!("session={}", request.session_id)),
+            )),
+        ) else {
             return false;
         };
         let delivery_tx = self.reliable_delivery_tx.clone();
         // The generated command is moved once into the worker. Captured output
         // is cleared before only a success bit crosses delivery.
         runtime.spawn(async move {
-            let mut audit_exit_code = None;
             let result = target
                 .run_command_capture(command.as_str(), timeout, max_output_size)
                 .await
                 .map(|mut output| {
-                    audit_exit_code = output.exit_code;
                     let succeeded = output.exit_code.unwrap_or(0) == 0;
                     zeroize::Zeroize::zeroize(&mut output.stdout);
                     zeroize::Zeroize::zeroize(&mut output.stderr);
                     succeeded
                 })
                 .map_err(|_| ());
-            let audit_outcome = match (&result, audit_exit_code) {
-                (Err(_), _) => oxideterm_audit::AuditOutcome::Failed,
-                (_, Some(0)) => oxideterm_audit::AuditOutcome::Succeeded,
-                (_, Some(_)) => oxideterm_audit::AuditOutcome::Failed,
-                (_, None) => oxideterm_audit::AuditOutcome::Unknown,
-            };
-            audit.finish(
-                audit_outcome,
-                if audit_exit_code.is_some() {
-                    oxideterm_audit::AuditEvidence::ExitCode
-                } else {
-                    oxideterm_audit::AuditEvidence::Protocol
-                },
-                audit_exit_code,
-                None,
-            );
             let _ = delivery_tx.send(super::delivery::HostToolsReliableDelivery::TmuxAction(
                 HostTmuxActionDelivery { request, result },
             ));

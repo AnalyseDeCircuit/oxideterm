@@ -10,19 +10,26 @@ version.workspace = true
 [dependencies]
 chrono.workspace = true
 gpui.workspace = true
-oxideterm-audit = { path = "../oxideterm-audit" }
 oxideterm-connection-monitor = { path = "../oxideterm-connection-monitor" }
 oxideterm-editor-core = { path = "../oxideterm-editor-core" }
 oxideterm-gpui-ui = { path = "../oxideterm-gpui-ui" }
 oxideterm-i18n = { path = "../oxideterm-i18n" }
 oxideterm-settings = { path = "../oxideterm-settings" }
-oxideterm-ssh = { path = "../oxideterm-ssh" }
 oxideterm-theme = { path = "../oxideterm-theme" }
 oxideterm-topology = { path = "../oxideterm-topology" }
 oxideterm-workspace = { path = "../oxideterm-workspace" }
 serde_json.workspace = true
-tokio.workspace = true
 zeroize.workspace = true
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+oxideterm-audit = { path = "../oxideterm-audit" }
+oxideterm-ssh = { path = "../oxideterm-ssh" }
+tokio.workspace = true
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+chrono = { workspace = true, features = ["wasmbind"] }
+futures-util.workspace = true
+web-time.workspace = true
 
 [dev-dependencies]
 base64.workspace = true

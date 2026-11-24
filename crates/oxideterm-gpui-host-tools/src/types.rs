@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use gpui::{Rgba, rgb, rgba};
 use oxideterm_gpui_ui::motion::ExitPresence;
-use oxideterm_ssh::{SshCommandOutput, SshSecretCommandOutput};
+
 use oxideterm_topology::TopologyViewStatus;
 use zeroize::Zeroize;
 
@@ -272,6 +272,7 @@ pub struct MonitorConnectionOption {
 }
 
 impl MonitorConnectionOption {
+    #[cfg(not(target_family = "wasm"))]
     pub fn from_connection_info(connection: oxideterm_ssh::ConnectionInfo) -> Self {
         Self {
             connection_id: connection.connection_id,
@@ -292,6 +293,7 @@ impl MonitorConnectionOption {
         }
     }
 
+    #[cfg(not(target_family = "wasm"))]
     pub fn local(label: String) -> Self {
         Self {
             connection_id: LOCAL_HOST_CONNECTION_ID.to_string(),
@@ -363,7 +365,7 @@ pub struct HostDockerLogsRequest {
 
 pub struct HostDockerLogsDelivery {
     pub request: HostDockerLogsRequest,
-    pub result: Result<SshCommandOutput, ()>,
+    pub result: Result<HostCommandOutput, ()>,
 }
 
 #[derive(Clone, Eq, PartialEq)]
@@ -400,12 +402,12 @@ pub struct HostServiceSnapshotRequest {
 
 pub struct HostServiceSnapshotDelivery {
     pub request: HostServiceSnapshotRequest,
-    pub result: Result<SshCommandOutput, ()>,
+    pub result: Result<HostCommandOutput, ()>,
 }
 
 pub struct HostServiceSnapshotPending {
     pub request: HostServiceSnapshotRequest,
-    pub runtime: tokio::runtime::Handle,
+    pub runtime: HostToolsRuntime,
 }
 
 #[derive(Clone, Eq, PartialEq)]
@@ -432,7 +434,7 @@ pub struct HostServiceLogsRequest {
 
 pub struct HostServiceLogsDelivery {
     pub request: HostServiceLogsRequest,
-    pub result: Result<SshCommandOutput, ()>,
+    pub result: Result<HostCommandOutput, ()>,
 }
 
 #[derive(Clone, Eq, PartialEq)]
@@ -479,12 +481,12 @@ pub struct HostRedisSnapshotRequest {
 
 pub struct HostRedisSnapshotDelivery {
     pub request: HostRedisSnapshotRequest,
-    pub result: Result<SshCommandOutput, ()>,
+    pub result: Result<HostCommandOutput, ()>,
 }
 
 pub struct HostRedisSnapshotPending {
     pub request: HostRedisSnapshotRequest,
-    pub runtime: tokio::runtime::Handle,
+    pub runtime: HostToolsRuntime,
 }
 
 /// One key-browsing request for a single endpoint.
@@ -524,12 +526,12 @@ impl HostRedisKeysRequest {
 
 pub struct HostRedisKeysDelivery {
     pub request: HostRedisKeysRequest,
-    pub result: Result<SshSecretCommandOutput, ()>,
+    pub result: Result<HostSecretCommandOutput, ()>,
 }
 
 pub struct HostRedisKeysPending {
     pub request: HostRedisKeysRequest,
-    pub runtime: tokio::runtime::Handle,
+    pub runtime: HostToolsRuntime,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -564,12 +566,12 @@ impl HostRedisValueRequest {
 
 pub struct HostRedisValueDelivery {
     pub request: HostRedisValueRequest,
-    pub result: Result<SshSecretCommandOutput, ()>,
+    pub result: Result<HostSecretCommandOutput, ()>,
 }
 
 pub struct HostRedisValuePending {
     pub request: HostRedisValueRequest,
-    pub runtime: tokio::runtime::Handle,
+    pub runtime: HostToolsRuntime,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -602,7 +604,7 @@ pub struct HostRedisMutationRequest {
 
 pub struct HostRedisMutationDelivery {
     pub request: HostRedisMutationRequest,
-    pub result: Result<SshSecretCommandOutput, ()>,
+    pub result: Result<HostSecretCommandOutput, ()>,
 }
 
 pub struct HostRedisValueDialog {
@@ -718,7 +720,7 @@ pub struct HostRedisCreateKeyRequest {
 
 pub struct HostRedisCreateKeyDelivery {
     pub request: HostRedisCreateKeyRequest,
-    pub result: Result<SshSecretCommandOutput, ()>,
+    pub result: Result<HostSecretCommandOutput, ()>,
 }
 
 pub struct HostRedisSetValueDialog {
@@ -763,7 +765,7 @@ pub struct HostRedisSetValueRequest {
 
 pub struct HostRedisSetValueDelivery {
     pub request: HostRedisSetValueRequest,
-    pub result: Result<SshSecretCommandOutput, ()>,
+    pub result: Result<HostSecretCommandOutput, ()>,
 }
 
 pub struct HostRedisState {
@@ -930,7 +932,7 @@ pub struct HostContainerConfirmRequest {
 
 pub struct HostContainerConfirmDelivery {
     pub request: HostContainerConfirmRequest,
-    pub result: Result<SshCommandOutput, ()>,
+    pub result: Result<HostCommandOutput, ()>,
 }
 
 /// Text-input dialogs for the container tool. Free-form arguments stay raw by
@@ -1016,7 +1018,7 @@ pub struct HostContainerCaptureRequest {
 
 pub struct HostContainerCaptureDelivery {
     pub request: HostContainerCaptureRequest,
-    pub result: Result<SshCommandOutput, ()>,
+    pub result: Result<HostCommandOutput, ()>,
 }
 
 pub struct HostContainerTextDialog {
@@ -1040,7 +1042,7 @@ pub struct HostContainerState {
     pub discovery_running: bool,
     /// Handle of the running discovery probe. Aborting it cancels the capture,
     /// so a superseding connection does not wait out the old host's 40s probe.
-    pub discovery_task: Option<tokio::task::JoinHandle<()>>,
+    pub discovery_task: Option<HostCaptureTask>,
     /// Engine selection survives refreshes and is dropped only when the engine
     /// disappears from discovery.
     pub selected_instance_id: Option<String>,
@@ -1061,7 +1063,7 @@ pub struct HostContainerState {
     pub text_dialog_running_generation: Option<u64>,
     /// Task for the running capture; aborted when the dialog closes so a
     /// dismissed inspect/log read stops holding a channel until its timeout.
-    pub text_dialog_task: Option<tokio::task::JoinHandle<()>>,
+    pub text_dialog_task: Option<HostCaptureTask>,
     /// User-chosen capture dialog size, kept across openings.
     pub text_dialog_size: (f32, f32),
     pub text_dialog_resize: Option<HostToolsDialogResizeDrag>,
@@ -1197,10 +1199,10 @@ pub struct HostLogSnapshotRequest {
 
 pub struct HostLogSnapshotDelivery {
     pub request: HostLogSnapshotRequest,
-    pub result: Result<SshCommandOutput, ()>,
+    pub result: Result<HostCommandOutput, ()>,
 }
 
-pub fn zeroize_host_snapshot_output(output: &mut SshCommandOutput) {
+pub fn zeroize_host_snapshot_output(output: &mut HostCommandOutput) {
     // Host inspection commands may return credentials embedded in logs or
     // diagnostics. Clear both raw streams once parsing or classification ends.
     output.stdout.zeroize();
@@ -1213,7 +1215,7 @@ mod snapshot_output_zeroize_tests {
 
     #[test]
     fn host_snapshot_output_zeroizes_both_raw_streams() {
-        let mut output = SshCommandOutput {
+        let mut output = HostCommandOutput {
             stdout: "Authorization: secret-output".to_string(),
             stderr: "Proxy-Authorization: secret-error".to_string(),
             exit_code: Some(1),
@@ -1270,7 +1272,7 @@ pub struct HostTmuxSnapshotRequest {
 
 pub struct HostTmuxSnapshotDelivery {
     pub request: HostTmuxSnapshotRequest,
-    pub result: Result<SshCommandOutput, ()>,
+    pub result: Result<HostCommandOutput, ()>,
 }
 
 #[derive(Clone, Eq, PartialEq)]
@@ -1313,7 +1315,7 @@ pub struct HostPortSnapshotRequest {
 
 pub struct HostPortSnapshotDelivery {
     pub request: HostPortSnapshotRequest,
-    pub result: Result<SshCommandOutput, ()>,
+    pub result: Result<HostCommandOutput, ()>,
 }
 
 pub struct HostPortsState {
@@ -1355,7 +1357,7 @@ pub struct HostScheduleSnapshotRequest {
 
 pub struct HostScheduleSnapshotDelivery {
     pub request: HostScheduleSnapshotRequest,
-    pub result: Result<SshCommandOutput, ()>,
+    pub result: Result<HostCommandOutput, ()>,
 }
 
 pub struct HostSchedulesState {
@@ -1396,7 +1398,7 @@ impl HostSchedulesState {
 
 pub struct HostFilesystemSnapshotDelivery {
     pub request: FilesystemSnapshotRequest,
-    pub result: Result<SshCommandOutput, ()>,
+    pub result: Result<HostCommandOutput, ()>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1408,7 +1410,7 @@ pub struct HostPackageSnapshotRequest {
 
 pub struct HostPackageSnapshotDelivery {
     pub request: HostPackageSnapshotRequest,
-    pub result: Result<SshCommandOutput, ()>,
+    pub result: Result<HostCommandOutput, ()>,
 }
 
 /// Packages uninstall through a confirmation because the terminal command
@@ -1482,7 +1484,7 @@ pub struct HostScheduleLogsRequest {
 
 pub struct HostScheduleLogsDelivery {
     pub request: HostScheduleLogsRequest,
-    pub result: Result<SshCommandOutput, ()>,
+    pub result: Result<HostCommandOutput, ()>,
 }
 
 #[derive(Clone, Eq, PartialEq)]
@@ -1595,7 +1597,7 @@ impl MuxSnapshotRequest {
 
 pub struct MuxSnapshotDelivery {
     pub request: MuxSnapshotRequest,
-    pub result: Result<SshCommandOutput, ()>,
+    pub result: Result<HostCommandOutput, ()>,
 }
 
 /// One capture of the subtree beneath one session; same generation rule as
@@ -1618,7 +1620,7 @@ impl MuxDetailRequest {
 
 pub struct MuxDetailDelivery {
     pub request: MuxDetailRequest,
-    pub result: Result<SshCommandOutput, ()>,
+    pub result: Result<HostCommandOutput, ()>,
 }
 
 /// The verb the user confirmed against one row. `node` is `None` for a
@@ -1698,7 +1700,7 @@ pub struct MuxReadRequest {
 
 pub struct MuxReadDelivery {
     pub request: MuxReadRequest,
-    pub result: Result<SshCommandOutput, ()>,
+    pub result: Result<HostCommandOutput, ()>,
 }
 
 #[derive(Clone, Eq, PartialEq)]
@@ -1893,7 +1895,9 @@ pub struct HostToolConfirmState<T> {
 }
 
 pub struct HostGpuViewState {
+    #[cfg(not(target_family = "wasm"))]
     pub update_tx: tokio::sync::mpsc::UnboundedSender<GpuUpdate>,
+    #[cfg(not(target_family = "wasm"))]
     pub sampling_task: Option<GpuSamplingTask>,
     pub snapshot_connection_id: Option<String>,
     pub snapshot: Option<GpuSnapshot>,
@@ -1903,9 +1907,15 @@ pub struct HostGpuViewState {
 }
 
 impl HostGpuViewState {
-    pub fn new(update_tx: tokio::sync::mpsc::UnboundedSender<GpuUpdate>) -> Self {
+    pub fn new(
+        #[cfg(not(target_family = "wasm"))] update_tx: tokio::sync::mpsc::UnboundedSender<
+            GpuUpdate,
+        >,
+    ) -> Self {
         Self {
+            #[cfg(not(target_family = "wasm"))]
             update_tx,
+            #[cfg(not(target_family = "wasm"))]
             sampling_task: None,
             snapshot_connection_id: None,
             snapshot: None,

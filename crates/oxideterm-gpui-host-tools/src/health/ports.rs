@@ -1068,7 +1068,7 @@ impl HostToolsEntity {
         connection_id: String,
         feedback: HostSnapshotFeedback,
         monitoring_enabled: bool,
-        runtime: tokio::runtime::Handle,
+        runtime: HostToolsRuntime,
         failure_fallback: String,
         cx: &mut Context<Self>,
     ) -> Vec<HostToolsNotice> {

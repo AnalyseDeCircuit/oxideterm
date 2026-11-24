@@ -3,6 +3,7 @@ use oxideterm_workspace::delivery as workspace_delivery;
 
 pub(crate) enum HostToolsSamplerDelivery {
     GpuUpdated(GpuUpdate),
+    ProfilerChanged,
 }
 
 pub(crate) enum HostToolsReliableDelivery {
@@ -37,24 +38,14 @@ pub(crate) enum HostToolsReliableDelivery {
     ScheduleAction(HostScheduleActionDelivery),
 }
 
-pub(crate) struct HostToolsDeliveryBridges {
-    pub(crate) profiler_update_rx: tokio::sync::mpsc::Receiver<()>,
-    pub(crate) gpu_update_rx: tokio::sync::mpsc::UnboundedReceiver<GpuUpdate>,
-    pub(crate) sampler_delivery_tx:
-        workspace_delivery::ActiveDeliverySender<HostToolsSamplerDelivery>,
-}
-
 impl HostToolsEntity {
-    pub(super) fn schedule_sampler_delivery(
+    #[cfg(not(target_family = "wasm"))]
+    pub(super) fn forward_desktop_updates(
         &self,
-        bridges: HostToolsDeliveryBridges,
+        mut profiler_update_rx: tokio::sync::mpsc::Receiver<()>,
+        mut gpu_update_rx: tokio::sync::mpsc::UnboundedReceiver<GpuUpdate>,
         cx: &mut Context<Self>,
     ) {
-        let HostToolsDeliveryBridges {
-            mut profiler_update_rx,
-            mut gpu_update_rx,
-            sampler_delivery_tx,
-        } = bridges;
         cx.spawn(async move |weak, cx| {
             while profiler_update_rx.recv().await.is_some() {
                 // This already runs on the foreground executor; do not enqueue
@@ -66,7 +57,7 @@ impl HostToolsEntity {
         })
         .detach();
 
-        let gpu_delivery_tx = sampler_delivery_tx;
+        let gpu_delivery_tx = self.updates.0.clone();
         cx.spawn(async move |_, _| {
             while let Some(update) = gpu_update_rx.recv().await {
                 if gpu_delivery_tx
@@ -78,16 +69,15 @@ impl HostToolsEntity {
             }
         })
         .detach();
+    }
 
+    pub(super) fn schedule_sampler_delivery(&self, cx: &mut Context<Self>) {
         let delivery_wake = self.sampler_delivery_wake.clone();
         let release_wake = delivery_wake.clone();
         cx.on_release(move |entity, _| {
             // Releasing the page owner stops sampling shells, never shared SSH nodes.
             entity.visibility = HostToolsVisibility::Dropped;
-            entity.profiler_registry.stop_all();
-            if let Some(task) = entity.host_gpu.sampling_task.take() {
-                task.stop();
-            }
+            entity.stop_page_sampling();
             release_wake.stop();
         })
         .detach();
@@ -121,18 +111,15 @@ impl HostToolsEntity {
             &self.sampler_delivery_rx,
             workspace_delivery::LIFECYCLE_DELIVERY_BUDGET,
         );
-        let active_gpu_connection_id = self
-            .host_gpu
-            .sampling_task
-            .as_ref()
-            .map(|task| task.connection_id().to_string());
+        let active_gpu_connection_id = self.active_gpu_id();
+        let mut profiler_changed = false;
         let mut latest_gpu_update = None;
 
         for delivery in drain.items {
             match delivery {
+                HostToolsSamplerDelivery::ProfilerChanged => profiler_changed = true,
                 HostToolsSamplerDelivery::GpuUpdated(update)
-                    if active_gpu_connection_id.as_deref()
-                        == Some(update.connection_id.as_str()) =>
+                    if active_gpu_connection_id == Some(update.connection_id.as_str()) =>
                 {
                     // GPU snapshots are latest-value state within one bounded batch.
                     latest_gpu_update = Some(update);
@@ -146,7 +133,7 @@ impl HostToolsEntity {
             self.host_gpu.snapshot_connection_id = Some(update.connection_id);
             self.host_gpu.snapshot = Some(update.snapshot);
         }
-        if gpu_updated {
+        if gpu_updated || profiler_changed {
             cx.notify();
         }
         drain.outcome.backlog_remaining

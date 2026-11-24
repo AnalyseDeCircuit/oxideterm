@@ -49,10 +49,10 @@ pub(crate) struct MuxPanel {
     /// request is superseded, when the host or provider changes, or when the
     /// viewer that asked for it closes. Remote command output must not be
     /// fetched for a panel the user already left.
-    pub(crate) snapshot_task: Option<tokio::task::JoinHandle<()>>,
-    pub(crate) detail_task: Option<tokio::task::JoinHandle<()>>,
-    pub(crate) action_task: Option<tokio::task::JoinHandle<()>>,
-    pub(crate) read_task: Option<tokio::task::JoinHandle<()>>,
+    pub(crate) snapshot_task: Option<HostCaptureTask>,
+    pub(crate) detail_task: Option<HostCaptureTask>,
+    pub(crate) action_task: Option<HostCaptureTask>,
+    pub(crate) read_task: Option<HostCaptureTask>,
     /// Never reset: a generation that repeats would let a capture that started
     /// before a host change be accepted as one that started after it.
     pub(crate) generation: u64,
@@ -87,7 +87,7 @@ impl MuxPanel {
     /// Stops the capture behind one slot when its request is superseded. The
     /// delivery of an aborted task never reaches the panel, so the slot it
     /// held is already free for the replacement request.
-    fn cancel(task: &mut Option<tokio::task::JoinHandle<()>>) {
+    fn cancel(task: &mut Option<HostCaptureTask>) {
         if let Some(task) = task.take() {
             task.abort();
         }
@@ -189,7 +189,7 @@ impl HostToolsEntity {
     fn start_mux_snapshot(
         &mut self,
         request: MuxSnapshotRequest,
-        runtime: tokio::runtime::Handle,
+        runtime: HostToolsRuntime,
         cx: &mut Context<Self>,
     ) {
         let provider = request.provider;
@@ -327,7 +327,7 @@ impl HostToolsEntity {
         &mut self,
         connection_id: String,
         session: String,
-        runtime: tokio::runtime::Handle,
+        runtime: HostToolsRuntime,
         cx: &mut Context<Self>,
     ) {
         let Some(provider) = self.host_tmux.mux.provider else {
@@ -466,7 +466,7 @@ impl HostToolsEntity {
             return true;
         }
         cx.spawn(async move |weak, cx| {
-            Timer::after(delay).await;
+            cx.background_executor().timer(delay).await;
             let _ = weak.update(cx, |entity, cx| {
                 if entity
                     .host_tmux
@@ -515,7 +515,7 @@ impl HostToolsEntity {
     fn run_mux_action(
         &mut self,
         request: MuxActionRequest,
-        runtime: tokio::runtime::Handle,
+        runtime: HostToolsRuntime,
         cx: &mut Context<Self>,
     ) -> Vec<HostToolsNotice> {
         if self.host_tmux.mux.action_running.is_some() {
@@ -537,7 +537,7 @@ impl HostToolsEntity {
         &mut self,
         request: MuxActionRequest,
         command: zeroize::Zeroizing<String>,
-        runtime: tokio::runtime::Handle,
+        runtime: HostToolsRuntime,
         cx: &mut Context<Self>,
     ) -> Vec<HostToolsNotice> {
         if self.connection_os_type(&request.connection_id).is_none() {
@@ -776,10 +776,7 @@ impl HostToolsEntity {
 }
 
 fn mux_now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_millis() as u64)
-        .unwrap_or(0)
+    chrono::Utc::now().timestamp_millis().max(0) as u64
 }
 
 fn format_mux_clock(ms: u64) -> String {
@@ -828,7 +825,7 @@ fn mux_probe_verb(kind: MuxVerbKind) -> MuxVerb {
 /// Output that arrived for a capture the panel no longer waits for still holds
 /// remote text, which can contain anything the user typed into a pane, so it is
 /// wiped here rather than dropped along with the delivery.
-fn discard_mux_capture(result: Result<oxideterm_ssh::SshCommandOutput, ()>) {
+fn discard_mux_capture(result: Result<HostCommandOutput, ()>) {
     if let Ok(mut output) = result {
         output.stdout.zeroize();
         output.stderr.zeroize();

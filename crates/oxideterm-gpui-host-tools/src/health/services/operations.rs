@@ -175,7 +175,7 @@ impl HostToolsEntity {
     pub(crate) fn request_service_snapshot(
         &mut self,
         connection_id: String,
-        runtime: tokio::runtime::Handle,
+        runtime: HostToolsRuntime,
         connection_fallback: String,
         failure_fallback: String,
         cx: &mut Context<Self>,
@@ -198,7 +198,7 @@ impl HostToolsEntity {
     fn start_service_snapshot(
         &mut self,
         request: HostServiceSnapshotRequest,
-        runtime: tokio::runtime::Handle,
+        runtime: HostToolsRuntime,
         cx: &mut Context<Self>,
     ) {
         let Some(os_type) = self.connection_os_type(&request.connection_id) else {
@@ -337,7 +337,7 @@ impl HostToolsEntity {
             return true;
         }
         cx.spawn(async move |weak, cx| {
-            Timer::after(delay).await;
+            cx.background_executor().timer(delay).await;
             let _ = weak.update(cx, |entity, cx| {
                 if entity
                     .host_services
@@ -358,7 +358,7 @@ impl HostToolsEntity {
     pub fn confirm_service_action(
         &mut self,
         delay: Duration,
-        runtime: tokio::runtime::Handle,
+        runtime: HostToolsRuntime,
         cx: &mut Context<Self>,
     ) -> Vec<HostToolsNotice> {
         let Some(request) = self
@@ -378,7 +378,7 @@ impl HostToolsEntity {
     pub(crate) fn start_service_action(
         &mut self,
         request: HostServiceActionRequest,
-        runtime: tokio::runtime::Handle,
+        runtime: HostToolsRuntime,
         cx: &mut Context<Self>,
     ) -> Vec<HostToolsNotice> {
         let Some(os_type) = self.connection_os_type(&request.connection_id) else {
@@ -469,7 +469,7 @@ impl HostToolsEntity {
         connection_id: String,
         service_id: String,
         description: String,
-        runtime: tokio::runtime::Handle,
+        runtime: HostToolsRuntime,
         failure_fallback: String,
         empty_fallback: String,
         cx: &mut Context<Self>,

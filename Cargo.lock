@@ -7686,6 +7686,7 @@ version = "2.4.1"
 dependencies = [
  "base64 0.22.1",
  "chrono",
+ "futures-util",
  "gpui-pre",
  "libc",
  "oxideterm-audit",
@@ -7701,6 +7702,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "web-time",
  "windows 0.61.3",
  "zeroize",
 ]

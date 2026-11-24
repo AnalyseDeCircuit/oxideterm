@@ -364,7 +364,7 @@ impl HostToolsEntity {
             return true;
         }
         cx.spawn(async move |weak, cx| {
-            Timer::after(delay).await;
+            cx.background_executor().timer(delay).await;
             let _ = weak.update(cx, |entity, cx| {
                 if entity
                     .host_docker_operations
@@ -385,7 +385,7 @@ impl HostToolsEntity {
     pub(in crate::health) fn confirm_docker_action(
         &mut self,
         delay: Duration,
-        runtime: tokio::runtime::Handle,
+        runtime: HostToolsRuntime,
         cx: &mut Context<Self>,
     ) -> Vec<HostToolsNotice> {
         let Some(request) = self
@@ -405,7 +405,7 @@ impl HostToolsEntity {
     pub(crate) fn start_docker_action(
         &mut self,
         request: HostDockerActionRequest,
-        runtime: tokio::runtime::Handle,
+        runtime: HostToolsRuntime,
         cx: &mut Context<Self>,
     ) -> Vec<HostToolsNotice> {
         let Some(os_type) = self.connection_os_type(&request.connection_id) else {
@@ -440,7 +440,7 @@ impl HostToolsEntity {
         connection_id: String,
         container_id: String,
         container_name: String,
-        runtime: tokio::runtime::Handle,
+        runtime: HostToolsRuntime,
         failure_fallback: String,
         empty_fallback: String,
         cx: &mut Context<Self>,

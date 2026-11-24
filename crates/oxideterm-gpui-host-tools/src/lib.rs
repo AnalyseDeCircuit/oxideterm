@@ -1,10 +1,13 @@
 //! Host Tools panels and page-owned operations. The app owns window input and the shared SSH nodes.
 
+mod bridge;
+pub use bridge::*;
 mod delivery;
 mod dialogs;
 pub use dialogs::{HostToolDialogWindow, HostToolsDialogs};
 mod entity;
 mod events;
+#[cfg(not(target_family = "wasm"))]
 mod exec;
 mod filesystem_panel;
 mod filesystem_state;
@@ -19,7 +22,7 @@ mod window_text;
 use gpui::{
     AnyElement, App, ClipboardItem, Context, CursorStyle, IntoElement, ListAlignment, ListState,
     MouseButton, MouseDownEvent, MouseMoveEvent, ParentElement, Pixels, Rgba, SharedString, Styled,
-    Timer, Window, canvas, div, prelude::*, px, relative, rgb, rgba, svg,
+    Window, canvas, div, prelude::*, px, relative, rgb, rgba, svg,
 };
 use helpers::*;
 use oxideterm_connection_monitor::container::{
@@ -36,12 +39,11 @@ use oxideterm_connection_monitor::container::{
 };
 use oxideterm_connection_monitor::{
     ConnectionPoolEntrySummary, ConnectionPoolMonitorStats, DockerActionKind,
-    FilesystemCommandCapability, GpuDevice, GpuProvider, GpuSamplingTask, GpuSnapshot,
-    GpuSnapshotStatus, GpuUpdate, LogCommandCapability, LogPreset, MetricsSource,
-    MonitorValueLevel, PackageCommandCapability, PackageFilter, PortCommandCapability, PortFilter,
-    ProcessActionKind, ProcessCommandCapability, ProcessFilter, ProcessSort, ProfilerRegistry,
-    REDIS_KEY_EXISTS_SENTINEL, RedisCreateKind, RedisKeyMutation, RedisValueWriteKind,
-    ResourceDockerContainer, ResourceDockerStatus, ResourceFilesystemSnapshot,
+    FilesystemCommandCapability, GpuDevice, GpuProvider, GpuSnapshot, GpuSnapshotStatus, GpuUpdate,
+    LogCommandCapability, LogPreset, MetricsSource, MonitorValueLevel, PackageCommandCapability,
+    PackageFilter, PortCommandCapability, PortFilter, ProcessActionKind, ProcessCommandCapability,
+    ProcessFilter, ProcessSort, REDIS_KEY_EXISTS_SENTINEL, RedisCreateKind, RedisKeyMutation,
+    RedisValueWriteKind, ResourceDockerContainer, ResourceDockerStatus, ResourceFilesystemSnapshot,
     ResourceFilesystemStatus, ResourceLogEntry, ResourceLogSnapshot, ResourceLogStatus,
     ResourceMetrics, ResourcePackageEntry, ResourcePackageSnapshot, ResourcePackageStatus,
     ResourcePortEntry, ResourcePortSnapshot, ResourcePortStatus, ResourceRedisDatabase,
@@ -77,11 +79,12 @@ use oxideterm_connection_monitor::{
     redis_value_text, scheduled_task_active_label_key, scheduled_task_enabled_label_key,
     scheduled_task_filter_label_key, scheduled_task_row_signature, scheduled_task_source_label_key,
     service_action_succeeded, service_enabled_label_key, service_row_signature,
-    service_state_label_key, start_gpu_sampling_on, tmux_session_row_signature,
-    visible_docker_rows, visible_log_rows, visible_package_rows, visible_port_rows,
-    visible_process_rows, visible_scheduled_task_rows, visible_service_rows,
-    visible_tmux_session_rows,
+    service_state_label_key, tmux_session_row_signature, visible_docker_rows, visible_log_rows,
+    visible_package_rows, visible_port_rows, visible_process_rows, visible_scheduled_task_rows,
+    visible_service_rows, visible_tmux_session_rows,
 };
+#[cfg(not(target_family = "wasm"))]
+use oxideterm_connection_monitor::{GpuSamplingTask, ProfilerRegistry, start_gpu_sampling_on};
 use oxideterm_gpui_ui::{
     ConfirmDialogAction, ConfirmDialogVariant, ConfirmDialogView,
     scroll::ScrollableElement,
@@ -92,17 +95,15 @@ use oxideterm_gpui_ui::{
     },
 };
 use oxideterm_i18n::I18n;
-use oxideterm_ssh::{
-    ManagedKeyResolver, NodeId, NodeRouter, SshConnectionRegistry, SshPromptHandler,
-};
+#[cfg(not(target_family = "wasm"))]
+use oxideterm_ssh::{ManagedKeyResolver, NodeRouter, SshConnectionRegistry, SshPromptHandler};
 use oxideterm_theme::{AppUiColors, ThemeTokens};
-use std::{
-    cell::RefCell,
-    collections::HashSet,
-    sync::Arc,
-    time::{Duration, Instant},
-};
-use types::*;
+use oxideterm_topology::NodeId;
+#[cfg(not(target_family = "wasm"))]
+use std::time::Instant;
+use std::{cell::RefCell, collections::HashSet, sync::Arc, time::Duration};
+#[cfg(target_family = "wasm")]
+use web_time::Instant;
 use window_text::render_lucide_icon;
 
 pub use entity::HostToolsEntity;
@@ -110,6 +111,7 @@ pub use events::{
     HostToolsEvent, HostToolsNotice, HostToolsWindowIntent, HostToolsWindowRequest,
     ScheduleActionNoticeKind,
 };
+#[cfg(not(target_family = "wasm"))]
 pub use exec::{
     HostCommandTarget, LOCAL_HOST_CONNECTION_ID, LocalResourceSampler, local_host_os_type,
 };

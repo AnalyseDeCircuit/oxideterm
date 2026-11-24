@@ -33,9 +33,7 @@ impl HostToolsEntity {
             .iter()
             .find(|connection| connection.connection_id == selected_id)
             .unwrap_or(&connections[0]);
-        let current = self
-            .profiler_registry()
-            .current(&active_connection.connection_id);
+        let current = self.profiler_current(&active_connection.connection_id);
         let metrics = current.as_ref().and_then(|(metrics, _)| metrics.as_ref());
         let rows = metrics
             .map(|metrics| self.visible_host_process_rows(&metrics.top_processes))
@@ -1211,7 +1209,7 @@ impl HostToolsEntity {
             return true;
         }
         cx.spawn(async move |weak, cx| {
-            Timer::after(delay).await;
+            cx.background_executor().timer(delay).await;
             let _ = weak.update(cx, |entity, cx| {
                 if entity
                     .host_process_actions
@@ -1232,7 +1230,7 @@ impl HostToolsEntity {
     pub fn confirm_process_action(
         &mut self,
         delay: Duration,
-        runtime: tokio::runtime::Handle,
+        runtime: HostToolsRuntime,
         cx: &mut Context<Self>,
     ) -> Vec<HostToolsNotice> {
         let Some(request) = self.host_process_actions.pending_confirm.as_ref() else {
@@ -1253,7 +1251,7 @@ impl HostToolsEntity {
     pub(crate) fn start_process_action(
         &mut self,
         request: HostProcessActionRun,
-        runtime: tokio::runtime::Handle,
+        runtime: HostToolsRuntime,
         cx: &mut Context<Self>,
     ) -> Vec<HostToolsNotice> {
         let Some(os_type) = self.connection_os_type(&request.connection_id) else {

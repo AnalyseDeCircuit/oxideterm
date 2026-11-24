@@ -183,7 +183,9 @@ impl HostToolsEntity {
     }
 
     pub fn ai_snapshot(&self, connection_id: &str, resource: &str) -> serde_json::Value {
-        let latest_metrics = self.profiler_registry.latest(connection_id);
+        let latest_metrics = self
+            .profiler_current(connection_id)
+            .and_then(|(metrics, _)| metrics);
         match resource {
             "overview" => latest_metrics
                 .map(|metrics| serde_json::to_value(metrics).unwrap_or_default())

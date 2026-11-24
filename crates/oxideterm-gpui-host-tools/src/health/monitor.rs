@@ -101,12 +101,12 @@ impl HostToolsEntity {
             );
         };
         let selected_id = active.connection_id.as_str();
-        let current = self.profiler_registry().current(selected_id);
+        let current = self.profiler_current(selected_id);
         let (metrics, profiler_state) =
             current.as_ref().map_or((None, None), |(metrics, state)| {
                 (metrics.as_ref().filter(|_| monitor_enabled), Some(*state))
             });
-        let failure = self.profiler_registry().failure(selected_id);
+        let failure = self.profiler_failure(selected_id);
         let failure_key = failure
             .map(|failure| failure.label_key())
             .unwrap_or("profiler.panel.sampling_failed");
@@ -424,8 +424,7 @@ impl HostToolsEntity {
         render: &MonitorRenderContext,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let history: Arc<[ResourceTrendSample]> =
-            self.profiler_registry().trend_history(connection_id).into();
+        let history: Arc<[ResourceTrendSample]> = self.profiler_trend_history(connection_id).into();
         let options = CompactMonitorOptions {
             cpu_cores_expanded: self.monitor_cpu_cores_expanded(connection_id),
             show_cpu_sparkline: has_cpu_trend_series(&history),

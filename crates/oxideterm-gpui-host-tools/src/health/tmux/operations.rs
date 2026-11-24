@@ -204,7 +204,7 @@ impl HostToolsEntity {
         search_query: String,
         failure_fallback: String,
         unavailable_fallback: String,
-        runtime: tokio::runtime::Handle,
+        runtime: HostToolsRuntime,
         cx: &mut Context<Self>,
     ) -> Vec<HostToolsNotice> {
         if self.host_tmux.snapshot_in_flight {
@@ -372,7 +372,7 @@ impl HostToolsEntity {
             return true;
         }
         cx.spawn(async move |weak, cx| {
-            Timer::after(delay).await;
+            cx.background_executor().timer(delay).await;
             let _ = weak.update(cx, |entity, cx| {
                 if entity
                     .host_tmux
@@ -393,7 +393,7 @@ impl HostToolsEntity {
     pub(in crate::health) fn confirm_tmux_action(
         &mut self,
         delay: Duration,
-        runtime: tokio::runtime::Handle,
+        runtime: HostToolsRuntime,
         cx: &mut Context<Self>,
     ) -> Vec<HostToolsNotice> {
         let Some(request) = self
@@ -425,7 +425,7 @@ impl HostToolsEntity {
     pub(crate) fn start_tmux_action(
         &mut self,
         request: HostTmuxActionRequest,
-        runtime: tokio::runtime::Handle,
+        runtime: HostToolsRuntime,
         cx: &mut Context<Self>,
     ) -> Vec<HostToolsNotice> {
         let HostTmuxActionRequest {
@@ -464,7 +464,7 @@ impl HostToolsEntity {
         &mut self,
         command: zeroize::Zeroizing<String>,
         request: HostTmuxActionRun,
-        runtime: tokio::runtime::Handle,
+        runtime: HostToolsRuntime,
         cx: &mut Context<Self>,
     ) -> Vec<HostToolsNotice> {
         self.host_tmux.action_running = Some(request.clone());
@@ -559,7 +559,7 @@ impl HostToolsEntity {
 
     pub(crate) fn submit_tmux_input(
         &mut self,
-        runtime: tokio::runtime::Handle,
+        runtime: HostToolsRuntime,
         cx: &mut Context<Self>,
     ) -> Vec<HostToolsNotice> {
         if self.host_tmux.action_running.is_some() {
