@@ -22,10 +22,12 @@ impl ContextSidebarTool {
             Self::Logs => "sidebar.panels.logs",
             Self::Tmux => "sidebar.panels.tmux",
             Self::Docker => "sidebar.panels.docker",
+            Self::Container => "sidebar.panels.container",
             Self::Ports => "sidebar.panels.ports",
             Self::Schedules => "sidebar.panels.schedules",
             Self::Filesystems => "sidebar.panels.filesystems",
             Self::Packages => "sidebar.panels.packages",
+            Self::Redis => "sidebar.panels.redis",
         }
     }
 }
@@ -40,10 +42,12 @@ impl ContextSidebarTool {
             Self::Logs => settings.logs_enabled,
             Self::Tmux => settings.tmux_enabled,
             Self::Docker => settings.docker_enabled,
+            Self::Container => true,
             Self::Ports => settings.ports_enabled,
             Self::Schedules => settings.schedules_enabled,
             Self::Filesystems => settings.filesystems_enabled,
             Self::Packages => settings.packages_enabled,
+            Self::Redis => settings.redis_enabled,
         }
     }
 
@@ -61,10 +65,14 @@ impl ContextSidebarTool {
             Self::Logs => settings.logs_enabled = enabled,
             Self::Tmux => settings.tmux_enabled = enabled,
             Self::Docker => settings.docker_enabled = enabled,
+            // The Container tool detects engines on demand; there is no
+            // persistent probe to enable or disable yet.
+            Self::Container => {}
             Self::Ports => settings.ports_enabled = enabled,
             Self::Schedules => settings.schedules_enabled = enabled,
             Self::Filesystems => settings.filesystems_enabled = enabled,
             Self::Packages => settings.packages_enabled = enabled,
+            Self::Redis => settings.redis_enabled = enabled,
         }
     }
 }
@@ -231,6 +239,7 @@ impl HostToolsEntity {
 }
 
 // Each Host Tools module owns its complete UI and request lifecycle.
+pub(crate) mod container;
 mod docker;
 mod filesystems;
 mod gpu;
@@ -239,6 +248,7 @@ pub(crate) mod monitor;
 mod packages;
 mod ports;
 mod process;
+pub(crate) mod redis;
 mod scheduled_tasks;
 mod services;
 pub(crate) mod tmux;

@@ -59,12 +59,13 @@ impl SshConnectionHandle {
         // The cache lives on the physical transport, so reconnect cannot reuse it.
         let channel = select_channel(&pooled).await?;
         if channel == SshCommandChannel::Exec {
-            let captured = Self::capture_exec_on(&pooled, command, timeout, max_output_size, None)
-                .await
-                .map_err(|error| match error {
-                    SshTransportError::CommandRejected => error,
-                    _ => SshTransportError::CommandOutcomeUnknown,
-                })?;
+            let captured =
+                Self::capture_exec_on(&pooled, command, timeout, max_output_size, None, None)
+                    .await
+                    .map_err(|error| match error {
+                        SshTransportError::CommandRejected => error,
+                        _ => SshTransportError::CommandOutcomeUnknown,
+                    })?;
             if captured.exit_code.is_none() {
                 return Err(SshTransportError::CommandOutcomeUnknown);
             }
@@ -175,7 +176,7 @@ async fn select_channel(
     let marker = format!("__OXIDE_PROBE_{}__", uuid::Uuid::new_v4().simple());
     let probe = format!("echo {marker}");
     if let Ok(output) =
-        SshConnectionHandle::capture_exec_on(pooled, &probe, PROBE_TIMEOUT, 8192, None).await
+        SshConnectionHandle::capture_exec_on(pooled, &probe, PROBE_TIMEOUT, 8192, None, None).await
         && output.exit_code == Some(0)
         && !output.truncated
         && String::from_utf8_lossy(&output.stdout)

@@ -411,6 +411,13 @@ impl WorkspaceApp {
             host_tools.set_messages(host_tools_messages);
             host_tools
         });
+        let host_tool_dialogs = Self::mount_host_tool_dialogs(
+            host_tools.clone(),
+            tokens,
+            i18n.clone(),
+            settings_mono_font_family(&settings),
+            cx,
+        );
         let session_manager = connections.session_manager.clone();
         let session_manager_subscription = cx.subscribe(
             &session_manager,
@@ -1090,6 +1097,7 @@ impl WorkspaceApp {
             graphics_surface,
             _graphics_subscription: graphics_subscription,
             host_tools,
+            host_tool_dialogs,
             _host_tools_subscription: host_tools_subscription,
             cloud_sync,
             cloud_sync_panel,

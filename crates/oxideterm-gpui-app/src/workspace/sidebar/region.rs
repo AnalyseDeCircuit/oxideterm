@@ -182,7 +182,17 @@ impl WorkspaceApp {
                             ))
                             .when(
                                 self.active_context_sidebar_panel == ContextSidebarPanel::HostTools,
-                                |header| header.child(self.render_host_tool_monitoring_toggle(cx)),
+                                |header| {
+                                    // The Container tool has no persisted probe
+                                    // to switch off, so it renders no toggle.
+                                    if self.host_tools.read(cx).active_tool()
+                                        == ContextSidebarTool::Container
+                                    {
+                                        header
+                                    } else {
+                                        header.child(self.render_host_tool_monitoring_toggle(cx))
+                                    }
+                                },
                             ),
                     )
                     .child(

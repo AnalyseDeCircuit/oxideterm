@@ -68,7 +68,9 @@ pub struct HostToolsEntity {
     pub ui: HostToolsUiState,
     pub(crate) host_process_actions: HostProcessActionsState,
     pub(crate) host_docker_operations: HostDockerOperationsState,
+    pub host_container: HostContainerState,
     pub(crate) host_services: HostServicesState,
+    pub host_redis: HostRedisState,
     pub(crate) host_tmux: HostTmuxState,
     pub(crate) host_gpu: HostGpuViewState,
     pub(crate) host_logs: HostLogsState,
@@ -86,14 +88,14 @@ pub struct HostToolsEntity {
     active_tool: ContextSidebarTool,
     // Visibility is an Entity lifecycle input. It controls only page-scoped
     // sampling and never owns or releases shared SSH transports.
-    pub(crate) visibility: HostToolsVisibility,
+    pub visibility: HostToolsVisibility,
     // These inputs let the Entity refresh its own samplers after an action.
     // The runtime handle has no registry release or disconnect capability.
     pub(crate) lifecycle_runtime: Option<tokio::runtime::Handle>,
     pub(crate) sampling_config: oxideterm_connection_monitor::ResourceSamplingConfig,
     // Host Tools receives one read-only settings snapshot. Persistent writes
     // remain owned by SettingsStore and are applied back through lifecycle.
-    pub(crate) monitoring: oxideterm_settings::HostToolsSettings,
+    pub monitoring: oxideterm_settings::HostToolsSettings,
     pub(crate) messages: Option<HostToolsMessages>,
     pub(crate) lifecycle_refresh_task: Option<Task<()>>,
     #[cfg(test)]
@@ -115,7 +117,7 @@ pub struct HostToolsEntity {
 }
 
 impl HostToolsEntity {
-    pub(super) fn host_tool_audit(
+    pub(crate) fn host_tool_audit(
         &self,
         connection_id: &str,
         action: &str,
@@ -175,6 +177,14 @@ impl HostToolsEntity {
             Some(HostToolsWindowModalSnapshot::DockerConfirm(
                 confirm.presence.phase(),
             ))
+        } else if self.ui.host_container_input_dialog.is_some() {
+            Some(HostToolsWindowModalSnapshot::ContainerInput)
+        } else if self.host_container.text_dialog.is_some() {
+            Some(HostToolsWindowModalSnapshot::ContainerText)
+        } else if let Some(confirm) = self.host_container.confirm.as_ref() {
+            Some(HostToolsWindowModalSnapshot::ContainerConfirm(
+                confirm.presence.phase(),
+            ))
         } else if let Some(confirm) = self.host_packages.pending_confirm.as_ref() {
             Some(HostToolsWindowModalSnapshot::PackageConfirm(
                 confirm.presence.phase(),
@@ -219,7 +229,9 @@ impl HostToolsEntity {
             ui: HostToolsUiState::new(),
             host_process_actions: HostProcessActionsState::new(),
             host_docker_operations: HostDockerOperationsState::new(),
+            host_container: HostContainerState::new(),
             host_services: HostServicesState::new(),
+            host_redis: HostRedisState::new(),
             host_tmux: HostTmuxState::new(),
             host_gpu: HostGpuViewState::new(gpu_update_tx),
             host_logs: HostLogsState::new(),
@@ -336,10 +348,28 @@ impl HostToolsEntity {
             HostToolsTextInput::PortSearch => self.host_ports.expanded_index = None,
             HostToolsTextInput::ScheduleSearch => self.host_schedules.expanded_index = None,
             HostToolsTextInput::PackageSearch => self.host_packages.expanded_index = None,
+            // The container search and dialog inputs own no expansion state.
+            HostToolsTextInput::ContainerSearch
+            | HostToolsTextInput::ContainerDialog
+            | HostToolsTextInput::ContainerDialogRegistry
+            | HostToolsTextInput::ContainerRunName
+            | HostToolsTextInput::ContainerRunPorts
+            | HostToolsTextInput::ContainerRunVolumes
+            | HostToolsTextInput::ContainerRunCommand
+            | HostToolsTextInput::MuxDialog => {}
             HostToolsTextInput::ProcessRenice
             | HostToolsTextInput::FilesystemSearch
             | HostToolsTextInput::TmuxDialog
-            | HostToolsTextInput::MuxDialog => {}
+            | HostToolsTextInput::RedisPassword
+            | HostToolsTextInput::RedisRename
+            | HostToolsTextInput::RedisSetValue
+            | HostToolsTextInput::RedisSetValueField
+            | HostToolsTextInput::RedisCreateKeyName
+            | HostToolsTextInput::RedisCreateKeyValue
+            | HostToolsTextInput::RedisCreateKeyField
+            | HostToolsTextInput::RedisCreateKeyTtl
+            | HostToolsTextInput::RedisTtl
+            | HostToolsTextInput::RedisSearch => {}
         }
         true
     }
@@ -356,7 +386,7 @@ impl HostToolsEntity {
         cx.notify();
     }
 
-    pub(super) fn pool_refresh_is_stale(&self, interval: Duration) -> bool {
+    pub(crate) fn pool_refresh_is_stale(&self, interval: Duration) -> bool {
         self.last_pool_refresh
             .is_none_or(|last_refresh| last_refresh.elapsed() >= interval)
     }
@@ -406,7 +436,7 @@ impl HostToolsEntity {
         connections
     }
 
-    pub(super) fn connection_os_type(&self, connection_id: &str) -> Option<String> {
+    pub(crate) fn connection_os_type(&self, connection_id: &str) -> Option<String> {
         if connection_id == LOCAL_HOST_CONNECTION_ID {
             return Some(local_host_os_type().to_string());
         }
@@ -420,7 +450,7 @@ impl HostToolsEntity {
 
     /// Resolves the execution target for one Host Tools connection. The local
     /// target runs the same generated command lines without an SSH node.
-    pub(super) fn host_command_target(&self, connection_id: &str) -> Option<HostCommandTarget> {
+    pub(crate) fn host_command_target(&self, connection_id: &str) -> Option<HostCommandTarget> {
         if connection_id == LOCAL_HOST_CONNECTION_ID {
             return Some(HostCommandTarget::Local);
         }
@@ -429,17 +459,17 @@ impl HostToolsEntity {
             .map(HostCommandTarget::Ssh)
     }
 
-    pub(super) fn remote_env_detection_running(&self, connection_id: &str) -> bool {
+    pub(crate) fn remote_env_detection_running(&self, connection_id: &str) -> bool {
         self.ssh_registry
             .get(connection_id)
             .is_some_and(|handle| handle.remote_env_detection_running())
     }
 
-    pub(super) fn compact_monitor_list_state(&self) -> ListState {
+    pub(crate) fn compact_monitor_list_state(&self) -> ListState {
         self.compact_monitor_list_state.clone()
     }
 
-    pub(super) fn sync_compact_monitor_list_signatures(&self, identity: &str, signatures: &[u64]) {
+    pub(crate) fn sync_compact_monitor_list_signatures(&self, identity: &str, signatures: &[u64]) {
         sync_tauri_variable_list_state_by_signatures(
             &self.compact_monitor_list_state,
             &mut self.compact_monitor_list_cache.borrow_mut(),
@@ -505,6 +535,320 @@ impl HostToolsEntity {
         true
     }
 
+    pub(crate) fn spawn_redis_snapshot_capture(
+        &self,
+        command: String,
+        request: HostRedisSnapshotRequest,
+        timeout: Duration,
+        max_output_size: usize,
+        runtime: tokio::runtime::Handle,
+    ) -> bool {
+        let Some(target) = self.host_command_target(&request.connection_id) else {
+            return false;
+        };
+        let delivery_tx = self.reliable_delivery_tx.clone();
+        // Probe output stays inside the Entity and is parsed before render.
+        runtime.spawn(async move {
+            let result = target
+                .run_command_capture(&command, timeout, max_output_size)
+                .await
+                .map_err(|_| ());
+            let _ = delivery_tx.send(super::delivery::HostToolsReliableDelivery::RedisSnapshot(
+                HostRedisSnapshotDelivery { request, result },
+            ));
+        });
+        true
+    }
+
+    pub(crate) fn spawn_redis_keys_capture(
+        &self,
+        command: String,
+        request: HostRedisKeysRequest,
+        timeout: Duration,
+        max_output_size: usize,
+        runtime: tokio::runtime::Handle,
+    ) -> bool {
+        let Some(target) = self.host_command_target(&request.connection_id) else {
+            return false;
+        };
+        // The password travels on the exec channel's stdin: never in argv, the
+        // command text, an audit record, or a Debug formatter.
+        let pattern = request.pattern.clone().unwrap_or_default();
+        let Some(payload) = redis_stdin_payload(&request.password, &[&pattern]) else {
+            return false;
+        };
+        let delivery_tx = self.reliable_delivery_tx.clone();
+        // Browse output stays inside the Entity and is parsed before render.
+        runtime.spawn(async move {
+            let result = target
+                .run_secret_command_capture_with_stdin(&command, payload, timeout, max_output_size)
+                .await
+                .map_err(|_| ());
+            let _ = delivery_tx.send(super::delivery::HostToolsReliableDelivery::RedisKeys(
+                HostRedisKeysDelivery { request, result },
+            ));
+        });
+        true
+    }
+
+    pub(crate) fn spawn_redis_value_capture(
+        &self,
+        command: String,
+        request: HostRedisValueRequest,
+        timeout: Duration,
+        max_output_size: usize,
+        runtime: tokio::runtime::Handle,
+    ) -> bool {
+        let Some(target) = self.host_command_target(&request.connection_id) else {
+            return false;
+        };
+        // Password, database index and key ride the exec channel's stdin,
+        // never the command line.
+        let database = request.database.to_string();
+        let Some(payload) = redis_stdin_payload(&request.password, &[&database, &request.key])
+        else {
+            return false;
+        };
+        let delivery_tx = self.reliable_delivery_tx.clone();
+        runtime.spawn(async move {
+            let result = target
+                .run_secret_command_capture_with_stdin(&command, payload, timeout, max_output_size)
+                .await
+                .map_err(|_| ());
+            let _ = delivery_tx.send(super::delivery::HostToolsReliableDelivery::RedisValue(
+                HostRedisValueDelivery { request, result },
+            ));
+        });
+        true
+    }
+
+    pub(crate) fn spawn_redis_set_value_capture(
+        &self,
+        command: String,
+        request: HostRedisSetValueRequest,
+        timeout: Duration,
+        max_output_size: usize,
+        runtime: tokio::runtime::Handle,
+    ) -> bool {
+        let Some(target) = self.host_command_target(&request.connection_id) else {
+            return false;
+        };
+        // Password, database and key are lines; the replacement value follows
+        // verbatim and is piped to `redis-cli -x`, never put in argv.
+        let database = request.database.to_string();
+        let Some(payload) = redis_stdin_payload_with_body(
+            &request.password,
+            &[&database, &request.key],
+            request.value.as_str(),
+        ) else {
+            return false;
+        };
+        let delivery_tx = self.reliable_delivery_tx.clone();
+        runtime.spawn(async move {
+            let result = target
+                .run_secret_command_capture_with_stdin(&command, payload, timeout, max_output_size)
+                .await
+                .map_err(|_| ());
+            let _ = delivery_tx.send(super::delivery::HostToolsReliableDelivery::RedisSetValue(
+                HostRedisSetValueDelivery { request, result },
+            ));
+        });
+        true
+    }
+
+    pub(crate) fn spawn_redis_create_key_capture(
+        &self,
+        command: String,
+        request: HostRedisCreateKeyRequest,
+        timeout: Duration,
+        max_output_size: usize,
+        runtime: tokio::runtime::Handle,
+    ) -> bool {
+        let Some(target) = self.host_command_target(&request.connection_id) else {
+            return false;
+        };
+        // Password, database and key are lines; the value follows verbatim and
+        // is piped to `redis-cli -x`, never put in argv.
+        let database = request.database.to_string();
+        let Some(payload) = redis_stdin_payload_with_body(
+            &request.password,
+            &[&database, &request.key],
+            request.value.as_str(),
+        ) else {
+            return false;
+        };
+        let delivery_tx = self.reliable_delivery_tx.clone();
+        runtime.spawn(async move {
+            let result = target
+                .run_secret_command_capture_with_stdin(&command, payload, timeout, max_output_size)
+                .await
+                .map_err(|_| ());
+            let _ = delivery_tx.send(super::delivery::HostToolsReliableDelivery::RedisCreateKey(
+                HostRedisCreateKeyDelivery { request, result },
+            ));
+        });
+        true
+    }
+
+    pub(crate) fn spawn_redis_mutation_capture(
+        &self,
+        command: String,
+        request: HostRedisMutationRequest,
+        timeout: Duration,
+        max_output_size: usize,
+        runtime: tokio::runtime::Handle,
+    ) -> bool {
+        let Some(target) = self.host_command_target(&request.connection_id) else {
+            return false;
+        };
+        let database = request.database.to_string();
+        let ttl = request.ttl_seconds.map(|seconds| seconds.to_string());
+        let values: Vec<&str> = match request.kind {
+            HostRedisMutationKind::DeleteMany => {
+                let mut values = Vec::with_capacity(1 + request.keys.len());
+                values.push(database.as_str());
+                values.extend(request.keys.iter().map(String::as_str));
+                values
+            }
+            HostRedisMutationKind::Expire => vec![
+                database.as_str(),
+                request.key.as_str(),
+                ttl.as_deref().unwrap_or("0"),
+            ],
+            HostRedisMutationKind::Persist => vec![database.as_str(), request.key.as_str()],
+            _ => match request.new_key.as_deref() {
+                Some(new_key) => vec![database.as_str(), request.key.as_str(), new_key],
+                None => vec![database.as_str(), request.key.as_str()],
+            },
+        };
+        let Some(payload) = redis_stdin_payload(&request.password, &values) else {
+            return false;
+        };
+        let delivery_tx = self.reliable_delivery_tx.clone();
+        runtime.spawn(async move {
+            let result = target
+                .run_secret_command_capture_with_stdin(&command, payload, timeout, max_output_size)
+                .await
+                .map_err(|_| ());
+            let _ = delivery_tx.send(super::delivery::HostToolsReliableDelivery::RedisMutation(
+                HostRedisMutationDelivery { request, result },
+            ));
+        });
+        true
+    }
+
+    pub(crate) fn spawn_container_capture(
+        &mut self,
+        command: String,
+        request: HostContainerCaptureRequest,
+        timeout: Duration,
+        max_output_size: usize,
+        runtime: tokio::runtime::Handle,
+    ) -> bool {
+        self.spawn_container_capture_handle(command, request, timeout, max_output_size, runtime)
+            .is_some()
+    }
+
+    /// Same capture, but hands back the task handle so a superseded probe
+    /// (a 40s discovery run) can be aborted instead of delaying the next host.
+    pub(crate) fn spawn_container_capture_handle(
+        &mut self,
+        command: String,
+        request: HostContainerCaptureRequest,
+        timeout: Duration,
+        max_output_size: usize,
+        runtime: tokio::runtime::Handle,
+    ) -> Option<tokio::task::JoinHandle<()>> {
+        let target = self.host_command_target(&request.connection_id)?;
+        let delivery_tx = self.reliable_delivery_tx.clone();
+        // Capture output stays inside the Entity and is parsed before render.
+        Some(runtime.spawn(async move {
+            let result = target
+                .run_command_capture(&command, timeout, max_output_size)
+                .await
+                .map_err(|_| ());
+            let _ = delivery_tx.send(
+                super::delivery::HostToolsReliableDelivery::ContainerCapture(
+                    HostContainerCaptureDelivery { request, result },
+                ),
+            );
+        }))
+    }
+
+    /// Stops the running container discovery probe. Its delivery is dropped
+    /// with the aborted task, so the panel never sees the old host's engines.
+    pub(crate) fn cancel_container_discovery(&mut self) {
+        if let Some(task) = self.host_container.discovery_task.take() {
+            task.abort();
+        }
+        self.host_container.discovery_running = false;
+    }
+
+    /// Audits the action class only; the composed command never reaches the record.
+    pub(crate) fn spawn_container_action(
+        &self,
+        command: String,
+        request: HostContainerConfirmRequest,
+        timeout: Duration,
+        max_output_size: usize,
+        runtime: tokio::runtime::Handle,
+    ) -> bool {
+        let audit = self.host_tool_audit(
+            &request.connection_id,
+            "container_action",
+            Some(&format!("resource={:?}", request.kind)),
+        );
+        let Some(target) = self.host_command_target(&request.connection_id) else {
+            audit.finish(
+                oxideterm_audit::AuditOutcome::Failed,
+                oxideterm_audit::AuditEvidence::Request,
+                None,
+                None,
+            );
+            return false;
+        };
+        let delivery_tx = self.reliable_delivery_tx.clone();
+        runtime.spawn(async move {
+            let mut audit_exit_code = None;
+            let result = target
+                .run_command_capture(&command, timeout, max_output_size)
+                .await
+                .map(|mut output| {
+                    audit_exit_code = output.exit_code;
+                    zeroize::Zeroize::zeroize(&mut output.stdout);
+                    zeroize::Zeroize::zeroize(&mut output.stderr);
+                    output
+                })
+                .map_err(|_| ());
+            let audit_outcome = match (&result, audit_exit_code) {
+                (Err(_), _) => oxideterm_audit::AuditOutcome::Failed,
+                (_, Some(0)) => oxideterm_audit::AuditOutcome::Succeeded,
+                (_, Some(_)) => oxideterm_audit::AuditOutcome::Failed,
+                (_, None) => oxideterm_audit::AuditOutcome::Unknown,
+            };
+            audit.finish(
+                audit_outcome,
+                if audit_exit_code.is_some() {
+                    oxideterm_audit::AuditEvidence::ExitCode
+                } else {
+                    oxideterm_audit::AuditEvidence::Protocol
+                },
+                audit_exit_code,
+                None,
+            );
+            let _ = delivery_tx.send(super::delivery::HostToolsReliableDelivery::ContainerAction(
+                HostContainerConfirmDelivery { request, result },
+            ));
+        });
+        true
+    }
+
+    /// Starts one bounded session-list capture and returns its handle, which
+    /// the panel aborts when the request is superseded or its host changes.
+    /// Output stays inside this delivery boundary and is matched against the
+    /// request identity before anything is rendered.
+    /// Audits the provider and the target label only; user-authored labels and
+    /// run commands never enter the audit record.
     pub fn select_sidebar_tool(
         &mut self,
         tool: ContextSidebarTool,
@@ -523,6 +867,11 @@ impl HostToolsEntity {
         if tool != ContextSidebarTool::Docker {
             self.dismiss_docker_confirm(cx);
         }
+        if tool != ContextSidebarTool::Container {
+            self.dismiss_container_confirm(cx);
+            // Leaving the panel cancels the capture it opened.
+            self.invalidate_container_text_dialog(cx);
+        }
         if tool != ContextSidebarTool::Services {
             self.dismiss_service_confirm(cx);
             self.pause_service_refreshes();
@@ -536,6 +885,11 @@ impl HostToolsEntity {
         }
         if tool != ContextSidebarTool::Schedules {
             self.dismiss_schedule_confirm(cx);
+        }
+        if tool != ContextSidebarTool::Redis {
+            // The Redis password is a credential: it lives only while that tool
+            // is on screen, and the buffer zeroizes on drop.
+            self.ui.host_redis_password = zeroize::Zeroizing::new(String::new());
         }
 
         if let Some(runtime) = self.lifecycle_runtime.clone() {
@@ -586,7 +940,7 @@ impl HostToolsEntity {
         changed
     }
 
-    pub(super) fn toggle_selector_from_pointer(
+    pub(crate) fn toggle_selector_from_pointer(
         &mut self,
         selected_index: usize,
         cx: &mut Context<Self>,
@@ -602,7 +956,7 @@ impl HostToolsEntity {
         cx.notify();
     }
 
-    pub(super) fn highlight_selector_index(&mut self, index: usize, cx: &mut Context<Self>) {
+    pub(crate) fn highlight_selector_index(&mut self, index: usize, cx: &mut Context<Self>) {
         if self.selector_highlighted_index != Some(index) {
             self.selector_highlighted_index = Some(index);
             cx.notify();
@@ -696,14 +1050,32 @@ impl HostToolsEntity {
         true
     }
 
-    pub(super) fn select_connection(
+    pub(crate) fn select_connection(
         &mut self,
         connection_id: String,
         focus_origin: Option<BrowserFocusOrigin>,
         cx: &mut Context<Self>,
     ) {
-        if self.selected_connection_id.as_deref() != Some(&connection_id) {
+        if self.selected_connection_id.as_deref() != Some(connection_id.as_str()) {
             self.host_tmux.mux.clear_host();
+            // The Redis password belongs to the host it was typed for: never
+            // send it to the next host, and drop the old host's key tree so a
+            // refresh cannot act on it either.
+            self.ui.host_redis_password = zeroize::Zeroizing::new(String::new());
+            self.host_redis.keys = None;
+            self.host_redis.keys_connection_id = None;
+            self.host_redis.keys_endpoint = None;
+            self.host_redis.keys_cache_endpoint = None;
+            // Queued reads were made against the old host: starting one now
+            // would read the old node and install its tree under the new host.
+            self.host_redis.keys_pending = None;
+            // The in-flight read still runs on the old node. Forgetting its
+            // marker discards the late result and keeps the new host from
+            // waiting behind a request it did not make.
+            self.host_redis.keys_running = None;
+            self.host_redis.keys_in_flight = false;
+            self.host_redis.collapsed_databases.clear();
+            self.host_redis.expanded_segments.clear();
         }
         self.selected_connection_id = Some(connection_id);
         self.selector_open = false;
@@ -721,6 +1093,10 @@ impl HostToolsEntity {
         self.select_connection(connection_id, focus_origin, cx);
         self.dismiss_process_confirm(cx);
         self.dismiss_docker_confirm(cx);
+        self.dismiss_container_confirm(cx);
+        // Switching hosts also cancels a running capture: its output belongs
+        // to the host that was selected when it was requested.
+        self.invalidate_container_text_dialog(cx);
         self.dismiss_service_confirm(cx);
         self.dismiss_tmux_input_dialog(cx);
         self.dismiss_tmux_confirm(cx);
@@ -783,6 +1159,7 @@ impl HostToolsEntity {
                     | ContextSidebarTool::Gpu
                     | ContextSidebarTool::Processes
                     | ContextSidebarTool::Docker
+                    | ContextSidebarTool::Container
             )
         {
             // Tests record the command boundary without opening a real SSH channel.
@@ -853,6 +1230,20 @@ impl HostToolsEntity {
                 messages.package_unknown_error,
                 cx,
             ),
+            ContextSidebarTool::Redis => {
+                self.request_redis_snapshot(
+                    connection_id,
+                    runtime,
+                    messages.redis_connection_missing,
+                    messages.redis_probe_failed,
+                    cx,
+                );
+                Vec::new()
+            }
+            ContextSidebarTool::Container => {
+                self.request_container_discovery(connection_id, feedback, cx);
+                Vec::new()
+            }
             ContextSidebarTool::Monitor
             | ContextSidebarTool::Gpu
             | ContextSidebarTool::Processes
@@ -864,6 +1255,7 @@ impl HostToolsEntity {
     }
 
     pub fn take_selected_connection(&mut self, cx: &mut Context<Self>) -> Option<String> {
+        self.ui.host_redis_password = zeroize::Zeroizing::default();
         let selected = self.selected_connection_id.take();
         self.close_selector(true, cx);
         selected
@@ -892,34 +1284,36 @@ impl HostToolsEntity {
             // away; keeping it open would let that value be submitted against
             // the fallback connection.
             self.dismiss_mux_input_dialog(cx);
-            self.selected_connection_id = live_connection_ids.first().cloned();
+            if let Some(next) = live_connection_ids.first() {
+                self.select_connection(next.clone(), None, cx);
+            }
             cx.notify();
         }
         self.selected_connection_id.clone()
     }
 
-    pub(super) fn stop_profiler_sampling(&self) {
+    pub(crate) fn stop_profiler_sampling(&self) {
         self.profiler_registry.stop_all();
     }
 
-    pub(super) fn profiler_connection_ids(&self) -> Vec<String> {
+    pub(crate) fn profiler_connection_ids(&self) -> Vec<String> {
         self.profiler_registry.connection_ids()
     }
 
-    pub(super) fn remove_profiler_connection(&self, connection_id: &str) {
+    pub(crate) fn remove_profiler_connection(&self, connection_id: &str) {
         self.profiler_registry.remove(connection_id);
         self.monitor_expanded_cpu_connections
             .borrow_mut()
             .remove(connection_id);
     }
 
-    pub(super) fn monitor_cpu_cores_expanded(&self, connection_id: &str) -> bool {
+    pub(crate) fn monitor_cpu_cores_expanded(&self, connection_id: &str) -> bool {
         self.monitor_expanded_cpu_connections
             .borrow()
             .contains(connection_id)
     }
 
-    pub(super) fn toggle_monitor_cpu_cores(
+    pub(crate) fn toggle_monitor_cpu_cores(
         &mut self,
         connection_id: String,
         cx: &mut Context<Self>,
@@ -931,11 +1325,11 @@ impl HostToolsEntity {
         cx.notify();
     }
 
-    pub(super) fn profiler_connection_missing(&self, connection_id: &str) -> bool {
+    pub(crate) fn profiler_connection_missing(&self, connection_id: &str) -> bool {
         self.profiler_registry.state(connection_id).is_none()
     }
 
-    pub(super) fn start_profiler(
+    pub(crate) fn start_profiler(
         &self,
         connection_id: String,
         sampling_config: oxideterm_connection_monitor::ResourceSamplingConfig,
@@ -975,7 +1369,7 @@ impl HostToolsEntity {
         cx.notify();
     }
 
-    pub(super) fn sync_gpu_sampling(
+    pub(crate) fn sync_gpu_sampling(
         &mut self,
         enabled_and_visible: bool,
         selected_connection_id: Option<String>,
@@ -1071,7 +1465,7 @@ impl HostToolsEntity {
         Arc::new(handle)
     }
 
-    pub(super) fn gpu_snapshot_for(&self, connection_id: &str) -> Option<GpuSnapshot> {
+    pub(crate) fn gpu_snapshot_for(&self, connection_id: &str) -> Option<GpuSnapshot> {
         self.host_gpu
             .snapshot
             .as_ref()
@@ -1079,18 +1473,18 @@ impl HostToolsEntity {
             .cloned()
     }
 
-    pub(super) fn gpu_sampling_is_running(&self, connection_id: &str) -> bool {
+    pub(crate) fn gpu_sampling_is_running(&self, connection_id: &str) -> bool {
         self.host_gpu
             .sampling_task
             .as_ref()
             .is_some_and(|task| task.connection_id() == connection_id && !task.is_finished())
     }
 
-    pub(super) fn gpu_list_state(&self) -> ListState {
+    pub(crate) fn gpu_list_state(&self) -> ListState {
         self.host_gpu.list_state.clone()
     }
 
-    pub(super) fn toggle_gpu_device(&mut self, device_uuid: String, cx: &mut Context<Self>) {
+    pub(crate) fn toggle_gpu_device(&mut self, device_uuid: String, cx: &mut Context<Self>) {
         if self.host_gpu.expanded_uuid.as_deref() == Some(device_uuid.as_str()) {
             self.host_gpu.expanded_uuid = None;
         } else {
@@ -1099,11 +1493,11 @@ impl HostToolsEntity {
         cx.notify();
     }
 
-    pub(super) fn gpu_device_is_expanded(&self, device_uuid: &str) -> bool {
+    pub(crate) fn gpu_device_is_expanded(&self, device_uuid: &str) -> bool {
         self.host_gpu.expanded_uuid.as_deref() == Some(device_uuid)
     }
 
-    pub(super) fn sync_gpu_list_state(
+    pub(crate) fn sync_gpu_list_state(
         &self,
         devices: &[GpuDevice],
         snapshot: Option<&GpuSnapshot>,
@@ -1131,7 +1525,7 @@ impl HostToolsEntity {
         );
     }
 
-    pub(super) fn request_gpu_refresh(&mut self, connection_id: String, cx: &mut Context<Self>) {
+    pub(crate) fn request_gpu_refresh(&mut self, connection_id: String, cx: &mut Context<Self>) {
         let enabled_and_visible = self.monitoring.gpu_enabled
             && self.visibility.sidebar_is_visible()
             && self.active_tool() == ContextSidebarTool::Gpu;
@@ -1148,7 +1542,7 @@ impl HostToolsEntity {
         );
     }
 
-    pub(super) fn restart_gpu_sampling(
+    pub(crate) fn restart_gpu_sampling(
         &mut self,
         connection_id: String,
         enabled_and_visible: bool,
@@ -1167,6 +1561,17 @@ impl HostToolsEntity {
         }
         self.host_gpu.snapshot = None;
         self.sync_gpu_sampling(enabled_and_visible, selected_connection_id, runtime, cx);
+    }
+}
+
+impl HostToolsEntity {
+    /// Escaping the capture dialog cancels its request too. The spawn cannot be
+    /// aborted, so bumping the dialog epoch is what keeps the late delivery
+    /// from landing in a later dialog that asks for the same capture.
+    pub(crate) fn invalidate_container_text_dialog(&mut self, cx: &mut Context<Self>) {
+        if self.host_container.invalidate_container_text_dialog() {
+            cx.notify();
+        }
     }
 }
 

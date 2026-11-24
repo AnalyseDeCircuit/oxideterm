@@ -12,6 +12,9 @@ enum Mode {
     Pty,
     SilentExec,
     WrongExec,
+    /// Accepts the exec request, then replies only after the client writes a
+    /// payload into the channel's stdin.
+    StdinExec,
 }
 
 #[derive(Default)]
@@ -19,6 +22,8 @@ struct Counts {
     probes: AtomicUsize,
     payloads: AtomicUsize,
     authentications: AtomicUsize,
+    exec_command: std::sync::Mutex<String>,
+    stdin: std::sync::Mutex<Vec<u8>>,
 }
 
 struct Peer {
@@ -86,6 +91,11 @@ impl server::Handler for Peer {
         session: &mut server::Session,
     ) -> Result<(), Self::Error> {
         let command = std::str::from_utf8(data).unwrap();
+        if self.mode == Mode::StdinExec {
+            *self.counts.exec_command.lock().unwrap() = command.to_string();
+            session.channel_success(channel)?;
+            return Ok(());
+        }
         if command.starts_with("echo __OXIDE_PROBE_") {
             self.counts.probes.fetch_add(1, Ordering::SeqCst);
         }
@@ -133,6 +143,19 @@ impl server::Handler for Peer {
         data: &[u8],
         session: &mut server::Session,
     ) -> Result<(), Self::Error> {
+        if self.mode == Mode::StdinExec {
+            // Reply only once the whole payload arrived: a client that waits
+            // for output before writing its input would deadlock here.
+            let mut stdin = self.counts.stdin.lock().unwrap();
+            stdin.extend_from_slice(data);
+            if !stdin.ends_with(b"\n") {
+                return Ok(());
+            }
+            session.data(channel, b"status\tready\n".to_vec())?;
+            session.exit_status_request(channel, 0)?;
+            session.eof(channel)?;
+            return session.close(channel);
+        }
         if self.mode == Mode::Pty && (!self.ptys.contains(&channel) || !data.ends_with(b"\r")) {
             return session.close(channel);
         }
@@ -334,6 +357,32 @@ async fn shell_sampling_drains_overflow_before_the_next_sample() {
     replacement.close().await.unwrap();
     assert_eq!(counts.authentications.load(Ordering::SeqCst), 1);
     server.abort();
+}
+
+#[tokio::test]
+async fn stdin_capture_sends_the_payload_without_putting_it_on_the_command_line() {
+    let (handle, counts, server) = fixture(Mode::StdinExec).await;
+    let output = handle
+        .run_command_capture_with_stdin(
+            "business-browse",
+            zeroize::Zeroizing::new(b"password\n".to_vec()),
+            Duration::from_secs(2),
+            8192,
+        )
+        .await
+        .unwrap();
+    // The fixture answers only after the payload arrives, so a write-after-read
+    // implementation would time out instead of returning this output.
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "status\tready\n");
+    assert_eq!(output.exit_code, Some(0));
+    assert_eq!(counts.stdin.lock().unwrap().as_slice(), b"password\n");
+    assert_eq!(
+        counts.exec_command.lock().unwrap().as_str(),
+        "business-browse"
+    );
+    handle.clear_physical().await;
+    server.abort();
+    let _ = server.await;
 }
 
 #[tokio::test]

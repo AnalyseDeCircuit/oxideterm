@@ -5,11 +5,12 @@ use oxideterm_gpui_ui::select::{
     select_separator,
 };
 
-const TOOLS: [ContextSidebarTool; 11] = [
+const TOOLS: [ContextSidebarTool; 13] = [
     ContextSidebarTool::Monitor,
     ContextSidebarTool::Processes,
     ContextSidebarTool::Gpu,
     ContextSidebarTool::Docker,
+    ContextSidebarTool::Container,
     ContextSidebarTool::Services,
     ContextSidebarTool::Logs,
     ContextSidebarTool::Ports,
@@ -17,9 +18,10 @@ const TOOLS: [ContextSidebarTool; 11] = [
     ContextSidebarTool::Filesystems,
     ContextSidebarTool::Schedules,
     ContextSidebarTool::Packages,
+    ContextSidebarTool::Redis,
 ];
 
-const MONITORING_TOOL_COUNT: usize = 4;
+const MONITORING_TOOL_COUNT: usize = 5;
 
 pub(super) fn context_sidebar_tool_icon(tool: ContextSidebarTool) -> LucideIcon {
     match tool {
@@ -30,10 +32,12 @@ pub(super) fn context_sidebar_tool_icon(tool: ContextSidebarTool) -> LucideIcon 
         ContextSidebarTool::Logs => LucideIcon::FileText,
         ContextSidebarTool::Tmux => LucideIcon::SplitSquareHorizontal,
         ContextSidebarTool::Docker => LucideIcon::Docker,
+        ContextSidebarTool::Container => LucideIcon::Container,
         ContextSidebarTool::Ports => LucideIcon::Network,
         ContextSidebarTool::Schedules => LucideIcon::CalendarClock,
         ContextSidebarTool::Filesystems => LucideIcon::HardDrive,
         ContextSidebarTool::Packages => LucideIcon::Package,
+        ContextSidebarTool::Redis => LucideIcon::Database,
     }
 }
 
@@ -423,43 +427,35 @@ mod tests {
 
     #[test]
     fn shrinking_the_rail_moves_only_trailing_tools_into_more() {
+        let row_height = 40.0;
+        let separator_height = 9.0;
+        let stack = |count| tool_stack_height(count, row_height, separator_height);
         // All tools fit exactly without reserving an unnecessary More button.
-        let all_visible = visible_tool_count(498.0, 40.0, 9.0);
-        assert_eq!(all_visible, 11);
-        assert_eq!(overflow_tools(all_visible), vec![]);
-        assert_eq!(visible_tool_count(700.0, 40.0, 9.0), 11);
-        // Once the last row no longer fits, More needs a row of its own.
-        let almost_all = visible_tool_count(497.0, 40.0, 9.0);
-        assert_eq!(almost_all, 9);
+        let tall = stack(TOOLS.len());
         assert_eq!(
-            overflow_tools(almost_all),
-            vec![ContextSidebarTool::Schedules, ContextSidebarTool::Packages]
+            visible_tool_count(tall, row_height, separator_height),
+            TOOLS.len()
         );
-        assert_eq!(visible_tool_count(300.0, 40.0, 9.0), 5);
-        // A visible management row needs the group divider as well as its own row.
-        assert_eq!(visible_tool_count(298.0, 40.0, 9.0), 5);
-        assert_eq!(visible_tool_count(297.0, 40.0, 9.0), 4);
-        let visible = visible_tool_count(210.0, 40.0, 9.0);
+        assert_eq!(overflow_tools(TOOLS.len()), vec![]);
         assert_eq!(
-            &TOOLS[..visible],
-            &[
-                ContextSidebarTool::Monitor,
-                ContextSidebarTool::Processes,
-                ContextSidebarTool::Gpu
-            ]
+            visible_tool_count(tall + 200.0, row_height, separator_height),
+            TOOLS.len()
         );
+        // Once the stack no longer fits, More needs a row of its own and only
+        // trailing tools move into it.
+        let tight = visible_tool_count(tall - 1.0, row_height, separator_height);
+        assert!(tight < TOOLS.len());
+        assert_eq!(overflow_tools(tight), TOOLS[tight..].to_vec());
+        // Below the group divider only leading monitoring tools stay visible.
+        let below_divider = visible_tool_count(
+            stack(MONITORING_TOOL_COUNT) - 1.0,
+            row_height,
+            separator_height,
+        );
+        assert!(below_divider < MONITORING_TOOL_COUNT);
         assert_eq!(
-            overflow_tools(visible),
-            vec![
-                ContextSidebarTool::Docker,
-                ContextSidebarTool::Services,
-                ContextSidebarTool::Logs,
-                ContextSidebarTool::Ports,
-                ContextSidebarTool::Tmux,
-                ContextSidebarTool::Filesystems,
-                ContextSidebarTool::Schedules,
-                ContextSidebarTool::Packages
-            ]
+            overflow_tools(below_divider),
+            TOOLS[below_divider..].to_vec()
         );
         assert_eq!(visible_tool_count(80.0, 40.0, 9.0), 0);
     }

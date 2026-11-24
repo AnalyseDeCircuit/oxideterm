@@ -3654,6 +3654,7 @@ mod panel_layout_tests {
         let mut settings = SettingsStore::load_from_path(&settings_path).unwrap();
         settings.settings_mut().onboarding_completed = true;
         settings.settings_mut().ssh_config.auto_load_hosts = false;
+        settings.settings_mut().onboarding_completed = true;
         settings.save().unwrap();
         cx.executor().allow_parking();
         let (shell, cx) = cx.add_window_view(|window, cx| {

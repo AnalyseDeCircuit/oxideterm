@@ -5,12 +5,13 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
+use zeroize::Zeroizing;
 
 use oxideterm_connection_monitor::{
     ResourceSampleError, ResourceSampleShell, ResourceSampler, ResourceSamplerFuture,
 };
-use oxideterm_ssh::{SshCommandOutput, SshConnectionHandle};
-use tokio::io::AsyncReadExt;
+use oxideterm_ssh::{SshCommandOutput, SshConnectionHandle, SshSecretCommandOutput};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 #[cfg(windows)]
 mod windows;
@@ -53,6 +54,25 @@ impl HostCommandTarget {
             Self::Local => run_local_command_capture(command, timeout, max_output_size).await,
         }
     }
+
+    /// Secret-bearing capture: the payload travels on stdin, never in argv.
+    pub(super) async fn run_secret_command_capture_with_stdin(
+        &self,
+        command: &str,
+        stdin: Zeroizing<Vec<u8>>,
+        timeout: Duration,
+        max_output_size: usize,
+    ) -> Result<SshSecretCommandOutput, ()> {
+        match self {
+            Self::Ssh(handle) => handle
+                .run_command_capture_with_stdin(command, stdin, timeout, max_output_size)
+                .await
+                .map_err(|_| ()),
+            Self::Local => {
+                run_local_secret_capture_with_stdin(command, stdin, timeout, max_output_size).await
+            }
+        }
+    }
 }
 
 /// Executes a generated command line through the local shell the way an SSH
@@ -63,10 +83,54 @@ async fn run_local_command_capture(
     timeout: Duration,
     max_output_size: usize,
 ) -> Result<SshCommandOutput, ()> {
+    let capture = run_local_capture(command, None, timeout, max_output_size).await?;
+    Ok(SshCommandOutput {
+        stdout: String::from_utf8_lossy(&capture.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&capture.stderr).into_owned(),
+        exit_code: capture.exit_code,
+        truncated: capture.truncated,
+    })
+}
+
+/// Local variant of the SSH secret capture: the payload is written to the
+/// child's stdin while both output streams are drained, so a command that
+/// echoes or blocks on stdin cannot deadlock the capture.
+async fn run_local_secret_capture_with_stdin(
+    command: &str,
+    stdin: Zeroizing<Vec<u8>>,
+    timeout: Duration,
+    max_output_size: usize,
+) -> Result<SshSecretCommandOutput, ()> {
+    let capture = run_local_capture(command, Some(stdin), timeout, max_output_size).await?;
+    Ok(SshSecretCommandOutput {
+        stdout: capture.stdout,
+        stderr: capture.stderr,
+        exit_code: capture.exit_code,
+        truncated: capture.truncated,
+    })
+}
+
+struct LocalCapture {
+    stdout: Zeroizing<Vec<u8>>,
+    stderr: Zeroizing<Vec<u8>>,
+    exit_code: Option<i32>,
+    truncated: bool,
+}
+
+async fn run_local_capture(
+    command: &str,
+    stdin: Option<Zeroizing<Vec<u8>>>,
+    timeout: Duration,
+    max_output_size: usize,
+) -> Result<LocalCapture, ()> {
     let line = command.trim_end_matches(['\r', '\n']);
     let mut process = local_shell_command(line);
+    if stdin.is_some() {
+        process.stdin(std::process::Stdio::piped());
+    } else {
+        process.stdin(std::process::Stdio::null());
+    }
     process
-        .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true);
@@ -75,6 +139,7 @@ async fn run_local_command_capture(
     // only ends the shell, so the guard ends the tree the same way the timeout
     // path does.
     let mut child = LocalCaptureChild::new(child)?;
+    let mut stdin_pipe = child.child.stdin.take();
     let stdout = child.child.stdout.take().ok_or(())?;
     let stderr = child.child.stderr.take().ok_or(())?;
     // Both streams share one budget, matching the SSH capture limit.
@@ -82,6 +147,7 @@ async fn run_local_command_capture(
     // EOF is not process completion: commands may redirect both streams and keep running.
     let reads = tokio::time::timeout(timeout, async {
         let output = tokio::join!(
+            write_local_stdin(stdin_pipe.take(), stdin),
             read_capped(stdout, budget.clone()),
             read_capped(stderr, budget.clone()),
         );
@@ -89,7 +155,7 @@ async fn run_local_command_capture(
         (output, status)
     })
     .await;
-    let ((stdout, stderr), status) = match reads {
+    let ((_, stdout, stderr), status) = match reads {
         Ok(read) => read,
         Err(_) => {
             // A Windows capture is `cmd /C powershell …`; killing only the
@@ -102,12 +168,23 @@ async fn run_local_command_capture(
     child.disarm();
     let (stdout, stdout_truncated) = stdout;
     let (stderr, stderr_truncated) = stderr;
-    Ok(SshCommandOutput {
-        stdout: String::from_utf8_lossy(&stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&stderr).into_owned(),
+    Ok(LocalCapture {
+        stdout: Zeroizing::new(stdout),
+        stderr: Zeroizing::new(stderr),
         exit_code: status.code(),
         truncated: stdout_truncated || stderr_truncated,
     })
+}
+
+async fn write_local_stdin(
+    mut pipe: Option<tokio::process::ChildStdin>,
+    stdin: Option<Zeroizing<Vec<u8>>>,
+) {
+    let (Some(mut pipe), Some(stdin)) = (pipe.take(), stdin) else {
+        return;
+    };
+    let _ = pipe.write_all(&stdin).await;
+    let _ = pipe.shutdown().await;
 }
 
 /// Runs profiler samples as one-shot local captures. SSH profilers keep a

@@ -35,6 +35,8 @@ pub enum LucideIcon {
     Copy,
     CornerDownLeft,
     Cpu,
+    Container,
+    Database,
     Docker,
     Download,
     Eye,
@@ -178,6 +180,8 @@ impl LucideIcon {
             "copy" => Self::Copy,
             "cornerdownleft" => Self::CornerDownLeft,
             "cpu" => Self::Cpu,
+            "container" => Self::Container,
+            "database" => Self::Database,
             "docker" => Self::Docker,
             "download" => Self::Download,
             "eye" => Self::Eye,
@@ -282,6 +286,8 @@ impl LucideIcon {
     pub fn path(self) -> &'static str {
         match self {
             Self::Activity => "lucide/activity.svg",
+            Self::Container => "lucide/container.svg",
+            Self::Database => "lucide/database.svg",
             Self::AlertCircle => "lucide/alert-circle.svg",
             Self::AlertTriangle => "lucide/alert-triangle.svg",
             Self::AppWindow => "lucide/app-window.svg",

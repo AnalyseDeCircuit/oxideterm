@@ -1858,10 +1858,12 @@ impl WorkspaceApp {
                     | ContextSidebarTool::Logs
                     | ContextSidebarTool::Tmux
                     | ContextSidebarTool::Docker
+                    | ContextSidebarTool::Container
                     | ContextSidebarTool::Ports
                     | ContextSidebarTool::Schedules
                     | ContextSidebarTool::Filesystems
                     | ContextSidebarTool::Packages
+                    | ContextSidebarTool::Redis
             );
         if connection_monitor_keys_visible && self.handle_connection_monitor_select_key(event, cx) {
             return;
@@ -1871,6 +1873,12 @@ impl WorkspaceApp {
             return;
         }
         if self.handle_host_docker_search_key(event, cx) {
+            return;
+        }
+        if self.handle_host_container_search_key(event, cx) {
+            return;
+        }
+        if self.handle_host_redis_key(event, cx) {
             return;
         }
         if self.handle_host_service_search_key(event, cx) {

@@ -26,6 +26,20 @@ impl WorkspaceApp {
                 }
                 true
             }
+            HostToolsWindowModalSnapshot::ContainerConfirm(_) => {
+                self.handle_host_container_confirm_key(event, cx)
+            }
+            HostToolsWindowModalSnapshot::ContainerText => {
+                if event.keystroke.key.as_str() == "escape" {
+                    self.host_tools.update(cx, |host_tools, cx| {
+                        host_tools.dismiss_container_text_dialog(cx);
+                    });
+                }
+                true
+            }
+            HostToolsWindowModalSnapshot::ContainerInput => {
+                self.handle_host_container_input_key(event, window, cx)
+            }
             HostToolsWindowModalSnapshot::ServiceConfirm(_) => {
                 self.handle_host_service_confirm_key(event, cx)
             }

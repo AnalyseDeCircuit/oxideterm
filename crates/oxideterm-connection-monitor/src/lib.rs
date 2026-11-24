@@ -8,6 +8,7 @@
 
 mod action;
 mod capture;
+pub mod container;
 mod docker;
 mod filesystem;
 mod gpu;
@@ -24,12 +25,14 @@ mod package;
 mod port;
 mod process;
 mod profiler;
+mod redis;
 mod scheduled_task;
 mod service;
 mod shell;
 mod stats;
 mod summary;
 mod tmux;
+mod windows;
 
 pub use action::{
     HostToolActionOutcome, host_tool_capture_failure_message, interpret_docker_action_output,
@@ -100,6 +103,19 @@ pub use profiler::{
     RESOURCE_MAX_OUTPUT_SIZE, RESOURCE_SAMPLE_INTERVAL, RESOURCE_SAMPLE_TIMEOUT,
     ResourceSampleError, ResourceSampleShell, ResourceSampler, ResourceSamplerFuture,
     ResourceSamplingConfig, build_sample_command, build_sample_command_for, shell_init_command,
+};
+pub use redis::{
+    REDIS_KEY_EXISTS_SENTINEL, REDIS_KEYS_PER_DATABASE_LIMIT, REDIS_PROBE_TARGET, RedisCreateKind,
+    RedisKeyMutation, RedisPayloadError, RedisValueWriteKind, ResourceRedisDatabase,
+    ResourceRedisEndpoint, ResourceRedisEndpointKind, ResourceRedisKeyNode, ResourceRedisKeys,
+    ResourceRedisSnapshot, ResourceRedisStatus, ResourceRedisTtl, ResourceRedisValue,
+    ResourceRedisValueKind, parse_redis_key_mutation, parse_redis_keys, parse_redis_snapshot,
+    parse_redis_value, redis_create_key_command, redis_discovery_command,
+    redis_key_mutation_command, redis_key_tree, redis_keys_command, redis_keys_delete_command,
+    redis_replace_value_command, redis_search_pattern, redis_stdin_payload,
+    redis_stdin_payload_checked, redis_stdin_payload_with_body,
+    redis_stdin_payload_with_body_checked, redis_value_command, redis_value_json, redis_value_rows,
+    redis_value_text,
 };
 pub use scheduled_task::{
     ResourceScheduledTask, ResourceScheduledTaskSnapshot, ResourceScheduledTaskStatus,
