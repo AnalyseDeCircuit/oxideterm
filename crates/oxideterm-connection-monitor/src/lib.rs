@@ -58,10 +58,11 @@ pub use filesystem::{
 };
 pub use gpu::{
     GPU_CHANNEL_OPEN_TIMEOUT, GPU_END_MARKER, GPU_MAX_OUTPUT_SIZE, GPU_SAMPLE_INTERVAL,
-    GPU_SAMPLE_TIMEOUT, GpuDevice, GpuProcess, GpuProvider, GpuSamplingTask, GpuSnapshot,
-    GpuSnapshotStatus, GpuSummary, GpuUpdate, build_gpu_sample_command, gpu_device_row_signature,
-    parse_gpu_snapshot, start_gpu_sampling_on,
+    GPU_SAMPLE_TIMEOUT, GpuDevice, GpuProcess, GpuProvider, GpuSnapshot, GpuSnapshotStatus,
+    GpuSummary, GpuUpdate, build_gpu_sample_command, gpu_device_row_signature, parse_gpu_snapshot,
 };
+#[cfg(not(target_family = "wasm"))]
+pub use gpu::{GpuSamplingTask, start_gpu_sampling_on};
 pub use log::{
     LogCaptureCommand, LogCommandCapability, LogPreset, ResourceLogEntry, ResourceLogSnapshot,
     ResourceLogStatus, build_log_follow_command, build_log_snapshot_command, log_level_label_key,
@@ -97,8 +98,10 @@ pub use process::{
     process_matches_filter, process_matches_query, process_row_signature, process_state_label_key,
     sort_process_rows, visible_process_rows,
 };
+#[cfg(not(target_family = "wasm"))]
+pub use profiler::ProfilerRegistry;
 pub use profiler::{
-    ConnectionProfilerSnapshot, ProfilerFailure, ProfilerRegistry, ProfilerState, ProfilerUpdate,
+    ConnectionProfilerSnapshot, ProfilerFailure, ProfilerState, ProfilerUpdate,
     RESOURCE_CHANNEL_OPEN_TIMEOUT, RESOURCE_END_MARKER, RESOURCE_MAX_CONSECUTIVE_FAILURES,
     RESOURCE_MAX_OUTPUT_SIZE, RESOURCE_SAMPLE_INTERVAL, RESOURCE_SAMPLE_TIMEOUT,
     ResourceSampleError, ResourceSampleShell, ResourceSampler, ResourceSamplerFuture,

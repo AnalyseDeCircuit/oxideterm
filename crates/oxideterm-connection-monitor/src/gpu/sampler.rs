@@ -1,7 +1,7 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 
 use tokio::{
     runtime::Handle,
@@ -13,18 +13,10 @@ use crate::{ResourceSampleShell, ResourceSampler, shell_init_command};
 
 use super::provider::gpu_os_supported;
 use super::{
-    GPU_END_MARKER, GpuSnapshot, GpuSnapshotStatus, GpuUpdate, build_gpu_sample_command,
+    GPU_CHANNEL_OPEN_TIMEOUT, GPU_END_MARKER, GPU_MAX_OUTPUT_SIZE, GPU_SAMPLE_INTERVAL,
+    GPU_SAMPLE_TIMEOUT, GpuSnapshot, GpuSnapshotStatus, GpuUpdate, build_gpu_sample_command,
     parse_gpu_snapshot,
 };
-
-pub const GPU_SAMPLE_INTERVAL: Duration = Duration::from_secs(2);
-// A Windows sample runs the vendor query once (nvidia-smi is typically one to
-// two seconds); the timeout only bounds hung reads.
-pub const GPU_SAMPLE_TIMEOUT: Duration = Duration::from_secs(10);
-pub const GPU_CHANNEL_OPEN_TIMEOUT: Duration = Duration::from_secs(10);
-// Multi-accelerator hosts can return sizeable per-process and per-tile data,
-// while the cap still prevents an unbounded remote command response.
-pub const GPU_MAX_OUTPUT_SIZE: usize = 512 * 1024;
 
 /// Owns one page-scoped GPU sampler and its cancellation path.
 pub struct GpuSamplingTask {
@@ -219,6 +211,7 @@ fn now_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
 
     use super::*;
     use crate::ResourceSamplerFuture;

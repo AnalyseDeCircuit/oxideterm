@@ -1,9 +1,12 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
+#[cfg(not(target_family = "wasm"))]
 use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
+#[cfg(target_family = "wasm")]
+use web_time::SystemTime;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PoolConnectionMonitorSnapshot {

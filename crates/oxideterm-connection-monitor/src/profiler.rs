@@ -1,26 +1,28 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
+#[cfg(not(target_family = "wasm"))]
 use std::{
     collections::HashMap,
-    future::Future,
-    pin::Pin,
     sync::{Arc, Mutex, MutexGuard},
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{SystemTime, UNIX_EPOCH},
 };
+use std::{future::Future, pin::Pin, time::Duration};
 
 use serde::{Deserialize, Serialize};
+#[cfg(not(target_family = "wasm"))]
 use tokio::{
     runtime::Handle,
     sync::{Notify, mpsc, oneshot},
     task::JoinHandle,
 };
 
+#[cfg(not(target_family = "wasm"))]
 use crate::{
-    MetricsSource, PreviousResourceSample, RESOURCE_HISTORY_CAPACITY, ResourceMetrics,
-    ResourceSystemInfo, docker_sample_command, parse_resource_metrics,
-    previous_sample_from_metrics, push_history,
+    MetricsSource, PreviousResourceSample, RESOURCE_HISTORY_CAPACITY, ResourceSystemInfo,
+    parse_resource_metrics, previous_sample_from_metrics, push_history,
 };
+use crate::{ResourceMetrics, docker_sample_command};
 
 pub const RESOURCE_SAMPLE_INTERVAL: Duration = Duration::from_secs(10);
 // A full Windows sample measures around eight seconds (CIM system info,
@@ -238,6 +240,7 @@ pub trait ResourceSampler: Send + Sync + 'static {
     ) -> ResourceSamplerFuture<'a, Result<Box<dyn ResourceSampleShell>, String>>;
 }
 
+#[cfg(not(target_family = "wasm"))]
 struct ConnectionProfilerEntry {
     snapshot: ConnectionProfilerSnapshot,
     config: ResourceSamplingConfig,
@@ -246,12 +249,14 @@ struct ConnectionProfilerEntry {
     task: Option<JoinHandle<()>>,
 }
 
+#[cfg(not(target_family = "wasm"))]
 #[derive(Clone)]
 struct CachedSystemInfo {
     value: ResourceSystemInfo,
     sampled_at_ms: u64,
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl CachedSystemInfo {
     fn snapshot_at(&self, timestamp_ms: u64) -> ResourceSystemInfo {
         let mut value = self.value.clone();
@@ -263,11 +268,13 @@ impl CachedSystemInfo {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 #[derive(Clone, Default)]
 pub struct ProfilerRegistry {
     profilers: Arc<Mutex<HashMap<String, ConnectionProfilerEntry>>>,
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl ProfilerRegistry {
     pub fn new() -> Self {
         Self::default()
@@ -562,10 +569,6 @@ pub fn build_sample_command_for(os_type: &str, config: ResourceSamplingConfig) -
     build_sample_command_with_system_info(os_type, config, true)
 }
 
-fn build_live_sample_command(os_type: &str, config: ResourceSamplingConfig) -> String {
-    build_sample_command_with_system_info(os_type, config, false)
-}
-
 fn build_sample_command_with_system_info(
     os_type: &str,
     config: ResourceSamplingConfig,
@@ -828,6 +831,7 @@ pub fn shell_init_command(os_type: &str) -> &'static str {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn running_snapshot() -> ConnectionProfilerSnapshot {
     ConnectionProfilerSnapshot {
         metrics: None,
@@ -837,6 +841,7 @@ fn running_snapshot() -> ConnectionProfilerSnapshot {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn spawn_profiler_thread<F>(future: F)
 where
     F: Future<Output = ()> + Send + 'static,
@@ -854,6 +859,7 @@ where
         });
 }
 
+#[cfg(not(target_family = "wasm"))]
 async fn sample_loop(
     registry: ProfilerRegistry,
     connection_id: String,
@@ -885,7 +891,7 @@ async fn sample_loop(
     };
 
     let initial_command = build_sample_command_for(&os_type, config);
-    let live_command = build_live_sample_command(&os_type, config);
+    let live_command = build_sample_command_with_system_info(&os_type, config, false);
     let mut system_info_sampled = false;
     let mut cached_system_info: Option<CachedSystemInfo> = None;
     let mut previous_sample: Option<PreviousResourceSample> = None;
@@ -1051,6 +1057,7 @@ async fn sample_loop(
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn empty_metrics_with_cached_system_info(
     timestamp_ms: u64,
     source: MetricsSource,
@@ -1062,6 +1069,7 @@ fn empty_metrics_with_cached_system_info(
     metrics
 }
 
+#[cfg(not(target_family = "wasm"))]
 async fn open_resource_sample_shell(
     sampler: &dyn ResourceSampler,
     os_type: &str,
@@ -1071,6 +1079,7 @@ async fn open_resource_sample_shell(
         .await
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn record_and_emit(
     registry: &ProfilerRegistry,
     update_tx: &Option<mpsc::Sender<()>>,
@@ -1090,6 +1099,7 @@ fn record_and_emit(
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1097,13 +1107,14 @@ fn now_ms() -> u64 {
         .as_millis() as u64
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_family = "wasm")))]
 mod tests {
     use super::*;
     use crate::MetricsSource;
