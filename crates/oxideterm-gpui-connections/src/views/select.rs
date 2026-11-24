@@ -83,6 +83,9 @@ pub fn select_anchor_id(select_id: NewConnectionSelect) -> SelectAnchorId {
             SelectAnchorId::NewConnectionTerminalSessionLogPolicy
         }
         NewConnectionSelect::TerminalBellPolicy => SelectAnchorId::NewConnectionTerminalBellPolicy,
+        NewConnectionSelect::X11ForwardingMode => SelectAnchorId::NewConnectionX11Mode,
+        NewConnectionSelect::X11UntrustedTimeout => SelectAnchorId::NewConnectionX11Timeout,
+        NewConnectionSelect::PrimaryActionMenu => SelectAnchorId::NewConnectionPrimaryAction,
     }
 }
 

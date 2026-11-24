@@ -250,12 +250,22 @@ impl ConnectionFormView {
 
         let category_tabs = self.render_studio_category_tabs(tab_items, active_drawer, cx);
 
+        let studio_layout = composer::StudioLayoutMetrics::compute(
+            modal_width,
+            &self.tokens,
+            shows_transport_selector,
+        );
         let page_content = match active_drawer {
-            Some(ConnectionFormDrawer::StandaloneSftpPrimary) => {
-                self.render_standalone_sftp_endpoint_page(&form, false, remote_to_remote, cx)
-            }
+            Some(ConnectionFormDrawer::StandaloneSftpPrimary) => self
+                .render_standalone_sftp_endpoint_page(
+                    &form,
+                    false,
+                    remote_to_remote,
+                    studio_layout,
+                    cx,
+                ),
             Some(ConnectionFormDrawer::StandaloneSftpSecondary) if remote_to_remote => {
-                self.render_standalone_sftp_endpoint_page(&form, true, true, cx)
+                self.render_standalone_sftp_endpoint_page(&form, true, true, studio_layout, cx)
             }
             Some(ConnectionFormDrawer::Route) => {
                 self.render_standalone_sftp_route_page(&form, remote_to_remote, cx)
@@ -265,10 +275,10 @@ impl ConnectionFormView {
                 .flex_col()
                 .gap(px(self.tokens.metrics.modal_section_gap))
                 .child(self.render_connection_appearance_options(cx))
-                .child(div().h(px(1.0)).bg(rgb(theme.border)))
+                .child(self.form_hairline())
                 .child(self.render_connection_notes_fields(&form.notes, cx))
                 .into_any_element(),
-            _ => self.render_standalone_sftp_basic_page(&form, cx),
+            _ => self.render_standalone_sftp_basic_page(&form, studio_layout, cx),
         };
 
         let fields_scroll = self.selectable_text_scroll_handle("standalone-sftp-form-scroll");
@@ -317,7 +327,7 @@ impl ConnectionFormView {
                         .min_h(px(0.0))
                         .flex()
                         .when(shows_transport_selector, |content| {
-                            content.child(self.render_studio_protocol_sidebar(cx))
+                            content.child(self.render_studio_protocol_sidebar(studio_layout, cx))
                         })
                         .child(
                             div()
@@ -337,8 +347,8 @@ impl ConnectionFormView {
                                             div()
                                                 .id("standalone-sftp-form-scroll")
                                                 .size_full()
-                                                .px(px(22.0))
-                                                .py(px(18.0))
+                                                .px(px(studio_layout.content_padding_x))
+                                                .py(px(16.0))
                                                 .overflow_y_scroll()
                                                 .track_scroll(&fields_scroll)
                                                 .on_scroll(cx.listener(|this, _, _, cx| {
@@ -361,10 +371,15 @@ impl ConnectionFormView {
                                 ),
                         ),
                 )
-                .child(
-                    modal_footer(&self.tokens)
-                        .flex_none()
-                        .bg(rgb(theme.bg_panel))
+                .child({
+                    let show_test = form.profile_id.is_none() && !remote_to_remote;
+                    let right_cluster = div()
+                        .min_w_0()
+                        .flex()
+                        .flex_wrap()
+                        .items_center()
+                        .justify_end()
+                        .gap(px(8.0))
                         .child(self.render_connection_button(
                             self.i18n.t("ssh.form.cancel"),
                             false,
@@ -374,15 +389,6 @@ impl ConnectionFormView {
                         ))
                         .when(form.profile_id.is_none(), |footer| {
                             footer
-                                .when(!remote_to_remote, |footer| {
-                                    footer.child(self.render_connection_button(
-                                        self.i18n.t("ssh.form.test"),
-                                        false,
-                                        ConnectionButtonAction::Test,
-                                        primary_disabled,
-                                        cx,
-                                    ))
-                                })
                                 .child(self.render_connection_button(
                                     self.i18n.t("ssh.form.save"),
                                     false,
@@ -390,22 +396,21 @@ impl ConnectionFormView {
                                     primary_disabled,
                                     cx,
                                 ))
-                                .when(!remote_to_remote, |footer| {
-                                    footer.child(self.render_connection_button(
-                                        self.i18n.t("sftp.standalone.open"),
-                                        false,
-                                        ConnectionButtonAction::Connect,
+                                .child(if remote_to_remote {
+                                    self.render_connection_button(
+                                        self.i18n.t("sftp.standalone.save_and_open"),
+                                        true,
+                                        ConnectionButtonAction::SaveAndConnect,
                                         primary_disabled,
                                         cx,
-                                    ))
+                                    )
+                                } else {
+                                    self.render_split_primary_action_button(
+                                        self.i18n.t("sftp.standalone.save_and_open"),
+                                        primary_disabled,
+                                        cx,
+                                    )
                                 })
-                                .child(self.render_connection_button(
-                                    self.i18n.t("sftp.standalone.save_and_open"),
-                                    true,
-                                    ConnectionButtonAction::SaveAndConnect,
-                                    primary_disabled,
-                                    cx,
-                                ))
                         })
                         .when(form.profile_id.is_some(), |footer| {
                             footer.child(self.render_connection_button(
@@ -415,8 +420,29 @@ impl ConnectionFormView {
                                 primary_disabled,
                                 cx,
                             ))
-                        }),
-                ),
+                        });
+                    modal_footer(&self.tokens)
+                        .flex_none()
+                        .h_auto()
+                        .min_h(px(self.tokens.metrics.modal_footer_height))
+                        .flex_wrap()
+                        .bg(rgb(theme.bg_panel))
+                        .px(px(studio_layout.content_padding_x))
+                        .py(px(13.0))
+                        .when(show_test, |footer| footer.justify_between())
+                        .when(!show_test, |footer| footer.justify_end())
+                        .gap(px(12.0))
+                        .when(show_test, |footer| {
+                            footer.child(self.render_connection_button(
+                                self.i18n.t("ssh.form.test"),
+                                false,
+                                ConnectionButtonAction::Test,
+                                primary_disabled,
+                                cx,
+                            ))
+                        })
+                        .child(right_cluster)
+                }),
                 form_visible,
             ))
             .into_any_element()
@@ -425,33 +451,24 @@ impl ConnectionFormView {
     fn render_standalone_sftp_basic_page(
         &self,
         form: &StandaloneSftpModalSnapshot,
+        layout: composer::StudioLayoutMetrics,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         div()
             .flex()
             .flex_col()
             .gap(px(14.0))
-            .child(
-                div()
-                    .flex()
-                    .flex_row()
-                    .gap(px(12.0))
-                    .child(div().flex_1().min_w_0().child(self.render_connection_field(
-                        self.i18n.t("ssh.form.name"),
-                        &form.name,
-                        self.i18n.t("ssh.form.name_placeholder"),
-                        NewConnectionField::Name,
-                        false,
-                        cx,
-                    )))
-                    .child(div().w(px(196.0)).flex_none().child(
-                        self.render_connection_group_select(
-                            self.i18n.t("ssh.form.group"),
-                            &form.group,
-                            cx,
-                        ),
-                    )),
-            )
+            .child(self.render_identity_row(
+                self.i18n.t("ssh.form.name"),
+                &form.name,
+                self.i18n.t("ssh.form.name_placeholder"),
+                NewConnectionField::Name,
+                Some((self.i18n.t("ssh.form.group"), &form.group)),
+                true,
+                layout,
+                cx,
+            ))
+            .child(self.form_hairline())
             .child(self.render_standalone_sftp_transfer_mode(form.transfer_mode, cx))
             .child(self.render_connection_hint(self.i18n.t("sftp.standalone.usage_notice")))
             .when_some(form.error.clone(), |content, error| {
@@ -465,13 +482,16 @@ impl ConnectionFormView {
         form: &StandaloneSftpModalSnapshot,
         secondary: bool,
         numbered: bool,
+        layout: composer::StudioLayoutMetrics,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         div()
             .flex()
             .flex_col()
             .gap(px(14.0))
-            .child(self.render_standalone_sftp_endpoint_fields(form, secondary, numbered, cx))
+            .child(
+                self.render_standalone_sftp_endpoint_fields(form, secondary, numbered, layout, cx),
+            )
             .when_some(form.error.clone(), |content, error| {
                 content.child(self.render_prompt_feedback_box(error, form.feedback_success))
             })
@@ -556,21 +576,24 @@ impl ConnectionFormView {
         let tabs = options
             .into_iter()
             .map(|(mode, label)| {
-                segmented_tab(&self.tokens, self.i18n.t(label), mode == selected)
-                    .id(SharedString::from(format!("standalone-sftp-mode-{mode:?}")))
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.update_connection_form_state(cx, |state| {
-                                if let Some(form) = state.form.as_mut() {
-                                    form.set_standalone_sftp_transfer_mode(mode);
-                                    form.error = None;
-                                }
-                            });
-                            this.close_new_connection_select(cx);
-                            cx.notify();
-                        }),
-                    )
+                self.render_sunken_segmented_tab(
+                    SharedString::from(format!("standalone-sftp-mode-{mode:?}")),
+                    self.i18n.t(label),
+                    mode == selected,
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _event, _window, cx| {
+                        this.update_connection_form_state(cx, |state| {
+                            if let Some(form) = state.form.as_mut() {
+                                form.set_standalone_sftp_transfer_mode(mode);
+                                form.error = None;
+                            }
+                        });
+                        this.close_new_connection_select(cx);
+                        cx.notify();
+                    }),
+                )
             })
             .collect::<Vec<_>>();
         div()
@@ -580,7 +603,7 @@ impl ConnectionFormView {
             .child(form_field(
                 &self.tokens,
                 self.i18n.t("sftp.standalone.transfer_mode"),
-                segmented_tabs(&self.tokens).children(tabs),
+                self.render_sunken_segmented_track().children(tabs),
             ))
             .child(self.render_connection_hint(self.i18n.t(match selected {
                 StandaloneSftpTransferMode::LocalRemote => "sftp.standalone.mode_local_remote_hint",
@@ -596,6 +619,7 @@ impl ConnectionFormView {
         form: &StandaloneSftpModalSnapshot,
         secondary: bool,
         numbered: bool,
+        layout: composer::StudioLayoutMetrics,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
@@ -703,46 +727,20 @@ impl ConnectionFormView {
                         .child(self.i18n.t(title_key)),
                 )
             })
-            .child(
-                div()
-                    .flex()
-                    .flex_row()
-                    .gap(px(12.0))
-                    .child(div().flex_1().min_w_0().child(self.render_connection_field(
-                        self.i18n.t("sftp.standalone.host"),
-                        host,
-                        self.i18n.t("sftp.standalone.host_placeholder"),
-                        host_field,
-                        false,
-                        cx,
-                    )))
-                    .child(
-                        div()
-                            .w(px(108.0))
-                            .flex_none()
-                            .child(self.render_connection_field(
-                                self.i18n.t("sftp.standalone.port"),
-                                port,
-                                SSH_DEFAULT_PORT_TEXT.to_string(),
-                                port_field,
-                                false,
-                                cx,
-                            )),
-                    )
-                    .child(
-                        div()
-                            .w(px(196.0))
-                            .flex_none()
-                            .child(self.render_connection_field(
-                                self.i18n.t("ssh.form.username"),
-                                username,
-                                "root".to_string(),
-                                username_field,
-                                false,
-                                cx,
-                            )),
-                    ),
-            )
+            .child(self.render_unified_address_bar_with_fields(
+                username_field,
+                username,
+                "root".to_string(),
+                host_field,
+                host,
+                self.i18n.t("sftp.standalone.host_placeholder"),
+                port_field,
+                port,
+                SSH_DEFAULT_PORT_TEXT.to_string(),
+                layout.content_width,
+                cx,
+            ))
+            .child(self.form_hairline())
             .child(self.render_standalone_sftp_endpoint_auth(
                 auth_tab,
                 secondary,
@@ -768,7 +766,7 @@ impl ConnectionFormView {
                 },
                 cx,
             ))
-            .child(div().h(px(1.0)).bg(rgb(theme.border)))
+            .child(self.form_hairline())
             .child(options)
             .into_any_element()
     }

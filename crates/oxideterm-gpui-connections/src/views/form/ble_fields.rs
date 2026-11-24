@@ -12,6 +12,7 @@ impl ConnectionFormView {
     pub(super) fn render_ble_form_branch(
         &self,
         active_drawer: Option<crate::form_state::ConnectionFormDrawer>,
+        layout: composer::StudioLayoutMetrics,
         window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -617,37 +618,59 @@ impl ConnectionFormView {
             )
             .into_any_element();
 
-        let basic = div()
-            .flex()
-            .flex_col()
-            .gap(px(self.tokens.metrics.modal_section_gap))
-            .child(
-                div()
-                    .flex()
-                    .flex_row()
-                    .gap(px(12.0))
-                    .child(
-                        div().flex_1().min_w_0().child(
-                            self.render_connection_field(
-                                self.i18n.t("modals.new_connection.ble_profile_name"),
-                                &ble_profile_name,
-                                self.i18n
-                                    .t("modals.new_connection.ble_profile_name_placeholder"),
-                                NewConnectionField::BleProfileName,
-                                false,
-                                cx,
-                            ),
-                        ),
+        let (mtu_customized, write_without_response, terminal_customized, appearance_customized) =
+            self.connection_form_state(cx)
+                .form
+                .as_ref()
+                .map(|form| {
+                    (
+                        !form.ble.mtu.trim().is_empty(),
+                        form.ble.write_without_response,
+                        form.terminal != Default::default()
+                            || !form.pre_connect_command.trim().is_empty()
+                            || form.ble.local_echo,
+                        !form.icon.trim().is_empty()
+                            || !form.color.trim().is_empty()
+                            || !form.icon_background_color.trim().is_empty(),
                     )
-                    .child(div().w(px(196.0)).flex_none().child(
-                        self.render_connection_group_select(
-                            self.i18n.t("ssh.form.group"),
-                            &group,
-                            cx,
-                        ),
-                    )),
-            )
-            .into_any_element();
+                })
+                .unwrap_or_default();
+        let transport_highlighted = mtu_customized || write_without_response;
+        let transport_summary = if transport_highlighted {
+            self.i18n.t("ssh.form.ssh_algorithms_custom")
+        } else {
+            self.i18n.t("ssh.form.ssh_algorithms_default")
+        };
+        let terminal_summary = if terminal_customized {
+            self.i18n.t("ssh.form.ssh_algorithms_custom")
+        } else {
+            self.i18n.t("ssh.form.ssh_algorithms_default")
+        };
+        let notes_trimmed = notes.trim();
+        let notes_highlighted = !notes_trimmed.is_empty() || appearance_customized;
+        let notes_summary = if !notes_trimmed.is_empty() {
+            notes_trimmed
+                .lines()
+                .next()
+                .unwrap_or(notes_trimmed)
+                .to_string()
+        } else if appearance_customized {
+            self.i18n.t("ssh.form.ssh_algorithms_custom")
+        } else {
+            self.i18n.t("ssh.form.ssh_algorithms_default")
+        };
+
+        let basic = self.render_identity_row(
+            self.i18n.t("modals.new_connection.ble_profile_name"),
+            &ble_profile_name,
+            self.i18n
+                .t("modals.new_connection.ble_profile_name_placeholder"),
+            NewConnectionField::BleProfileName,
+            Some((self.i18n.t("ssh.form.group"), &group)),
+            true,
+            layout,
+            cx,
+        );
 
         use crate::form_state::ConnectionFormDrawer;
         match active_drawer {
@@ -658,7 +681,8 @@ impl ConnectionFormView {
                 .flex()
                 .flex_col()
                 .gap(px(self.tokens.metrics.modal_section_gap))
-                .child(self.render_connection_terminal_options(cx))
+                .child(self.render_connection_terminal_options(layout.narrow_content, cx))
+                .child(self.form_hairline())
                 .child(self.render_connection_pre_connect_command(cx))
                 .into_any_element(),
             Some(ConnectionFormDrawer::Notes) => div()
@@ -666,16 +690,56 @@ impl ConnectionFormView {
                 .flex_col()
                 .gap(px(self.tokens.metrics.modal_section_gap))
                 .child(self.render_connection_appearance_options(cx))
-                .child(div().h(px(1.0)).bg(rgb(theme.border)))
+                .child(self.form_hairline())
                 .child(self.render_connection_notes_fields(&notes, cx))
                 .into_any_element(),
             _ => div()
                 .flex()
                 .flex_col()
-                .gap(px(self.tokens.metrics.modal_section_gap))
+                .gap(px(12.0))
                 .child(basic)
-                .child(div().h(px(1.0)).bg(rgb(theme.border)))
+                .child(self.form_hairline())
                 .child(discovery_body)
+                .child(
+                    div()
+                        .w_full()
+                        .flex()
+                        .flex_col()
+                        .gap(px(2.0))
+                        .child(self.form_hairline())
+                        .child(
+                            self.render_connection_disclosure_row(
+                                "ble-summary-BleTransportOptions",
+                                LucideIcon::Settings,
+                                self.i18n
+                                    .t("modals.new_connection.ble_transport_options_title"),
+                                transport_summary,
+                                transport_highlighted,
+                                ConnectionFormDrawer::BleTransportOptions,
+                                cx,
+                            ),
+                        )
+                        .child(self.form_hairline())
+                        .child(self.render_connection_disclosure_row(
+                            "ble-summary-Terminal",
+                            LucideIcon::Terminal,
+                            self.i18n.t("ssh.form.terminal_options"),
+                            terminal_summary,
+                            terminal_customized,
+                            ConnectionFormDrawer::Terminal,
+                            cx,
+                        ))
+                        .child(self.form_hairline())
+                        .child(self.render_connection_disclosure_row(
+                            "ble-summary-Notes",
+                            LucideIcon::Sparkles,
+                            self.i18n.t("ssh.form.appearance"),
+                            notes_summary,
+                            notes_highlighted,
+                            ConnectionFormDrawer::Notes,
+                            cx,
+                        )),
+                )
                 .into_any_element(),
         }
     }
@@ -729,69 +793,70 @@ impl ConnectionFormView {
                         .contains(&value)
                 })
                 .unwrap_or(true);
+        let theme = self.tokens.ui;
+        let mtu_row = div()
+            .w_full()
+            .min_h(px(44.0))
+            .py(px(6.0))
+            .px(px(2.0))
+            .flex()
+            .flex_row()
+            .items_center()
+            .justify_between()
+            .gap(px(12.0))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                    .text_color(rgb(theme.text))
+                    .child(self.render_connection_label_with_help(
+                        "new-connection-ble-mtu-help",
+                        "new-connection-ble-mtu",
+                        "modals.new_connection.ble_mtu",
+                        "modals.new_connection.ble_mtu_hint",
+                        cx,
+                    )),
+            )
+            .child(div().w(px(96.0)).flex_none().child(
+                self.render_connection_centered_mono_input(
+                    &mtu_draft,
+                    self.i18n.t("modals.new_connection.ble_mtu_placeholder"),
+                    NewConnectionField::BleMtu,
+                    cx,
+                ),
+            ));
+
         div()
             .flex()
             .flex_col()
-            .gap(px(self.tokens.spacing.three))
-            .child(
-                div()
-                    .flex()
-                    .flex_row()
-                    .flex_wrap()
-                    .gap(px(self.tokens.spacing.three))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w(px(CONNECTION_TERMINAL_CONTROL_MIN_WIDTH))
-                            .child(form_field(
-                                &self.tokens,
-                                // Same label + hover hint pattern as the SSH
-                                // connect timeout field.
-                                self.render_connection_label_with_help(
-                                    "new-connection-ble-mtu-help",
-                                    "new-connection-ble-mtu",
-                                    "modals.new_connection.ble_mtu",
-                                    "modals.new_connection.ble_mtu_hint",
-                                    cx,
-                                ),
-                                self.render_connection_input(
-                                    &mtu_draft,
-                                    self.i18n.t("modals.new_connection.ble_mtu_placeholder"),
-                                    NewConnectionField::BleMtu,
-                                    false,
-                                    cx,
-                                ),
-                            )),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w(px(CONNECTION_TERMINAL_CONTROL_MIN_WIDTH))
-                            .child(self.render_connection_checkbox_with_help(
-                                "new-connection-ble-wwr-help",
-                                "new-connection-ble-wwr",
-                                "modals.new_connection.ble_write_without_response",
-                                "modals.new_connection.ble_write_without_response_hint",
-                                // Reflects the unchecked state whenever the
-                                // selected service has no matching
-                                // characteristic, instead of only graying out
-                                // a stale check.
-                                write_without_response_available && write_without_response,
-                                !write_without_response_available,
-                                |form| {
-                                    form.ble.write_without_response =
-                                        !form.ble.write_without_response
-                                },
-                                cx,
-                            )),
-                    ),
-            )
+            .gap(px(2.0))
+            .child(mtu_row)
             .when(mtu_invalid, |section| {
-                section.child(self.render_connection_hint_with_color(
-                    self.i18n.t("modals.new_connection.ble_mtu_invalid"),
-                    self.tokens.ui.error,
-                ))
+                section.child(
+                    div()
+                        .pb(px(6.0))
+                        .child(self.render_connection_hint_with_color(
+                            self.i18n.t("modals.new_connection.ble_mtu_invalid"),
+                            self.tokens.ui.error,
+                        )),
+                )
             })
+            .child(self.form_hairline())
+            .child(self.render_connection_switch_row_with_help(
+                "new-connection-ble-wwr-help",
+                "new-connection-ble-wwr",
+                "modals.new_connection.ble_write_without_response",
+                "modals.new_connection.ble_write_without_response_hint",
+                // Reflects the unchecked state whenever the selected service has no
+                // matching characteristic, instead of only graying out a stale check.
+                write_without_response_available && write_without_response,
+                !write_without_response_available,
+                |form| {
+                    form.ble.write_without_response = !form.ble.write_without_response;
+                },
+                cx,
+            ))
             .into_any_element()
     }
 

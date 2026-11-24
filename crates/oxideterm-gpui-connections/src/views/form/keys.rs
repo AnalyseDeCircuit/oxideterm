@@ -41,6 +41,7 @@ impl ConnectionFlowEntity {
         } else {
             modifiers.platform || modifiers.control
         };
+        let is_drill_down = self.form.drill_down_parent_node_id.is_some();
         let Some(form) = self.form.form.as_mut() else {
             return (FormKeyAction::NotHandled, false);
         };
@@ -54,6 +55,10 @@ impl ConnectionFlowEntity {
                 }
                 "escape" if form.jump_server_form.is_some() => {
                     (FormKeyAction::CloseJumpForm, false)
+                }
+                "escape" if !is_drill_down && step_back_ssh_subpage(form) => {
+                    cx.notify();
+                    (FormKeyAction::Handled, false)
                 }
                 "escape" => (FormKeyAction::CloseForm, false),
                 "enter" if form.jump_server_form.is_some() => (FormKeyAction::AddJumpServer, false),
@@ -151,6 +156,10 @@ impl ConnectionFlowEntity {
                 (FormKeyAction::Handled, false)
             }
             "escape" if form.jump_server_form.is_some() => (FormKeyAction::CloseJumpForm, false),
+            "escape" if !is_drill_down && step_back_ssh_subpage(form) => {
+                cx.notify();
+                (FormKeyAction::Handled, false)
+            }
             "escape" => (FormKeyAction::CloseForm, false),
             "enter" if form.jump_server_form.is_some() => (FormKeyAction::AddJumpServer, false),
             "enter" => (FormKeyAction::Submit, false),
@@ -252,7 +261,28 @@ impl ConnectionFlowEntity {
                     // A pasted replacement is owned by the form; the saved value is never loaded.
                     form.password_loaded = true;
                 }
-                insert_text_into_current_connection_field(form, &single_line);
+                if form.focused_field == NewConnectionField::Host
+                    && matches!(
+                        form.transport,
+                        NewConnectionTransport::Ssh
+                            | NewConnectionTransport::Mosh
+                            | NewConnectionTransport::StandaloneSftp
+                    )
+                    && (form.host.trim().is_empty()
+                        || form.selected_field == Some(NewConnectionField::Host))
+                    && let Some(parsed) = parse_ssh_address_paste(&single_line)
+                {
+                    form.host = parsed.host;
+                    if let Some(username) = parsed.username {
+                        form.username = username;
+                    }
+                    if let Some(port) = parsed.port {
+                        form.port = port;
+                    }
+                    clear_connection_selection(form);
+                } else {
+                    insert_text_into_current_connection_field(form, &single_line);
+                }
             }
             form.error = None;
             true
@@ -262,5 +292,268 @@ impl ConnectionFlowEntity {
             cx.notify();
         }
         pasted
+    }
+}
+
+fn step_back_ssh_subpage(form: &mut NewConnectionForm) -> bool {
+    if form.transport == NewConnectionTransport::StandaloneSftp {
+        return false;
+    }
+    let Some(drawer) = form.active_drawer else {
+        return false;
+    };
+    form.active_drawer = match drawer {
+        crate::form_state::ConnectionFormDrawer::SshAlgorithms
+            if form.transport == NewConnectionTransport::Ssh =>
+        {
+            Some(crate::form_state::ConnectionFormDrawer::SshSecurity)
+        }
+        _ => None,
+    };
+    form.ssh_algorithm_menu = None;
+    form.field_focused = false;
+    clear_connection_selection(form);
+    true
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct ParsedSshAddress {
+    username: Option<String>,
+    host: String,
+    port: Option<String>,
+}
+
+/// Parses pasted SSH commands, `ssh://` URIs, or `user@host:port` targets into
+/// separate fields. Returns `None` for plain hostnames so regular paste runs unchanged.
+fn parse_ssh_address_paste(raw: &str) -> Option<ParsedSshAddress> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Some(rest) = trimmed
+        .strip_prefix("ssh://")
+        .or_else(|| trimmed.strip_prefix("SSH://"))
+    {
+        let authority = rest.split(['/', '?', '#']).next().unwrap_or("").trim();
+        return parse_ssh_authority(authority, true);
+    }
+
+    let tokens: Vec<&str> = trimmed.split_whitespace().collect();
+    if tokens
+        .first()
+        .is_some_and(|t| t.eq_ignore_ascii_case("ssh"))
+        && tokens.len() >= 2
+    {
+        let mut username: Option<String> = None;
+        let mut port: Option<String> = None;
+        let mut target: Option<&str> = None;
+        let mut index = 1;
+        while index < tokens.len() {
+            let token = tokens[index];
+            if token == "--" {
+                if let Some(&next) = tokens.get(index + 1) {
+                    target = Some(next);
+                }
+                break;
+            }
+            if token == "-p" {
+                if let Some(&value) = tokens.get(index + 1)
+                    && value.parse::<u16>().is_ok_and(|p| p > 0)
+                {
+                    port = Some(value.to_string());
+                    index += 2;
+                    continue;
+                }
+                return None;
+            }
+            if let Some(value) = token.strip_prefix("-p")
+                && !value.is_empty()
+                && value.parse::<u16>().is_ok_and(|p| p > 0)
+            {
+                port = Some(value.to_string());
+                index += 1;
+                continue;
+            }
+            if token == "-l" {
+                if let Some(&value) = tokens.get(index + 1)
+                    && !value.is_empty()
+                {
+                    username = Some(value.to_string());
+                    index += 2;
+                    continue;
+                }
+                return None;
+            }
+            if let Some(value) = token.strip_prefix("-l")
+                && !value.is_empty()
+            {
+                username = Some(value.to_string());
+                index += 1;
+                continue;
+            }
+            if matches!(
+                token,
+                "-b" | "-B"
+                    | "-c"
+                    | "-D"
+                    | "-E"
+                    | "-e"
+                    | "-F"
+                    | "-I"
+                    | "-i"
+                    | "-J"
+                    | "-L"
+                    | "-m"
+                    | "-O"
+                    | "-o"
+                    | "-P"
+                    | "-Q"
+                    | "-R"
+                    | "-S"
+                    | "-W"
+                    | "-w"
+            ) {
+                index += 2;
+                continue;
+            }
+            if token.starts_with('-') {
+                index += 1;
+                continue;
+            }
+            if target.is_none() {
+                target = Some(token);
+                index += 1;
+                continue;
+            }
+            break;
+        }
+        let target = target?;
+        let mut parsed = parse_ssh_authority(target, true)?;
+        if parsed.username.is_none() {
+            parsed.username = username;
+        }
+        if parsed.port.is_none() {
+            parsed.port = port;
+        }
+        return Some(parsed);
+    }
+
+    if tokens.len() == 1 {
+        return parse_ssh_authority(trimmed, false);
+    }
+    None
+}
+
+fn parse_ssh_authority(authority: &str, allow_bare_host: bool) -> Option<ParsedSshAddress> {
+    let authority = authority.trim();
+    if authority.is_empty() || authority.contains(char::is_whitespace) {
+        return None;
+    }
+    let (username, host_port) = if let Some((userinfo, rest)) = authority.rsplit_once('@') {
+        // Never copy an inline URI password into visible username/host fields.
+        let user = userinfo.split(':').next().unwrap_or("").trim();
+        let username = (!user.is_empty()).then(|| user.to_string());
+        (username, rest)
+    } else {
+        (None, authority)
+    };
+
+    let (host, port) = if let Some(after_open) = host_port.strip_prefix('[') {
+        let (ipv6, remainder) = after_open.split_once(']')?;
+        let port = if let Some(port_str) = remainder.strip_prefix(':') {
+            port_str.parse::<u16>().ok().filter(|&p| p > 0)?;
+            Some(port_str.to_string())
+        } else if remainder.is_empty() {
+            None
+        } else {
+            return None;
+        };
+        (ipv6.trim().to_string(), port)
+    } else if host_port.matches(':').count() == 1 {
+        let (host_part, port_part) = host_port.split_once(':')?;
+        if port_part.parse::<u16>().is_ok_and(|p| p > 0) {
+            (host_part.trim().to_string(), Some(port_part.to_string()))
+        } else {
+            return None;
+        }
+    } else {
+        (host_port.trim().to_string(), None)
+    };
+
+    if host.is_empty() {
+        return None;
+    }
+    if !allow_bare_host && username.is_none() && port.is_none() {
+        return None;
+    }
+    Some(ParsedSshAddress {
+        username,
+        host,
+        port,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ParsedSshAddress, parse_ssh_address_paste};
+
+    #[test]
+    fn parse_ssh_address_paste_extracts_target_fields_and_ignores_plain_hosts() {
+        let cases = [
+            (
+                "ssh -p 2222 deploy@prod.example.com",
+                Some(ParsedSshAddress {
+                    username: Some("deploy".into()),
+                    host: "prod.example.com".into(),
+                    port: Some("2222".into()),
+                }),
+            ),
+            (
+                "ssh -i ~/.ssh/id_ed25519 -l ops 10.0.0.8 -p2200",
+                Some(ParsedSshAddress {
+                    username: Some("ops".into()),
+                    host: "10.0.0.8".into(),
+                    port: Some("2200".into()),
+                }),
+            ),
+            (
+                "ssh://admin:s3cr3t@bastion.internal:2222/ignored",
+                Some(ParsedSshAddress {
+                    username: Some("admin".into()),
+                    host: "bastion.internal".into(),
+                    port: Some("2222".into()),
+                }),
+            ),
+            (
+                "root@[2001:db8::1]:2222",
+                Some(ParsedSshAddress {
+                    username: Some("root".into()),
+                    host: "2001:db8::1".into(),
+                    port: Some("2222".into()),
+                }),
+            ),
+            (
+                "ubuntu@192.168.1.50",
+                Some(ParsedSshAddress {
+                    username: Some("ubuntu".into()),
+                    host: "192.168.1.50".into(),
+                    port: None,
+                }),
+            ),
+            (
+                "db.internal:2202",
+                Some(ParsedSshAddress {
+                    username: None,
+                    host: "db.internal".into(),
+                    port: Some("2202".into()),
+                }),
+            ),
+            ("192.168.1.100", None),
+            ("2001:db8::1", None),
+        ];
+
+        for (input, expected) in cases {
+            assert_eq!(parse_ssh_address_paste(input), expected, "input: {input}");
+        }
     }
 }

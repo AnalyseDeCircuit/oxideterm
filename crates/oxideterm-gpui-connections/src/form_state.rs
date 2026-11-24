@@ -189,6 +189,9 @@ pub enum NewConnectionSelect {
     TerminalHighlightRuleSet,
     TerminalSessionLogPolicy,
     TerminalBellPolicy,
+    X11ForwardingMode,
+    X11UntrustedTimeout,
+    PrimaryActionMenu,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

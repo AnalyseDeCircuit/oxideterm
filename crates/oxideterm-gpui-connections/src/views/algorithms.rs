@@ -223,9 +223,11 @@ impl<'a> SshAlgorithmEditor<'a> {
         // without expanding the modal width.
         let mut category_tabs = div()
             .w_full()
-            .p(px(3.0))
+            .p(px(2.0))
             .rounded(px(self.tokens.radii.md))
-            .bg(rgb(theme.bg_panel))
+            .bg(rgba((theme.bg_sunken << 8) | 0xc8))
+            .border_1()
+            .border_color(rgba((theme.border << 8) | 0x66))
             .flex()
             .flex_row()
             .items_center()
@@ -238,7 +240,7 @@ impl<'a> SshAlgorithmEditor<'a> {
                     .id(("ssh-algorithm-category", cat_idx))
                     .flex_1()
                     .min_w_0()
-                    .h(px(30.0))
+                    .h(px(28.0))
                     .px(px(6.0))
                     .rounded(px(self.tokens.radii.sm))
                     .cursor_pointer()
@@ -249,7 +251,7 @@ impl<'a> SshAlgorithmEditor<'a> {
                     .when(active, |tab| {
                         tab.bg(rgb(theme.bg_card))
                             .border_1()
-                            .border_color(rgb(theme.border))
+                            .border_color(rgba((theme.border << 8) | 0xc0))
                     })
                     .when(!active, |tab| {
                         tab.hover(|el| el.bg(rgba((theme.bg_hover << 8) | 0x99)))
@@ -297,8 +299,15 @@ impl<'a> SshAlgorithmEditor<'a> {
 
         // Compact mode toggle bar: Follow Preset vs Custom. Any direct edit on a row
         // automatically promotes the category to Custom, so users never hit dead controls.
-        let mode_toggle =
-            segmented_tabs(self.tokens).children([true, false].into_iter().map(|follow| {
+        let mode_toggle = segmented_tabs(self.tokens)
+            .h(px(self.tokens.metrics.ui_tabs_list_height + 2.0))
+            .rounded(px(self.tokens.radii.md))
+            .bg(rgba((theme.bg_sunken << 8) | 0xc8))
+            .border_1()
+            .border_color(rgba((theme.border << 8) | 0x66))
+            .p(px(2.0))
+            .children([true, false].into_iter().map(|follow| {
+                let selected = inherited == follow;
                 segmented_tab(
                     self.tokens,
                     self.i18n.t(if follow {
@@ -306,13 +315,25 @@ impl<'a> SshAlgorithmEditor<'a> {
                     } else {
                         "ssh.form.ssh_algorithms_custom"
                     }),
-                    inherited == follow,
+                    selected,
                 )
                 .id(SharedString::from(if follow {
                     "ssh-algorithm-mode-preset"
                 } else {
                     "ssh-algorithm-mode-custom"
                 }))
+                .h_full()
+                .min_h_0()
+                .py_0()
+                .rounded(px(self.tokens.radii.sm))
+                .bg(if selected {
+                    rgb(theme.bg_card)
+                } else {
+                    rgba(0x00000000)
+                })
+                .when(selected, |el| {
+                    el.border_1().border_color(rgba((theme.border << 8) | 0xc0))
+                })
                 .on_mouse_down(
                     MouseButton::Left,
                     self.listener(move |this, _, _, cx| {
@@ -338,6 +359,7 @@ impl<'a> SshAlgorithmEditor<'a> {
         let toolbar = div()
             .w_full()
             .flex()
+            .flex_wrap()
             .items_center()
             .justify_between()
             .gap(px(12.0))
@@ -459,16 +481,22 @@ impl<'a> SshAlgorithmEditor<'a> {
                             (0..6).map(|_| div().size(px(2.0)).bg(rgb(theme.text_muted))),
                         )),
                 )
-                .child(oxideterm_gpui_ui::checkbox::checkbox_with(
-                    self.tokens,
-                    format!("ssh-algorithm-{category:?}-{name}"),
-                    String::new(),
-                    checked,
-                    oxideterm_gpui_ui::checkbox::CheckboxOptions {
-                        disabled: cannot_disable,
-                        ..Default::default()
-                    },
-                ))
+                .child(
+                    // Soften inherited preset checkmarks so default rows stay calm
+                    // until the user explicitly switches to or edits Custom mode.
+                    div().when(inherited, |el| el.opacity(0.48)).child(
+                        oxideterm_gpui_ui::checkbox::checkbox_with(
+                            self.tokens,
+                            format!("ssh-algorithm-{category:?}-{name}"),
+                            String::new(),
+                            checked,
+                            oxideterm_gpui_ui::checkbox::CheckboxOptions {
+                                disabled: cannot_disable,
+                                ..Default::default()
+                            },
+                        ),
+                    ),
+                )
                 .when(checked, |row| {
                     row.child(
                         div()
@@ -606,10 +634,10 @@ impl<'a> SshAlgorithmEditor<'a> {
         div()
             .flex()
             .flex_col()
-            .gap(px(12.0))
+            .gap(px(10.0))
             .child(category_tabs)
             .child(toolbar)
-            .child(div().h(px(1.0)).bg(rgb(theme.border)))
+            .child(div().h(px(1.0)).bg(rgba((theme.border << 8) | 0x55)))
             .child(list)
             .into_any_element()
     }

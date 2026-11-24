@@ -1,4 +1,5 @@
 use super::*;
+use gpui::AnimationExt;
 use oxideterm_connections::{ConnectionTerminalBellPolicy, ConnectionTerminalSessionLogPolicy};
 
 struct JumpServerRenderSnapshot {
@@ -1209,16 +1210,124 @@ impl ConnectionFormView {
                     ));
                 }
             }
+            NewConnectionSelect::X11ForwardingMode => {
+                let selected = self
+                    .connection_form_state(cx)
+                    .form
+                    .as_ref()
+                    .map(|form| form.x11_forwarding.mode)
+                    .unwrap_or_default();
+                for (mode, label_key) in [
+                    (
+                        ConnectionX11ForwardingMode::Untrusted,
+                        "ssh.form.x11_mode_untrusted",
+                    ),
+                    (
+                        ConnectionX11ForwardingMode::Trusted,
+                        "ssh.form.x11_mode_trusted",
+                    ),
+                ] {
+                    popup = popup.child(select_option_action(
+                        select_option(&self.tokens, self.i18n.t(label_key), selected == mode),
+                        false,
+                        false,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.close_new_connection_select(cx);
+                            this.update_connection_form_state(cx, |state| {
+                                if let Some(form) = state.form.as_mut() {
+                                    form.x11_forwarding.mode = mode;
+                                }
+                            });
+                            cx.stop_propagation();
+                            cx.notify();
+                        }),
+                    ));
+                }
+            }
+            NewConnectionSelect::X11UntrustedTimeout => {
+                let selected = self
+                    .connection_form_state(cx)
+                    .form
+                    .as_ref()
+                    .map(|form| form.x11_forwarding.untrusted_timeout_seconds)
+                    .unwrap_or(1_200);
+                for (seconds, label_key) in [
+                    (300u32, "ssh.form.x11_timeout_5_minutes"),
+                    (1_200u32, "ssh.form.x11_timeout_20_minutes"),
+                    (3_600u32, "ssh.form.x11_timeout_1_hour"),
+                    (0u32, "ssh.form.x11_timeout_none"),
+                ] {
+                    popup = popup.child(select_option_action(
+                        select_option(&self.tokens, self.i18n.t(label_key), selected == seconds),
+                        false,
+                        false,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.close_new_connection_select(cx);
+                            this.update_connection_form_state(cx, |state| {
+                                if let Some(form) = state.form.as_mut() {
+                                    form.x11_forwarding.untrusted_timeout_seconds = seconds;
+                                }
+                            });
+                            cx.stop_propagation();
+                            cx.notify();
+                        }),
+                    ));
+                }
+            }
+            NewConnectionSelect::PrimaryActionMenu => {
+                let state = self.connection_form_state(cx);
+                let is_drill_down = state.drill_down_parent_node_id.is_some();
+                let connect_label = state
+                    .form
+                    .as_ref()
+                    .map(|form| {
+                        if matches!(
+                            form.transport,
+                            NewConnectionTransport::LocalTerminal
+                                | NewConnectionTransport::Serial
+                                | NewConnectionTransport::Ble
+                        ) {
+                            self.i18n.t("modals.new_connection.local_open")
+                        } else if form.transport == NewConnectionTransport::StandaloneSftp {
+                            self.i18n.t("sftp.standalone.open")
+                        } else if is_drill_down {
+                            self.i18n.t("ssh.drill_down.connect")
+                        } else {
+                            self.i18n.t("ssh.form.connect")
+                        }
+                    })
+                    .unwrap_or_else(|| self.i18n.t("ssh.form.connect"));
+                popup = popup.child(select_option_action(
+                    select_option(&self.tokens, connect_label, false),
+                    false,
+                    false,
+                    cx.listener(|this, _event, window, cx| {
+                        this.close_new_connection_select(cx);
+                        this.submit_new_connection_form_with_action(
+                            NewConnectionSubmitAction::Connect,
+                            window,
+                            cx,
+                        );
+                        cx.stop_propagation();
+                    }),
+                ));
+            }
         }
 
-        let (anchor_corner, position, offset_y) = if opens_above {
-            (
+        let align_right = select_id == NewConnectionSelect::PrimaryActionMenu;
+        let (anchor_corner, position, offset_y) = match (opens_above, align_right) {
+            (true, true) => (
+                Corner::BottomRight,
+                point(anchor.bounds.right(), anchor.bounds.top()),
+                -popup_gap,
+            ),
+            (false, true) => (Corner::TopRight, anchor.bounds.bottom_right(), popup_gap),
+            (true, false) => (
                 Corner::BottomLeft,
                 point(anchor.bounds.left(), anchor.bounds.top()),
                 -popup_gap,
-            )
-        } else {
-            (Corner::TopLeft, anchor.bounds.bottom_left(), popup_gap)
+            ),
+            (false, false) => (Corner::TopLeft, anchor.bounds.bottom_left(), popup_gap),
         };
         let popup_offset_y = if opens_above { 4.0 } else { -4.0 };
         let popup_origin = gpui::point(0.5, if opens_above { 1.0 } else { 0.0 });
@@ -1961,13 +2070,8 @@ impl ConnectionFormView {
                     "new-connection-proxy-chain-scroll"
                 }));
             for (index, hop) in summaries.iter().enumerate() {
-                list = list.child(self.render_proxy_hop_summary(
-                    index,
-                    index + 1 == hop_count,
-                    hop,
-                    secondary,
-                    cx,
-                ));
+                list =
+                    list.child(self.render_proxy_hop_summary(index, hop_count, hop, secondary, cx));
             }
             list.into_any_element()
         };
@@ -1977,8 +2081,8 @@ impl ConnectionFormView {
             .flex_col()
             .gap(px(10.0))
             .border_t_1()
-            .border_color(rgb(theme.border))
-            .pt(px(16.0))
+            .border_color(rgba((theme.border << 8) | 0x55))
+            .pt(px(14.0))
             .child(
                 div()
                     .flex()
@@ -2183,11 +2287,13 @@ impl ConnectionFormView {
     fn render_proxy_hop_summary(
         &self,
         index: usize,
-        is_last: bool,
+        hop_count: usize,
         hop: &ProxyHopSummarySnapshot,
         secondary: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let is_last = index + 1 >= hop_count;
+        let segment_count = hop_count.saturating_sub(1);
         let theme = self.tokens.ui;
         let hop_title = hop
             .saved_connection_name
@@ -2243,14 +2349,103 @@ impl ConnectionFormView {
                             .child((index + 1).to_string()),
                     )
                     .when(!is_last, |rail| {
-                        rail.child(
-                            div()
-                                .flex_1()
-                                .w(px(1.5))
-                                .min_h(px(12.0))
-                                .mt(px(4.0))
-                                .bg(rgb(theme.border)),
-                        )
+                        let animate =
+                            self.tokens.motion.enabled && self.tokens.motion.spatial_enabled;
+                        let mut line = div()
+                            .relative()
+                            .flex_1()
+                            .w(px(2.0))
+                            .min_h(px(14.0))
+                            .mt(px(4.0))
+                            .rounded_full()
+                            .bg(rgba((theme.border << 8) | 0x99))
+                            .overflow_hidden();
+                        if animate {
+                            let seg_count = segment_count.max(1);
+                            let cycle_ms = if seg_count == 1 {
+                                2400
+                            } else {
+                                (1200 * seg_count as u64).clamp(2400, 4400)
+                            };
+                            let duration =
+                                oxideterm_gpui_ui::motion::scaled_duration(&self.tokens, cycle_ms);
+                            let rail_key = (u64::from(secondary) << 16)
+                                | ((seg_count as u64) << 8)
+                                | (index as u64);
+                            if seg_count == 1 {
+                                for (pulse_idx, phase_offset) in
+                                    [0.0_f32, 0.5_f32].into_iter().enumerate()
+                                {
+                                    line = line.child(
+                                        div()
+                                            .absolute()
+                                            .left_0()
+                                            .right_0()
+                                            .h(px(14.0))
+                                            .rounded_full()
+                                            .bg(rgb(theme.accent))
+                                            .with_animation(
+                                                (
+                                                    "proxy-hop-vertical-flow",
+                                                    (rail_key << 2) | pulse_idx as u64,
+                                                ),
+                                                gpui::Animation::new(duration)
+                                                    .repeat()
+                                                    .with_easing(|progress| progress),
+                                                move |pulse, progress| {
+                                                    let phase = (progress + phase_offset) % 1.0;
+                                                    let opacity = (if phase < 0.5 {
+                                                        phase * 5.0
+                                                    } else {
+                                                        (1.0 - phase) * 5.0
+                                                    })
+                                                    .clamp(0.0, 1.0);
+                                                    pulse
+                                                        .top(gpui::relative(phase * 1.25 - 0.25))
+                                                        .opacity(opacity)
+                                                },
+                                            ),
+                                    );
+                                }
+                            } else {
+                                // Run one continuous pulse downward across each hop rail segment.
+                                let total_segments = seg_count as f32;
+                                let seg = index as f32;
+                                line = line.child(
+                                    div()
+                                        .absolute()
+                                        .left_0()
+                                        .right_0()
+                                        .h(px(14.0))
+                                        .rounded_full()
+                                        .bg(rgb(theme.accent))
+                                        .with_animation(
+                                            ("proxy-hop-vertical-flow", rail_key),
+                                            gpui::Animation::new(duration)
+                                                .repeat()
+                                                .with_easing(|progress| progress),
+                                            move |pulse, progress| {
+                                                let local = progress * total_segments - seg;
+                                                if !(0.0..=1.0).contains(&local) {
+                                                    return pulse
+                                                        .top(gpui::relative(-0.25))
+                                                        .opacity(0.0);
+                                                }
+                                                let opacity = (if local < 0.5 {
+                                                    local * 5.0
+                                                } else {
+                                                    (1.0 - local) * 5.0
+                                                })
+                                                .clamp(0.0, 1.0);
+                                                pulse
+                                                    .top(gpui::relative(local * 1.25 - 0.25))
+                                                    .opacity(opacity)
+                                            },
+                                        ),
+                                );
+                            }
+                        }
+                        rail.child(line)
                     }),
             )
             .child(

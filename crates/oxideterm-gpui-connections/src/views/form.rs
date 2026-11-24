@@ -52,19 +52,21 @@ use oxideterm_gpui_settings_view::{
 use oxideterm_gpui_ui::icons::LucideIcon;
 use oxideterm_gpui_ui::select::BrowserFocusOrigin;
 use oxideterm_gpui_ui::{
-    ButtonTone, CheckboxOptions, TextInputView, button,
+    ButtonTone, SwitchOptions, TextInputView, button,
     button::{
         ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, IconButtonOptions,
         ToolbarButtonOptions,
     },
-    checkbox, checkbox_with, form_field,
+    checkbox, form_field,
     modal::{dismissible_dialog_backdrop, popover_backdrop},
     modal_container, modal_footer, segmented_tab, segmented_tabs,
     select::{
         SelectAnchorId, select_option, select_option_action, select_overlay_popup_with_max_height,
     },
+    switch_with,
     text_input::{
-        text_caret, text_input_value_segments, text_input_value_segments_with_marked_range,
+        TextInputContentAlign, text_caret, text_input_value_segments,
+        text_input_value_segments_with_marked_range, text_input_with_viewport_and_content_align,
     },
 };
 use oxideterm_remote_desktop::{
@@ -96,9 +98,7 @@ const SECRET_VISIBILITY_ICON_SIZE: f32 = 16.0;
 const JUMP_STUDIO_MODAL_WIDTH: f32 = 560.0;
 const JUMP_STUDIO_MAX_HEIGHT: f32 = 620.0;
 const PROXY_CHAIN_LIST_MAX_HEIGHT: f32 = 260.0;
-const TAURI_SERIAL_GRID_GAP: f32 = 16.0; // Tauri serial grid gap-4
 pub const NEW_CONNECTION_TYPE_SIDEBAR_WIDTH: f32 = 160.0;
-const CONNECTION_TERMINAL_CONTROL_MIN_WIDTH: f32 = 220.0;
 const CONNECTION_ICON_COLOR_CONTROL_MIN_WIDTH: f32 = 220.0;
 
 // Persistence enums stay independent from the settings crate while sharing user-facing labels.
@@ -442,7 +442,7 @@ impl Render for ConnectionFormView {
                     .absolute()
                     .inset_0()
                     .children(jump)
-                    .children(self.render_composer_overlays(cx))
+                    .children(self.render_composer_overlays(window, cx))
                     .children(self.render_new_connection_select_overlay(window, cx))
                     .children(self.algorithms().render_ssh_algorithm_context_menu(cx))
                     .into_any_element()

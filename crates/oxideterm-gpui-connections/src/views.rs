@@ -180,6 +180,60 @@ pub struct ConnectionsViewBindings {
     pub manager: SessionManagerViewBindings,
 }
 
+fn is_mono_connection_field(field: crate::form_state::NewConnectionField) -> bool {
+    use crate::form_state::NewConnectionField as Field;
+    matches!(
+        field,
+        Field::LocalCwd
+            | Field::Host
+            | Field::Port
+            | Field::Username
+            | Field::KeyPath
+            | Field::CertPath
+            | Field::GssapiServerIdentity
+            | Field::IdentityAgent
+            | Field::InitialRemotePath
+            | Field::ConnectTimeoutSeconds
+            | Field::StandaloneSftpSecondaryHost
+            | Field::StandaloneSftpSecondaryPort
+            | Field::StandaloneSftpSecondaryUsername
+            | Field::StandaloneSftpSecondaryKeyPath
+            | Field::StandaloneSftpSecondaryCertPath
+            | Field::StandaloneSftpSecondaryGssapiServerIdentity
+            | Field::StandaloneSftpSecondaryIdentityAgent
+            | Field::StandaloneSftpSecondaryInitialRemotePath
+            | Field::StandaloneSftpSecondaryConnectTimeoutSeconds
+            | Field::StandaloneSftpSecondaryProxyCommand
+            | Field::StandaloneSftpSecondaryUpstreamProxyHost
+            | Field::StandaloneSftpSecondaryUpstreamProxyPort
+            | Field::StandaloneSftpSecondaryUpstreamProxyNoProxy
+            | Field::StandaloneSftpSecondaryUpstreamProxyUsername
+            | Field::PostConnectCommand
+            | Field::PreConnectCommand
+            | Field::ProxyCommand
+            | Field::JumpHost
+            | Field::JumpPort
+            | Field::JumpUsername
+            | Field::JumpKeyPath
+            | Field::JumpCertPath
+            | Field::JumpGssapiServerIdentity
+            | Field::JumpIdentityAgent
+            | Field::UpstreamProxyHost
+            | Field::UpstreamProxyPort
+            | Field::UpstreamProxyNoProxy
+            | Field::UpstreamProxyUsername
+            | Field::SerialPortPath
+            | Field::SerialBaudRate
+            | Field::BleMtu
+            | Field::MoshServerExecutable
+            | Field::MoshUdpHost
+            | Field::MoshUdpPort
+            | Field::MoshLocale
+            | Field::TunnelTargetHost
+            | Field::TunnelTargetPort
+    )
+}
+
 pub fn connection_text_input(
     tokens: &ThemeTokens,
     dispatch: &ConnectionsDispatch,
@@ -187,7 +241,10 @@ pub fn connection_text_input(
     frame: ConnectionImeFrame,
     view: TextInputView<'_>,
 ) -> AnyElement {
-    let input = text_input_with_viewport(
+    let focused = view.focused;
+    let is_mono =
+        matches!(target, ConnectionsInput::Form(field) if is_mono_connection_field(field));
+    let mut input = text_input_with_viewport(
         tokens,
         TextInputView {
             caret_visible: frame.caret_visible,
@@ -198,6 +255,15 @@ pub fn connection_text_input(
         &frame.viewport,
         frame.active_offset,
     );
+    if !focused {
+        // Keep input boundaries crisp against the elevated modal surface.
+        input = input.border_color(gpui::rgba((tokens.ui.border << 8) | 0xb8));
+    }
+    if is_mono {
+        input = input.font_family(gpui::SharedString::from(
+            tokens.metrics.markdown_code_font_family,
+        ));
+    }
     bind_connection_input(
         input,
         target,

@@ -159,6 +159,7 @@ impl ConnectionFormView {
         id: (&'static str, u64),
         remote: bool,
         phase_offset: f32,
+        wire_width: f32,
     ) -> AnyElement {
         let theme = self.tokens.ui;
         div()
@@ -179,8 +180,8 @@ impl ConnectionFormView {
                 move |pulse, progress| {
                     let phase = (progress + phase_offset) % 1.0;
                     let travel = if remote { 1.0 - phase } else { phase };
-                    let left = (TUNNEL_FLOW_WIRE_WIDTH + TUNNEL_FLOW_PULSE_WIDTH) * travel
-                        - TUNNEL_FLOW_PULSE_WIDTH;
+                    let left =
+                        (wire_width + TUNNEL_FLOW_PULSE_WIDTH) * travel - TUNNEL_FLOW_PULSE_WIDTH;
                     let opacity = (if phase < 0.5 {
                         phase * 5.0
                     } else {
@@ -195,6 +196,7 @@ impl ConnectionFormView {
 
     /// Live traffic-direction preview adapted from the mobile tunnel flow diagram:
     /// maps the local machine, encrypted SSH pipe, and selected remote host.
+    #[allow(clippy::too_many_arguments)]
     fn render_tunnel_flow_card(
         &self,
         kind: TunnelKind,
@@ -203,9 +205,13 @@ impl ConnectionFormView {
         bind_port: &str,
         target_host: &str,
         target_port: &str,
+        content_width: f32,
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let mono_font = SharedString::from(self.tokens.metrics.markdown_code_font_family);
+        let wire_width = (content_width * 0.24)
+            .clamp(76.0, TUNNEL_FLOW_WIRE_WIDTH)
+            .round();
         let remote = kind == TunnelKind::Remote;
         let dynamic = kind == TunnelKind::Dynamic;
         let listener = format_tunnel_endpoint(bind_host, bind_port);
@@ -242,25 +248,27 @@ impl ConnectionFormView {
                     ("ssh-tunnel-flow-pulse-a", direction_key),
                     remote,
                     0.0,
+                    wire_width,
                 ))
                 .child(self.render_tunnel_flow_pulse(
                     ("ssh-tunnel-flow-pulse-b", direction_key),
                     remote,
                     0.5,
+                    wire_width,
                 ));
         }
 
         div()
             .w_full()
-            .rounded(px(self.tokens.radii.lg))
-            .bg(rgb(theme.bg_panel))
+            .rounded(px(self.tokens.radii.md))
+            .bg(rgba((theme.bg_sunken << 8) | 0x90))
             .border_1()
-            .border_color(rgb(theme.border))
-            .px(px(18.0))
-            .py(px(14.0))
+            .border_color(rgba((theme.border << 8) | 0x66))
+            .px(px(14.0))
+            .py(px(12.0))
             .flex()
             .items_start()
-            .gap(px(12.0))
+            .gap(px(10.0))
             .child(self.render_tunnel_flow_node(
                 LucideIcon::Monitor,
                 self.i18n.t("forwards.form.local_client"),
@@ -271,7 +279,7 @@ impl ConnectionFormView {
             .child(
                 div()
                     .flex_none()
-                    .w(px(TUNNEL_FLOW_WIRE_WIDTH))
+                    .w(px(wire_width))
                     .h(px(32.0))
                     .relative()
                     .flex()
@@ -315,7 +323,8 @@ impl ConnectionFormView {
             .into_any_element()
     }
 
-    fn render_tunnel_endpoint_card(
+    #[allow(clippy::too_many_arguments)]
+    fn render_tunnel_endpoint_section(
         &self,
         icon: LucideIcon,
         side_label: String,
@@ -326,20 +335,16 @@ impl ConnectionFormView {
         host_field: NewConnectionField,
         port_value: &str,
         port_field: NewConnectionField,
+        section_width: f32,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
         div()
             .flex_1()
             .min_w_0()
-            .rounded(px(self.tokens.radii.md))
-            .bg(rgb(theme.bg_panel))
-            .border_1()
-            .border_color(rgb(theme.border))
-            .p(px(12.0))
             .flex()
             .flex_col()
-            .gap(px(10.0))
+            .gap(px(8.0))
             .child(
                 div()
                     .flex()
@@ -385,25 +390,18 @@ impl ConnectionFormView {
                         )
                     }),
             )
-            .child(
-                div()
-                    .flex()
-                    .gap(px(8.0))
-                    .child(div().flex_1().min_w_0().child(self.tunnel_input(
-                        host_label,
-                        host_value,
-                        "127.0.0.1",
-                        host_field,
-                        cx,
-                    )))
-                    .child(div().w(px(96.0)).flex_none().child(self.tunnel_input(
-                        "forwards.form.port_placeholder",
-                        port_value,
-                        "1–65535",
-                        port_field,
-                        cx,
-                    ))),
-            )
+            .child(self.render_unified_host_port_bar(
+                self.i18n.t(host_label),
+                host_field,
+                host_value,
+                "127.0.0.1".to_string(),
+                self.i18n.t("forwards.form.port_placeholder"),
+                port_field,
+                port_value,
+                "1–65535".to_string(),
+                section_width,
+                cx,
+            ))
             .into_any_element()
     }
 
@@ -414,6 +412,20 @@ impl ConnectionFormView {
     ) -> Option<AnyElement> {
         let form = self.environment.tunnel.as_ref()?;
         let theme = self.tokens.ui;
+        let modal_max_height = f32::from(window.viewport_size().height)
+            * self.tokens.metrics.modal_max_viewport_height_ratio;
+        let shows_transport_selector = !form.editing;
+        let (modal_width, studio_height) = composer::studio_modal_size(
+            window,
+            &self.tokens,
+            shows_transport_selector,
+            modal_max_height,
+        );
+        let studio_layout = composer::StudioLayoutMetrics::compute(
+            modal_width,
+            &self.tokens,
+            shows_transport_selector,
+        );
         let (name, group, bind_host, bind_port, target_host, target_port, error) = {
             let draft = self.connection_form_state(cx).form.as_ref()?;
             (
@@ -445,34 +457,42 @@ impl ConnectionFormView {
                     && (form.kind == TunnelKind::Dynamic
                         || (!target_host.trim().is_empty() && valid_port(&target_port)))));
 
+        let name_input =
+            self.tunnel_input("ssh_tunnel.name", &name, "", NewConnectionField::Name, cx);
+        let group_input = super::super::select::group_select(
+            &self.flow,
+            &self.dispatch,
+            &self.tokens,
+            &self.i18n,
+            self.i18n.t("ssh_tunnel.group"),
+            &group,
+            cx,
+        );
+        let identity_row = if studio_layout.narrow_content {
+            div()
+                .w_full()
+                .flex()
+                .flex_col()
+                .gap(px(10.0))
+                .child(name_input)
+                .child(group_input)
+        } else {
+            let group_width = (studio_layout.content_width * 0.30)
+                .clamp(148.0, 220.0)
+                .round();
+            div()
+                .flex()
+                .flex_row()
+                .gap(px(12.0))
+                .child(div().flex_1().min_w_0().child(name_input))
+                .child(div().w(px(group_width)).flex_none().child(group_input))
+        };
+
         let mut body = div()
             .flex()
             .flex_col()
-            .gap(px(14.0))
-            .child(
-                div()
-                    .flex()
-                    .flex_row()
-                    .gap(px(12.0))
-                    .child(div().flex_1().min_w_0().child(self.tunnel_input(
-                        "ssh_tunnel.name",
-                        &name,
-                        "",
-                        NewConnectionField::Name,
-                        cx,
-                    )))
-                    .child(div().w(px(196.0)).flex_none().child(
-                        super::super::select::group_select(
-                            &self.flow,
-                            &self.dispatch,
-                            &self.tokens,
-                            &self.i18n,
-                            self.i18n.t("ssh_tunnel.group"),
-                            &group,
-                            cx,
-                        ),
-                    )),
-            )
+            .gap(px(12.0))
+            .child(identity_row)
             .child(self.render_tunnel_host_select(form.host_id.as_deref(), form.editing, cx))
             .child(self.render_tunnel_flow_card(
                 form.kind,
@@ -481,46 +501,54 @@ impl ConnectionFormView {
                 &bind_port,
                 &target_host,
                 &target_port,
+                studio_layout.content_width,
             ));
 
         if !form.editing {
             let remote = form.kind == TunnelKind::Remote;
             let dynamic = form.kind == TunnelKind::Dynamic;
-            let types = segmented_tabs(&self.tokens).children(
+            let types = self.render_sunken_segmented_track().children(
                 [
                     (TunnelKind::Local, "forwards.form.type_local"),
                     (TunnelKind::Remote, "forwards.form.type_remote"),
                     (TunnelKind::Dynamic, "forwards.form.type_dynamic"),
                 ]
                 .into_iter()
-                .map(|(kind, label)| {
-                    segmented_tab(&self.tokens, self.i18n.t(label), form.kind == kind)
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(move |this, _, _, cx| {
-                                this.close_new_connection_select(cx);
-                                this.request(
-                                    ConnectionsWindowRequest::SetTunnelKind(kind),
-                                    None,
-                                    cx,
-                                );
-                                this.update_connection_form_state(cx, |state| {
-                                    if let Some(form) = state.form.as_mut() {
-                                        form.field_focused = false;
-                                        form.selected_field = None;
-                                        form.focused_field = NewConnectionField::Host;
-                                        form.error = None;
-                                    }
-                                });
-                                this.request(ConnectionsWindowRequest::ClearComposition, None, cx);
-                                cx.stop_propagation();
-                                cx.notify();
-                            }),
-                        )
+                .enumerate()
+                .map(|(index, (kind, label))| {
+                    self.render_sunken_segmented_tab(
+                        SharedString::from(format!("ssh-tunnel-kind-{index}")),
+                        self.i18n.t(label),
+                        form.kind == kind,
+                    )
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _, _, cx| {
+                            this.close_new_connection_select(cx);
+                            this.request(ConnectionsWindowRequest::SetTunnelKind(kind), None, cx);
+                            this.update_connection_form_state(cx, |state| {
+                                if let Some(form) = state.form.as_mut() {
+                                    form.field_focused = false;
+                                    form.selected_field = None;
+                                    form.focused_field = NewConnectionField::Host;
+                                    form.error = None;
+                                }
+                            });
+                            this.request(ConnectionsWindowRequest::ClearComposition, None, cx);
+                            cx.stop_propagation();
+                            cx.notify();
+                        }),
+                    )
                 }),
             );
 
-            let listener_card = self.render_tunnel_endpoint_card(
+            let stacked_endpoints = studio_layout.narrow_content || dynamic;
+            let endpoint_width = if stacked_endpoints {
+                studio_layout.content_width
+            } else {
+                (studio_layout.content_width - 14.0) * 0.5
+            };
+            let listener_section = self.render_tunnel_endpoint_section(
                 if remote {
                     LucideIcon::Server
                 } else {
@@ -538,12 +566,14 @@ impl ConnectionFormView {
                 NewConnectionField::Host,
                 &bind_port,
                 NewConnectionField::Port,
+                endpoint_width,
                 cx,
             );
 
-            let mut endpoints_row = div().flex().flex_row().gap(px(12.0)).child(listener_card);
-            if !dynamic {
-                endpoints_row = endpoints_row.child(self.render_tunnel_endpoint_card(
+            let endpoints = if dynamic {
+                div().w_full().child(listener_section)
+            } else {
+                let target_section = self.render_tunnel_endpoint_section(
                     if remote {
                         LucideIcon::Monitor
                     } else {
@@ -561,9 +591,28 @@ impl ConnectionFormView {
                     NewConnectionField::TunnelTargetHost,
                     &target_port,
                     NewConnectionField::TunnelTargetPort,
+                    endpoint_width,
                     cx,
-                ));
-            }
+                );
+                if studio_layout.narrow_content {
+                    div()
+                        .w_full()
+                        .flex()
+                        .flex_col()
+                        .gap(px(10.0))
+                        .child(listener_section)
+                        .child(self.form_hairline())
+                        .child(target_section)
+                } else {
+                    div()
+                        .w_full()
+                        .flex()
+                        .flex_row()
+                        .gap(px(14.0))
+                        .child(listener_section)
+                        .child(target_section)
+                }
+            };
 
             body = body
                 .child(form_field(
@@ -571,39 +620,55 @@ impl ConnectionFormView {
                     self.i18n.t("forwards.form.type"),
                     types,
                 ))
-                .child(endpoints_row);
+                .child(self.form_hairline())
+                .child(endpoints);
         }
 
-        body = body.child(
-            checkbox(
-                &self.tokens,
-                "ssh-tunnel-startup",
-                self.i18n.t("ssh_tunnel.startup"),
-                form.startup,
-            )
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _, _, cx| {
-                    this.request(ConnectionsWindowRequest::ToggleTunnelStartup, None, cx);
-                    cx.stop_propagation();
-                    cx.notify();
-                }),
-            ),
+        let startup_enabled = form.startup;
+        body = body.child(self.form_hairline()).child(
+            div()
+                .id("ssh-tunnel-startup")
+                .w_full()
+                .min_h(px(34.0))
+                .py(px(4.0))
+                .px(px(2.0))
+                .rounded(px(self.tokens.radii.sm))
+                .cursor_pointer()
+                .hover(|el| el.bg(rgba((theme.bg_hover << 8) | 0x45)))
+                .flex()
+                .flex_row()
+                .items_center()
+                .justify_between()
+                .gap(px(12.0))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .text_size(px(self.tokens.metrics.ui_text_sm))
+                        .text_color(rgb(theme.text))
+                        .child(self.i18n.t("ssh_tunnel.startup")),
+                )
+                .child(switch_with(
+                    &self.tokens,
+                    "track-ssh-tunnel-startup",
+                    "",
+                    startup_enabled,
+                    SwitchOptions::default(),
+                ))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _, _, cx| {
+                        this.request(ConnectionsWindowRequest::ToggleTunnelStartup, None, cx);
+                        cx.stop_propagation();
+                        cx.notify();
+                    }),
+                ),
         );
 
         if let Some(error) = error {
             body = body.child(self.render_prompt_feedback_box(error, false));
         }
 
-        let modal_max_height = f32::from(window.viewport_size().height)
-            * self.tokens.metrics.modal_max_viewport_height_ratio;
-        let shows_transport_selector = !form.editing;
-        let (modal_width, studio_height) = composer::studio_modal_size(
-            window,
-            &self.tokens,
-            shows_transport_selector,
-            modal_max_height,
-        );
         let scroll = self.selectable_text_scroll_handle("ssh-tunnel-form-scroll");
         let dialog = modal_container(&self.tokens)
             .bg(rgb(theme.bg_elevated))
@@ -626,7 +691,7 @@ impl ConnectionFormView {
                     .min_h_0()
                     .flex()
                     .when(shows_transport_selector, |content| {
-                        content.child(self.render_studio_protocol_sidebar(cx))
+                        content.child(self.render_studio_protocol_sidebar(studio_layout, cx))
                     })
                     .child(
                         div()
@@ -638,8 +703,8 @@ impl ConnectionFormView {
                                 div()
                                     .id("ssh-tunnel-form-scroll")
                                     .size_full()
-                                    .px(px(22.0))
-                                    .py(px(18.0))
+                                    .px(px(studio_layout.content_padding_x))
+                                    .py(px(16.0))
                                     .overflow_y_scroll()
                                     .track_scroll(&scroll)
                                     .on_scroll(cx.listener(|this, _, _, cx| {
@@ -657,8 +722,11 @@ impl ConnectionFormView {
             .child(
                 modal_footer(&self.tokens)
                     .flex_none()
+                    .h_auto()
+                    .min_h(px(self.tokens.metrics.modal_footer_height))
+                    .flex_wrap()
                     .bg(rgb(theme.bg_panel))
-                    .px(px(22.0))
+                    .px(px(studio_layout.content_padding_x))
                     .py(px(13.0))
                     .gap(px(8.0))
                     .child(

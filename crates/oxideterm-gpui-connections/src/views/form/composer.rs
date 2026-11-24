@@ -13,7 +13,75 @@ pub(super) const CONNECTION_STUDIO_EDIT_MAX_WIDTH: f32 = 920.0;
 pub(super) const CONNECTION_STUDIO_MIN_HEIGHT: f32 = 560.0;
 pub(super) const CONNECTION_STUDIO_MAX_HEIGHT: f32 = 760.0;
 pub(super) const CONNECTION_STUDIO_VIEWPORT_MARGIN: f32 = 16.0;
+pub(super) const CONNECTION_STUDIO_COMPACT_VIEWPORT_MARGIN: f32 = 8.0;
 pub(super) const CONNECTION_STUDIO_SIDEBAR_WIDTH: f32 = 180.0;
+pub(super) const CONNECTION_STUDIO_SIDEBAR_SLIM_WIDTH: f32 = 144.0;
+pub(super) const CONNECTION_STUDIO_SIDEBAR_ICON_WIDTH: f32 = 54.0;
+
+/// Responsive breakpoints derived from the live modal width so small split
+/// windows, standard laptops, and 4K displays all avoid clipping or crowding.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct StudioLayoutMetrics {
+    pub(super) sidebar_width: f32,
+    pub(super) icon_only_sidebar: bool,
+    pub(super) content_padding_x: f32,
+    pub(super) content_width: f32,
+    pub(super) compact_content: bool,
+    pub(super) narrow_content: bool,
+}
+
+impl StudioLayoutMetrics {
+    pub(super) fn compute(
+        modal_width: f32,
+        tokens: &ThemeTokens,
+        shows_transport_selector: bool,
+    ) -> Self {
+        let font_scale = studio_font_scale(tokens);
+        let (sidebar_width, icon_only_sidebar) = if !shows_transport_selector {
+            (0.0, false)
+        } else if modal_width < 620.0 {
+            (CONNECTION_STUDIO_SIDEBAR_ICON_WIDTH, true)
+        } else if modal_width < 760.0 {
+            (
+                (CONNECTION_STUDIO_SIDEBAR_SLIM_WIDTH * font_scale.max(1.0)).round(),
+                false,
+            )
+        } else {
+            (
+                (CONNECTION_STUDIO_SIDEBAR_WIDTH * font_scale.max(1.0)).round(),
+                false,
+            )
+        };
+        let pane_width = (modal_width - sidebar_width).max(240.0);
+        let content_padding_x = if pane_width < 460.0 {
+            14.0
+        } else if pane_width < 560.0 {
+            18.0
+        } else {
+            22.0
+        };
+        let content_width = (pane_width - content_padding_x * 2.0).max(200.0);
+        Self {
+            sidebar_width,
+            icon_only_sidebar,
+            content_padding_x,
+            content_width,
+            compact_content: content_width < 520.0,
+            narrow_content: content_width < 440.0,
+        }
+    }
+}
+
+pub(super) fn studio_viewport_margin(window: &Window) -> f32 {
+    let viewport = window.viewport_size();
+    let viewport_w = f32::from(viewport.width);
+    let viewport_h = f32::from(viewport.height);
+    if viewport_w < 600.0 || viewport_h < 520.0 {
+        CONNECTION_STUDIO_COMPACT_VIEWPORT_MARGIN
+    } else {
+        CONNECTION_STUDIO_VIEWPORT_MARGIN
+    }
+}
 
 fn studio_font_scale(tokens: &ThemeTokens) -> f32 {
     // Baseline ui_text_sm is 14px in ThemeTokens; track user font scaling directly.
@@ -43,6 +111,7 @@ pub(super) fn studio_modal_size(
     let viewport = window.viewport_size();
     let viewport_w = f32::from(viewport.width);
     let viewport_h = f32::from(viewport.height);
+    let margin = studio_viewport_margin(window);
     let ui_scale = studio_ui_scale(tokens);
     let (base_w, cap_w) = if shows_transport_selector {
         (CONNECTION_STUDIO_WIDTH, CONNECTION_STUDIO_MAX_WIDTH)
@@ -55,10 +124,9 @@ pub(super) fn studio_modal_size(
     let desired_w = (base_w * ui_scale)
         .max(viewport_w * 0.54)
         .min(cap_w * ui_scale.max(1.0));
-    let max_w = (viewport_w - CONNECTION_STUDIO_VIEWPORT_MARGIN * 2.0).max(0.0);
+    let max_w = (viewport_w - margin * 2.0).max(0.0);
     let width = desired_w.min(max_w);
-    let max_h =
-        modal_max_height.min((viewport_h - CONNECTION_STUDIO_VIEWPORT_MARGIN * 2.0).max(0.0));
+    let max_h = modal_max_height.min((viewport_h - margin * 2.0).max(0.0));
     let min_h = (CONNECTION_STUDIO_MIN_HEIGHT * ui_scale.min(1.15)).min(max_h);
     let max_studio_h = CONNECTION_STUDIO_MAX_HEIGHT * ui_scale.max(1.0);
     let height = (viewport_h * 0.80).clamp(min_h, max_studio_h).min(max_h);
@@ -134,7 +202,12 @@ impl ConnectionFormView {
         }
     }
 
-    fn render_identity_avatar_preview(&self, size_px: f32, icon_px: f32, cx: &App) -> AnyElement {
+    pub(super) fn render_identity_avatar_preview(
+        &self,
+        size_px: f32,
+        icon_px: f32,
+        cx: &App,
+    ) -> AnyElement {
         let theme = self.tokens.ui;
         let Some((icon_value, color_value, bg_value, transport)) =
             self.connection_form_state(cx).form.as_ref().map(|form| {
@@ -252,9 +325,15 @@ impl ConnectionFormView {
     }
 
     /// Left vertical rail listing all connection protocols grouped by domain so every built-in
-    /// transport stays visible at once without horizontal scrolling.
-    pub(super) fn render_studio_protocol_sidebar(&self, cx: &mut Context<Self>) -> AnyElement {
+    /// transport stays visible at once without horizontal scrolling. Collapses cleanly to a
+    /// compact icon-only vertical rail on narrow viewports.
+    pub(super) fn render_studio_protocol_sidebar(
+        &self,
+        layout: StudioLayoutMetrics,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = self.tokens.ui;
+        let icon_only = layout.icon_only_sidebar;
         let tunnel_active = self.environment.tunnel.is_some();
         let active_transport = self
             .connection_form_state(cx)
@@ -321,7 +400,7 @@ impl ConnectionFormView {
             .ui_control_height
             .max((self.tokens.metrics.ui_text_sm * 2.25).round());
         let protocol_icon_size = (14.0 * font_scale).round();
-        let sidebar_width = (CONNECTION_STUDIO_SIDEBAR_WIDTH * font_scale.max(1.0)).round();
+        let sidebar_width = layout.sidebar_width;
 
         // Precompute exact vertical offsets (including inter-group hairlines) so the vertical
         // active indicator slides cleanly across group boundaries.
@@ -372,7 +451,7 @@ impl ConnectionFormView {
                 .bg(rgb(theme.bg_card))
                 .flex()
                 .items_center()
-                .pl(px(8.0))
+                .pl(px(if icon_only { 3.0 } else { 8.0 }))
                 .child(
                     div()
                         .w(px(2.5))
@@ -426,7 +505,7 @@ impl ConnectionFormView {
                     .flex_none()
                     .w_full()
                     .h(px(protocol_row_height))
-                    .px(px(8.0))
+                    .px(px(if icon_only { 0.0 } else { 8.0 }))
                     .rounded(px(self.tokens.radii.md))
                     .cursor_pointer()
                     .when(!active, |el| {
@@ -435,8 +514,8 @@ impl ConnectionFormView {
                     .when(active, |el| el.child(render_active_surface()))
                     .flex()
                     .items_center()
-                    .gap(px(8.0))
-                    .child(div().w(px(2.5)))
+                    .when(icon_only, |el| el.justify_center())
+                    .when(!icon_only, |el| el.gap(px(8.0)).child(div().w(px(2.5))))
                     .child(Self::render_lucide_icon(
                         icon,
                         protocol_icon_size,
@@ -446,24 +525,26 @@ impl ConnectionFormView {
                             theme.text_muted
                         }),
                     ))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .truncate()
-                            .text_size(px(protocol_font_size))
-                            .font_weight(if active {
-                                gpui::FontWeight::MEDIUM
-                            } else {
-                                gpui::FontWeight::NORMAL
-                            })
-                            .text_color(rgb(if active {
-                                theme.text_heading
-                            } else {
-                                theme.text
-                            }))
-                            .child(label),
-                    )
+                    .when(!icon_only, |el| {
+                        el.child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .truncate()
+                                .text_size(px(protocol_font_size))
+                                .font_weight(if active {
+                                    gpui::FontWeight::MEDIUM
+                                } else {
+                                    gpui::FontWeight::NORMAL
+                                })
+                                .text_color(rgb(if active {
+                                    theme.text_heading
+                                } else {
+                                    theme.text
+                                }))
+                                .child(label),
+                        )
+                    })
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _event, window, cx| {
@@ -511,28 +592,30 @@ impl ConnectionFormView {
                         .flex_none()
                         .w_full()
                         .h(px(protocol_row_height))
-                        .px(px(8.0))
+                        .px(px(if icon_only { 0.0 } else { 8.0 }))
                         .rounded(px(self.tokens.radii.md))
                         .cursor_pointer()
                         .hover(|el| el.bg(rgba((theme.bg_hover << 8) | 0x99)))
                         .flex()
                         .items_center()
-                        .gap(px(8.0))
-                        .child(div().w(px(2.5)))
+                        .when(icon_only, |el| el.justify_center())
+                        .when(!icon_only, |el| el.gap(px(8.0)).child(div().w(px(2.5))))
                         .child(Self::render_lucide_icon(
                             LucideIcon::from_plugin_name(&definition.icon),
                             protocol_icon_size,
                             rgb(theme.text_muted),
                         ))
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .truncate()
-                                .text_size(px(protocol_font_size))
-                                .text_color(rgb(theme.text))
-                                .child(definition.title),
-                        )
+                        .when(!icon_only, |el| {
+                            el.child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .truncate()
+                                    .text_size(px(protocol_font_size))
+                                    .text_color(rgb(theme.text))
+                                    .child(definition.title),
+                            )
+                        })
                         .on_mouse_down(
                             MouseButton::Left,
                             cx.listener(move |this, _, window, cx| {
@@ -567,7 +650,7 @@ impl ConnectionFormView {
                     .size_full()
                     .overflow_y_scroll()
                     .track_scroll(&scroll)
-                    .px(px(10.0))
+                    .px(px(if icon_only { 6.0 } else { 10.0 }))
                     .py(px(8.0))
                     .child(list),
             )
@@ -804,29 +887,37 @@ impl ConnectionFormView {
             .h(px(tab_bar_height))
             .bg(rgb(theme.bg_elevated))
             .border_b_1()
-            .border_color(rgb(theme.border))
+            .border_color(rgba((theme.border << 8) | 0xb3))
             .child(strip)
             .into_any_element()
     }
 
     /// Floating overlays owned by the studio (Appearance Popover for non-sidebar modes).
-    pub(super) fn render_composer_overlays(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    pub(super) fn render_composer_overlays(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         let appearance_open = self
             .connection_form_state(cx)
             .form
             .as_ref()
             .is_some_and(|form| form.appearance_popover_open);
         if appearance_open {
-            return Some(self.render_appearance_popover(cx));
+            return Some(self.render_appearance_popover(window, cx));
         }
         None
     }
 
-    fn render_appearance_popover(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_appearance_popover(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
+        let viewport = window.viewport_size();
+        let margin = studio_viewport_margin(window);
+        let popover_width = (f32::from(viewport.width) - margin * 2.0).clamp(260.0, 520.0);
+        let popover_max_height = (f32::from(viewport.height) - margin * 2.0).clamp(220.0, 500.0);
         let card = div()
-            .w(px(500.0))
-            .max_h(px(480.0))
+            .w(px(popover_width))
+            .max_h(px(popover_max_height))
             .rounded(px(self.tokens.radii.lg))
             .bg(rgb(theme.bg_elevated))
             .border_1()
