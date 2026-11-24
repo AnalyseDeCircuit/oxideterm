@@ -7909,6 +7909,7 @@ dependencies = [
  "oxideterm-environment",
  "oxideterm-gpui-background",
  "oxideterm-gpui-editor",
+ "oxideterm-gpui-terminal-view",
  "oxideterm-gpui-ui",
  "oxideterm-i18n",
  "oxideterm-modem-transfer",
@@ -7932,9 +7933,20 @@ dependencies = [
  "tokio",
  "unicode-segmentation",
  "unicode-width",
- "url",
  "uuid",
  "vte",
+ "zeroize",
+]
+
+[[package]]
+name = "oxideterm-gpui-terminal-view"
+version = "2.4.1"
+dependencies = [
+ "gpui-pre",
+ "oxideterm-gpui-ui",
+ "oxideterm-settings",
+ "oxideterm-terminal-emulator",
+ "url",
  "zeroize",
 ]
 

@@ -1404,14 +1404,7 @@ impl TerminalTransitionColors {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum TerminalBlinkMode {
-    #[allow(dead_code)]
-    Off,
-    #[allow(dead_code)]
-    TerminalControlled,
-    On,
-}
+pub(crate) use oxideterm_gpui_terminal_view::input::TerminalBlinkMode;
 
 #[derive(Clone)]
 pub(crate) struct TerminalMetrics {

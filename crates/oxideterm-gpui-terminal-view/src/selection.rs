@@ -1,26 +1,26 @@
-use oxideterm_terminal::{TerminalCell, TerminalSnapshot};
+use oxideterm_terminal_emulator::{TerminalCell, TerminalSnapshot};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct TerminalPoint {
-    pub(crate) row: usize,
-    pub(crate) col: usize,
+pub struct TerminalPoint {
+    pub row: usize,
+    pub col: usize,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct TerminalGridPoint {
-    pub(crate) line: i32,
-    pub(crate) col: usize,
+pub struct TerminalGridPoint {
+    pub line: i32,
+    pub col: usize,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct TerminalSelection {
-    pub(crate) anchor: TerminalGridPoint,
-    pub(crate) head: TerminalGridPoint,
-    pub(crate) mode: TerminalSelectionMode,
+pub struct TerminalSelection {
+    pub anchor: TerminalGridPoint,
+    pub head: TerminalGridPoint,
+    pub mode: TerminalSelectionMode,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum TerminalSelectionMode {
+pub enum TerminalSelectionMode {
     Simple,
     Block,
     Semantic,
@@ -28,17 +28,17 @@ pub(crate) enum TerminalSelectionMode {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct TerminalSelectionSnapshotRequest {
-    pub(crate) display_offset: usize,
-    pub(crate) rows: usize,
+pub struct TerminalSelectionSnapshotRequest {
+    pub display_offset: usize,
+    pub rows: usize,
 }
 
 impl TerminalSelection {
-    pub(crate) fn is_empty(self) -> bool {
+    pub fn is_empty(self) -> bool {
         self.anchor == self.head && self.mode == TerminalSelectionMode::Simple
     }
 
-    pub(crate) fn normalized(self) -> (TerminalGridPoint, TerminalGridPoint) {
+    pub fn normalized(self) -> (TerminalGridPoint, TerminalGridPoint) {
         if (self.anchor.line, self.anchor.col) <= (self.head.line, self.head.col) {
             (self.anchor, self.head)
         } else {
@@ -46,12 +46,7 @@ impl TerminalSelection {
         }
     }
 
-    pub(crate) fn contains_viewport_cell(
-        self,
-        row: usize,
-        col: usize,
-        display_offset: usize,
-    ) -> bool {
+    pub fn contains_viewport_cell(self, row: usize, col: usize, display_offset: usize) -> bool {
         let line = grid_line_for_viewport_row(row, display_offset);
         if self.mode == TerminalSelectionMode::Block {
             let row_start = self.anchor.line.min(self.head.line);
@@ -66,7 +61,7 @@ impl TerminalSelection {
     }
 }
 
-pub(crate) fn grid_point_for_viewport_point(
+pub fn grid_point_for_viewport_point(
     snapshot: &TerminalSnapshot,
     point: TerminalPoint,
 ) -> Option<TerminalGridPoint> {
@@ -87,7 +82,7 @@ fn snapshot_row_for_grid_line(snapshot: &TerminalSnapshot, line: i32) -> Option<
         .filter(|row| *row < snapshot.lines.len())
 }
 
-pub(crate) fn snapshot_request_for_selection(
+pub fn snapshot_request_for_selection(
     snapshot: &TerminalSnapshot,
     selection: TerminalSelection,
 ) -> Option<TerminalSelectionSnapshotRequest> {
@@ -126,7 +121,7 @@ pub(crate) fn snapshot_request_for_selection(
     })
 }
 
-pub(crate) fn word_selection_at_point(
+pub fn word_selection_at_point(
     snapshot: &TerminalSnapshot,
     point: TerminalPoint,
 ) -> Option<TerminalSelection> {
@@ -175,7 +170,7 @@ pub(crate) fn word_selection_at_point(
     })
 }
 
-pub(crate) fn matching_pair_selection_at_point(
+pub fn matching_pair_selection_at_point(
     snapshot: &TerminalSnapshot,
     point: TerminalPoint,
 ) -> Option<TerminalSelection> {
@@ -348,7 +343,7 @@ fn text_for_logical_range(
     Some(text)
 }
 
-pub(crate) fn previous_logical_cell(
+pub fn previous_logical_cell(
     snapshot: &TerminalSnapshot,
     point: TerminalPoint,
 ) -> Option<TerminalPoint> {
@@ -374,7 +369,7 @@ pub(crate) fn previous_logical_cell(
     }
 }
 
-pub(crate) fn next_logical_cell(
+pub fn next_logical_cell(
     snapshot: &TerminalSnapshot,
     point: TerminalPoint,
 ) -> Option<TerminalPoint> {
@@ -395,7 +390,7 @@ pub(crate) fn next_logical_cell(
         })
 }
 
-pub(crate) fn line_selection_at_point(
+pub fn line_selection_at_point(
     snapshot: &TerminalSnapshot,
     point: TerminalPoint,
 ) -> Option<TerminalSelection> {
@@ -444,7 +439,7 @@ pub(crate) fn line_selection_at_point(
     })
 }
 
-pub(crate) fn selected_text_for_selection(
+pub fn selected_text_for_selection(
     snapshot: &TerminalSnapshot,
     selection: TerminalSelection,
 ) -> Option<String> {
@@ -487,7 +482,7 @@ pub(crate) fn selected_text_for_selection(
     Some(text)
 }
 
-pub(crate) fn selected_text_for_block_selection(
+pub fn selected_text_for_block_selection(
     snapshot: &TerminalSnapshot,
     selection: TerminalSelection,
 ) -> Option<String> {
@@ -510,7 +505,7 @@ pub(crate) fn selected_text_for_block_selection(
     Some(text)
 }
 
-pub(crate) fn cell_text(cell: &TerminalCell) -> String {
+pub fn cell_text(cell: &TerminalCell) -> String {
     let mut text = String::new();
     text.push(cell.ch);
     text.push_str(cell.zerowidth());

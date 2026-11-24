@@ -1,0 +1,18 @@
+[lints]
+workspace = true
+
+[package]
+name = "oxideterm-gpui-terminal-view"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+gpui.workspace = true
+oxideterm-gpui-ui = { path = "../oxideterm-gpui-ui" }
+oxideterm-settings = { path = "../oxideterm-settings" }
+oxideterm-terminal-emulator = { path = "../oxideterm-terminal-emulator" }
+zeroize.workspace = true
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+url.workspace = true

@@ -1,11 +1,11 @@
 use super::*;
-use std::{path::Path, sync::Arc};
+use std::sync::Arc;
 
-use gpui::{Bounds, Keystroke, Modifiers, MouseButton, Pixels, point, px, rgb, size};
+use gpui::{Bounds, Pixels, point, px, rgb, size};
 use oxideterm_terminal::{
-    TermMode, TerminalCell, TerminalColor, TerminalCommandMark, TerminalCommandMarkClosedBy,
+    TerminalCell, TerminalColor, TerminalCommandMark, TerminalCommandMarkClosedBy,
     TerminalCommandMarkConfidence, TerminalCommandMarkDetectionSource, TerminalCursorShape,
-    TerminalSearchMatch, TerminalSnapshot,
+    TerminalRow, TerminalSearchMatch, TerminalSnapshot,
 };
 
 use crate::command_facts::TransientCommandHighlight;
@@ -28,22 +28,9 @@ fn test_metrics() -> TerminalMetrics {
     }
 }
 
-fn test_snapshot(display_offset: usize, scrollback_lines: usize) -> TerminalSnapshot {
-    TerminalSnapshot {
-        row_reuse: None,
-        logical_context: Vec::new(),
-        generation: 0,
-        cols: 80,
-        rows: 10,
-        cursor_col: 0,
-        cursor_row: 0,
-        cursor_shape: TerminalCursorShape::Block,
-        display_offset,
-        scrollback_lines,
-        lines: Vec::new(),
-        images: Vec::new(),
-    }
-}
+#[path = "../../../oxideterm-gpui-terminal-view/tests/support/snapshot.rs"]
+mod snapshot;
+use snapshot::*;
 
 fn cursor_snapshot() -> TerminalSnapshot {
     let mut snapshot = test_snapshot(0, 0);
@@ -87,112 +74,6 @@ fn cursor_snapshot() -> TerminalSnapshot {
     snapshot
 }
 
-fn row_from_text(text: &str, cols: usize) -> oxideterm_terminal::TerminalRow {
-    let mut cells = Vec::new();
-    for ch in text.chars().take(cols) {
-        cells.push(TerminalCell {
-            ch,
-            wide: false,
-            fg: TerminalColor::rgb(0xe6, 0xe8, 0xeb),
-            bg: TerminalColor::rgb(0x0d, 0x0f, 0x12),
-            style_origin: Default::default(),
-            attrs: Default::default(),
-            extra: None,
-            cursor: false,
-        });
-    }
-    while cells.len() < cols {
-        cells.push(TerminalCell {
-            ch: ' ',
-            wide: false,
-            fg: TerminalColor::rgb(0xe6, 0xe8, 0xeb),
-            bg: TerminalColor::rgb(0x0d, 0x0f, 0x12),
-            style_origin: Default::default(),
-            attrs: Default::default(),
-            extra: None,
-            cursor: false,
-        });
-    }
-    let mut row = oxideterm_terminal::TerminalRow {
-        line_id: 0,
-        source_id: 0,
-        absolute_line: 0,
-        cells: Arc::new(cells),
-        wrapped: false,
-        active_input: false,
-        signature: 0,
-    };
-    row.refresh_signature();
-    row
-}
-
-fn selection_snapshot(text: &str) -> TerminalSnapshot {
-    let mut snapshot = test_snapshot(0, 0);
-    snapshot.cols = text.chars().count().max(40);
-    snapshot.rows = 1;
-    snapshot.lines = vec![row_from_text(text, snapshot.cols)];
-    snapshot
-}
-
-fn row_from_text_with_wide_spacers(text: &str) -> oxideterm_terminal::TerminalRow {
-    let mut cells = Vec::new();
-    for ch in text.chars() {
-        let wide = matches!(
-            ch as u32,
-            0x1100..=0x115f
-                | 0x2e80..=0xa4cf
-                | 0xac00..=0xd7a3
-                | 0xf900..=0xfaff
-                | 0xfe10..=0xfe19
-                | 0xfe30..=0xfe6f
-                | 0xff00..=0xff60
-                | 0xffe0..=0xffe6
-        );
-        cells.push(TerminalCell {
-            ch,
-            wide,
-            fg: TerminalColor::rgb(0xe6, 0xe8, 0xeb),
-            bg: TerminalColor::rgb(0x0d, 0x0f, 0x12),
-            style_origin: Default::default(),
-            attrs: Default::default(),
-            extra: None,
-            cursor: false,
-        });
-        if wide {
-            cells.push(TerminalCell {
-                ch: ' ',
-                wide: false,
-                fg: TerminalColor::rgb(0xe6, 0xe8, 0xeb),
-                bg: TerminalColor::rgb(0x0d, 0x0f, 0x12),
-                style_origin: Default::default(),
-                attrs: Default::default(),
-                extra: None,
-                cursor: false,
-            });
-        }
-    }
-    let mut row = oxideterm_terminal::TerminalRow {
-        line_id: 0,
-        source_id: 0,
-        absolute_line: 0,
-        cells: Arc::new(cells),
-        wrapped: false,
-        active_input: false,
-        signature: 0,
-    };
-    row.refresh_signature();
-    row
-}
-
-fn wide_snapshot(text: &str) -> TerminalSnapshot {
-    let row = row_from_text_with_wide_spacers(text);
-    let mut snapshot = test_snapshot(0, 0);
-    snapshot.cols = row.cells.len().max(40);
-    snapshot.rows = 1;
-    snapshot.lines = vec![row];
-    snapshot
-}
-
 fn visible_layout_bounds(rows: usize) -> Bounds<Pixels> {
     Bounds::new(
         point(px(0.0), px(0.0)),
@@ -201,26 +82,6 @@ fn visible_layout_bounds(rows: usize) -> Bounds<Pixels> {
             px(TERMINAL_CONTENT_PADDING * 2.0 + rows as f32 * test_metrics().line_height_f32()),
         ),
     )
-}
-
-fn multirow_snapshot(rows: &[&str]) -> TerminalSnapshot {
-    let mut snapshot = test_snapshot(0, 0);
-    snapshot.cols = rows
-        .iter()
-        .map(|row| row.chars().count())
-        .max()
-        .unwrap_or(1)
-        .max(40);
-    snapshot.rows = rows.len();
-    snapshot.lines = rows
-        .iter()
-        .map(|row| row_from_text(row, snapshot.cols))
-        .collect();
-    for (row_index, row) in snapshot.lines.iter_mut().enumerate() {
-        row.absolute_line = row_index as i64 - snapshot.display_offset as i64;
-        row.refresh_signature();
-    }
-    snapshot
 }
 
 #[test]
@@ -474,28 +335,7 @@ pub(super) fn test_command_mark(
     }
 }
 
-#[test]
-fn cursor_blink_respects_preference_terminal_state_and_surface_ownership() {
-    use TerminalBlinkMode::{Off, On, TerminalControlled};
-    use TerminalCursorShape::{Block, Hidden};
-
-    for (mode, focused, terminal_blinking, alt_screen, shape, expected) in [
-        (On, true, false, false, Block, true),
-        (TerminalControlled, true, false, false, Block, false),
-        (TerminalControlled, true, true, false, Block, true),
-        (On, false, true, false, Block, false),
-        (On, true, true, true, Block, false),
-        (On, true, true, false, Hidden, false),
-        (Off, true, true, false, Block, false),
-    ] {
-        assert_eq!(
-            should_blink_cursor_for_mode(mode, focused, terminal_blinking, alt_screen, shape),
-            expected,
-            "{mode:?}, focused={focused}, terminal={terminal_blinking}, alt={alt_screen}, {shape:?}"
-        );
-    }
-}
-
+#[cfg(windows)]
 mod input_tests;
 mod layout_tests;
 mod link_tests;

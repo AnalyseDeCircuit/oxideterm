@@ -1,0 +1,365 @@
+use std::ops::Range;
+#[cfg(not(target_family = "wasm"))]
+use std::{
+    env,
+    path::{Path, PathBuf},
+};
+
+use gpui::SharedString;
+use oxideterm_terminal_emulator::{TerminalCell, TerminalSnapshot};
+use zeroize::Zeroizing;
+
+struct LinkText {
+    // URL and path scans share one character buffer; terminal contents stay local to this row.
+    text: Zeroizing<Vec<char>>,
+    boundaries: Vec<usize>,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct TerminalLinkRange {
+    pub row: usize,
+    pub start_col: usize,
+    pub end_col: usize,
+    // Cached visible link ranges are rebuilt every frame, so targets must remain cheap to clone.
+    pub target: SharedString,
+    pub kind: TerminalLinkKind,
+    // A path hit may outlive the snapshot that the pointer was over.
+    pub detected_path_row_signature: Option<u64>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum TerminalLinkKind {
+    Url,
+    Path,
+    Trigger,
+}
+
+pub fn link_should_be_styled(
+    ranges: &[TerminalLinkRange],
+    hovered: Option<&TerminalLinkRange>,
+    row: usize,
+    col: usize,
+) -> bool {
+    if hovered.is_some_and(|link| {
+        link.kind == TerminalLinkKind::Trigger
+            && link.row == row
+            && (link.start_col..link.end_col).contains(&col)
+    }) {
+        return true;
+    }
+    ranges
+        .iter()
+        .find(|range| range.row == row && col >= range.start_col && col < range.end_col)
+        .is_some_and(|range| range.kind == TerminalLinkKind::Url || hovered == Some(range))
+}
+
+pub fn is_link_stylable_cell(cell: &TerminalCell) -> bool {
+    // Auto-detected links must not replace colors chosen by the terminal application.
+    is_link_interactive_cell(cell) && !cell.style_origin.foreground_explicit()
+}
+
+pub fn is_link_interactive_cell(cell: &TerminalCell) -> bool {
+    // Application-painted backgrounds usually mark UI chrome rather than plain output.
+    !cell.style_origin.background_explicit()
+}
+
+/// `Some` enables path detection; the host classifies archive names without a directory prefix.
+pub fn display_link_ranges_for_rows(
+    snapshot: &TerminalSnapshot,
+    rows: Range<usize>,
+    archive_path: Option<fn(&str) -> bool>,
+) -> Vec<TerminalLinkRange> {
+    filter_display_link_ranges(
+        snapshot,
+        detect_link_ranges_for_rows(snapshot, rows, archive_path),
+    )
+}
+
+pub fn persistent_link_ranges_for_rows(
+    snapshot: &TerminalSnapshot,
+    rows: Range<usize>,
+) -> Vec<TerminalLinkRange> {
+    display_link_ranges_for_rows(snapshot, rows, None)
+}
+
+fn filter_display_link_ranges(
+    snapshot: &TerminalSnapshot,
+    mut links: Vec<TerminalLinkRange>,
+) -> Vec<TerminalLinkRange> {
+    links.retain(|link| should_display_link(snapshot, link));
+    links
+}
+
+fn should_display_link(snapshot: &TerminalSnapshot, link: &TerminalLinkRange) -> bool {
+    link.kind != TerminalLinkKind::Path
+        || !snapshot
+            .lines
+            .get(link.row)
+            .is_some_and(|row| row.active_input)
+}
+
+pub fn detect_link_ranges_for_rows(
+    snapshot: &TerminalSnapshot,
+    rows: Range<usize>,
+    archive_path: Option<fn(&str) -> bool>,
+) -> Vec<TerminalLinkRange> {
+    let mut links = Vec::new();
+    for row_index in rows {
+        let Some(row) = snapshot.lines.get(row_index) else {
+            continue;
+        };
+        let link_text = link_text_for_row(row);
+        let row_links_start = links.len();
+        links.extend(detect_osc8_ranges(row_index, row));
+        let url_ranges = detect_url_ranges(row_index, &link_text, &links[row_links_start..]);
+        links.extend(url_ranges);
+        if let Some(is_archive_path) = archive_path {
+            let path_ranges = detect_path_ranges(
+                row_index,
+                row.signature,
+                &link_text,
+                &links[row_links_start..],
+                is_archive_path,
+            );
+            links.extend(path_ranges);
+        }
+    }
+    links
+}
+
+fn link_text_for_row(row: &oxideterm_terminal_emulator::TerminalRow) -> LinkText {
+    let mut text = Zeroizing::new(Vec::with_capacity(row.cells.len()));
+    let mut boundaries = Vec::with_capacity(row.cells.len() + 1);
+    let mut skip_wide_spacer = false;
+    let mut last_end_col = 0;
+
+    for (col, cell) in row.cells.iter().enumerate() {
+        if skip_wide_spacer {
+            skip_wide_spacer = false;
+            continue;
+        }
+
+        boundaries.push(col);
+        text.push(cell.ch);
+        last_end_col = col + if cell.wide { 2 } else { 1 };
+
+        for ch in cell.zerowidth().chars() {
+            boundaries.push(col);
+            text.push(ch);
+        }
+
+        skip_wide_spacer = cell.wide;
+    }
+
+    boundaries.push(last_end_col);
+    LinkText { text, boundaries }
+}
+
+fn char_range_to_cell_range(
+    link_text: &LinkText,
+    start: usize,
+    end: usize,
+) -> Option<(usize, usize)> {
+    let start_col = *link_text.boundaries.get(start)?;
+    let end_col = *link_text.boundaries.get(end)?;
+    (end_col > start_col).then_some((start_col, end_col))
+}
+
+pub fn detect_osc8_ranges(
+    row: usize,
+    terminal_row: &oxideterm_terminal_emulator::TerminalRow,
+) -> Vec<TerminalLinkRange> {
+    let mut ranges = Vec::new();
+    let mut col = 0;
+    while col < terminal_row.cells.len() {
+        let Some(uri) = terminal_row.cells[col].hyperlink() else {
+            col += 1;
+            continue;
+        };
+
+        let start_col = col;
+        col += 1;
+        while col < terminal_row.cells.len() && terminal_row.cells[col].hyperlink() == Some(uri) {
+            col += 1;
+        }
+
+        ranges.push(TerminalLinkRange {
+            row,
+            start_col,
+            end_col: col,
+            target: uri.into(),
+            kind: terminal_link_kind_for_target(uri),
+            detected_path_row_signature: None,
+        });
+    }
+    ranges
+}
+
+pub fn terminal_link_kind_for_target(target: &str) -> TerminalLinkKind {
+    if target.contains("://") || target.starts_with("mailto:") {
+        TerminalLinkKind::Url
+    } else {
+        TerminalLinkKind::Path
+    }
+}
+
+fn detect_url_ranges(
+    row: usize,
+    link_text: &LinkText,
+    existing_links: &[TerminalLinkRange],
+) -> Vec<TerminalLinkRange> {
+    const HTTPS_PREFIX: [char; 8] = ['h', 't', 't', 'p', 's', ':', '/', '/'];
+    const HTTP_PREFIX: [char; 7] = ['h', 't', 't', 'p', ':', '/', '/'];
+
+    let chars = link_text.text.as_slice();
+    let mut ranges = Vec::new();
+    let mut index = 0;
+    while index < chars.len() {
+        // Match directly on the character slice so a non-link prefix never allocates or copies
+        // the remainder of a long terminal row.
+        let prefix_len = if chars[index..].starts_with(&HTTPS_PREFIX) {
+            HTTPS_PREFIX.len()
+        } else if chars[index..].starts_with(&HTTP_PREFIX) {
+            HTTP_PREFIX.len()
+        } else {
+            index += 1;
+            continue;
+        };
+
+        let start = index;
+        index += prefix_len;
+        while index < chars.len() && !is_link_terminator(chars[index]) {
+            index += 1;
+        }
+        let end = trim_link_end(chars, start, index);
+        if end > start + prefix_len {
+            let Some((start_col, end_col)) = char_range_to_cell_range(link_text, start, end) else {
+                continue;
+            };
+            if existing_links.iter().any(|link| {
+                link.row == row && ranges_overlap(start_col, end_col, link.start_col, link.end_col)
+            }) {
+                continue;
+            }
+            ranges.push(TerminalLinkRange {
+                row,
+                start_col,
+                end_col,
+                target: chars[start..end].iter().collect::<String>().into(),
+                kind: TerminalLinkKind::Url,
+                detected_path_row_signature: None,
+            });
+        }
+    }
+    ranges
+}
+
+fn detect_path_ranges(
+    row: usize,
+    row_signature: u64,
+    link_text: &LinkText,
+    existing_links: &[TerminalLinkRange],
+    is_archive_path: fn(&str) -> bool,
+) -> Vec<TerminalLinkRange> {
+    let chars = link_text.text.as_slice();
+    let mut ranges = Vec::new();
+    let mut index = 0;
+    while index < chars.len() {
+        while index < chars.len() && chars[index].is_whitespace() {
+            index += 1;
+        }
+        let start = index;
+        let quoted_archive_end = chars
+            .get(start)
+            .filter(|ch| matches!(ch, '\'' | '"'))
+            .and_then(|quote| {
+                let end = (start + 1..chars.len()).find(|&i| chars[i] == *quote)?;
+                let path: String = chars[start + 1..end].iter().collect();
+                is_archive_path(&path).then_some(end + 1)
+            });
+        if let Some(end) = quoted_archive_end {
+            index = end;
+        } else {
+            while index < chars.len() && !chars[index].is_whitespace() {
+                index += 1;
+            }
+        }
+        let end = trim_link_end(chars, start, index);
+        if end <= start {
+            continue;
+        }
+        let Some((start_col, end_col)) = char_range_to_cell_range(link_text, start, end) else {
+            continue;
+        };
+        if existing_links.iter().any(|link| {
+            link.row == row && ranges_overlap(start_col, end_col, link.start_col, link.end_col)
+        }) {
+            continue;
+        }
+        let token: String = chars[start..end].iter().collect();
+        if is_path_like(&token, is_archive_path) {
+            ranges.push(TerminalLinkRange {
+                row,
+                start_col,
+                end_col,
+                target: token.into(),
+                kind: TerminalLinkKind::Path,
+                detected_path_row_signature: Some(row_signature),
+            });
+        }
+    }
+    ranges
+}
+
+pub fn ranges_overlap(a_start: usize, a_end: usize, b_start: usize, b_end: usize) -> bool {
+    a_start < b_end && b_start < a_end
+}
+
+pub fn is_path_like(token: &str, is_archive_path: fn(&str) -> bool) -> bool {
+    let token = token.trim_matches(|ch: char| matches!(ch, '"' | '\'' | '`'));
+    token.starts_with('/')
+        || token.starts_with("./")
+        || token.starts_with("../")
+        || token.starts_with("~/")
+        || (token.contains('/') && token.contains('.'))
+        || is_archive_path(token)
+}
+
+#[cfg(not(target_family = "wasm"))]
+pub fn path_link_to_file_url(target: &str, base_dir: &Path) -> Option<String> {
+    let target = target.trim_matches(|ch: char| matches!(ch, '"' | '\'' | '`'));
+    let path = if let Some(rest) = target.strip_prefix("~/") {
+        home_dir()?.join(rest)
+    } else {
+        let path = PathBuf::from(target);
+        if path.is_absolute() {
+            path
+        } else {
+            base_dir.join(path)
+        }
+    };
+
+    // File URLs require platform-aware handling of drive letters and UNC roots.
+    url::Url::from_file_path(path).ok().map(String::from)
+}
+
+#[cfg(not(target_family = "wasm"))]
+pub fn home_dir() -> Option<PathBuf> {
+    env::var_os("HOME").map(PathBuf::from)
+}
+
+pub fn is_link_terminator(ch: char) -> bool {
+    ch.is_whitespace() || matches!(ch, '"' | '\'' | '`' | '<' | '>' | '[' | ']' | '{' | '}')
+}
+
+pub fn trim_link_end(chars: &[char], start: usize, mut end: usize) -> usize {
+    while end > start
+        && matches!(
+            chars[end - 1],
+            '.' | ',' | ':' | ';' | '!' | '?' | ')' | ']'
+        )
+    {
+        end -= 1;
+    }
+    end
+}

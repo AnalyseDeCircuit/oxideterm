@@ -6,19 +6,24 @@ use std::borrow::Cow;
 
 use gpui::{MouseButton, ScrollDelta, ScrollEvent, px};
 use oxideterm_settings::{TerminalBackspaceSequence, TerminalDeleteSequence};
-use oxideterm_terminal::TermMode;
+use oxideterm_terminal_emulator::{TermMode, TerminalCursorShape};
 
-use crate::terminal_ui::TerminalBlinkMode;
-use crate::terminal_view::selection::TerminalPoint;
-use oxideterm_terminal::TerminalCursorShape;
+use crate::selection::TerminalPoint;
 
-pub(crate) enum MouseFormat {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TerminalBlinkMode {
+    Off,
+    TerminalControlled,
+    On,
+}
+
+pub enum MouseFormat {
     Sgr,
     Normal { utf8: bool },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum TerminalScrollAction {
+pub enum TerminalScrollAction {
     PageUp,
     PageDown,
     LineUp,
@@ -27,7 +32,7 @@ pub(crate) enum TerminalScrollAction {
     Bottom,
 }
 
-pub(crate) fn oxideterm_terminal_scroll_action(
+pub fn oxideterm_terminal_scroll_action(
     keystroke: &gpui::Keystroke,
 ) -> Option<TerminalScrollAction> {
     let modifiers = keystroke.modifiers;
@@ -48,11 +53,11 @@ pub(crate) fn oxideterm_terminal_scroll_action(
     }
 }
 
-pub(crate) fn terminal_scroll_delta(scroll_lines: i32) -> i32 {
+pub fn terminal_scroll_delta(scroll_lines: i32) -> i32 {
     scroll_lines
 }
 
-pub(crate) fn should_blink_cursor_for_mode(
+pub fn should_blink_cursor_for_mode(
     mode: TerminalBlinkMode,
     focused: bool,
     terminal_enabled: bool,
@@ -82,7 +87,7 @@ impl MouseFormat {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct TerminalMouseButtonCode(u8);
+pub struct TerminalMouseButtonCode(u8);
 
 impl TerminalMouseButtonCode {
     const LEFT: Self = Self(0);
@@ -130,11 +135,11 @@ impl TerminalMouseButtonCode {
     }
 }
 
-pub(crate) fn mouse_mode(mode: TermMode, shift: bool) -> bool {
+pub fn mouse_mode(mode: TermMode, shift: bool) -> bool {
     mode.intersects(TermMode::MOUSE_MODE) && !shift
 }
 
-pub(crate) fn mouse_button_report(
+pub fn mouse_button_report(
     point: TerminalPoint,
     button: MouseButton,
     modifiers: gpui::Modifiers,
@@ -155,7 +160,7 @@ pub(crate) fn mouse_button_report(
     None
 }
 
-pub(crate) fn mouse_moved_report(
+pub fn mouse_moved_report(
     point: TerminalPoint,
     button: Option<MouseButton>,
     modifiers: gpui::Modifiers,
@@ -174,7 +179,7 @@ pub(crate) fn mouse_moved_report(
     }
 }
 
-pub(crate) fn mouse_scroll_report(
+pub fn mouse_scroll_report(
     point: TerminalPoint,
     event: &ScrollEvent,
     mode: TermMode,
@@ -192,7 +197,7 @@ pub(crate) fn mouse_scroll_report(
     }
 }
 
-pub(crate) fn mouse_report(
+pub fn mouse_report(
     point: TerminalPoint,
     button: TerminalMouseButtonCode,
     pressed: bool,
@@ -231,7 +236,7 @@ fn mouse_modifier_bits(modifiers: gpui::Modifiers) -> u8 {
     bits
 }
 
-pub(crate) fn normal_mouse_report(point: TerminalPoint, button: u8, utf8: bool) -> Option<Vec<u8>> {
+pub fn normal_mouse_report(point: TerminalPoint, button: u8, utf8: bool) -> Option<Vec<u8>> {
     const REPORT_PREFIX: &[u8] = b"\x1b[M";
     const REPORT_OFFSET: u8 = 32;
 
@@ -248,7 +253,7 @@ pub(crate) fn normal_mouse_report(point: TerminalPoint, button: u8, utf8: bool) 
     Some(msg)
 }
 
-pub(crate) fn append_mouse_position(msg: &mut Vec<u8>, position: usize, utf8: bool) {
+pub fn append_mouse_position(msg: &mut Vec<u8>, position: usize, utf8: bool) {
     let encoded = 32 + 1 + position;
     if utf8 && position >= 95 {
         msg.push((0xc0 + encoded / 64) as u8);
@@ -258,7 +263,7 @@ pub(crate) fn append_mouse_position(msg: &mut Vec<u8>, position: usize, utf8: bo
     }
 }
 
-pub(crate) fn alt_scroll(scroll_lines: i32) -> Vec<u8> {
+pub fn alt_scroll(scroll_lines: i32) -> Vec<u8> {
     let suffix = if scroll_lines > 0 { b'A' } else { b'B' };
     std::iter::repeat_n([0x1b, b'O', suffix], scroll_lines.unsigned_abs() as usize)
         .flatten()
@@ -308,24 +313,7 @@ impl TerminalKeyModifiers {
     }
 }
 
-#[cfg(test)]
-pub(crate) fn oxideterm_key_escape_sequence(
-    keystroke: &gpui::Keystroke,
-    mode: &TermMode,
-    option_as_meta: bool,
-    event_type: KittyKeyEventType,
-) -> Option<Cow<'static, str>> {
-    configurable_key_escape_sequence(
-        keystroke,
-        mode,
-        option_as_meta,
-        TerminalBackspaceSequence::default(),
-        TerminalDeleteSequence::default(),
-        event_type,
-    )
-}
-
-pub(crate) fn configurable_key_escape_sequence(
+pub fn configurable_key_escape_sequence(
     keystroke: &gpui::Keystroke,
     mode: &TermMode,
     option_as_meta: bool,
@@ -664,11 +652,11 @@ fn xterm_modifier_parameter(modifiers: TerminalKeyModifiers) -> u32 {
     bits + 1
 }
 
-pub(crate) fn modifier_code(keystroke: &gpui::Keystroke) -> u32 {
+pub fn modifier_code(keystroke: &gpui::Keystroke) -> u32 {
     xterm_modifier_parameter(TerminalKeyModifiers::from_keystroke(keystroke))
 }
 
-pub(crate) fn kitty_keyboard_escape_sequence(
+pub fn kitty_keyboard_escape_sequence(
     keystroke: &gpui::Keystroke,
     mode: &TermMode,
     event_type: KittyKeyEventType,
@@ -753,13 +741,13 @@ pub(crate) fn kitty_keyboard_escape_sequence(
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum KittyKeyEventType {
+pub enum KittyKeyEventType {
     Press = 1,
     Repeat = 2,
     Release = 3,
 }
 
-pub(crate) fn kitty_keyboard_codepoint(keystroke: &gpui::Keystroke) -> Option<u32> {
+pub fn kitty_keyboard_codepoint(keystroke: &gpui::Keystroke) -> Option<u32> {
     if let Some(text) = keystroke.key_char.as_deref()
         && text.chars().count() == 1
     {
@@ -781,7 +769,7 @@ pub(crate) fn kitty_keyboard_codepoint(keystroke: &gpui::Keystroke) -> Option<u3
     }
 }
 
-pub(crate) fn kitty_keyboard_legacy_functional_sequence(
+pub fn kitty_keyboard_legacy_functional_sequence(
     keystroke: &gpui::Keystroke,
     mode: &TermMode,
     event_type: KittyKeyEventType,
@@ -823,7 +811,7 @@ pub(crate) fn kitty_keyboard_legacy_functional_sequence(
     Some(Cow::Owned(format!("\x1b[{};{}~", number, modifier)))
 }
 
-pub(crate) fn kitty_modifier_field(
+pub fn kitty_modifier_field(
     keystroke: &gpui::Keystroke,
     mode: &TermMode,
     event_type: KittyKeyEventType,
@@ -836,7 +824,7 @@ pub(crate) fn kitty_modifier_field(
     modifier
 }
 
-pub(crate) fn kitty_keyboard_alternate_codepoint(
+pub fn kitty_keyboard_alternate_codepoint(
     keystroke: &gpui::Keystroke,
     codepoint: u32,
 ) -> Option<u32> {
@@ -851,7 +839,7 @@ pub(crate) fn kitty_keyboard_alternate_codepoint(
     (key_codepoint != codepoint && typed as u32 != key_codepoint).then_some(key_codepoint)
 }
 
-pub(crate) fn kitty_keyboard_associated_text(keystroke: &gpui::Keystroke) -> Option<String> {
+pub fn kitty_keyboard_associated_text(keystroke: &gpui::Keystroke) -> Option<String> {
     let text = keystroke.key_char.as_deref()?;
     let mut codepoints = Vec::new();
     for ch in text.chars() {
