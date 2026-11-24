@@ -452,6 +452,17 @@ fn read_kitty_shared_memory(
     result
 }
 
+#[cfg(not(any(unix, windows)))]
+fn read_kitty_shared_memory(
+    _name: &str,
+    _offset: u64,
+    _length: Option<u64>,
+    _storage_limit_mb: u32,
+) -> Result<Vec<u8>, GraphicsError> {
+    // Host shared-memory objects do not exist on targets such as wasm32.
+    Err(GraphicsError::LocalFileTransmissionAccessFailed)
+}
+
 fn decode_raw_rgb(
     bytes: &[u8],
     params: &HashMap<String, String>,
