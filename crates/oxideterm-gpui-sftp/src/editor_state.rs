@@ -69,7 +69,9 @@ impl SftpWorkspaceEntity {
         self.preview_editor_network_error = false;
         self.preview_editor_save_error = None;
         self.preview_editor_retry_task = Some(cx.spawn(async move |entity, cx| {
-            gpui::Timer::after(Duration::from_millis(500)).await;
+            cx.background_executor()
+                .timer(Duration::from_millis(500))
+                .await;
             let _ = entity.update(cx, |sftp, cx| {
                 sftp.preview_editor_retry_task = None;
                 sftp.sync_preview_editor_state(&editor, cx);
@@ -352,7 +354,7 @@ impl SftpWorkspaceEntity {
             return;
         };
 
-        match std::fs::read_to_string(&local_file.path) {
+        match self.local_host.read_text(&local_file.path) {
             Ok(local_content) => {
                 let view = cx.new(|_| {
                     SftpDiffView::new(

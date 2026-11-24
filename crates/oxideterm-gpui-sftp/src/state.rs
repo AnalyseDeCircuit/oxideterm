@@ -192,6 +192,7 @@ pub struct SftpRemoteLoadRequest {
     pub remote_id: SftpRemoteId,
     pub view_generation: u64,
     pub path: String,
+    #[cfg(not(target_family = "wasm"))]
     pub audit_request: Option<oxideterm_audit::AuditContext>,
 }
 
@@ -407,16 +408,6 @@ pub enum SftpDialog {
     },
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct SftpDrive {
-    pub name: String,
-    pub path: String,
-    pub drive_type: String,
-    pub total_space: u64,
-    pub available_space: u64,
-    pub read_only: bool,
-}
-
 pub struct SftpDocumentPreview {
     view: gpui::AnyView,
     set_source: std::rc::Rc<dyn Fn(PreviewAssetOwner, &mut App)>,
@@ -445,7 +436,13 @@ impl SftpDocumentPreview {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
+pub type SftpPreviewLoadTask = tokio::task::AbortHandle;
+#[cfg(target_family = "wasm")]
+pub type SftpPreviewLoadTask = Task<()>;
+
 pub struct SftpWorkspaceEntity {
+    pub(crate) local_host: std::rc::Rc<dyn SftpLocalHost>,
     pub active_pane: SftpPane,
     pub local_path: String,
     pub remote_path: String,
@@ -495,6 +492,7 @@ pub struct SftpWorkspaceEntity {
     pub remote_load_inflight: bool,
     pub(crate) remote_load_retry_count: u8,
     pub(crate) remote_load_retry_task: Option<Task<()>>,
+    #[cfg(not(target_family = "wasm"))]
     pub remote_browse_request: Option<(SftpRemoteId, String, oxideterm_audit::AuditContext)>,
     pub current_surface_id: Option<SftpSurfaceId>,
     pub current_remote_id: Option<SftpRemoteId>,
@@ -522,10 +520,14 @@ pub struct SftpWorkspaceEntity {
     pub preview_asset_owner: Option<PreviewAssetOwner>,
     pub preview_plugin: Option<SftpDocumentPreview>,
     pub preview_generation: u64,
-    pub preview_load_task: Option<tokio::task::AbortHandle>,
-    pub preview_audio: RodioAudioPreviewBackend,
+    pub preview_load_task: Option<SftpPreviewLoadTask>,
+    #[cfg(not(target_family = "wasm"))]
+    pub preview_audio: oxideterm_preview::RodioAudioPreviewBackend,
+    #[cfg(target_family = "wasm")]
+    pub preview_audio: Box<dyn AudioPreviewBackend>,
     pub(crate) preview_audio_tick_active: bool,
     pub(crate) preview_audio_tick_task: Option<Task<()>>,
+    #[cfg(not(target_family = "wasm"))]
     pub preview_video_surface: SharedSftpNativeVideoSurface,
     pub preview_error: Option<String>,
     pub preview_loading: bool,
@@ -572,9 +574,16 @@ pub struct SftpWorkspaceEntity {
     pub(crate) worker_rx: std::sync::mpsc::Receiver<SftpWorkerResult>,
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl Default for SftpWorkspaceEntity {
     fn default() -> Self {
-        let local_path = default_download_path();
+        Self::from_local_host(std::rc::Rc::new(local_host::DesktopLocalHost))
+    }
+}
+
+impl SftpWorkspaceEntity {
+    fn from_local_host(local_host: std::rc::Rc<dyn SftpLocalHost>) -> Self {
+        let local_path = local_host.download_dir();
         let remote_path = String::new();
         let (worker_tx, worker_rx) = delivery::ActiveDeliverySender::channel();
         Self {
@@ -617,13 +626,15 @@ impl Default for SftpWorkspaceEntity {
             tree_pending: VecDeque::new(),
             tree_generation: 0,
             tree_selected: None,
-            local_files: list_local_files(&local_path).unwrap_or_else(|_| Vec::new()),
+            local_files: local_host.list(&local_path).unwrap_or_default(),
+            local_host,
             remote_files: Vec::new(),
             remote_loading: false,
             remote_load_pending: false,
             remote_load_inflight: false,
             remote_load_retry_count: 0,
             remote_load_retry_task: None,
+            #[cfg(not(target_family = "wasm"))]
             remote_browse_request: None,
             current_surface_id: None,
             current_remote_id: None,
@@ -650,9 +661,13 @@ impl Default for SftpWorkspaceEntity {
             preview_plugin: None,
             preview_generation: 0,
             preview_load_task: None,
-            preview_audio: RodioAudioPreviewBackend::new(),
+            #[cfg(not(target_family = "wasm"))]
+            preview_audio: oxideterm_preview::RodioAudioPreviewBackend::new(),
+            #[cfg(target_family = "wasm")]
+            preview_audio: Box::new(oxideterm_preview::UnsupportedAudioPreviewBackend),
             preview_audio_tick_active: false,
             preview_audio_tick_task: None,
+            #[cfg(not(target_family = "wasm"))]
             preview_video_surface: SharedSftpNativeVideoSurface::default(),
             preview_error: None,
             preview_loading: false,
@@ -702,8 +717,16 @@ impl Default for SftpWorkspaceEntity {
 }
 
 impl SftpWorkspaceEntity {
+    #[cfg(not(target_family = "wasm"))]
     pub fn new(cx: &mut Context<Self>) -> Self {
-        let entity = Self::default();
+        Self::with_local_host(std::rc::Rc::new(local_host::DesktopLocalHost), cx)
+    }
+
+    pub fn with_local_host(
+        local_host: std::rc::Rc<dyn SftpLocalHost>,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let entity = Self::from_local_host(local_host);
         entity.schedule_worker_delivery(cx);
         entity
     }
@@ -717,9 +740,7 @@ impl SftpWorkspaceEntity {
         let worker_wake = self.worker_tx.wake();
         let release_wake = worker_wake.clone();
         cx.on_release(move |this, _| {
-            if let Some(task) = this.preview_load_task.take() {
-                task.abort();
-            }
+            this.cancel_preview_load();
             // Releasing the page owner stops UI delivery without cancelling
             // node-owned transfers or their backend tasks.
             release_wake.stop();
@@ -872,8 +893,7 @@ impl SftpWorkspaceEntity {
         if self.folder_picker_task.is_some() {
             return;
         }
-        let audit_context =
-            oxideterm_local_files::local_file_audit_context(oxideterm_audit::AuditSource::User);
+        let audit = BrowseAudit::capture();
         self.folder_picker_task = Some(cx.spawn(async move |entity, cx| {
             let selected_path = selection.await;
             let _ = entity.update(cx, |sftp, cx| {
@@ -882,15 +902,10 @@ impl SftpWorkspaceEntity {
                     if let Some(remote_id) = sftp.current_remote_id.clone() {
                         sftp.local_path_by_remote.insert(remote_id, path.clone());
                     }
-                    let audit = oxideterm_audit::AuditOperation::in_context(
-                        audit_context.as_ref(),
-                        oxideterm_audit::AuditCategory::File,
-                        "file_browse",
-                        Some(&path),
-                    );
-                    sftp.set_input_focus(None, cx);
-                    let result = sftp.apply_local_path(path);
-                    audit.result(&result);
+                    let _ = audit.run(path, |path| {
+                        sftp.set_input_focus(None, cx);
+                        sftp.apply_local_path(path)
+                    });
                     cx.notify();
                 }
             });
@@ -913,7 +928,7 @@ impl SftpWorkspaceEntity {
         }
         self.dialog_exit_generation = Some(generation);
         self.dialog_exit_task = Some(cx.spawn(async move |entity, cx| {
-            gpui::Timer::after(delay).await;
+            cx.background_executor().timer(delay).await;
             let _ = entity.update(cx, |sftp, cx| {
                 sftp.finish_dialog_exit(generation, cx);
             });
@@ -969,14 +984,23 @@ impl SftpWorkspaceEntity {
         self.preview_editor_retry_task = None;
     }
 
-    pub fn stop_preview_media(&mut self) {
+    fn cancel_preview_load(&mut self) {
         if let Some(task) = self.preview_load_task.take() {
+            #[cfg(not(target_family = "wasm"))]
             task.abort();
+            // A GPUI task is cancelled by releasing its owning handle.
+            #[cfg(target_family = "wasm")]
+            drop(task);
         }
+    }
+
+    pub fn stop_preview_media(&mut self) {
+        self.cancel_preview_load();
         self.preview_plugin = None;
         let _ = self.preview_audio.command(AudioPreviewCommand::Stop);
         self.preview_audio_tick_active = false;
         self.preview_audio_tick_task = None;
+        #[cfg(not(target_family = "wasm"))]
         self.preview_video_surface.detach();
     }
 

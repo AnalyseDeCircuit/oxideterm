@@ -15,6 +15,7 @@ struct SftpRemoteListOutcome {
 }
 
 impl SftpWorkspaceEntity {
+    #[cfg(not(target_family = "wasm"))]
     fn take_remote_browse_request(
         &mut self,
         remote_id: &SftpRemoteId,
@@ -60,12 +61,14 @@ impl SftpWorkspaceEntity {
         self.set_remote_load_state(started);
         self.init_error = None;
         let path = self.remote_path.clone();
+        #[cfg(not(target_family = "wasm"))]
         let audit_request = self.take_remote_browse_request(remote_id, &path);
         Some(SftpRemoteLoadRequest {
             surface_id,
             remote_id: remote_id.clone(),
             view_generation: self.view_generation,
             path,
+            #[cfg(not(target_family = "wasm"))]
             audit_request,
         })
     }
@@ -97,7 +100,7 @@ impl SftpWorkspaceEntity {
             .local_path_by_remote
             .get(&remote_id)
             .cloned()
-            .unwrap_or_else(default_download_path);
+            .unwrap_or_else(|| self.local_host.download_dir());
         let _ = self.apply_local_path(local_path);
 
         let remembered_remote = self
@@ -310,7 +313,7 @@ impl SftpWorkspaceEntity {
     ) {
         let delay = Duration::from_secs(2_u64.saturating_pow(attempt as u32));
         self.remote_load_retry_task = Some(cx.spawn(async move |entity, cx| {
-            gpui::Timer::after(delay).await;
+            cx.background_executor().timer(delay).await;
             let _ = entity.update(cx, |sftp, cx| {
                 sftp.remote_load_retry_task = None;
                 if sftp.current_surface_id == Some(surface_id)
@@ -780,7 +783,7 @@ impl SftpWorkspaceEntity {
     }
 
     fn reload_local_directory(&self) {
-        if let Ok(files) = list_local_files(&self.local_path) {
+        if let Ok(files) = self.local_host.list(&self.local_path) {
             let _ = self.worker_tx.send(SftpWorkerResult::LocalFilesLoaded {
                 view_generation: self.view_generation,
                 path: self.local_path.clone(),
@@ -859,7 +862,7 @@ impl SftpWorkspaceEntity {
                         AssetFileKind::Audio => {
                             let _ = self.preview_audio.load(owner.path());
                         }
-                        AssetFileKind::Font => match std::fs::read(owner.path()) {
+                        AssetFileKind::Font => match self.local_host.font_bytes(owner.path()) {
                             Ok(bytes) => {
                                 let family = font_family_name_from_bytes(&bytes).or_else(|| {
                                     owner

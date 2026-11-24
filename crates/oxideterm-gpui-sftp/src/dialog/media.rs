@@ -231,7 +231,12 @@ impl SftpDialogView {
         }
         #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
         {
+            #[cfg(not(target_family = "wasm"))]
             let snapshot = self.sftp_view().read(_cx).preview_video_surface.snapshot();
+            #[cfg(target_family = "wasm")]
+            let snapshot = oxideterm_preview::PlatformVideoBackend::snapshot(
+                &oxideterm_preview::UnsupportedPlatformVideoBackend,
+            );
             let detail = snapshot
                 .error
                 .unwrap_or_else(|| format!("{} backend is unavailable", snapshot.backend));

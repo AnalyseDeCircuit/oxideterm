@@ -288,21 +288,10 @@ impl SftpBrowserView {
                         }
                         // Local refresh only re-reads the visible directory and
                         // must not disturb the node-owned remote SFTP session.
-                        let path = this.sftp_view().read(cx).local_path.clone();
-                        let audit = oxideterm_audit::AuditOperation::in_context(
-                            oxideterm_local_files::local_file_audit_context(
-                                oxideterm_audit::AuditSource::User,
-                            )
-                            .as_ref(),
-                            oxideterm_audit::AuditCategory::File,
-                            "file_browse",
-                            Some(&path),
-                        );
-                        let result = list_local_files(&path);
-                        audit.result(&result);
-                        let files = local_files_or_error(&path, result);
                         this.sftp_view().update(cx, |sftp, cx| {
-                            sftp.local_files = files;
+                            let result = BrowseAudit::capture()
+                                .run(sftp.local_path.clone(), |path| sftp.local_host.list(&path));
+                            sftp.local_files = local_files_or_error(&sftp.local_path, result);
                             cx.notify();
                         });
                     }

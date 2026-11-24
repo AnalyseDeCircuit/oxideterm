@@ -72,7 +72,9 @@ impl SftpWorkspaceEntity {
                 if let Some(remote_id) = pair_primary {
                     remote_id
                 } else {
-                    let entries = list_local_files(&parent_path)
+                    let entries = self
+                        .local_host
+                        .list(&parent_path)
                         .unwrap_or_default()
                         .into_iter()
                         .map(sftp_path_completion_candidate)
@@ -159,31 +161,24 @@ impl SftpWorkspaceEntity {
                 if let Some(remote_id) = self.current_remote_id.clone() {
                     self.local_path_by_remote.insert(remote_id, path.clone());
                 }
-                let audit = oxideterm_audit::AuditOperation::in_context(
-                    oxideterm_local_files::local_file_audit_context(
-                        oxideterm_audit::AuditSource::User,
-                    )
-                    .as_ref(),
-                    oxideterm_audit::AuditCategory::File,
-                    "file_browse",
-                    Some(&path),
-                );
-                let result = self.apply_local_path(path);
-                audit.result(&result);
+                let _ = BrowseAudit::capture().run(path, |path| self.apply_local_path(path));
                 SftpPathLoad::Local
             }
             SftpPane::Remote => {
-                let request = oxideterm_audit::AuditContext::current_request().or_else(|| {
-                    oxideterm_audit::AuditContext::current().map(|mut context| {
-                        context.source = oxideterm_audit::AuditSource::User;
-                        context
-                    })
-                });
-                self.remote_browse_request = self
-                    .current_remote_id
-                    .clone()
-                    .zip(request)
-                    .map(|(remote_id, context)| (remote_id, path.clone(), context));
+                #[cfg(not(target_family = "wasm"))]
+                {
+                    let request = oxideterm_audit::AuditContext::current_request().or_else(|| {
+                        oxideterm_audit::AuditContext::current().map(|mut context| {
+                            context.source = oxideterm_audit::AuditSource::User;
+                            context
+                        })
+                    });
+                    self.remote_browse_request = self
+                        .current_remote_id
+                        .clone()
+                        .zip(request)
+                        .map(|(remote_id, context)| (remote_id, path.clone(), context));
+                }
                 self.apply_remote_path(path);
                 SftpPathLoad::Remote
             }
@@ -212,7 +207,7 @@ impl SftpWorkspaceEntity {
                     .cloned()
                     .unwrap_or_else(|| "/".to_string())
             }
-            (SftpPane::Local, "~") => home_path(),
+            (SftpPane::Local, "~") => self.local_host.home(),
             (SftpPane::Remote, "~") => {
                 let sftp = self;
                 sftp.current_remote_id

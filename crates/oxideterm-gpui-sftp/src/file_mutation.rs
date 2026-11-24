@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use oxideterm_i18n::I18n;
+#[cfg(not(target_family = "wasm"))]
 use oxideterm_sftp::MutationSession;
 
 use super::*;
@@ -18,11 +19,11 @@ pub enum SftpDialogSubmission {
 pub struct SftpRemoteMutation {
     pub pane: SftpPane,
     pub clear_selection: bool,
-    operation: FileOperation,
+    operation: SftpFileOperation,
     notice: MutationNotice,
 }
 
-enum FileOperation {
+pub enum SftpFileOperation {
     Rename { from: String, to: String },
     NewFolder(String),
     Delete(Vec<String>),
@@ -51,28 +52,38 @@ impl MutationNotice {
 }
 
 impl SftpRemoteMutation {
+    pub fn operation(&self) -> &SftpFileOperation {
+        &self.operation
+    }
+
+    #[cfg(not(target_family = "wasm"))]
     pub async fn execute(self, session: Result<MutationSession, String>) -> SftpWorkerResult {
         let result: Result<u64, String> = async {
             let session = session?;
-            match self.operation {
-                FileOperation::Rename { from, to } => {
-                    session.rename(&from, &to).await?;
+            match self.operation() {
+                SftpFileOperation::Rename { from, to } => {
+                    session.rename(from, to).await?;
                     Ok(0)
                 }
-                FileOperation::NewFolder(path) => {
-                    session.mkdir(&path).await?;
+                SftpFileOperation::NewFolder(path) => {
+                    session.mkdir(path).await?;
                     Ok(0)
                 }
-                FileOperation::Delete(paths) => {
+                SftpFileOperation::Delete(paths) => {
                     let mut count = 0_u64;
                     for path in paths {
-                        count = count.saturating_add(session.delete_recursive(&path).await?);
+                        count = count.saturating_add(session.delete_recursive(path).await?);
                     }
                     Ok(count)
                 }
             }
         }
         .await;
+        self.complete(result)
+    }
+
+    /// The host reports the recursive deletion count for the existing completion notice.
+    pub fn complete(self, result: Result<u64, String>) -> SftpWorkerResult {
         let description =
             MutationNotice::success_detail(self.notice.detail, result.as_ref().ok().copied());
         SftpWorkerResult::RemoteMutationComplete {
@@ -133,7 +144,7 @@ impl SftpWorkspaceEntity {
                     ),
                     error: i18n.t("sftp.toast.rename_failed"),
                 };
-                (pane, FileOperation::Rename { from, to }, notice, false)
+                (pane, SftpFileOperation::Rename { from, to }, notice, false)
             }
             SftpDialog::NewFolder { pane, remote_path } => {
                 if name.is_empty() {
@@ -154,7 +165,7 @@ impl SftpWorkspaceEntity {
                     detail: MutationDetail::Text(name),
                     error: i18n.t("sftp.toast.create_folder_failed"),
                 };
-                (pane, FileOperation::NewFolder(path), notice, false)
+                (pane, SftpFileOperation::NewFolder(path), notice, false)
             }
             SftpDialog::Delete { pane, files, paths } => {
                 let dir = self.mutation_directory(pane);
@@ -186,7 +197,7 @@ impl SftpWorkspaceEntity {
                     error: i18n.t("sftp.toast.delete_failed"),
                 };
                 let clear = pane == SftpPane::Remote || !dir.remote;
-                (pane, FileOperation::Delete(targets), notice, clear)
+                (pane, SftpFileOperation::Delete(targets), notice, clear)
             }
             SftpDialog::BookmarkRename { bookmark_id } => {
                 return if name.is_empty() {
@@ -211,9 +222,9 @@ impl SftpWorkspaceEntity {
                 notice,
             });
         }
-        let result = operation.apply_local(dir.path);
+        let result = self.local_host.mutate(dir.path, operation);
         if result.is_ok()
-            && let Ok(files) = list_local_files(dir.path)
+            && let Ok(files) = self.local_host.list(dir.path)
         {
             self.local_files = files;
             cx.notify();
@@ -264,8 +275,9 @@ struct MutationDirectory<'a> {
     remote: bool,
 }
 
-impl FileOperation {
-    fn apply_local(self, local_path: &str) -> std::io::Result<()> {
+#[cfg(not(target_family = "wasm"))]
+impl SftpFileOperation {
+    pub(crate) fn apply_local(self, local_path: &str) -> std::io::Result<()> {
         let context =
             oxideterm_local_files::local_file_audit_context(oxideterm_audit::AuditSource::User);
         match self {
@@ -296,6 +308,7 @@ impl FileOperation {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn delete_local_files(
     local_path: &str,
     files: Vec<String>,

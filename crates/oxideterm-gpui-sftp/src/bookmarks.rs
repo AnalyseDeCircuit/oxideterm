@@ -3,17 +3,22 @@
 
 use gpui::Context;
 use oxideterm_sftp::bookmarks::{
-    SftpPathBookmark, default_sftp_bookmark_name, load_sftp_path_bookmarks,
-    new_sftp_path_bookmark_id, save_sftp_path_bookmarks,
+    SftpPathBookmark, default_sftp_bookmark_name, new_sftp_path_bookmark_id,
 };
-use std::{io, path::PathBuf};
+#[cfg(not(target_family = "wasm"))]
+use oxideterm_sftp::bookmarks::{load_sftp_path_bookmarks, save_sftp_path_bookmarks};
+use std::io;
+#[cfg(not(target_family = "wasm"))]
+use std::path::PathBuf;
 
 pub struct SftpBookmarks {
+    #[cfg(not(target_family = "wasm"))]
     settings_path: PathBuf,
     entries: Option<Vec<SftpPathBookmark>>,
 }
 
 impl SftpBookmarks {
+    #[cfg(not(target_family = "wasm"))]
     pub fn new(settings_path: PathBuf) -> Self {
         Self {
             settings_path,
@@ -21,9 +26,19 @@ impl SftpBookmarks {
         }
     }
 
+    /// Keep bookmarks for the lifetime of the browser workspace.
+    #[cfg(target_family = "wasm")]
+    pub fn in_memory() -> Self {
+        Self { entries: None }
+    }
+
     pub(crate) fn load(&mut self, cx: &mut Context<Self>) {
         if self.entries.is_none() {
-            self.entries = Some(load_sftp_path_bookmarks(&self.settings_path));
+            #[cfg(not(target_family = "wasm"))]
+            let entries = load_sftp_path_bookmarks(&self.settings_path);
+            #[cfg(target_family = "wasm")]
+            let entries = Vec::new();
+            self.entries = Some(entries);
             cx.notify();
         }
     }
@@ -94,6 +109,7 @@ impl SftpBookmarks {
             return Ok(false);
         }
         cx.notify();
+        #[cfg(not(target_family = "wasm"))]
         save_sftp_path_bookmarks(&self.settings_path, entries)?;
         Ok(true)
     }

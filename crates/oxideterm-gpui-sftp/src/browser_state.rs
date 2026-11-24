@@ -51,7 +51,7 @@ impl SftpWorkspaceEntity {
         self.local_path = path.clone();
         self.local_path_input.clone_from(&path);
         self.editing_local_path = false;
-        let listing = list_local_files(&path);
+        let listing = self.local_host.list(&path);
         let outcome = listing.as_ref().map(Vec::len).map_err(ToString::to_string);
         self.local_files = local_files_or_error(&path, listing);
         self.local_selected.clear();
@@ -356,7 +356,9 @@ impl SftpWorkspaceEntity {
         }
         self.drag_autoscroll_scheduled = true;
         cx.spawn(async move |entity, cx| {
-            gpui::Timer::after(Duration::from_millis(16)).await;
+            cx.background_executor()
+                .timer(Duration::from_millis(16))
+                .await;
             let _ = entity.update(cx, |sftp, cx| {
                 sftp.drag_autoscroll_scheduled = false;
                 let Some(position) = sftp.drag_autoscroll_position else {
@@ -573,7 +575,7 @@ impl SftpWorkspaceEntity {
         // The browser state owns the exit timer; a generation prevents an old
         // timer from clearing a menu that was opened again.
         cx.spawn(async move |entity, cx| {
-            Timer::after(delay).await;
+            cx.background_executor().timer(delay).await;
             let _ = entity.update(cx, |sftp, cx| {
                 if sftp.context_menu_presence.finish_exit(generation) {
                     sftp.context_menu = None;

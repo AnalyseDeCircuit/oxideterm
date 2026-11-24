@@ -40,7 +40,10 @@ impl SftpDialogView {
                 path,
                 mime_type,
                 kind: AssetFileKind::Image,
-            } => self.render_sftp_preview_image(std::path::PathBuf::from(path), mime_type.clone()),
+            } => self.render_sftp_preview_image(
+                self.sftp_view().read(cx).local_host.image(path),
+                mime_type.clone(),
+            ),
             PreviewContent::AssetFile {
                 path,
                 mime_type,

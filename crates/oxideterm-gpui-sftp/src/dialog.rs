@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use super::*;
-use crate::{native_video::sftp_native_video_element, style::*};
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+use crate::native_video::sftp_native_video_element;
+use crate::style::*;
 use gpui::{
     AnyElement, CursorStyle, MouseButton, MouseDownEvent, MouseMoveEvent, ObjectFit, Rgba,
     SharedString, WeakEntity, Window, div, relative, rgb, rgba, svg,

@@ -8,7 +8,7 @@ impl SftpDialogView {
     ) -> AnyElement {
         let ui = self.sftp_ui_metrics();
         let theme = self.tokens.ui;
-        let drives = local_drives();
+        let drives = self.sftp_view().read(cx).local_host.drives();
         let drive_count = drives.len();
         div()
             .px(px(16.0))
@@ -110,18 +110,10 @@ impl SftpDialogView {
                                     this.sftp_view().update(cx, |sftp_view, cx| {
                                         // Drive selection is committed navigation, so refresh the
                                         // file list and reset selection state through one path.
-                                        let audit = oxideterm_audit::AuditOperation::in_context(
-                                            oxideterm_local_files::local_file_audit_context(
-                                                oxideterm_audit::AuditSource::User,
-                                            )
-                                            .as_ref(),
-                                            oxideterm_audit::AuditCategory::File,
-                                            "file_browse",
-                                            Some(&path),
-                                        );
-                                        sftp_view.set_input_focus(None, cx);
-                                        let result = sftp_view.apply_local_path(path.clone());
-                                        audit.result(&result);
+                                        let _ = BrowseAudit::capture().run(path.clone(), |path| {
+                                            sftp_view.set_input_focus(None, cx);
+                                            sftp_view.apply_local_path(path)
+                                        });
                                         cx.notify();
                                     });
                                     this.send(SftpDialogRequest::Close, _window, cx);

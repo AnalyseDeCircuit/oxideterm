@@ -383,6 +383,7 @@ impl SftpWorkspaceEntity {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub fn build_sftp_pending_uploads(paths: &[std::path::PathBuf]) -> Vec<SftpPendingTransfer> {
     paths
         .iter()

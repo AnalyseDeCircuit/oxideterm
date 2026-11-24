@@ -12,17 +12,21 @@ pub fn is_sftp_incomplete_store_compat_error(error: &str) -> bool {
         || error.contains("not found")
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub fn home_path() -> String {
     oxideterm_local_files::home_path()
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub fn default_download_path() -> String {
     oxideterm_local_files::default_download_path()
 }
 
+#[cfg(not(target_family = "wasm"))]
+pub use oxideterm_sftp::browser_files::list_local_files;
 pub use oxideterm_sftp::browser_files::{
-    join_local_path, list_local_files, normalize_external_dropped_path, parent_path,
-    sftp_path_segments, sorted_sftp_files, unique_sftp_conflict_name,
+    join_local_path, normalize_external_dropped_path, parent_path, sftp_path_segments,
+    sorted_sftp_files, unique_sftp_conflict_name,
 };
 
 pub fn local_files_or_error(
@@ -38,24 +42,6 @@ pub fn local_files_or_error(
             None,
         )]
     })
-}
-
-pub(crate) fn local_drives() -> Vec<SftpDrive> {
-    oxideterm_local_files::local_drives()
-        .into_iter()
-        .map(sftp_drive_from_local)
-        .collect()
-}
-
-pub(crate) fn sftp_drive_from_local(drive: oxideterm_local_files::LocalDrive) -> SftpDrive {
-    SftpDrive {
-        name: drive.name,
-        path: drive.path,
-        drive_type: drive.drive_type,
-        total_space: drive.total_space,
-        available_space: drive.available_space,
-        read_only: drive.read_only,
-    }
 }
 
 pub fn sftp_file_entry(
@@ -81,8 +67,12 @@ pub fn sftp_file_entry(
 }
 
 pub fn new_sftp_transfer_id(remote_id: &SftpRemoteId, name: &str) -> String {
-    let timestamp_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    #[cfg(not(target_family = "wasm"))]
+    use std::time::{SystemTime, UNIX_EPOCH};
+    #[cfg(target_family = "wasm")]
+    use web_time::{SystemTime, UNIX_EPOCH};
+    let timestamp_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis())
         .unwrap_or_default();
     let safe_name = name.replace(['/', '\\', ':'], "_");
