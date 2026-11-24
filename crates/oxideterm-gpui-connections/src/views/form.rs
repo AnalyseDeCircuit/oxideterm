@@ -1,8 +1,8 @@
 use gpui::{
     AnchoredPositionMode, AnyElement, App, ClipboardItem, Context, Corner, Entity, KeyDownEvent,
     MouseButton, MouseMoveEvent, ParentElement, PathPromptOptions, Render, Rgba, ScrollHandle,
-    SharedString, Styled, Subscription, Timer, Window, anchored, deferred, div, point, prelude::*,
-    px, rgb, rgba,
+    SharedString, Styled, Subscription, Window, anchored, deferred, div, point, prelude::*, px,
+    rgb, rgba,
 };
 use zeroize::Zeroize;
 
@@ -584,7 +584,7 @@ impl ConnectionFormView {
         // User intent outlives a virtual-list row only for the real transition,
         // then expires so remounts and programmatic navigation render settled.
         cx.spawn(async move |weak, cx| {
-            Timer::after(motion.duration).await;
+            cx.background_executor().timer(motion.duration).await;
             let _ = weak.update(cx, |this, cx| {
                 if this.user_motion.finish(control_id, generation) {
                     cx.notify();

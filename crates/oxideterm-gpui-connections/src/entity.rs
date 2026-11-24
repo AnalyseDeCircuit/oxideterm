@@ -15,7 +15,7 @@ use super::{
     form_state::clear_connection_selection, saved_auth::SavedPasswordLoadError,
 };
 use crate::launch::PendingStandaloneSftpPairLaunch;
-use gpui::{Context, EventEmitter, Task, Timer};
+use gpui::{Context, EventEmitter, Task};
 use oxideterm_connections::{SaveConnectionRequest, SecretString};
 use oxideterm_editor_core::utf16::replace_utf16;
 use oxideterm_gpui_ui::select::{OverlayAnchor, SelectAnchorId};
@@ -513,7 +513,7 @@ impl ConnectionFlowEntity {
             return true;
         }
         self.connection_form_exit_task = Some(cx.spawn(async move |connection_flow, cx| {
-            Timer::after(delay).await;
+            cx.background_executor().timer(delay).await;
             let _ = connection_flow.update(cx, |connection_flow, cx| {
                 connection_flow.finish_connection_form_exit(generation, cx);
             });
@@ -736,7 +736,7 @@ impl ConnectionFlowEntity {
             return true;
         }
         self.jump_server_exit_task = Some(cx.spawn(async move |connection_flow, cx| {
-            Timer::after(delay).await;
+            cx.background_executor().timer(delay).await;
             let _ = connection_flow.update(cx, |connection_flow, cx| {
                 connection_flow.finish_jump_server_form_exit(generation, cx);
             });
@@ -852,7 +852,7 @@ impl ConnectionFlowEntity {
             return true;
         }
         self.host_key_exit_task = Some(cx.spawn(async move |connection_flow, cx| {
-            Timer::after(delay).await;
+            cx.background_executor().timer(delay).await;
             let _ = connection_flow.update(cx, |connection_flow, cx| {
                 connection_flow.finish_host_key_challenge_exit(generation, cx);
             });
@@ -979,7 +979,7 @@ impl ConnectionFlowEntity {
     fn schedule_keyboard_interactive_timer(&mut self, generation: u64, cx: &mut Context<Self>) {
         self.keyboard_interactive_timer_task = Some(cx.spawn(async move |connection_flow, cx| {
             loop {
-                Timer::after(Duration::from_secs(1)).await;
+                cx.background_executor().timer(Duration::from_secs(1)).await;
                 let keep_ticking = connection_flow
                     .update(cx, |connection_flow, cx| {
                         if connection_flow.keyboard_interactive_timer_generation != generation {
@@ -1177,7 +1177,7 @@ impl ConnectionFlowEntity {
             return true;
         }
         self.keyboard_interactive_exit_task = Some(cx.spawn(async move |connection_flow, cx| {
-            Timer::after(delay).await;
+            cx.background_executor().timer(delay).await;
             let _ = connection_flow.update(cx, |connection_flow, cx| {
                 connection_flow.finish_keyboard_interactive_exit(generation, cx);
             });

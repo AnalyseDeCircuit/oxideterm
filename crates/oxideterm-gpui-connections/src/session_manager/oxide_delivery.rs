@@ -16,7 +16,7 @@ use super::{
     oxide_export_connection_count,
 };
 use chrono::{Local, Utc};
-use gpui::{App, Context, Entity, Timer};
+use gpui::{App, Context, Entity};
 use oxideterm_audit::{AuditContext, AuditEvidence, AuditOutcome};
 use oxideterm_connections::{
     ConnectionStore,
@@ -505,7 +505,7 @@ impl SessionManagerState {
             return true;
         }
         self.import_dialog_exit_task = Some(cx.spawn(async move |session_manager, cx| {
-            Timer::after(delay).await;
+            cx.background_executor().timer(delay).await;
             let _ = session_manager.update(cx, |session_manager, cx| {
                 session_manager.finish_import_dialog_exit(generation, cx);
             });
@@ -545,7 +545,7 @@ impl SessionManagerState {
             return true;
         }
         self.export_dialog_exit_task = Some(cx.spawn(async move |session_manager, cx| {
-            Timer::after(delay).await;
+            cx.background_executor().timer(delay).await;
             let _ = session_manager.update(cx, |session_manager, cx| {
                 session_manager.finish_export_dialog_exit(generation, cx);
             });
@@ -683,7 +683,7 @@ impl SessionManagerState {
             return;
         };
         self.dialog_auto_close_task = Some(cx.spawn(async move |session_manager, cx| {
-            Timer::after(delay).await;
+            cx.background_executor().timer(delay).await;
             let _ = session_manager.update(cx, |session_manager, cx| {
                 let should_close =
                     session_manager

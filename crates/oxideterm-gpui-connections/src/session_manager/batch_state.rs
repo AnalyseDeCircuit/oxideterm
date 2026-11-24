@@ -4,7 +4,7 @@
 use std::time::Duration;
 
 use super::SessionManagerState;
-use gpui::{App, Context, Entity, Subscription, Task, Timer};
+use gpui::{App, Context, Entity, Subscription, Task};
 use oxideterm_connections::BatchIssueKind;
 use oxideterm_connections::{
     BatchDuplicateNamePolicy, BatchIssue, BatchPreview, BatchTemplate, SavedAuth, SecretString,
@@ -238,7 +238,7 @@ impl SessionManagerState {
             return true;
         }
         self.batch_add_exit_task = Some(cx.spawn(async move |session_manager, cx| {
-            Timer::after(delay).await;
+            cx.background_executor().timer(delay).await;
             let _ = session_manager.update(cx, |session_manager, cx| {
                 session_manager.finish_batch_add_dialog_exit(generation, cx);
             });

@@ -149,50 +149,7 @@ pub fn connection_icon_field_visible(
         && oxideterm_connections::transport_is_persistable(transport)
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum NewConnectionSelect {
-    Totp,
-    JumpTotp,
-    Group,
-    KeyAuthSource,
-    ManagedKey,
-    StandaloneSftpSecondaryKeyAuthSource,
-    StandaloneSftpSecondaryManagedKey,
-    JumpSavedConnection,
-    TunnelHost,
-    JumpKeyAuthSource,
-    JumpManagedKey,
-    UpstreamProxyPolicy,
-    UpstreamProxyProtocol,
-    UpstreamProxyAuth,
-    StandaloneSftpSecondaryUpstreamProxyPolicy,
-    StandaloneSftpSecondaryUpstreamProxyProtocol,
-    StandaloneSftpSecondaryUpstreamProxyAuth,
-    RemoteDesktopSshGateway,
-    LocalShell,
-    SerialPort,
-    BleAdapter,
-    SerialDataBits,
-    SerialStopBits,
-    SerialParity,
-    SerialFlowControl,
-    TerminalEncoding,
-    TerminalBackspaceSequence,
-    TerminalDeleteSequence,
-    TelnetInputLineEnding,
-    TelnetOutputLineEnding,
-    BleInputLineEnding,
-    BleOutputLineEnding,
-    BleSendMode,
-    BleDisplayMode,
-    TerminalSemanticScheme,
-    TerminalHighlightRuleSet,
-    TerminalSessionLogPolicy,
-    TerminalBellPolicy,
-    X11ForwardingMode,
-    X11UntrustedTimeout,
-    PrimaryActionMenu,
-}
+pub use crate::NewConnectionSelect;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NewConnectionUpstreamProxyPolicy {
