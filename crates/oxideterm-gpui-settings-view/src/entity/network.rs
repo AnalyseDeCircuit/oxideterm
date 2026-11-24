@@ -107,7 +107,7 @@ impl SettingsWorkspaceEntity {
         if let Some(abort) = self.network_proxy_test_abort.take() {
             abort.abort();
         }
-        let started_at = std::time::Instant::now();
+        let started_at = tokio::time::Instant::now();
         let worker = schedule(runtime.as_ref(), host, port, upstream_proxy);
         self.network_proxy_test_abort = Some(worker.abort_handle());
         self.network_proxy_test_pending = true;

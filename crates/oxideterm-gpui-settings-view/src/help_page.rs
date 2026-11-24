@@ -1,12 +1,14 @@
+#[cfg(not(target_family = "wasm"))]
+mod desktop;
+#[cfg(not(target_family = "wasm"))]
+pub use desktop::HelpPage;
+
 mod documents;
 pub use documents::SettingsMarkdownDialog;
 
 use std::{ops::Deref, rc::Rc};
 
-use gpui::{
-    AnyElement, App, Entity, MouseButton, MouseDownEvent, Window, div, prelude::*, px, relative,
-    rgb, rgba,
-};
+use gpui::{AnyElement, App, MouseButton, MouseDownEvent, Window, div, prelude::*, px, rgb, rgba};
 use oxideterm_gpui_ui::button::{
     ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, ToolbarButtonIconPosition,
     ToolbarButtonOptions, toolbar_button,
@@ -15,11 +17,7 @@ use oxideterm_settings_model::SettingsSectionId;
 
 use crate::{
     SettingsSelect,
-    components::{SettingsCalloutTone, SettingsControls, settings_mono_font_family},
-    entity::SettingsWorkspaceEntity,
-    native_update::{
-        NativeUpdateRenderState, native_update_progress_hint, native_update_progress_ratio,
-    },
+    components::{SettingsControls, settings_mono_font_family},
     set_diagnostics_debug_logging, set_show_terminal_performance_overlay,
     surface::nav::render_icon,
     update_channel_label,
@@ -57,14 +55,13 @@ pub enum HelpRequest {
     Url(&'static str),
 }
 
-pub struct HelpPage<'a> {
+pub(crate) struct HelpPresentation<'a> {
     pub controls: SettingsControls<'a>,
-    pub state: &'a Entity<SettingsWorkspaceEntity>,
     pub year: &'a str,
     pub dispatch: Rc<dyn Fn(HelpRequest, &mut App)>,
 }
 
-impl<'a> Deref for HelpPage<'a> {
+impl<'a> Deref for HelpPresentation<'a> {
     type Target = SettingsControls<'a>;
 
     fn deref(&self) -> &Self::Target {
@@ -72,7 +69,7 @@ impl<'a> Deref for HelpPage<'a> {
     }
 }
 
-impl HelpPage<'_> {
+impl HelpPresentation<'_> {
     fn action(
         &self,
         request: HelpRequest,
@@ -83,10 +80,10 @@ impl HelpPage<'_> {
             cx.stop_propagation();
         }
     }
-    pub fn render(&self, section: SettingsSectionId, cx: &App) -> AnyElement {
+    pub(crate) fn section(&self, section: SettingsSectionId, cx: &App) -> AnyElement {
         match section {
-            SettingsSectionId::HelpVersion => self.help_version_card(cx),
-            SettingsSectionId::HelpDiagnostics => self.help_diagnostics_card(cx),
+            SettingsSectionId::HelpVersion => self.help_version_card(false, None, cx),
+            SettingsSectionId::HelpDiagnostics => self.help_diagnostics_card(false, cx),
             SettingsSectionId::HelpTechStack => self.help_tech_stack_card(),
             SettingsSectionId::HelpResources => self.help_resources_card(cx),
             SettingsSectionId::HelpSafety => self.help_safety_card(),
@@ -95,8 +92,12 @@ impl HelpPage<'_> {
         }
     }
 
-    fn help_version_card(&self, cx: &App) -> AnyElement {
-        let is_portable = self.resolved_help_portable_mode(cx);
+    fn help_version_card(
+        &self,
+        is_portable: bool,
+        update_footer: Option<AnyElement>,
+        cx: &App,
+    ) -> AnyElement {
         let channel_label = update_channel_label(self.settings.general.update_channel, &self.i18n);
         let version_rows = div()
             .flex()
@@ -116,52 +117,41 @@ impl HelpPage<'_> {
             ))
             .child(self.help_portable_or_channel_row(is_portable, channel_label, cx));
 
-        // HelpAboutSection keeps the version rows and update controls inside one
-        // card, with only the update block separated by `border-t`.
-        self.settings_card(
-            "settings_view.help.version_info",
-            "",
-            vec![
-                version_rows.into_any_element(),
-                self.help_update_footer(is_portable, cx),
-            ],
-        )
+        let mut rows = vec![version_rows.into_any_element()];
+        rows.extend(update_footer);
+        self.settings_card("settings_view.help.version_info", "", rows)
     }
 
-    fn help_diagnostics_card(&self, cx: &App) -> AnyElement {
-        // MemoryDiagnosticsPanel and the keyboard-shortcut reference are Tauri-only Help blocks.
-        // GPUI keeps diagnostics lightweight: file logging is always available, while verbose
-        // debug output is opt-in so normal sessions do not generate oversized logs.
-        self.settings_card(
-            "settings_view.help.diagnostics",
-            "",
-            vec![
-                self.bool_row(
-                    "settings_view.help.debug_logs",
-                    "settings_view.help.debug_logs_hint",
-                    self.settings.diagnostics.debug_logging,
-                    set_diagnostics_debug_logging,
-                    cx,
-                ),
-                self.card_separator(),
-                self.bool_row(
-                    "settings_view.terminal.show_performance_overlay",
-                    "settings_view.terminal.show_performance_overlay_hint",
-                    self.settings.terminal.show_fps_overlay,
-                    set_show_terminal_performance_overlay,
-                    cx,
-                ),
-                self.card_separator(),
-                self.help_action_row(
-                    "settings_view.help.open_logs",
-                    "settings_view.help.open_logs_hint",
-                    self.i18n.t("settings_view.help.open"),
-                    "lucide/folder-open.svg",
-                    HelpRequest::Logs,
-                    cx,
-                ),
-            ],
-        )
+    fn help_diagnostics_card(&self, open_logs: bool, cx: &App) -> AnyElement {
+        let mut rows = vec![
+            self.bool_row(
+                "settings_view.help.debug_logs",
+                "settings_view.help.debug_logs_hint",
+                self.settings.diagnostics.debug_logging,
+                set_diagnostics_debug_logging,
+                cx,
+            ),
+            self.card_separator(),
+            self.bool_row(
+                "settings_view.terminal.show_performance_overlay",
+                "settings_view.terminal.show_performance_overlay_hint",
+                self.settings.terminal.show_fps_overlay,
+                set_show_terminal_performance_overlay,
+                cx,
+            ),
+        ];
+        if open_logs {
+            rows.push(self.card_separator());
+            rows.push(self.help_action_row(
+                "settings_view.help.open_logs",
+                "settings_view.help.open_logs_hint",
+                self.i18n.t("settings_view.help.open"),
+                "lucide/folder-open.svg",
+                HelpRequest::Logs,
+                cx,
+            ));
+        }
+        self.settings_card("settings_view.help.diagnostics", "", rows)
     }
 
     fn help_tech_stack_card(&self) -> AnyElement {
@@ -342,254 +332,6 @@ impl HelpPage<'_> {
         )
     }
 
-    fn help_update_footer(&self, is_portable: bool, cx: &App) -> AnyElement {
-        div()
-            .pt(px(16.0))
-            .border_t_1()
-            .border_color(rgba((self.tokens.ui.border << 8) | 0x66))
-            .flex()
-            .flex_col()
-            .gap(px(12.0))
-            .child(if is_portable {
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(12.0))
-                    .child(self.help_portable_update_notice())
-                    .child(self.help_update_status_area(cx))
-                    .into_any_element()
-            } else {
-                self.help_update_status_area(cx)
-            })
-            .into_any_element()
-    }
-
-    fn help_portable_update_notice(&self) -> AnyElement {
-        self.settings_callout(
-            SettingsCalloutTone::Warning,
-            Some("lucide/shield.svg"),
-            div()
-                .flex()
-                .flex_col()
-                .gap(px(4.0))
-                .child(
-                    div()
-                        .text_size(px(self.tokens.metrics.ui_text_sm))
-                        .font_weight(gpui::FontWeight::MEDIUM)
-                        .text_color(rgb(self.tokens.ui.text))
-                        .child(self.i18n.t("settings_view.help.portable_updates")),
-                )
-                .child(
-                    div()
-                        .text_size(px(self.tokens.metrics.ui_text_xs))
-                        .text_color(rgb(self.tokens.ui.text_muted))
-                        .child(self.i18n.t("settings_view.help.portable_updates_hint")),
-                )
-                .into_any_element(),
-        )
-    }
-
-    fn help_update_status_area(&self, cx: &App) -> AnyElement {
-        let update_state = self.state.read(cx).native_update_render_state();
-        let button_icon = if matches!(update_state, NativeUpdateRenderState::Checking) {
-            "lucide/loader-circle.svg"
-        } else {
-            "lucide/refresh-cw.svg"
-        };
-        let disabled = matches!(
-            update_state,
-            NativeUpdateRenderState::Checking
-                | NativeUpdateRenderState::Downloading(_)
-                | NativeUpdateRenderState::Verifying(_)
-                | NativeUpdateRenderState::Installing(_)
-        );
-
-        let mut area = div().flex().flex_col().gap(px(12.0)).child(
-            div()
-                .flex()
-                .items_center()
-                .gap(px(12.0))
-                .child(self.help_outline_button_with_disabled(
-                    self.i18n.t("settings_view.help.check_update"),
-                    button_icon,
-                    disabled,
-                    HelpRequest::Check,
-                    cx,
-                ))
-                .children(self.help_update_status_inline(&update_state)),
-        );
-
-        if let Some(detail) = self.help_update_detail(&update_state, cx) {
-            area = area.child(detail);
-        }
-
-        area.into_any_element()
-    }
-
-    fn help_update_status_inline(
-        &self,
-        update_state: &NativeUpdateRenderState,
-    ) -> Option<AnyElement> {
-        let (label, icon, color) = match update_state {
-            NativeUpdateRenderState::Checking => (
-                self.i18n.t("settings_view.help.checking"),
-                None,
-                self.tokens.ui.text_muted,
-            ),
-            NativeUpdateRenderState::UpToDate => (
-                self.i18n.t("settings_view.help.up_to_date"),
-                Some("lucide/check-circle.svg"),
-                self.tokens.ui.success,
-            ),
-            NativeUpdateRenderState::ManagedByNix => (
-                self.i18n.t("settings_view.help.managed_by_nix"),
-                None,
-                self.tokens.ui.text_muted,
-            ),
-            NativeUpdateRenderState::Verifying(_) => (
-                self.i18n.t("settings_view.help.verifying"),
-                None,
-                self.tokens.ui.text_muted,
-            ),
-            NativeUpdateRenderState::Installing(summary) => (
-                summary
-                    .clone()
-                    .unwrap_or_else(|| self.i18n.t("settings_view.help.installing")),
-                None,
-                self.tokens.ui.text_muted,
-            ),
-            NativeUpdateRenderState::Downloaded => (
-                self.i18n.t("settings_view.help.update_downloaded"),
-                Some("lucide/check-circle.svg"),
-                self.tokens.ui.success,
-            ),
-            NativeUpdateRenderState::InstallFinished { status, .. } => {
-                let label_key = match status {
-                    oxideterm_update::NativeInstallStatus::ManualActionRequired => {
-                        "settings_view.help.update_downloaded"
-                    }
-                    oxideterm_update::NativeInstallStatus::InstallerLaunched => {
-                        "settings_view.help.installer_launched"
-                    }
-                    oxideterm_update::NativeInstallStatus::ReplacementScheduled => {
-                        "settings_view.help.replacement_scheduled"
-                    }
-                };
-                (
-                    self.i18n.t(label_key),
-                    Some("lucide/check-circle.svg"),
-                    self.tokens.ui.success,
-                )
-            }
-            NativeUpdateRenderState::Error(error) => (
-                if error.is_empty() {
-                    self.i18n.t("settings_view.help.update_error")
-                } else {
-                    error.clone()
-                },
-                Some("lucide/alert-circle.svg"),
-                self.tokens.ui.error,
-            ),
-            NativeUpdateRenderState::Idle
-            | NativeUpdateRenderState::Available { .. }
-            | NativeUpdateRenderState::Downloading(_) => return None,
-        };
-
-        let mut row = div()
-            .flex()
-            .items_center()
-            .gap(px(6.0))
-            .text_size(px(self.tokens.metrics.ui_text_sm))
-            .text_color(rgb(color));
-        if let Some(icon) = icon {
-            row = row.child(render_icon(icon, 14.0, rgb(color)));
-        }
-        Some(row.child(label).into_any_element())
-    }
-
-    fn help_update_detail(
-        &self,
-        update_state: &NativeUpdateRenderState,
-        cx: &App,
-    ) -> Option<AnyElement> {
-        match update_state {
-            NativeUpdateRenderState::Available {
-                version,
-                has_release_notes,
-            } => {
-                let mut actions = div()
-                    .flex()
-                    .flex_wrap()
-                    .justify_end()
-                    .gap(px(self.tokens.spacing.two));
-                if *has_release_notes {
-                    actions = actions.child(self.help_outline_button(
-                        self.i18n.t("settings_view.help.release_notes"),
-                        "lucide/book-open.svg",
-                        HelpRequest::ReleaseNotes,
-                        cx,
-                    ));
-                }
-                actions = actions.child(self.help_outline_button(
-                    self.i18n.t("settings_view.help.download_update"),
-                    "lucide/download.svg",
-                    HelpRequest::Download,
-                    cx,
-                ));
-
-                Some(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap(px(12.0))
-                        .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap(px(8.0))
-                                .text_size(px(self.tokens.metrics.ui_text_sm))
-                                .text_color(rgb(self.tokens.ui.text))
-                                .child(self.i18n.t("settings_view.help.update_available"))
-                                .child(
-                                    div()
-                                        .text_color(rgb(self.tokens.ui.accent))
-                                        .font_weight(gpui::FontWeight::MEDIUM)
-                                        .child(format!("v{version}")),
-                                ),
-                        )
-                        .child(actions)
-                        .into_any_element(),
-                )
-            }
-            NativeUpdateRenderState::Downloading(status) => {
-                Some(self.help_transfer_progress(status.as_ref(), false, cx))
-            }
-            NativeUpdateRenderState::Verifying(status) => {
-                Some(self.help_transfer_progress(status.as_ref(), true, cx))
-            }
-            NativeUpdateRenderState::Downloaded => Some(
-                div()
-                    .flex()
-                    .justify_end()
-                    .child(self.help_outline_button(
-                        self.i18n.t("settings_view.help.install_update"),
-                        "lucide/download.svg",
-                        HelpRequest::Install,
-                        cx,
-                    ))
-                    .into_any_element(),
-            ),
-            _ => None,
-        }
-    }
-
-    fn resolved_help_portable_mode(&self, cx: &App) -> bool {
-        self.state
-            .read(cx)
-            .portable_mode()
-            .unwrap_or_else(|| oxideterm_portable_runtime::is_portable_mode().unwrap_or(false))
-    }
-
     fn help_key_value_row(
         &self,
         label_key: &str,
@@ -687,69 +429,6 @@ impl HelpPage<'_> {
             .font_weight(gpui::FontWeight::MEDIUM)
             .text_color(rgb(color))
             .child(label)
-            .into_any_element()
-    }
-
-    fn help_transfer_progress(
-        &self,
-        status: Option<&oxideterm_update::ResumableUpdateStatus>,
-        verifying: bool,
-        cx: &App,
-    ) -> AnyElement {
-        let progress_ratio = if verifying {
-            1.0
-        } else {
-            status.and_then(native_update_progress_ratio).unwrap_or(0.0)
-        };
-        let fallback_key = if verifying {
-            "settings_view.help.verifying"
-        } else {
-            "settings_view.help.downloading"
-        };
-
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(self.tokens.spacing.two))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .gap(px(12.0))
-                    .child(
-                        div()
-                            .min_w(px(0.0))
-                            .text_size(px(self.tokens.metrics.ui_text_sm))
-                            .text_color(rgb(self.tokens.ui.text_muted))
-                            .child(
-                                status
-                                    .map(native_update_progress_hint)
-                                    .unwrap_or_else(|| self.i18n.t(fallback_key)),
-                            ),
-                    )
-                    .child(self.help_outline_button(
-                        self.i18n.t("settings_view.help.cancel"),
-                        "lucide/x.svg",
-                        HelpRequest::Cancel,
-                        cx,
-                    )),
-            )
-            .child(
-                div()
-                    .h(px(self.tokens.spacing.one))
-                    .w_full()
-                    .overflow_hidden()
-                    .rounded_full()
-                    .bg(rgba((self.tokens.ui.border << 8) | 0x80))
-                    .child(
-                        div()
-                            .h_full()
-                            .rounded_full()
-                            .bg(rgb(self.tokens.ui.accent))
-                            .w(relative(progress_ratio)),
-                    ),
-            )
             .into_any_element()
     }
 

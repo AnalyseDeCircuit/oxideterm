@@ -39,6 +39,8 @@ use crate::{
 
 mod actions;
 mod fields;
+mod host;
+pub use host::{PortableKnownHostsAction, PortableProxyProbe};
 mod pages;
 use fields::Fields;
 
@@ -58,19 +60,19 @@ pub struct PortableSettingsSurface {
 impl EventEmitter<PortableSettingsChanged> for PortableSettingsSurface {}
 impl EventEmitter<PortableSettingsChanged> for PageState {}
 
-const TABS: &[SettingsTab] = &[
-    SettingsTab::General,
-    SettingsTab::Appearance,
-    SettingsTab::Terminal,
-    SettingsTab::Sftp,
-    SettingsTab::Ide,
-    SettingsTab::Keybindings,
-];
-
 fn supported(tab: SettingsTab, section: SettingsSectionId) -> bool {
     use SettingsSectionId::*;
     match tab {
-        SettingsTab::General => section == GeneralLanguage,
+        SettingsTab::General => matches!(
+            section,
+            GeneralLanguage | GeneralExternalConnectionUris | GeneralWindowBehavior
+        ),
+        SettingsTab::Connections => section == ConnectionsKnownHosts,
+        SettingsTab::Network => matches!(section, NetworkSharedProxy | NetworkRouting),
+        SettingsTab::Help => matches!(
+            section,
+            HelpVersion | HelpDiagnostics | HelpTechStack | HelpResources | HelpSafety | HelpLegal
+        ),
         SettingsTab::Appearance => matches!(section, AppearanceTheme | AppearanceLayout),
         SettingsTab::Terminal => matches!(
             section,
@@ -113,6 +115,12 @@ struct PageState {
     scheme: Option<bool>,
     editor: Option<ThemeEditorState>,
     editor_scroll: ScrollHandle,
+    known_hosts: host::KnownHosts,
+    probe: host::ProxyProbe,
+    document: Option<(
+        bool,
+        oxideterm_gpui_markdown::MarkdownVirtualListScrollHandle,
+    )>,
     shortcuts: KeybindingState,
     reset_open: bool,
     i18n: I18n,
@@ -132,7 +140,9 @@ impl PortableSettingsSurface {
             list: Default::default(),
             target: Cell::new(None),
             query: String::new(),
-            search: SettingsSearchFilter::new(supported),
+            search: SettingsSearchFilter::new(|i18n, query| {
+                crate::search::filtered_results(i18n, query, supported, false)
+            }),
             search_open: false,
             focus: cx.focus_handle(),
             fields: Default::default(),
@@ -144,6 +154,9 @@ impl PortableSettingsSurface {
             scheme: None,
             editor: None,
             editor_scroll: ScrollHandle::new(),
+            known_hosts: Default::default(),
+            probe: Default::default(),
+            document: None,
             shortcuts: Default::default(),
             reset_open: false,
         });
@@ -197,6 +210,7 @@ impl PageState {
     }
 
     fn changed(&mut self, cx: &mut Context<Self>) {
+        self.proxy_profile_changed();
         let language = locale(self.settings.general.language);
         if language != self.i18n.locale() {
             self.i18n.set_locale(language);
@@ -211,6 +225,9 @@ impl PageState {
         result: Option<&SettingsSearchResult>,
         cx: &mut Context<Self>,
     ) {
+        if tab != SettingsTab::Network {
+            self.clear_proxy_password();
+        }
         self.route.set_active_tab(tab);
         if let Some(page) = result.and_then(|r| r.terminal_page) {
             self.route.set_terminal_page(page);
@@ -265,7 +282,22 @@ impl PageState {
             knowledge_has_error: false,
             knowledge_has_selected_collection: false,
         };
-        let sections: Vec<_> = settings_tab_sections(route.active_tab, counts)
+        let sections_for = |tab| {
+            let mut sections = settings_tab_sections(tab, counts);
+            // A gateway can edit desktop preferences irrespective of its own platform.
+            if tab == SettingsTab::General
+                && !sections.contains(&SettingsSectionId::GeneralWindowBehavior)
+            {
+                sections.push(SettingsSectionId::GeneralWindowBehavior);
+            }
+            sections
+        };
+        let tabs = SettingsTab::all()
+            .iter()
+            .copied()
+            .filter(|&tab| sections_for(tab).into_iter().any(|s| supported(tab, s)))
+            .collect();
+        let sections: Vec<_> = sections_for(route.active_tab)
             .into_iter()
             .filter(|&s| supported(route.active_tab, s))
             .collect();
@@ -279,6 +311,31 @@ impl PageState {
                 self.settings.appearance.ui_font_family.hash(&mut h);
                 (self.settings.appearance.ui_density as u8).hash(&mut h);
                 match section {
+                    Some(SettingsSectionId::ConnectionsKnownHosts) => {
+                        self.known_hosts.revision.hash(&mut h);
+                        self.known_hosts.query.hash(&mut h);
+                        self.known_hosts.selected.hash(&mut h);
+                        self.known_hosts.snapshot.loading.hash(&mut h);
+                    }
+                    Some(SettingsSectionId::NetworkSharedProxy) => {
+                        self.settings
+                            .network
+                            .upstream_proxy
+                            .as_ref()
+                            .map(|p| {
+                                matches!(
+                                    p.auth,
+                                    oxideterm_settings::SettingsUpstreamProxyAuth::Password { .. }
+                                )
+                            })
+                            .hash(&mut h);
+                        self.probe.handler.is_some().hash(&mut h);
+                        self.probe.form.test_pending.hash(&mut h);
+                        self.probe.form.test_result.hash(&mut h);
+                    }
+                    Some(SettingsSectionId::NetworkRouting) => {
+                        self.settings.general.update_proxy.mode.hash(&mut h);
+                    }
                     Some(SettingsSectionId::SftpPerformance) => {
                         self.settings.sftp.speed_limit_enabled.hash(&mut h)
                     }
@@ -336,7 +393,7 @@ impl PageState {
                     &self.settings.appearance.ui_font_family,
                 ),
                 divider: rgb(tokens.ui.border),
-                groups: vec![TABS.to_vec()],
+                groups: vec![tabs],
             },
             sections,
         )

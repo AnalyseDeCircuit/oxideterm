@@ -3,13 +3,17 @@ pub mod appearance;
 pub mod appearance_page;
 pub mod components;
 pub mod dialog;
+pub mod general_page;
+pub mod help_page;
 pub mod ide_page;
 pub mod input;
 pub mod keybinding_page;
 pub mod keybindings;
+mod known_hosts_page;
 pub mod labels;
 mod navigation;
 pub mod options;
+pub mod proxy_page;
 mod search;
 pub mod select_menu;
 pub mod sftp_page;
@@ -43,17 +47,11 @@ pub mod credentials_page;
 #[cfg(not(target_family = "wasm"))]
 pub mod entity;
 #[cfg(not(target_family = "wasm"))]
-pub mod general_page;
-#[cfg(not(target_family = "wasm"))]
-pub mod help_page;
-#[cfg(not(target_family = "wasm"))]
 pub mod highlight;
 #[cfg(not(target_family = "wasm"))]
 pub mod highlight_page;
 #[cfg(not(target_family = "wasm"))]
 pub mod knowledge_page;
-#[cfg(not(target_family = "wasm"))]
-mod known_hosts_page;
 #[cfg(not(target_family = "wasm"))]
 pub mod local_terminal;
 #[cfg(not(target_family = "wasm"))]
@@ -64,8 +62,6 @@ pub mod native_update;
 pub mod navigation_editor;
 #[cfg(not(target_family = "wasm"))]
 pub mod portable_runtime;
-#[cfg(not(target_family = "wasm"))]
-pub mod proxy_page;
 #[cfg(not(target_family = "wasm"))]
 pub mod remote_shell;
 #[cfg(not(target_family = "wasm"))]

@@ -161,6 +161,9 @@ impl PageState {
                 edit(&mut self.settings);
                 self.changed(cx);
             }
+            SelectMenuRequest::ProxyAuth(mode) => {
+                self.proxy_action(crate::proxy_page::ProxyRequest::Auth(mode), cx);
+            }
             SelectMenuRequest::SftpPresentation(p) => {
                 self.settings.sftp.presentation = p;
                 self.changed(cx);
@@ -325,7 +328,14 @@ impl PageState {
         cx: &mut Context<Self>,
     ) {
         let key = event.keystroke.key.as_str();
-        if let Some(select) = self.select {
+        if self.document.is_some() {
+            if key == "escape" {
+                self.document = None;
+                cx.notify();
+            } else {
+                return;
+            }
+        } else if let Some(select) = self.select {
             if key == "escape" {
                 self.select = None;
                 cx.notify();

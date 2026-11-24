@@ -21,9 +21,7 @@ use oxideterm_gpui_ui::{
 use oxideterm_i18n::I18n;
 use oxideterm_settings::{
     ConnectionPoolSettings, FrostedGlassMode, NO_TIMEOUT_SECS, PersistedSettings,
-    RemoteShellIntegrationMode, SettingsApplicationProxyMode, SettingsUpstreamProxyAuth,
-    SettingsUpstreamProxyProtocol, TerminalSemanticScheme, UpdateChannel, UpdateProxyMode,
-    UpdateProxyProtocol,
+    RemoteShellIntegrationMode, TerminalSemanticScheme,
 };
 use oxideterm_settings_model::{
     SEMANTIC_CLASSES, SemanticRuleContext, edit_custom_semantic_scheme,
@@ -36,7 +34,6 @@ use oxideterm_theme::ThemeTokens;
 use super::{
     CoreSelectMenu, CoreSelectOwner, SelectMenuDispatch, SelectMenuRequest,
     application_semantic_scheme_label, connection_duration_label,
-    network_application_proxy_mode_label, network_proxy_protocol_label,
 };
 use crate::{
     connections_page::{
@@ -48,7 +45,6 @@ use crate::{
     },
     entity::SettingsWorkspaceEntity,
     highlight_page::{semantic_class_label, semantic_context_label},
-    proxy_page::{NetworkProxyAuthMode, network_proxy_auth_label},
     *,
 };
 
@@ -274,165 +270,6 @@ impl SettingsSelectMenu<'_> {
                             this.settings_workspace.update(cx, |settings, cx| {
                                 settings.set_connection_import_duplicate_strategy(strategy, cx);
                             });
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Network, SettingsSelect::NetworkProxyAuth) => {
-                let mut popup = select_overlay_popup(self.tokens, width);
-                let current = settings
-                    .network
-                    .upstream_proxy
-                    .as_ref()
-                    .map(|proxy| match proxy.auth {
-                        SettingsUpstreamProxyAuth::None => NetworkProxyAuthMode::None,
-                        SettingsUpstreamProxyAuth::Password { .. } => {
-                            NetworkProxyAuthMode::Password
-                        }
-                    })
-                    .unwrap_or(NetworkProxyAuthMode::None);
-                for mode in [NetworkProxyAuthMode::None, NetworkProxyAuthMode::Password] {
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            self.tokens,
-                            network_proxy_auth_label(mode, self.i18n),
-                            mode == current,
-                        ),
-                        false,
-                        false,
-                        self.action(move |this, _, window, cx| {
-                            this.send(SelectMenuRequest::Close, window, cx);
-                            this.send(SelectMenuRequest::ProxyAuth(mode), window, cx);
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Help, SettingsSelect::UpdateChannel) => {
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                for channel in [UpdateChannel::Stable, UpdateChannel::Beta] {
-                    let label = update_channel_label(channel, &self.i18n);
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            label,
-                            channel == settings.general.update_channel,
-                        ),
-                        false,
-                        false,
-                        self.action(move |this, _event, _window, cx| {
-                            this.send(SelectMenuRequest::Close, _window, cx);
-                            this.send(
-                                SelectMenuRequest::Edit(Box::new(move |settings| {
-                                    settings.general.update_channel = channel
-                                })),
-                                _window,
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Network, SettingsSelect::UpdateProxyMode) => {
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                let current = settings.general.update_proxy.mode;
-                for mode in [
-                    UpdateProxyMode::Direct,
-                    UpdateProxyMode::Application,
-                    UpdateProxyMode::System,
-                    UpdateProxyMode::Custom,
-                ] {
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            update_proxy_mode_label(mode, &self.i18n),
-                            mode == current,
-                        ),
-                        false,
-                        false,
-                        self.action(move |this, _event, _window, cx| {
-                            this.send(SelectMenuRequest::Close, _window, cx);
-                            this.send(
-                                SelectMenuRequest::Edit(Box::new(move |settings| {
-                                    settings.general.update_proxy.mode = mode
-                                })),
-                                _window,
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Network, SettingsSelect::UpdateProxyProtocol) => {
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                let current = settings.general.update_proxy.protocol;
-                for protocol in [
-                    UpdateProxyProtocol::Http,
-                    UpdateProxyProtocol::Https,
-                    UpdateProxyProtocol::Socks5,
-                ] {
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            update_proxy_protocol_label(protocol, &self.i18n),
-                            protocol == current,
-                        ),
-                        false,
-                        false,
-                        self.action(move |this, _event, _window, cx| {
-                            this.send(SelectMenuRequest::Close, _window, cx);
-                            this.send(
-                                SelectMenuRequest::Edit(Box::new(move |settings| {
-                                    settings.general.update_proxy.protocol = protocol
-                                })),
-                                _window,
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Network, SettingsSelect::NetworkApplicationProxyMode) => {
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                let current = settings.network.application_proxy_mode;
-                for mode in [
-                    SettingsApplicationProxyMode::System,
-                    SettingsApplicationProxyMode::Direct,
-                    SettingsApplicationProxyMode::Shared,
-                ] {
-                    // A missing shared profile is shown but cannot become an
-                    // active route, keeping the runtime policy fail-closed.
-                    let shared_proxy_missing = mode == SettingsApplicationProxyMode::Shared
-                        && settings.network.upstream_proxy.is_none();
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            network_application_proxy_mode_label(mode, &self.i18n),
-                            mode == current,
-                        ),
-                        shared_proxy_missing,
-                        false,
-                        self.action(move |this, _event, _window, cx| {
-                            if shared_proxy_missing {
-                                return;
-                            }
-                            this.send(SelectMenuRequest::Close, _window, cx);
-                            this.send(
-                                SelectMenuRequest::Edit(Box::new(move |settings| {
-                                    settings.network.application_proxy_mode = mode
-                                })),
-                                _window,
-                                cx,
-                            );
                             cx.stop_propagation();
                         }),
                     ));
@@ -1164,43 +1001,6 @@ impl SettingsSelectMenu<'_> {
                             this.send(
                                 SelectMenuRequest::Edit(Box::new(move |settings| {
                                     set_reconnect_max_delay(settings, delay_ms)
-                                })),
-                                _window,
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Network, SettingsSelect::NetworkProxyProtocol) => {
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                let current = settings
-                    .network
-                    .upstream_proxy
-                    .as_ref()
-                    .map(|proxy| proxy.protocol)
-                    .unwrap_or(SettingsUpstreamProxyProtocol::Socks5);
-                for protocol in [
-                    SettingsUpstreamProxyProtocol::Socks5,
-                    SettingsUpstreamProxyProtocol::HttpConnect,
-                ] {
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            network_proxy_protocol_label(protocol, &self.i18n),
-                            protocol == current,
-                        ),
-                        false,
-                        false,
-                        self.action(move |this, _event, _window, cx| {
-                            this.send(SelectMenuRequest::Close, _window, cx);
-                            this.send(
-                                SelectMenuRequest::Edit(Box::new(move |settings| {
-                                    if let Some(proxy) = settings.network.upstream_proxy.as_mut() {
-                                        proxy.protocol = protocol;
-                                    }
                                 })),
                                 _window,
                                 cx,

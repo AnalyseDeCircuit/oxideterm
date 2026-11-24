@@ -1,16 +1,65 @@
-use std::sync::Arc;
+use std::{ops::Deref, rc::Rc, sync::Arc};
 
-use gpui::Context;
+use gpui::{AnyElement, App, Context, Entity};
 use oxideterm_connections::ConnectionStore;
 use oxideterm_i18n::I18n;
 use oxideterm_settings::{
-    PersistedSettings, SettingsApplicationProxyMode, SettingsUpstreamProxyAuth,
-    SettingsUpstreamProxyConfig,
+    PersistedSettings, SettingsUpstreamProxyAuth, SettingsUpstreamProxyConfig,
 };
 use oxideterm_ssh::{HostKeyStatus, UpstreamProxyConfig, probe_upstream_proxy_route};
 
-use super::{NetworkProxyAuthMode, ProxyRequest, default_settings_upstream_proxy_config};
-use crate::{components::SettingsEdit, entity::SettingsWorkspaceEntity};
+use super::{NetworkProxyAuthMode, ProxyPresentation, ProxyRequest};
+use crate::{
+    components::{SettingsControls, SettingsEdit},
+    entity::SettingsWorkspaceEntity,
+};
+
+pub struct ProxyPage<'a> {
+    pub controls: SettingsControls<'a>,
+    pub state: &'a Entity<SettingsWorkspaceEntity>,
+    pub dispatch: Rc<dyn Fn(ProxyRequest, &mut App)>,
+}
+
+impl<'a> Deref for ProxyPage<'a> {
+    type Target = SettingsControls<'a>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.controls
+    }
+}
+
+impl ProxyPage<'_> {
+    fn presentation(&self, cx: &App) -> ProxyPresentation<'_> {
+        let state = self.state.read(cx);
+        ProxyPresentation {
+            controls: self.controls.clone(),
+            password: Some(state.network_proxy_password_snapshot()),
+            probe: state.network_proxy_test_snapshot(),
+            can_probe: true,
+            dispatch: self.dispatch.clone(),
+        }
+    }
+
+    pub fn section(
+        &self,
+        section: oxideterm_settings_model::SettingsSectionId,
+        cx: &App,
+    ) -> AnyElement {
+        self.presentation(cx).section(section, cx)
+    }
+
+    pub fn shared_proxy(
+        &self,
+        proxy: Option<&SettingsUpstreamProxyConfig>,
+        cx: &App,
+    ) -> AnyElement {
+        self.presentation(cx).shared_proxy(proxy, cx)
+    }
+
+    pub fn routing(&self, cx: &App) -> AnyElement {
+        self.presentation(cx).routing(cx)
+    }
+}
 
 impl SettingsWorkspaceEntity {
     pub fn apply_proxy_request(
@@ -37,10 +86,7 @@ impl SettingsWorkspaceEntity {
             )
         });
         match request {
-            ProxyRequest::Disclaimer => Some(Box::new(|settings| {
-                settings.network.upstream_proxy_disclaimer_accepted =
-                    !settings.network.upstream_proxy_disclaimer_accepted;
-            })),
+            ProxyRequest::Disclaimer | ProxyRequest::RemoteDns => request.preference_edit(),
             ProxyRequest::Enabled => {
                 self.set_network_proxy_password_status(None, cx);
                 if has_saved_password
@@ -50,22 +96,8 @@ impl SettingsWorkspaceEntity {
                     return None;
                 }
                 self.finish_network_proxy_password_action(None, cx);
-                Some(Box::new(|settings| {
-                    if settings.network.upstream_proxy.is_some() {
-                        settings.network.application_proxy_mode =
-                            SettingsApplicationProxyMode::System;
-                        settings.network.upstream_proxy = None;
-                    } else {
-                        settings.network.upstream_proxy =
-                            Some(default_settings_upstream_proxy_config());
-                    }
-                }))
+                request.preference_edit()
             }
-            ProxyRequest::RemoteDns => Some(Box::new(|settings| {
-                if let Some(proxy) = settings.network.upstream_proxy.as_mut() {
-                    proxy.remote_dns = !proxy.remote_dns;
-                }
-            })),
             ProxyRequest::Auth(mode) => {
                 self.finish_network_proxy_password_action(None, cx);
                 if mode == NetworkProxyAuthMode::None
@@ -75,17 +107,7 @@ impl SettingsWorkspaceEntity {
                     self.set_network_proxy_password_status(Some(error.to_string()), cx);
                     return None;
                 }
-                Some(Box::new(move |settings| {
-                    if let Some(proxy) = settings.network.upstream_proxy.as_mut() {
-                        proxy.auth = match mode {
-                            NetworkProxyAuthMode::None => SettingsUpstreamProxyAuth::None,
-                            NetworkProxyAuthMode::Password => SettingsUpstreamProxyAuth::Password {
-                                username: String::new(),
-                                keychain_id: None,
-                            },
-                        };
-                    }
-                }))
+                request.preference_edit()
             }
             ProxyRequest::Test => {
                 let Some(proxy) = proxy else {

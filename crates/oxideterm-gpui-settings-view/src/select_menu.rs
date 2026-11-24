@@ -15,6 +15,8 @@ use oxideterm_settings::{
 use oxideterm_theme::{BUILT_IN_THEMES, ThemeTokens};
 use std::rc::Rc;
 
+mod network;
+
 #[cfg(not(target_family = "wasm"))]
 mod desktop;
 #[cfg(not(target_family = "wasm"))]
@@ -51,7 +53,6 @@ pub enum SelectMenuRequest {
     ),
     #[cfg(not(target_family = "wasm"))]
     HighlightPreset(Vec<oxideterm_settings::HighlightRule>),
-    #[cfg(not(target_family = "wasm"))]
     ProxyAuth(crate::proxy_page::NetworkProxyAuthMode),
     SftpPresentation(SftpPresentationPreference),
 }
@@ -739,7 +740,7 @@ impl<S: CoreSelectOwner> CoreSelectMenu<'_, S> {
                 }
                 Some(popup)
             }
-            _ => None,
+            _ => self.network_or_update_menu(active_tab, open_select, width),
         }?;
         Some(overlay_content_boundary(popup).into_any_element())
     }

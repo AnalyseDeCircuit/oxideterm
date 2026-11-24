@@ -1,8 +1,6 @@
 use std::{ops::Deref, rc::Rc};
 
-use gpui::{
-    AnyElement, App, Div, Entity, MouseButton, MouseDownEvent, Window, div, prelude::*, px, rgb,
-};
+use gpui::{AnyElement, App, Div, MouseButton, MouseDownEvent, Window, div, prelude::*, px, rgb};
 use oxideterm_gpui_ui::{
     button::{
         ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, ToolbarButtonOptions,
@@ -13,15 +11,16 @@ use oxideterm_gpui_ui::{
 };
 use oxideterm_i18n::I18n;
 use oxideterm_settings::{
-    SettingsUpstreamProxyAuth, SettingsUpstreamProxyConfig, SettingsUpstreamProxyProtocol,
-    UpdateProxyMode,
+    SettingsApplicationProxyMode, SettingsUpstreamProxyAuth, SettingsUpstreamProxyConfig,
+    SettingsUpstreamProxyProtocol, UpdateProxyMode,
 };
 
-use crate::{
-    components::SettingsControls, entity::SettingsWorkspaceEntity, surface::nav::render_icon, *,
-};
+use crate::{components::SettingsControls, surface::nav::render_icon, *};
 
+#[cfg(not(target_family = "wasm"))]
 mod actions;
+#[cfg(not(target_family = "wasm"))]
+pub use actions::ProxyPage;
 
 const SETTINGS_NETWORK_FIELD_WIDTH: f32 = 320.0; // Desktop preference for normal proxy fields.
 const SETTINGS_NETWORK_PORT_FIELD_WIDTH: f32 = 140.0; // Ports should stay compact instead of sharing a full row.
@@ -62,13 +61,66 @@ pub enum ProxyRequest {
     Auth(NetworkProxyAuthMode),
 }
 
-pub struct ProxyPage<'a> {
+impl ProxyRequest {
+    pub(crate) fn preference_edit(self) -> Option<crate::components::SettingsEdit> {
+        match self {
+            ProxyRequest::Disclaimer => Some(Box::new(|settings| {
+                settings.network.upstream_proxy_disclaimer_accepted =
+                    !settings.network.upstream_proxy_disclaimer_accepted;
+            })),
+            ProxyRequest::Enabled => Some(Box::new(|settings| {
+                if settings.network.upstream_proxy.is_some() {
+                    settings.network.application_proxy_mode = SettingsApplicationProxyMode::System;
+                    settings.network.upstream_proxy = None;
+                } else {
+                    settings.network.upstream_proxy =
+                        Some(default_settings_upstream_proxy_config());
+                }
+            })),
+            ProxyRequest::RemoteDns => Some(Box::new(|settings| {
+                if let Some(proxy) = settings.network.upstream_proxy.as_mut() {
+                    proxy.remote_dns = !proxy.remote_dns;
+                }
+            })),
+            ProxyRequest::Auth(mode) => Some(Box::new(move |settings| {
+                if let Some(proxy) = settings.network.upstream_proxy.as_mut() {
+                    proxy.auth = match mode {
+                        NetworkProxyAuthMode::None => SettingsUpstreamProxyAuth::None,
+                        NetworkProxyAuthMode::Password => SettingsUpstreamProxyAuth::Password {
+                            username: String::new(),
+                            keychain_id: None,
+                        },
+                    };
+                }
+            })),
+            ProxyRequest::Test | ProxyRequest::SavePassword | ProxyRequest::RemovePassword => None,
+        }
+    }
+}
+
+pub struct NetworkProxyPasswordSnapshot {
+    pub password_present: bool,
+    pub password_status: Option<String>,
+}
+
+#[derive(Clone)]
+pub struct NetworkProxyTestSnapshot {
+    pub test_host: String,
+    pub test_port: String,
+    pub test_pending: bool,
+    pub test_result: Option<Result<u128, String>>,
+}
+
+pub(crate) struct ProxyPresentation<'a> {
     pub controls: SettingsControls<'a>,
-    pub state: &'a Entity<SettingsWorkspaceEntity>,
+    // Only a host with secure storage can offer save/remove password actions.
+    pub password: Option<NetworkProxyPasswordSnapshot>,
+    pub probe: NetworkProxyTestSnapshot,
+    pub can_probe: bool,
     pub dispatch: Rc<dyn Fn(ProxyRequest, &mut App)>,
 }
 
-impl<'a> Deref for ProxyPage<'a> {
+impl<'a> Deref for ProxyPresentation<'a> {
     type Target = SettingsControls<'a>;
 
     fn deref(&self) -> &Self::Target {
@@ -76,7 +128,7 @@ impl<'a> Deref for ProxyPage<'a> {
     }
 }
 
-impl ProxyPage<'_> {
+impl ProxyPresentation<'_> {
     pub fn section(
         &self,
         section: oxideterm_settings_model::SettingsSectionId,
@@ -347,21 +399,28 @@ impl ProxyPage<'_> {
                     proxy.is_some(),
                     cx,
                 ))
-                .child(self.network_password_field(auth_has_saved_password, proxy.is_some(), cx));
+                .when(self.password.is_some() || self.can_probe, |section| {
+                    section.child(self.network_password_field(
+                        auth_has_saved_password,
+                        proxy.is_some(),
+                        cx,
+                    ))
+                });
         }
 
         section.into_any_element()
     }
 
     fn settings_network_test_content(&self, proxy_enabled: bool, cx: &App) -> AnyElement {
-        let snapshot = self.state.read(cx).network_proxy_test_snapshot();
-        let host_value = snapshot.test_host;
-        let port_value = snapshot.test_port;
-        let test_disabled = !proxy_enabled
+        let snapshot = &self.probe;
+        let host_value = snapshot.test_host.clone();
+        let port_value = snapshot.test_port.clone();
+        let test_disabled = !self.can_probe
+            || !proxy_enabled
             || snapshot.test_pending
             || host_value.trim().is_empty()
             || port_value.trim().parse::<u16>().is_err();
-        let status = snapshot.test_result.map(|result| match result {
+        let status = snapshot.test_result.as_ref().map(|result| match result {
             Ok(elapsed) => self
                 .i18n
                 .t("settings_view.network.test_success")
@@ -369,7 +428,7 @@ impl ProxyPage<'_> {
             Err(error) => self
                 .i18n
                 .t("settings_view.network.test_error")
-                .replace("{{error}}", &error),
+                .replace("{{error}}", error),
         });
 
         div()
@@ -741,9 +800,10 @@ impl ProxyPage<'_> {
         cx: &App,
     ) -> AnyElement {
         let password_input = SettingsInput::NetworkProxyPassword;
-        let snapshot = self.state.read(cx).network_proxy_password_snapshot();
-        let save_disabled = !snapshot.password_present || !enabled;
-        let remove_disabled = !has_saved_password && !snapshot.password_present;
+        let stored = self.password.as_ref();
+        let draft_present = stored.is_some_and(|s| s.password_present);
+        let save_disabled = !draft_present || !enabled;
+        let remove_disabled = !has_saved_password && !draft_present;
         let mut row = div()
             .w_full()
             .min_w(px(0.0))
@@ -751,7 +811,9 @@ impl ProxyPage<'_> {
             .gap(px(8.0))
             .child(self.network_field_label(
                 "settings_view.network.password",
-                if has_saved_password {
+                if stored.is_none() {
+                    ""
+                } else if has_saved_password {
                     "settings_view.network.password_saved_hint"
                 } else {
                     "settings_view.network.password_hint"
@@ -773,7 +835,7 @@ impl ProxyPage<'_> {
                             .child(self.secret_field(
                                 password_input,
                                 String::new(),
-                                if has_saved_password {
+                                if stored.is_some() && has_saved_password {
                                     self.i18n
                                         .t("settings_view.network.password_saved_placeholder")
                                 } else {
@@ -782,36 +844,35 @@ impl ProxyPage<'_> {
                                 cx,
                             )),
                     )
-                    .child(
-                        div()
-                            .flex_none()
-                            .child(self.workspace_toolbar_action_button(
-                                self.i18n.t("settings_view.network.save_password"),
-                                Some(render_icon(
-                                    "lucide/key-round.svg",
-                                    16.0,
-                                    rgb(if save_disabled {
-                                        self.tokens.ui.text_muted
-                                    } else {
-                                        self.tokens.ui.bg
-                                    }),
-                                )),
-                                ToolbarButtonOptions {
-                                    button: ButtonOptions {
-                                        variant: ButtonVariant::Default,
-                                        size: ButtonSize::Default,
-                                        radius: ButtonRadius::Md,
-                                        disabled: save_disabled,
+                    .when(stored.is_some(), |row| {
+                        row.child(
+                            div()
+                                .flex_none()
+                                .child(self.workspace_toolbar_action_button(
+                                    self.i18n.t("settings_view.network.save_password"),
+                                    Some(render_icon(
+                                        "lucide/key-round.svg",
+                                        16.0,
+                                        rgb(if save_disabled {
+                                            self.tokens.ui.text_muted
+                                        } else {
+                                            self.tokens.ui.bg
+                                        }),
+                                    )),
+                                    ToolbarButtonOptions {
+                                        button: ButtonOptions {
+                                            variant: ButtonVariant::Default,
+                                            size: ButtonSize::Default,
+                                            radius: ButtonRadius::Md,
+                                            disabled: save_disabled,
+                                        },
+                                        ..ToolbarButtonOptions::default()
                                     },
-                                    ..ToolbarButtonOptions::default()
-                                },
-                                self.press(ProxyRequest::SavePassword),
-                            )),
-                    )
-                    .child(
-                        div()
-                            .flex_none()
-                            .child(self.workspace_toolbar_action_button(
+                                    self.press(ProxyRequest::SavePassword),
+                                )),
+                        )
+                        .child(div().flex_none().child(
+                            self.workspace_toolbar_action_button(
                                 self.i18n.t("settings_view.network.remove_password"),
                                 Some(render_icon(
                                     "lucide/trash-2.svg",
@@ -828,12 +889,13 @@ impl ProxyPage<'_> {
                                     ..ToolbarButtonOptions::default()
                                 },
                                 self.press(ProxyRequest::RemovePassword),
-                            )),
-                    ),
+                            ),
+                        ))
+                    }),
             )
             .when(!enabled, |field| field.opacity(0.5));
 
-        if let Some(status) = snapshot.password_status {
+        if let Some(status) = stored.and_then(|s| s.password_status.clone()) {
             row = row.child(
                 div()
                     .min_w(px(0.0))
@@ -858,12 +920,14 @@ impl ProxyPage<'_> {
                     .text_color(rgb(self.tokens.ui.text))
                     .child(self.i18n.t(label_key)),
             )
-            .child(
-                div()
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(self.i18n.t(hint_key)),
-            )
+            .when(!hint_key.is_empty(), |row| {
+                row.child(
+                    div()
+                        .text_size(px(self.tokens.metrics.ui_text_xs))
+                        .text_color(rgb(self.tokens.ui.text_muted))
+                        .child(self.i18n.t(hint_key)),
+                )
+            })
             .into_any_element()
     }
 }

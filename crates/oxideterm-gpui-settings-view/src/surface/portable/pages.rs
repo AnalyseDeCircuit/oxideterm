@@ -2,7 +2,9 @@ use super::*;
 use crate::{
     appearance_page::CoreAppearancePage,
     components::{SettingsWindowDispatch, TerminalPreviewFont, settings_mono_font_family},
+    help_page::{HelpPresentation, HelpRequest, SettingsMarkdownDialog},
     keybinding_page::{KeybindingPageView, KeybindingRequest, KeybindingTextRole},
+    proxy_page::ProxyPresentation,
     select_menu::{CoreSelectMenu, settings_select_popover},
     terminal_page::TerminalSettingsSection,
     theme_editor::{ThemeEditorBody, ThemeEditorFrame},
@@ -109,18 +111,60 @@ pub(super) fn render_section(
     let state = owner.read(cx);
     let c = state.controls(tokens, dispatch);
     match section {
-        GeneralLanguage => c.settings_card(
-            "settings_view.general.language",
-            "",
-            vec![c.select_setting_row(
-                "settings_view.general.language",
-                "settings_view.general.language_hint",
-                SettingsSelect::Language,
-                crate::select_menu::language_label(c.settings.general.language),
-                tokens.metrics.settings_select_width,
+        GeneralLanguage | GeneralWindowBehavior | GeneralExternalConnectionUris => {
+            c.general_preference_section(section, cx)
+        }
+        ConnectionsKnownHosts => {
+            let hosts = &state.known_hosts;
+            let owner = owner.downgrade();
+            c.known_hosts_list(
+                &hosts.snapshot,
+                &hosts.query,
+                hosts.selected.as_ref(),
+                &hosts.scroll,
+                hosts.handler.is_some(),
+                None,
+                Rc::new(move |request, cx| {
+                    let _ = owner.update(cx, |s, cx| s.known_hosts_action(request, cx));
+                }),
                 cx,
-            )],
-        ),
+            )
+        }
+        NetworkSharedProxy | NetworkRouting => {
+            let owner = owner.downgrade();
+            ProxyPresentation {
+                controls: c,
+                password: None,
+                probe: state.probe.form.clone(),
+                can_probe: state.probe.handler.is_some(),
+                dispatch: Rc::new(move |request, cx| {
+                    let _ = owner.update(cx, |s, cx| s.proxy_action(request, cx));
+                }),
+            }
+            .section(section, cx)
+        }
+        HelpVersion | HelpDiagnostics | HelpTechStack | HelpResources | HelpSafety | HelpLegal => {
+            let owner = owner.downgrade();
+            HelpPresentation {
+                controls: c,
+                year: &chrono::Utc::now().format("%Y").to_string(),
+                dispatch: Rc::new(move |request, cx| match request {
+                    HelpRequest::Url(url) => cx.open_url(url),
+                    HelpRequest::Legal | HelpRequest::ThirdParty => {
+                        let _ = owner.update(cx, |s, cx| {
+                            s.fields.blur();
+                            s.document = Some((
+                                matches!(request, HelpRequest::ThirdParty),
+                                Default::default(),
+                            ));
+                            cx.notify();
+                        });
+                    }
+                    _ => unreachable!("desktop help operations are not mounted"),
+                }),
+            }
+            .section(section, cx)
+        }
         SftpOpening | SftpPerformance | SftpConflict => c.settings_sftp_section(section, cx),
         IdeEditing | IdeTypography | IdeAgent | IdeAgentPrivacy => {
             c.settings_ide_section(section, state.ide_custom, cx)
@@ -239,6 +283,25 @@ impl PortableSettingsSurface {
     ) -> Vec<AnyElement> {
         let mut layers = Vec::new();
         let state = self.state.read(cx);
+        if let Some((third_party, scroll)) = &state.document {
+            let owner = self.state.downgrade();
+            layers.push(
+                SettingsMarkdownDialog {
+                    tokens,
+                    i18n: &state.i18n,
+                    phase: ExitPhase::Visible,
+                    focus: None,
+                    options: oxideterm_gpui_markdown::MarkdownOptions::from_theme(tokens),
+                    actions: Default::default(),
+                }
+                .legal_notice(*third_party, scroll, move |_, cx| {
+                    let _ = owner.update(cx, |s, cx| {
+                        s.document = None;
+                        cx.notify();
+                    });
+                }),
+            );
+        }
         if state.reset_open {
             layers.push(keybindings(
                 &self.state,

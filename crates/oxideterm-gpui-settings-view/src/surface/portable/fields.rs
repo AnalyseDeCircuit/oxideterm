@@ -7,6 +7,7 @@ use oxideterm_settings_model::{
     SettingsInputDraftApply, apply_persisted_settings_input_draft, persisted_settings_input_value,
 };
 use std::{cell::RefCell, ops::Range};
+use zeroize::{Zeroize, Zeroizing};
 
 #[derive(Clone, Default)]
 struct FieldLayout {
@@ -17,22 +18,42 @@ struct FieldLayout {
 #[derive(Default)]
 pub(super) struct Fields {
     pub(super) active: Option<SettingsInput>,
-    draft: String,
+    draft: Zeroizing<String>,
+    // The focused editor and the parked probe password exchange ownership on blur.
+    password: Zeroizing<String>,
     anchor: usize,
     caret: usize,
     // Composition replaces the current selection visually until the platform commits it.
-    marked: Option<(String, Range<usize>)>,
+    marked: Option<(Zeroizing<String>, Range<usize>)>,
     layouts: RefCell<HashMap<SettingsInput, FieldLayout>>,
 }
 
 impl Fields {
     pub(super) fn blur(&mut self) {
+        if self.active == Some(SettingsInput::NetworkProxyPassword) {
+            std::mem::swap(&mut self.password, &mut self.draft);
+        }
         self.active = None;
         self.marked = None;
-        self.draft.clear();
+        self.draft.zeroize();
     }
     pub(super) fn value(&self, id: SettingsInput) -> Option<&str> {
-        (self.active == Some(id)).then_some(self.draft.as_str())
+        if self.active == Some(id) {
+            Some(self.draft.as_str())
+        } else if id == SettingsInput::NetworkProxyPassword {
+            Some(self.password.as_str())
+        } else {
+            None
+        }
+    }
+    pub(super) fn take_password(&mut self) -> Zeroizing<String> {
+        if self.active == Some(SettingsInput::NetworkProxyPassword) {
+            self.blur();
+        }
+        std::mem::take(&mut self.password)
+    }
+    fn editing_password(&self) -> bool {
+        self.active == Some(SettingsInput::NetworkProxyPassword)
     }
     fn selection(&self) -> Range<usize> {
         self.anchor.min(self.caret)..self.anchor.max(self.caret)
@@ -47,7 +68,13 @@ impl Fields {
     }
     fn offset(&self, position: Point<Pixels>) -> Option<usize> {
         let byte = self.layout()?.viewport.byte_index_for_position(position)?;
-        Some(utf16_offset_for_byte_index(&self.document(), byte))
+        let document = self.document();
+        Some(if self.editing_password() {
+            // The viewport hit-tests the bullets, not the UTF-8 bytes of the password.
+            utf16_offset_for_char_index(&document, byte / '•'.len_utf8())
+        } else {
+            utf16_offset_for_byte_index(&document, byte)
+        })
     }
     pub(super) fn select_at(&mut self, position: Point<Pixels>, count: usize, extend: bool) {
         self.marked = None;
@@ -70,11 +97,28 @@ impl Fields {
         }
     }
     fn document(&self) -> String {
-        let mut value = self.draft.clone();
+        let ime_text = |value: &str| {
+            if self.editing_password() {
+                // The IME needs UTF-16 geometry, including surrogate pairs, not the credential.
+                value
+                    .chars()
+                    .map(|ch| if ch.len_utf16() == 1 { '•' } else { '🔒' })
+                    .collect()
+            } else {
+                value.to_owned()
+            }
+        };
+        let mut document = ime_text(&self.draft);
         if let Some((text, _)) = &self.marked {
-            replace_utf16(&mut value, Some(self.selection()), text);
+            replace_utf16(&mut document, Some(self.selection()), &ime_text(text));
         }
-        value
+        document
+    }
+    fn commit_marked(&mut self) {
+        if let Some((text, _)) = self.marked.take() {
+            let range = self.selection();
+            replace_utf16(&mut self.draft, Some(range), &text);
+        }
     }
     fn marked_range(&self) -> Option<Range<usize>> {
         let start = self.selection().start;
@@ -129,7 +173,18 @@ impl PageState {
         if self.fields.active == Some(id) {
             return;
         }
+        if id == SettingsInput::NetworkProxyPassword {
+            self.fields.blur();
+            std::mem::swap(&mut self.fields.draft, &mut self.fields.password);
+            self.fields.active = Some(id);
+            self.fields.caret = self.fields.draft.encode_utf16().count();
+            self.fields.anchor = self.fields.caret;
+            return;
+        }
         let value = match id {
+            SettingsInput::KnownHostsSearch => Some(self.known_hosts.query.clone()),
+            SettingsInput::NetworkProxyTestHost => Some(self.probe.form.test_host.clone()),
+            SettingsInput::NetworkProxyTestPort => Some(self.probe.form.test_port.clone()),
             SettingsInput::SettingsSearch => Some(self.query.clone()),
             SettingsInput::KeybindingSearch => {
                 Some(self.shortcuts.keybinding_search_query().to_owned())
@@ -146,11 +201,11 @@ impl PageState {
             _ => persisted_settings_input_value(&self.settings, id),
         };
         if let Some(value) = value {
-            self.fields.marked = None;
+            self.fields.blur();
             self.fields.active = Some(id);
             self.fields.caret = value.encode_utf16().count();
             self.fields.anchor = self.fields.caret;
-            self.fields.draft = value;
+            self.fields.draft = Zeroizing::new(value);
         }
     }
 
@@ -158,8 +213,23 @@ impl PageState {
         let Some(input) = self.fields.active else {
             return;
         };
-        let draft = &self.fields.draft;
+        let draft = &*self.fields.draft;
         match input {
+            SettingsInput::NetworkProxyPassword => {
+                self.probe
+                    .password_profile
+                    .clone_from(&self.settings.network.upstream_proxy);
+                self.probe.clear_result();
+            }
+            SettingsInput::KnownHostsSearch => self.known_hosts.query.clone_from(draft),
+            SettingsInput::NetworkProxyTestHost | SettingsInput::NetworkProxyTestPort => {
+                if input == SettingsInput::NetworkProxyTestHost {
+                    self.probe.form.test_host.clone_from(draft);
+                } else {
+                    self.probe.form.test_port.clone_from(draft);
+                }
+                self.probe.clear_result();
+            }
             SettingsInput::SettingsSearch => {
                 self.query.clone_from(draft);
                 self.search.apply(draft.trim().to_owned());
@@ -221,11 +291,15 @@ impl PageState {
                     }
                     self.search_open = false;
                 }
-                self.fields.blur();
+                if key == "escape" && self.fields.editing_password() {
+                    self.clear_proxy_password();
+                } else {
+                    self.fields.blur();
+                }
             }
             "a" if m.platform || m.control => self.fields.set_range(0..length),
             "c" | "x" if m.platform || m.control => {
-                if !range.is_empty() {
+                if !self.fields.editing_password() && !range.is_empty() {
                     cx.write_to_clipboard(gpui::ClipboardItem::new_string(utf16_slice(
                         &self.fields.draft,
                         range,
@@ -317,14 +391,14 @@ impl EntityInputHandler for PageState {
         }
         let replace = match (range, self.fields.marked_range()) {
             (Some(range), Some(marked)) if range != marked => {
-                self.fields.draft = self.fields.document();
+                self.fields.commit_marked();
                 range
             }
             (Some(range), None) => range,
             _ => self.fields.selection(),
         };
         self.fields.marked = None;
-        let text = text.replace(['\r', '\n'], "");
+        let text = Zeroizing::new(text.replace(['\r', '\n'], ""));
         let caret = replace.start.min(self.fields.draft.encode_utf16().count())
             + text.encode_utf16().count();
         replace_utf16(&mut self.fields.draft, Some(replace), &text);
@@ -345,11 +419,14 @@ impl EntityInputHandler for PageState {
         if let Some(range) = range
             && Some(&range) != self.fields.marked_range().as_ref()
         {
-            self.fields.draft = self.fields.document();
+            self.fields.commit_marked();
             self.fields.set_range(range);
         }
         let end = text.encode_utf16().count();
-        self.fields.marked = Some((text.to_owned(), selected.unwrap_or(end..end)));
+        self.fields.marked = Some((
+            Zeroizing::new(text.to_owned()),
+            selected.unwrap_or(end..end),
+        ));
         cx.notify();
     }
     fn bounds_for_range(
@@ -361,13 +438,16 @@ impl EntityInputHandler for PageState {
     ) -> Option<Bounds<Pixels>> {
         let layout = self.fields.layout()?;
         let bounds = layout.bounds.get()?;
+        let document = self.fields.document();
+        let byte = byte_index_for_utf16(&document, range.start);
+        let visible_byte = if self.fields.editing_password() {
+            document[..byte].chars().count() * '•'.len_utf8()
+        } else {
+            byte
+        };
         layout
             .viewport
-            .caret_bounds_for_byte_index(
-                byte_index_for_utf16(&self.fields.document(), range.start),
-                px(1.0),
-                bounds.size.height,
-            )
+            .caret_bounds_for_byte_index(visible_byte, px(1.0), bounds.size.height)
             .or(Some(bounds))
     }
     fn character_index_for_point(

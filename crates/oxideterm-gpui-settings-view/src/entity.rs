@@ -169,17 +169,7 @@ pub enum ManagedKeyDialogSnapshot {
     },
 }
 
-pub struct NetworkProxyPasswordSnapshot {
-    pub password_present: bool,
-    pub password_status: Option<String>,
-}
-
-pub struct NetworkProxyTestSnapshot {
-    pub test_host: String,
-    pub test_port: String,
-    pub test_pending: bool,
-    pub test_result: Option<Result<u128, String>>,
-}
+pub use crate::proxy_page::{NetworkProxyPasswordSnapshot, NetworkProxyTestSnapshot};
 
 /// Editable privilege credential state with a zeroizing secret owner.
 pub struct PrivilegeCredentialDraft {

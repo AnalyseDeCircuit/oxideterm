@@ -40,7 +40,10 @@ pub use pages::{
 };
 pub use section_cache::SettingsSectionList;
 mod portable;
-pub use portable::{PortableSettingsChanged, PortableSettingsSurface};
+pub use crate::known_hosts_page::{PortableKnownHostEntry, PortableKnownHostsSnapshot};
+pub use portable::{
+    PortableKnownHostsAction, PortableProxyProbe, PortableSettingsChanged, PortableSettingsSurface,
+};
 
 pub struct SettingsSurfaceFrame {
     pub tokens: ThemeTokens,

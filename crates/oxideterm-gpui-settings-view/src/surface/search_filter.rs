@@ -8,8 +8,7 @@ use oxideterm_i18n::{I18n, Locale};
 
 #[cfg(not(target_family = "wasm"))]
 use super::SettingsSurfaceView;
-use crate::{SettingsSearchResult, SettingsTab};
-use oxideterm_settings_model::SettingsSectionId;
+use crate::SettingsSearchResult;
 
 #[cfg(not(target_family = "wasm"))]
 const SEARCH_FILTER_DELAY: Duration = Duration::from_millis(120);
@@ -19,7 +18,7 @@ pub(super) struct SettingsSearchFilter {
     #[cfg(not(target_family = "wasm"))]
     observed_query: String,
     applied_query: String,
-    include: fn(SettingsTab, SettingsSectionId) -> bool,
+    search: fn(&I18n, &str) -> Vec<SettingsSearchResult>,
     cached: RefCell<Option<SearchCache>>,
     #[cfg(not(target_family = "wasm"))]
     pending: Option<Task<()>>,
@@ -27,19 +26,19 @@ pub(super) struct SettingsSearchFilter {
 
 impl Default for SettingsSearchFilter {
     fn default() -> Self {
-        Self::new(|_, _| true)
+        Self::new(crate::settings_search_results)
     }
 }
 
 impl SettingsSearchFilter {
-    pub(super) fn new(include: fn(SettingsTab, SettingsSectionId) -> bool) -> Self {
+    pub(super) fn new(search: fn(&I18n, &str) -> Vec<SettingsSearchResult>) -> Self {
         Self {
             #[cfg(not(target_family = "wasm"))]
             observed_query: String::new(),
             #[cfg(not(target_family = "wasm"))]
             pending: None,
             applied_query: String::new(),
-            include,
+            search,
             cached: Default::default(),
         }
     }
@@ -58,7 +57,7 @@ impl SettingsSearchFilter {
         let results: Rc<[_]> = if self.applied_query.is_empty() {
             Rc::from([])
         } else {
-            crate::search::filtered_results(i18n, &self.applied_query, self.include).into()
+            (self.search)(i18n, &self.applied_query).into()
         };
         *cache = Some((i18n.locale(), results.clone()));
         results

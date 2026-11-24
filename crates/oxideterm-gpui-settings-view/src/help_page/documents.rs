@@ -18,10 +18,9 @@ use oxideterm_gpui_ui::{
 use oxideterm_i18n::I18n;
 use oxideterm_theme::ThemeTokens;
 
-use crate::{
-    dialog::settings_dialog_transition, entity::SettingsWorkspaceEntity,
-    update_view::release_notes_dialog,
-};
+use crate::dialog::settings_dialog_transition;
+#[cfg(not(target_family = "wasm"))]
+use crate::{entity::SettingsWorkspaceEntity, update_view::release_notes_dialog};
 
 const HELP_LEGAL_MARKDOWN: &str =
     include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../LEGAL.md"));
@@ -40,6 +39,7 @@ pub struct SettingsMarkdownDialog<'a> {
 }
 
 impl SettingsMarkdownDialog<'_> {
+    #[cfg(not(target_family = "wasm"))]
     pub fn release_notes(
         mut self,
         settings: &SettingsWorkspaceEntity,

@@ -1,5 +1,11 @@
 use super::*;
-use gpui::ScrollHandle;
+use std::{path::Path, rc::Rc};
+
+use crate::{
+    components::SettingsControls,
+    known_hosts_page::{KnownHostsRequest, PortableKnownHostEntry, PortableKnownHostsSnapshot},
+};
+use gpui::{AnyElement, App, ScrollHandle};
 use oxideterm_ssh::{KnownHostEntry, KnownHostsSnapshot, list_known_hosts, remove_host_key};
 
 #[derive(Default)]
@@ -10,6 +16,84 @@ pub struct KnownHostsState {
     pub pending_delete: Option<KnownHostEntry>,
     pub task: Option<Task<()>>,
     pub scroll: ScrollHandle,
+}
+
+impl From<&KnownHostEntry> for PortableKnownHostEntry {
+    fn from(entry: &KnownHostEntry) -> Self {
+        Self {
+            host: entry.host.clone(),
+            port: entry.port,
+            key_type: entry.key_type.clone(),
+            fingerprint: entry.fingerprint.clone(),
+            line_number: None,
+            can_remove: entry.can_remove,
+        }
+    }
+}
+
+impl SettingsControls<'_> {
+    pub fn settings_known_hosts_section(
+        &self,
+        settings: &gpui::Entity<SettingsWorkspaceEntity>,
+        open_file: impl Fn(&Path, &mut App) + 'static,
+        cx: &App,
+    ) -> AnyElement {
+        let state = &settings.read(cx).known_hosts;
+        let file = state.snapshot.as_ref();
+        let snapshot = PortableKnownHostsSnapshot {
+            entries: file
+                .map(|s| s.entries.iter().map(Into::into).collect())
+                .unwrap_or_default(),
+            source: file.map(|s| s.path.display().to_string()),
+            loading: state.task.is_some(),
+            error: state.error.clone(),
+        };
+        let owner = settings.downgrade();
+        let open = file.map(|s| {
+            let path = s.path.clone();
+            let click: Rc<dyn Fn(&mut App)> = Rc::new(move |cx| open_file(&path, cx));
+            (s.exists, click)
+        });
+        self.known_hosts_list(
+            &snapshot,
+            &state.query,
+            state
+                .pending_delete
+                .as_ref()
+                .map(PortableKnownHostEntry::from)
+                .as_ref(),
+            &state.scroll,
+            true,
+            open,
+            Rc::new(move |request, cx| {
+                let _ = owner.update(cx, |settings, cx| match request {
+                    KnownHostsRequest::Refresh => settings.refresh_known_hosts(cx),
+                    KnownHostsRequest::Select(entry) => {
+                        settings.known_hosts.pending_delete = entry.map(|entry| KnownHostEntry {
+                            host: entry.host,
+                            port: entry.port,
+                            key_type: entry.key_type,
+                            fingerprint: entry.fingerprint,
+                            can_remove: entry.can_remove,
+                        });
+                        cx.notify();
+                    }
+                    KnownHostsRequest::Delete(entry) => {
+                        if settings
+                            .known_hosts
+                            .pending_delete
+                            .as_ref()
+                            .map(PortableKnownHostEntry::from)
+                            == Some(entry)
+                        {
+                            settings.delete_known_host(cx);
+                        }
+                    }
+                });
+            }),
+            cx,
+        )
+    }
 }
 
 impl SettingsWorkspaceEntity {

@@ -89,7 +89,7 @@ fn search_spec_section_rank(spec: &SettingsSearchEntrySpec) -> usize {
     settings_section_index(spec.tab, spec.section, dynamic).unwrap_or(usize::MAX)
 }
 
-fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
+fn settings_search_specs(desktop_operations: bool) -> Vec<SettingsSearchEntrySpec> {
     let mut specs = vec![
         settings_search_entry(
             SettingsTab::General,
@@ -823,23 +823,38 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
             SettingsTab::Help,
             SettingsSectionId::HelpVersion,
             "settings_view.help.version_info",
-            &[
-                "settings_view.help.update_channel_hint",
-                "settings_view.help.check_update",
-                "settings_view.help.release_notes",
-                "settings_view.help.channel_stable",
-            ],
+            if desktop_operations {
+                &[
+                    "settings_view.help.update_channel_hint",
+                    "settings_view.help.check_update",
+                    "settings_view.help.release_notes",
+                    "settings_view.help.channel_stable",
+                ]
+            } else {
+                &[
+                    "settings_view.help.update_channel_hint",
+                    "settings_view.help.channel_stable",
+                ]
+            },
         ),
         settings_search_entry(
             SettingsTab::Help,
             SettingsSectionId::HelpDiagnostics,
             "settings_view.help.diagnostics",
-            &[
-                "settings_view.help.debug_logs",
-                "settings_view.terminal.show_performance_overlay",
-                "settings_view.terminal.show_performance_overlay_hint",
-                "settings_view.help.open_logs",
-            ],
+            if desktop_operations {
+                &[
+                    "settings_view.help.debug_logs",
+                    "settings_view.terminal.show_performance_overlay",
+                    "settings_view.terminal.show_performance_overlay_hint",
+                    "settings_view.help.open_logs",
+                ]
+            } else {
+                &[
+                    "settings_view.help.debug_logs",
+                    "settings_view.terminal.show_performance_overlay",
+                    "settings_view.terminal.show_performance_overlay_hint",
+                ]
+            },
         ),
         settings_search_entry(
             SettingsTab::Help,
@@ -881,13 +896,14 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
         ),
     ];
 
-    #[cfg(any(target_os = "windows", target_os = "macos"))]
-    specs.push(settings_search_entry(
-        SettingsTab::General,
-        SettingsSectionId::GeneralWindowBehavior,
-        "settings_view.general.window_behavior",
-        &["settings_view.general.window_behavior_hint"],
-    ));
+    if !desktop_operations || cfg!(any(target_os = "windows", target_os = "macos")) {
+        specs.push(settings_search_entry(
+            SettingsTab::General,
+            SettingsSectionId::GeneralWindowBehavior,
+            "settings_view.general.window_behavior",
+            &["settings_view.general.window_behavior_hint"],
+        ));
+    }
     specs.push(settings_search_entry(
         SettingsTab::General,
         SettingsSectionId::GeneralAppLock,
@@ -955,15 +971,16 @@ fn settings_search_score(title: &str, haystack: &str, query: &str) -> Option<usi
 }
 
 pub fn settings_search_results(i18n: &I18n, query: &str) -> Vec<SettingsSearchResult> {
-    filtered_results(i18n, query, |_, _| true)
+    filtered_results(i18n, query, |_, _| true, true)
 }
 
 pub(crate) fn filtered_results(
     i18n: &I18n,
     query: &str,
     include: fn(SettingsTab, SettingsSectionId) -> bool,
+    desktop_operations: bool,
 ) -> Vec<SettingsSearchResult> {
-    let mut results = settings_search_specs()
+    let mut results = settings_search_specs(desktop_operations)
         .into_iter()
         .filter(|spec| include(spec.tab, spec.section))
         .filter_map(|spec| {
