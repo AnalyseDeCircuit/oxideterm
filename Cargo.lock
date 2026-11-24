@@ -7908,6 +7908,8 @@ dependencies = [
  "oxideterm-gpui-ui",
  "oxideterm-i18n",
  "oxideterm-theme",
+ "oxideterm-workspace",
+ "web-time",
 ]
 
 [[package]]

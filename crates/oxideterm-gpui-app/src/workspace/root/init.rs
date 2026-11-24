@@ -838,9 +838,43 @@ impl WorkspaceApp {
             state: knowledge_state,
             view: knowledge_view,
         };
+        let host = cx.weak_entity();
+        let request_host = host.clone();
+        let drop_host = host.clone();
+        let main_window_tabs = cx.new(|_| {
+            MeasuredTabStrip::new(
+                move |state, window, cx| {
+                    host.update(cx, |host, cx| host.tab_strip_frame(state, window, cx))
+                        .ok()
+                },
+                move |request, window, cx| {
+                    let _ = request_host
+                        .update(cx, |host, cx| host.handle_tab_request(request, window, cx));
+                },
+            )
+            .with_content_drop(move |event, window, cx| {
+                use oxideterm_gpui_shell::tabs::strip::TabContentDrop;
+                drop_host
+                    .update(cx, |host, cx| match event {
+                        TabContentDrop::Probe(drag, event) => {
+                            let previous = host.split_drop_target;
+                            let over = host.update_tab_split_destination(drag, event, window, cx);
+                            if host.split_drop_target != previous {
+                                cx.notify()
+                            }
+                            over
+                        }
+                        TabContentDrop::Commit(tab, point) => {
+                            host.finish_tab_split_drop(tab, point, window, cx)
+                        }
+                    })
+                    .unwrap_or(false)
+            })
+        });
         let mut workspace = Self {
             focus_handle,
-            main_window_tabs: WorkspaceWindowTabState::new(),
+            main_window_tabs,
+            tab_context_menu: None,
             tab_rename_dialog: None,
             detached_tab_return_drag: None,
             detached_tab_return_handoff: None,

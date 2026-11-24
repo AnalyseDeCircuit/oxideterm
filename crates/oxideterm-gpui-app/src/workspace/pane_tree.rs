@@ -1,27 +1,9 @@
 use super::*;
-use oxideterm_gpui_ui::button::{ButtonRadius, IconButtonOptions};
+pub(super) use oxideterm_gpui_shell::panes::SplitDrag;
+use oxideterm_gpui_shell::panes::{
+    MountedPane, PaneContent, PaneHost, PaneTree, SPLIT_HANDLE_LINE_ALPHA, ShellPaneRequest,
+};
 use oxideterm_terminal_triggers::SavedConnectionKind;
-
-const SPLIT_HANDLE_LINE_ALPHA: u32 = 0xd9;
-const SPLIT_HANDLE_HOVER_BG_ALPHA: u32 = 0x12;
-const SPLIT_HANDLE_ACTIVE_BG_ALPHA: u32 = 0x1f;
-const SPLIT_HANDLE_HOVER_LINE_ALPHA: u32 = 0xcc;
-const SPLIT_HANDLE_ACTIVE_LINE_ALPHA: u32 = 0xff;
-const SPLIT_HANDLE_LINE_WIDTH: f32 = 3.0;
-const SPLIT_HANDLE_HOVER_LINE_WIDTH: f32 = 4.0;
-const SPLIT_HANDLE_ACTIVE_LINE_WIDTH: f32 = 5.0;
-
-#[derive(Clone)]
-pub(super) struct SplitDrag {
-    tab_id: Option<TabId>,
-    group_id: PaneId,
-    handle_index: usize,
-    direction: SplitDirection,
-    start_position: gpui::Point<Pixels>,
-    start_sizes: Vec<f32>,
-    start_extent: f32,
-}
-
 #[derive(Clone, Copy)]
 enum TerminalPaneInteraction {
     PrivilegePromptSubmit,
@@ -958,7 +940,7 @@ impl WorkspaceApp {
         {
             self.request_close_tab_by_id(page, window, cx);
         } else {
-            self.close_terminal_pane_in_tab(tab_id, active_pane_id, window, cx);
+            self.request_close_terminal_pane(tab_id, active_pane_id, window, cx);
         }
     }
 
@@ -1056,59 +1038,16 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    pub(super) fn start_split_drag(
-        &mut self,
-        tab_id: Option<TabId>,
-        group_id: PaneId,
-        handle_index: usize,
-        direction: SplitDirection,
-        sizes: &[f32],
-        extent: f32,
-        event: &MouseDownEvent,
-        cx: &mut Context<Self>,
-    ) {
-        self.split_drag = Some(SplitDrag {
-            tab_id,
-            group_id,
-            handle_index,
-            direction,
-            start_position: event.position,
-            start_sizes: sizes.to_vec(),
-            start_extent: extent,
-        });
-        cx.notify();
-    }
-
     pub(super) fn update_split_drag(
         &mut self,
         event: &MouseMoveEvent,
-        _window: &Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(drag) = self.split_drag.clone() else {
-            return;
-        };
-        // Splitters use root-level pointer capture. While dragging outside the
-        // splitter element, the stored drag state owns motion until mouse-up.
-        let delta_fraction = match drag.direction {
-            SplitDirection::Horizontal => {
-                f32::from(event.position.x - drag.start_position.x) / drag.start_extent.max(1.0)
-                    * 100.0
-            }
-            SplitDirection::Vertical => {
-                f32::from(event.position.y - drag.start_position.y) / drag.start_extent.max(1.0)
-                    * 100.0
-            }
-        };
-        let next_sizes = adjusted_split_sizes(&drag.start_sizes, drag.handle_index, delta_fraction);
-        let updated = self.tab_host.update(cx, |tab_host, _| {
-            tab_host.update_group_sizes(drag.tab_id, drag.group_id, &next_sizes)
-        });
-        if updated {
-            cx.notify();
+        if let Some(drag) = self.split_drag.as_ref() {
+            self.pane_request(drag.resize_at(event.position), window, cx);
         }
     }
-
     pub(super) fn finish_split_drag(&mut self, cx: &mut Context<Self>) {
         if self.split_drag.take().is_some() {
             cx.notify();
@@ -1118,48 +1057,7 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn split_drag_belongs_to_tab(&self, tab_id: TabId) -> bool {
         self.split_drag
             .as_ref()
-            .is_some_and(|drag| drag.tab_id == Some(tab_id))
-    }
-
-    pub(super) fn reset_split_group_sizes(
-        &mut self,
-        tab_id: Option<TabId>,
-        group_id: PaneId,
-        cx: &mut Context<Self>,
-    ) {
-        let updated = self.tab_host.update(cx, |tab_host, _| {
-            tab_host.reset_group_sizes(tab_id, group_id)
-        });
-        if updated {
-            cx.notify();
-        }
-    }
-
-    fn pane_header_action(
-        &self,
-        icon: LucideIcon,
-        label_key: &'static str,
-        listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let label = self.i18n.t(label_key);
-        let tokens = self.tokens;
-        self.workspace_icon_action_button(
-            icon,
-            13.0,
-            rgb(tokens.ui.text_muted),
-            IconButtonOptions::opaque_toolbar(22.0, ButtonRadius::Md),
-            listener,
-            cx,
-        )
-        .id(label_key)
-        .flex_none()
-        .role(gpui::Role::Button)
-        .aria_label(label.clone())
-        .tooltip(move |_, cx| {
-            oxideterm_gpui_ui::tooltip::tooltip_view(tokens, label.clone(), None, cx)
-        })
-        .into_any_element()
+            .is_some_and(|drag| drag.tab_id == tab_id)
     }
 
     fn toggle_terminal_pane_zoom(
@@ -1179,89 +1077,6 @@ impl WorkspaceApp {
         }
     }
 
-    fn render_terminal_pane_header(
-        &self,
-        tab_id: TabId,
-        pane_id: PaneId,
-        active: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let theme = self.tokens.ui;
-        div()
-            .h(px(28.0))
-            .px(px(6.0))
-            .flex()
-            .items_center()
-            .gap(px(4.0))
-            .bg(self.workspace_chrome_background(theme.bg))
-            .border_b_1()
-            .border_color(rgb(if active { theme.accent } else { theme.border }))
-            .text_size(px(self.tokens.metrics.ui_text_xs))
-            .text_color(rgb(theme.text_muted))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .truncate()
-                    .child(self.terminal_pane_label(pane_id, cx)),
-            )
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                    if event.click_count == 2 {
-                        this.toggle_terminal_pane_zoom(tab_id, pane_id, window, cx);
-                        cx.stop_propagation();
-                    }
-                }),
-            )
-            .child(format!("#{}", pane_id.0))
-            .child(self.pane_header_action(
-                if self.tab_host.read(cx).zoomed_pane(tab_id) == Some(pane_id) {
-                    LucideIcon::Layers
-                } else {
-                    LucideIcon::Square
-                },
-                if self.tab_host.read(cx).zoomed_pane(tab_id) == Some(pane_id) {
-                    "tabbar.restore_pane_layout"
-                } else {
-                    "tabbar.zoom_pane"
-                },
-                move |this, _, window, cx| {
-                    this.toggle_terminal_pane_zoom(tab_id, pane_id, window, cx);
-                    cx.stop_propagation();
-                },
-                cx,
-            ))
-            .child(self.pane_header_action(
-                LucideIcon::AppWindow,
-                "tabbar.move_pane_to_tab",
-                move |this, _, window, cx| {
-                    this.move_terminal_pane_out(tab_id, pane_id, false, window, cx);
-                    cx.stop_propagation();
-                },
-                cx,
-            ))
-            .child(self.pane_header_action(
-                LucideIcon::ExternalLink,
-                "tabbar.move_pane_to_window",
-                move |this, _, window, cx| {
-                    this.move_terminal_pane_out(tab_id, pane_id, true, window, cx);
-                    cx.stop_propagation();
-                },
-                cx,
-            ))
-            .child(self.pane_header_action(
-                LucideIcon::X,
-                "command_palette.cmd_close_pane",
-                move |this, _, window, cx| {
-                    this.close_terminal_pane_in_tab(tab_id, pane_id, window, cx);
-                    cx.stop_propagation();
-                },
-                cx,
-            ))
-            .into_any_element()
-    }
-
     pub(super) fn render_pane_tree(
         &mut self,
         node: &PaneNode,
@@ -1269,57 +1084,6 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         self.render_pane_tree_for_tab(self.active_tab_id(cx), node, window, cx)
-    }
-
-    fn render_workspace_page_header(
-        &self,
-        page: TabId,
-        title: &str,
-        active: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let theme = self.tokens.ui;
-        div()
-            .h(px(28.0))
-            .flex_none()
-            .px(px(6.0))
-            .flex()
-            .items_center()
-            .gap(px(4.0))
-            .bg(self.workspace_chrome_background(theme.bg))
-            .border_b_1()
-            .border_color(rgb(if active { theme.accent } else { theme.border }))
-            .text_size(px(self.tokens.metrics.ui_text_xs))
-            .text_color(rgb(theme.text_muted))
-            .child(div().flex_1().min_w_0().truncate().child(title.to_owned()))
-            .child(self.pane_header_action(
-                LucideIcon::AppWindow,
-                "tabbar.move_pane_to_tab",
-                move |this, _, window, cx| {
-                    this.move_workspace_page_out(page, false, window, cx);
-                    cx.stop_propagation();
-                },
-                cx,
-            ))
-            .child(self.pane_header_action(
-                LucideIcon::ExternalLink,
-                "tabbar.move_pane_to_window",
-                move |this, _, window, cx| {
-                    this.move_workspace_page_out(page, true, window, cx);
-                    cx.stop_propagation();
-                },
-                cx,
-            ))
-            .child(self.pane_header_action(
-                LucideIcon::X,
-                "command_palette.cmd_close_pane",
-                move |this, _, window, cx| {
-                    this.request_close_tab_by_id(page, window, cx);
-                    cx.stop_propagation();
-                },
-                cx,
-            ))
-            .into_any_element()
     }
 
     fn move_workspace_page_out(
@@ -1362,409 +1126,225 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        if node.pane_count() > 1 {
-            if let Some((pane, session)) = tab_id
-                .and_then(|id| self.tab_host.read(cx).zoomed_pane(id))
-                .and_then(|pane| {
-                    node.session_id_for_pane(pane)
-                        .map(|session| (pane, session))
-                })
-            {
-                return self.render_pane_tree_for_tab(
-                    tab_id,
-                    &PaneNode::leaf(pane, session),
-                    window,
-                    cx,
-                );
-            }
+        let Some(tab) = tab_id else {
+            return div().into_any_element();
+        };
+        let i18n = self.i18n.clone();
+        PaneTree {
+            tab,
+            active: self.tab_by_id(tab, cx).and_then(|t| t.active_pane_id),
+            zoomed: self.tab_host.read(cx).zoomed_pane(tab),
+            drag: self.split_drag.clone(),
+            tokens: self.tokens,
+            i18n: &i18n,
+            header_background: self.workspace_chrome_background(self.tokens.ui.bg),
+            divider: self.workspace_divider_color(self.tokens.ui.divider, SPLIT_HANDLE_LINE_ALPHA),
+            supports_detach: true,
+            drop_regions: self
+                .window_registry
+                .handle_for_role(window_registry::WindowRole::Main)
+                .filter(|main| main.window_id() == window.window_handle().window_id())
+                .map(|_| self.split_drop_regions.clone()),
         }
-        let active_pane_id = tab_id
-            .and_then(|tab_id| self.tab_by_id(tab_id, cx))
-            .and_then(|tab| tab.active_pane_id);
-        let split = tab_id
-            .and_then(|id| self.tab_by_id(id, cx))
-            .and_then(|tab| tab.root_pane.as_ref())
-            .is_some_and(|root| root.pane_count() > 1);
-        let content = match node {
-            PaneNode::Page {
-                pane_id,
-                tab_id: page_id,
-            } => {
-                let Some(page) = self.tab_by_id(*page_id, cx).cloned() else {
-                    return div().into_any_element();
-                };
-                let (pane_id, page_id) = (*pane_id, *page_id);
-                let container = tab_id.unwrap_or(page_id);
+        .render(node, self, window, cx)
+    }
+}
+
+impl PaneHost for WorkspaceApp {
+    fn mount_pane(
+        &mut self,
+        _tab: TabId,
+        pane_id: PaneId,
+        content: PaneContent,
+        split: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<MountedPane> {
+        match content {
+            PaneContent::Page(page_id) => {
+                let page = self.tab_by_id(page_id, cx)?.clone();
                 let content = if page.kind == TabKind::Knowledge {
                     self.render_knowledge_workspace_surface()
                 } else {
                     self.render_tab_content_for_id(page_id, &page.kind, None, window, cx)
                 };
-                div()
-                    .id(("workspace-page", pane_id.0))
-                    .size_full()
-                    .flex()
-                    .flex_col()
-                    .overflow_hidden()
-                    .capture_any_mouse_down(cx.listener(move |this, _: &MouseDownEvent, _, cx| {
-                        let previous = this.tab_host.read(cx).focused_page_id(container);
-                        if previous != page_id {
-                            this.release_remote_desktop_inputs_for_tab(previous, cx);
-                        }
-                        if this
-                            .tab_host
-                            .update(cx, |host, _| host.set_active_pane(Some(container), pane_id))
-                        {
-                            this.blur_text_inputs(cx);
-                            if !this.tab_host.read(cx).is_detached(container) {
-                                this.sync_active_tab_surface(cx);
-                            }
-                        }
-                        cx.notify();
-                    }))
-                    .when(split, |frame| {
-                        frame.child(self.render_workspace_page_header(
-                            page_id,
-                            &page.title,
-                            Some(pane_id) == active_pane_id,
-                            cx,
-                        ))
-                    })
-                    .child(div().flex_1().min_h_0().relative().child(content))
-                    .into_any_element()
+                Some(MountedPane {
+                    title: page.title,
+                    body: content,
+                    capture_focus: true,
+                    toolbar: None,
+                    overlays: Vec::new(),
+                })
             }
-            PaneNode::Leaf { pane_id, .. } => {
-                let active = Some(*pane_id) == active_pane_id;
-                let shell_surface = self.ide_workspace.read(cx).shell_surface_for_pane(*pane_id);
-                if let Some((_, surface)) = shell_surface {
-                    let pane_id = *pane_id;
-                    return div()
-                        .id(("workspace-pane", pane_id.0))
-                        .size_full()
-                        .flex()
-                        .flex_col()
-                        .overflow_hidden()
-                        .capture_any_mouse_down(cx.listener(
-                            move |this, _: &MouseDownEvent, _, cx| {
-                                if let Some(tab_id) = tab_id {
-                                    let changed = this.tab_host.update(cx, |host, _| {
-                                        host.set_active_pane(Some(tab_id), pane_id)
-                                    });
-                                    if changed {
-                                        this.blur_text_inputs(cx);
-                                        if !this.tab_host.read(cx).is_outside_main_window(tab_id) {
-                                            this.sync_active_tab_surface(cx);
-                                        }
-                                    }
-                                }
-                                cx.notify();
-                            },
-                        ))
-                        .when(split, |frame| {
-                            frame.child(self.render_terminal_pane_header(
-                                tab_id.unwrap(),
-                                pane_id,
-                                active,
-                                cx,
-                            ))
-                        })
-                        .child(div().flex_1().min_h_0().relative().child(surface))
-                        .into_any_element();
-                }
-                let Some(pane) = self.tab_host.read(cx).panes().get(pane_id).cloned() else {
-                    return div().size_full().into_any_element();
-                };
-                let sync_header = self.render_terminal_sync_member_header(*pane_id, cx);
-                let terminal_top = if sync_header.is_some() {
-                    terminal_command_bar::TERMINAL_SYNC_HEADER_HEIGHT
+            PaneContent::Terminal(_) => {
+                let title = if split {
+                    self.terminal_pane_label(pane_id, cx)
                 } else {
-                    0.0
-                } + if split { 28.0 } else { 0.0 };
-                let header = div()
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .right_0()
-                    .flex()
-                    .flex_col()
-                    .when(split, |header| {
-                        header.child(self.render_terminal_pane_header(
-                            tab_id.unwrap(),
-                            *pane_id,
-                            active,
-                            cx,
-                        ))
-                    })
-                    .children(sync_header);
-                div()
-                    .id(("workspace-pane", pane_id.0))
-                    .size_full()
-                    .relative()
-                    .min_w_0()
-                    .min_h_0()
-                    .overflow_hidden()
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener({
-                            let pane_id = *pane_id;
-                            move |this, _event, window, cx| {
-                                // Release logical input ownership before focusing the native pane.
-                                this.blur_text_inputs(cx);
-                                if let Some(tab_id) = tab_id {
-                                    this.release_remote_desktop_inputs_for_tab(tab_id, cx);
-                                    this.tab_host.update(cx, |tab_host, _| {
-                                        tab_host.set_active_pane(Some(tab_id), pane_id);
-                                    });
-                                    if !this.tab_host.read(cx).is_outside_main_window(tab_id) {
-                                        this.set_main_window_active_tab(Some(tab_id), cx);
-                                    }
-                                } else {
-                                    this.tab_host.update(cx, |tab_host, _| {
-                                        tab_host.set_active_pane(None, pane_id);
-                                    });
-                                }
-                                if tab_id.is_none_or(|id| !this.tab_host.read(cx).is_detached(id)) {
-                                    this.sync_active_tab_surface(cx);
-                                    this.sync_active_terminal_metadata_context(cx);
-                                    this.sync_active_terminal_recording_elapsed_tick(cx);
-                                    this.sync_active_privilege_prompt_inline_hint(cx);
-                                } else {
-                                    this.remember_ssh_terminal_pane(pane_id, cx);
-                                }
-                                if let Some(pane) =
-                                    this.tab_host.read(cx).panes().get(&pane_id).cloned()
-                                {
-                                    pane.update(cx, |pane, cx| pane.focus(window, cx));
-                                }
-                                cx.notify();
-                            }
-                        }),
-                    )
-                    .child(header)
-                    .child(
-                        div()
-                            .absolute()
-                            .top(px(terminal_top))
-                            .left_0()
-                            .right_0()
-                            .bottom_0()
-                            .child(pane),
-                    )
-                    .when(
-                        self.ai.state.read(cx).terminal_inline_panel().open
-                            && self
-                                .ai
-                                .state
-                                .read(cx)
-                                .terminal_inline_panel()
-                                .target
-                                .is_some_and(|(id, _)| id == *pane_id),
-                        |pane_frame| pane_frame.child(self.ai.inline_panel.clone()),
-                    )
-                    .when(
-                        self.search
-                            .panes
-                            .get(pane_id)
-                            .is_some_and(|search| search.visible || search.exiting),
-                        |frame| frame.child(self.render_search_bar(*pane_id, cx)),
-                    )
-                    .into_any_element()
-            }
-            PaneNode::Group {
-                id,
-                direction,
-                children,
-            } => {
-                let sizes = node.split_sizes();
-                let extent = Rc::new(Cell::new(1.0_f32));
-                let mut group = div()
-                    .id(("workspace-pane-group", id.0))
-                    .size_full()
-                    .flex()
-                    .overflow_hidden();
-                group = match direction {
-                    SplitDirection::Horizontal => group.flex_row(),
-                    SplitDirection::Vertical => group.flex_col(),
+                    String::new()
                 };
-
-                for (index, child) in children.iter().enumerate() {
-                    let basis = relative(sizes.get(index).copied().unwrap_or(0.0) / 100.0);
-                    group = group.child(
-                        div()
-                            .flex_none()
-                            .flex_basis(basis)
-                            .flex_shrink_1()
-                            .relative()
-                            .min_w_0()
-                            .min_h_0()
-                            .overflow_hidden()
-                            .child(
-                                div()
-                                    .absolute()
-                                    .top_0()
-                                    .left_0()
-                                    .right_0()
-                                    .bottom_0()
-                                    .child(self.render_pane_tree_for_tab(
-                                        tab_id,
-                                        &child.node,
-                                        window,
-                                        cx,
-                                    )),
-                            ),
-                    );
-                    if index + 1 < children.len() {
-                        let group_id = *id;
-                        let direction = *direction;
-                        let start_sizes = sizes.clone();
-                        let drag_extent = extent.clone();
-                        let active_drag = self.split_drag.as_ref().is_some_and(|drag| {
-                            drag.tab_id == tab_id
-                                && drag.group_id == group_id
-                                && drag.handle_index == index
-                                && drag.direction == direction
-                        });
-                        let handle_bg = if active_drag {
-                            rgba((self.tokens.ui.accent << 8) | SPLIT_HANDLE_ACTIVE_BG_ALPHA)
-                        } else {
-                            rgba(0x00000000)
-                        };
-                        let line_color = if active_drag {
-                            rgba((self.tokens.ui.accent << 8) | SPLIT_HANDLE_ACTIVE_LINE_ALPHA)
-                        } else {
-                            self.workspace_divider_color(
-                                self.tokens.ui.divider,
-                                SPLIT_HANDLE_LINE_ALPHA,
-                            )
-                        };
-                        let line_width = if active_drag {
-                            SPLIT_HANDLE_ACTIVE_LINE_WIDTH
-                        } else {
-                            SPLIT_HANDLE_LINE_WIDTH
-                        };
-                        let highlighted_line_width = if active_drag {
-                            SPLIT_HANDLE_ACTIVE_LINE_WIDTH
-                        } else {
-                            SPLIT_HANDLE_HOVER_LINE_WIDTH
-                        };
-                        let highlighted_line_alpha = if active_drag {
-                            SPLIT_HANDLE_ACTIVE_LINE_ALPHA
-                        } else {
-                            SPLIT_HANDLE_HOVER_LINE_ALPHA
-                        };
-                        let highlighted_line_color =
-                            rgba((self.tokens.ui.accent << 8) | highlighted_line_alpha);
-                        let split_handle_size = self.tokens.metrics.split_handle_size;
-                        let handle_group = SharedString::from(format!(
-                            "workspace-split-handle-{}-{index}",
-                            group_id.0
-                        ));
-                        // The full handle remains easy to acquire while only the
-                        // centered visual line grows on hover and during drag.
-                        let line = div()
-                            .absolute()
-                            .bg(line_color)
-                            .when(direction == SplitDirection::Horizontal, |line| {
-                                line.top_0()
-                                    .bottom_0()
-                                    .left(px((split_handle_size - line_width) / 2.0))
-                                    .w(px(line_width))
-                            })
-                            .when(direction == SplitDirection::Vertical, |line| {
-                                line.left_0()
-                                    .right_0()
-                                    .top(px((split_handle_size - line_width) / 2.0))
-                                    .h(px(line_width))
-                            })
-                            .group_hover(handle_group.clone(), move |style| {
-                                let style = style.bg(highlighted_line_color);
-                                match direction {
-                                    SplitDirection::Horizontal => style
-                                        .left(
-                                            px((split_handle_size - highlighted_line_width) / 2.0),
-                                        )
-                                        .w(px(highlighted_line_width)),
-                                    SplitDirection::Vertical => style
-                                        .top(px((split_handle_size - highlighted_line_width) / 2.0))
-                                        .h(px(highlighted_line_width)),
-                                }
-                            });
-                        let mut handle = div()
-                            .flex_none()
-                            .relative()
-                            .group(handle_group)
-                            .bg(handle_bg)
-                            .hover({
-                                let accent = self.tokens.ui.accent;
-                                let hover_bg_alpha = if active_drag {
-                                    SPLIT_HANDLE_ACTIVE_BG_ALPHA
-                                } else {
-                                    SPLIT_HANDLE_HOVER_BG_ALPHA
-                                };
-                                move |style| style.bg(rgba((accent << 8) | hover_bg_alpha))
-                            })
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
-                                    if event.click_count >= 2 {
-                                        this.reset_split_group_sizes(tab_id, group_id, cx);
-                                        return;
-                                    }
-                                    this.start_split_drag(
-                                        tab_id,
-                                        group_id,
-                                        index,
-                                        direction,
-                                        &start_sizes,
-                                        drag_extent.get(),
-                                        event,
-                                        cx,
-                                    );
-                                }),
-                            )
-                            .child(line);
-                        handle = match direction {
-                            SplitDirection::Horizontal => handle
-                                .w(px(self.tokens.metrics.split_handle_size))
-                                .h_full()
-                                .cursor(CursorStyle::ResizeColumn),
-                            SplitDirection::Vertical => handle
-                                .h(px(self.tokens.metrics.split_handle_size))
-                                .w_full()
-                                .cursor(CursorStyle::ResizeRow),
-                        };
-                        group = group.child(handle);
-                    }
+                if let Some((_, surface)) =
+                    self.ide_workspace.read(cx).shell_surface_for_pane(pane_id)
+                {
+                    return Some(MountedPane {
+                        title,
+                        body: surface.into_any_element(),
+                        capture_focus: true,
+                        toolbar: None,
+                        overlays: Vec::new(),
+                    });
                 }
-
-                let direction = *direction;
-                let handle_extent =
-                    self.tokens.metrics.split_handle_size * children.len().saturating_sub(1) as f32;
-                div()
-                    .size_full()
-                    .child(group)
-                    .on_children_prepainted(move |bounds, _, _| {
-                        if let Some(bounds) = bounds.first() {
-                            extent.set(
-                                f32::from(match direction {
-                                    SplitDirection::Horizontal => bounds.size.width,
-                                    SplitDirection::Vertical => bounds.size.height,
-                                }) - handle_extent,
-                            );
-                        }
-                    })
-                    .into_any_element()
+                let pane = self.tab_host.read(cx).panes().get(&pane_id)?.clone();
+                let toolbar = self
+                    .render_terminal_sync_member_header(pane_id, cx)
+                    .map(|bar| (bar, terminal_command_bar::TERMINAL_SYNC_HEADER_HEIGHT));
+                let mut overlays = Vec::new();
+                let inline = self.ai.state.read(cx).terminal_inline_panel();
+                if inline.open && inline.target.is_some_and(|(id, _)| id == pane_id) {
+                    overlays.push(self.ai.inline_panel.clone().into_any_element())
+                }
+                if self
+                    .search
+                    .panes
+                    .get(&pane_id)
+                    .is_some_and(|search| search.visible || search.exiting)
+                {
+                    overlays.push(self.render_search_bar(pane_id, cx))
+                }
+                Some(MountedPane {
+                    title,
+                    body: pane.into_any_element(),
+                    capture_focus: false,
+                    toolbar,
+                    overlays,
+                })
             }
-        };
-        match (tab_id, node) {
-            (Some(tab), PaneNode::Leaf { pane_id, .. } | PaneNode::Page { pane_id, .. }) => {
-                self.wrap_split_drop_region(tab, Some(*pane_id), content, window, cx)
-            }
-            _ => content,
         }
     }
+    fn pane_request(
+        &mut self,
+        request: ShellPaneRequest,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        match request {
+            ShellPaneRequest::Drop { source, target } => {
+                if self.tab_host.read(cx).is_detached(source) {
+                    self.return_detached_tab_to_main(source, window, cx);
+                }
+                let (direction, before) = target.edge.placement();
+                return self.combine_tabs_at(
+                    source,
+                    target.tab,
+                    target.pane,
+                    direction,
+                    before,
+                    window,
+                    cx,
+                );
+            }
+            ShellPaneRequest::StartResize(drag) => {
+                self.split_drag = Some(drag);
+                cx.notify()
+            }
+            ShellPaneRequest::Reset(tab, group) => {
+                if self
+                    .tab_host
+                    .update(cx, |host, _| host.reset_group_sizes(Some(tab), group))
+                {
+                    cx.notify()
+                }
+            }
+            ShellPaneRequest::Resize(tab, group, sizes) => {
+                if self.tab_host.update(cx, |host, _| {
+                    host.update_group_sizes(Some(tab), group, &sizes)
+                }) {
+                    cx.notify()
+                }
+            }
+            ShellPaneRequest::Swap(tab, source, target) => {
+                if self
+                    .tab_host
+                    .update(cx, |host, _| host.swap_panes(tab, source, target))
+                {
+                    cx.notify()
+                }
+            }
+            ShellPaneRequest::ToggleZoom(tab, pane) => {
+                self.toggle_terminal_pane_zoom(tab, pane, window, cx)
+            }
+            ShellPaneRequest::MoveOut(_, _, PaneContent::Page(page), detach) => {
+                self.move_workspace_page_out(page, detach, window, cx)
+            }
+            ShellPaneRequest::MoveOut(tab, pane, _, detach) => {
+                self.move_terminal_pane_out(tab, pane, detach, window, cx)
+            }
+            ShellPaneRequest::ClosePane(_, _, PaneContent::Page(page)) => {
+                self.request_close_tab_by_id(page, window, cx)
+            }
+            ShellPaneRequest::ClosePane(tab, pane, _) => {
+                self.request_close_terminal_pane(tab, pane, window, cx)
+            }
+            ShellPaneRequest::Focus(container, pane_id, PaneContent::Page(page_id)) => {
+                let previous = self.tab_host.read(cx).focused_page_id(container);
+                if previous != page_id {
+                    self.release_remote_desktop_inputs_for_tab(previous, cx);
+                }
+                if self
+                    .tab_host
+                    .update(cx, |host, _| host.set_active_pane(Some(container), pane_id))
+                {
+                    self.blur_text_inputs(cx);
+                    if !self.tab_host.read(cx).is_detached(container) {
+                        self.sync_active_tab_surface(cx);
+                    }
+                }
+                cx.notify();
+            }
+            ShellPaneRequest::Focus(tab, pane_id, PaneContent::Terminal(_))
+                if self
+                    .ide_workspace
+                    .read(cx)
+                    .shell_surface_for_pane(pane_id)
+                    .is_some() =>
+            {
+                let changed = self
+                    .tab_host
+                    .update(cx, |host, _| host.set_active_pane(Some(tab), pane_id));
+                if changed {
+                    self.blur_text_inputs(cx);
+                    if !self.tab_host.read(cx).is_outside_main_window(tab) {
+                        self.sync_active_tab_surface(cx);
+                    }
+                }
+                cx.notify();
+            }
+            ShellPaneRequest::Focus(tab_id, pane_id, PaneContent::Terminal(_)) => {
+                // Release logical input ownership before focusing the native pane.
+                self.blur_text_inputs(cx);
+                self.release_remote_desktop_inputs_for_tab(tab_id, cx);
+                self.tab_host.update(cx, |tab_host, _| {
+                    tab_host.set_active_pane(Some(tab_id), pane_id);
+                });
+                if !self.tab_host.read(cx).is_outside_main_window(tab_id) {
+                    self.set_main_window_active_tab(Some(tab_id), cx);
+                }
+                if !self.tab_host.read(cx).is_detached(tab_id) {
+                    self.sync_active_tab_surface(cx);
+                    self.sync_active_terminal_metadata_context(cx);
+                    self.sync_active_terminal_recording_elapsed_tick(cx);
+                    self.sync_active_privilege_prompt_inline_hint(cx);
+                } else {
+                    self.remember_ssh_terminal_pane(pane_id, cx);
+                }
+                if let Some(pane) = self.tab_host.read(cx).panes().get(&pane_id).cloned() {
+                    pane.update(cx, |pane, cx| pane.focus(window, cx));
+                }
+                cx.notify();
+            }
+        }
+        true
+    }
 }
-
 fn x11_forwarding_notice(
     status: oxideterm_ssh::X11ForwardingStatus,
     i18n: &I18n,

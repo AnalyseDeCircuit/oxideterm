@@ -7,8 +7,7 @@ pub(crate) use oxideterm_gpui_ui::virtual_list::{
 };
 
 pub(crate) use oxideterm_gpui_ui::virtual_list::{
-    TauriVirtualScrollAlign, browser_drag_edge_scroll_step, scroll_tauri_virtual_list_to_index,
-    tauri_virtual_uniform_list,
+    TauriVirtualScrollAlign, scroll_tauri_virtual_list_to_index, tauri_virtual_uniform_list,
 };
 
 #[allow(dead_code)]
@@ -33,6 +32,7 @@ pub(super) fn sync_tauri_virtual_list_state_by_signatures(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use oxideterm_gpui_ui::virtual_list::browser_drag_edge_scroll_step;
 
     #[test]
     fn nearest_virtual_scroll_strategy_matches_browser_edges() {

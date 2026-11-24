@@ -1,9 +1,11 @@
 //! Platform-independent workspace chrome. Hosts provide feature content and own
-//! window services; the shell owns frame layout, activity rails and drawer geometry.
+//! window services; the shell owns frame layout, activity rails, tabs and split panes.
 mod assets;
 mod frame;
 mod host;
+pub mod panes;
 mod rails;
+pub mod tabs;
 pub mod zen;
 
 pub use assets::PortableAssets;

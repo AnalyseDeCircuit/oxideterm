@@ -1,6 +1,7 @@
 use std::fmt;
 
 mod command_palette;
+#[cfg(feature = "delivery")]
 pub mod delivery;
 pub mod session_retention;
 

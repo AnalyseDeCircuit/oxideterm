@@ -165,6 +165,10 @@ impl Render for DetachedTabWindow {
                     if session.app_lock.locked {
                         return false;
                     }
+                    if session.tab_host.read(cx).detached_close_dialog() == Some(detached.tab_id) {
+                        session.handle_tab_close_confirm_key(event, window, cx);
+                        return true;
+                    }
                     if session
                         .tab_host
                         .read(cx)
@@ -370,7 +374,7 @@ impl Render for DetachedTabWindow {
                         .is_some_and(|drag| drag.tab_id == tab_id),
                 |root| {
                     root.child(self.session.update(cx, |workspace, cx| {
-                        workspace.render_tab_drag_capture(Some(tab_id), cx)
+                        workspace.render_detached_tab_drag_capture(tab_id, cx)
                     }))
                 },
             )

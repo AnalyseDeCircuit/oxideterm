@@ -100,7 +100,7 @@ impl WorkspaceApp {
             terminal_cast_seekbar_dragging: self.terminal.read(cx).cast_seek_dragging(),
             text_selection_dragging: self.ime_drag_selection.is_some(),
             sftp_file_dragging: sftp.has_drag_capture(),
-            tab_dragging: self.main_window_tabs.drag.is_some(),
+            tab_dragging: self.main_window_tabs.read(cx).state.drag.is_some(),
         })
     }
 }

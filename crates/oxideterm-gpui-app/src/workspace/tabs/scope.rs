@@ -76,10 +76,14 @@ impl WorkspaceApp {
             host.switch_scope(scope)
         });
         self.apply_main_window_active_tab_change(previous, self.active_tab_id(cx), cx);
-        self.main_window_tabs
-            .scroll_handle
-            .set_offset(Point::new(px(0.0), px(0.0)));
-        self.main_window_tabs.drag = None;
+        self.main_window_tabs.update(cx, |strip, cx| {
+            strip
+                .state
+                .scroll_handle
+                .set_offset(Point::new(px(0.), px(0.)));
+            strip.state.drag = None;
+            cx.notify()
+        });
         self.sync_active_tab_surface(cx);
         self.focus_active_tab_keyboard_owner(window, cx);
         self.reveal_active_tab(window, cx);

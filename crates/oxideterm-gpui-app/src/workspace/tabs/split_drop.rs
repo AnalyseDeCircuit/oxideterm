@@ -1,74 +1,10 @@
 use super::*;
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(in crate::workspace) enum SplitDropEdge {
-    Left,
-    Right,
-    Top,
-    Bottom,
-}
-
-impl SplitDropEdge {
-    fn placement(self) -> (SplitDirection, bool) {
-        match self {
-            Self::Left => (SplitDirection::Horizontal, true),
-            Self::Right => (SplitDirection::Horizontal, false),
-            Self::Top => (SplitDirection::Vertical, true),
-            Self::Bottom => (SplitDirection::Vertical, false),
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-pub(in crate::workspace) struct SplitDropRegion {
-    tab: TabId,
-    pane: Option<PaneId>,
-    bounds: Bounds<Pixels>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(in crate::workspace) struct SplitDropTarget {
-    tab: TabId,
-    pane: Option<PaneId>,
-    edge: SplitDropEdge,
-    bounds: Bounds<Pixels>,
-}
-
-fn drop_edge(bounds: Bounds<Pixels>, point: Point<Pixels>) -> Option<SplitDropEdge> {
-    if !bounds.contains(&point) || bounds.size.width <= px(0.0) || bounds.size.height <= px(0.0) {
-        return None;
-    }
-    let x = f32::from(point.x - bounds.origin.x) / f32::from(bounds.size.width);
-    let y = f32::from(point.y - bounds.origin.y) / f32::from(bounds.size.height);
-    [
-        (x, SplitDropEdge::Left),
-        (1.0 - x, SplitDropEdge::Right),
-        (y, SplitDropEdge::Top),
-        (1.0 - y, SplitDropEdge::Bottom),
-    ]
-    .into_iter()
-    .filter(|(distance, _)| *distance <= 0.25)
-    .min_by(|a, b| a.0.total_cmp(&b.0))
-    .map(|(_, edge)| edge)
-}
-
-fn preview_bounds(mut bounds: Bounds<Pixels>, edge: SplitDropEdge) -> Bounds<Pixels> {
-    match edge {
-        SplitDropEdge::Left | SplitDropEdge::Right => {
-            bounds.size.width /= 2.0;
-            if edge == SplitDropEdge::Right {
-                bounds.origin.x += bounds.size.width;
-            }
-        }
-        SplitDropEdge::Top | SplitDropEdge::Bottom => {
-            bounds.size.height /= 2.0;
-            if edge == SplitDropEdge::Bottom {
-                bounds.origin.y += bounds.size.height;
-            }
-        }
-    }
-    bounds
-}
+use oxideterm_gpui_shell::panes::{
+    PaneHost, ShellPaneRequest, measure_drop_region, split_drop_target,
+};
+#[cfg(test)]
+use oxideterm_gpui_shell::panes::{SplitDropEdge, drop_edge, preview_bounds};
+pub(in crate::workspace) use oxideterm_gpui_shell::panes::{SplitDropRegion, SplitDropTarget};
 
 impl WorkspaceApp {
     pub(in crate::workspace) fn wrap_split_drop_region(
@@ -87,28 +23,14 @@ impl WorkspaceApp {
         }
         let regions = self.split_drop_regions.clone();
         let owner = cx.entity().downgrade();
-        div()
-            .size_full()
-            .child(content)
-            .on_children_prepainted(move |bounds, window, cx| {
-                if let Some(bounds) = bounds.first() {
-                    // Native windows report pointer positions locally; drop regions use screen coordinates.
-                    regions.borrow_mut().push(SplitDropRegion {
-                        tab,
-                        pane,
-                        bounds: Bounds::new(bounds.origin + window.bounds().origin, bounds.size),
-                    });
-                    if pane.is_none() {
-                        // The content wrapper runs after every leaf; partial geometry must not clear a valid preview.
-                        let _ = owner.update(cx, |workspace, cx| {
-                            workspace.refresh_split_drop_after_layout(window, cx)
-                        });
-                    }
-                }
-            })
-            .into_any_element()
+        measure_drop_region(tab, pane, content, regions, move |window, cx| {
+            if pane.is_none() {
+                let _ = owner.update(cx, |host, cx| {
+                    host.refresh_split_drop_after_layout(window, cx)
+                });
+            }
+        })
     }
-
     fn tab_drop_target(
         &self,
         source: TabId,
@@ -123,34 +45,19 @@ impl WorkspaceApp {
         }) {
             return None;
         }
-        let host = self.tab_host.read(cx);
-        self.split_drop_regions.borrow().iter().find_map(|region| {
-            if !host.can_receive_tab_drop(source, region.tab) {
-                return None;
-            }
-            let tab = host.tab_by_id(region.tab)?;
-            if region.pane.is_none() && tab.root_pane.is_some() {
-                return None;
-            }
-            if region.pane.is_some_and(|pane| {
-                tab.root_pane
-                    .as_ref()
-                    .is_none_or(|root| !root.contains_pane(pane))
-            }) {
-                return None;
-            }
-            Some(SplitDropTarget {
-                tab: region.tab,
-                pane: region.pane,
-                edge: drop_edge(region.bounds, point)?,
-                bounds: region.bounds,
-            })
-        })
+        split_drop_target(
+            self.tab_host.read(cx),
+            &self.split_drop_regions.borrow(),
+            source,
+            point,
+        )
     }
 
     fn refresh_split_drop_after_layout(&mut self, window: &Window, cx: &mut Context<Self>) {
         let source = self
             .main_window_tabs
+            .read(cx)
+            .state
             .drag
             .as_ref()
             .filter(|drag| drag.active)
@@ -181,9 +88,16 @@ impl WorkspaceApp {
         });
         let mut changed = self.split_drop_target != next;
         self.split_drop_target = next;
-        if over_content && let Some(drag) = self.main_window_tabs.drag.as_mut() {
-            changed |= drag.mode != TabDragMode::Content;
-            drag.mode = TabDragMode::Content;
+        if over_content {
+            self.main_window_tabs.update(cx, |strip, cx| {
+                if let Some(drag) = strip.state.drag.as_mut() {
+                    changed |= drag.mode != TabDragMode::Content;
+                    drag.mode = TabDragMode::Content;
+                    if changed {
+                        cx.notify()
+                    }
+                }
+            });
         }
         if changed {
             cx.notify();
@@ -204,7 +118,15 @@ impl WorkspaceApp {
         if over_strip {
             let bounds = self.main_window_tabbar_drop_bounds.unwrap();
             let x = f32::from(point.x - bounds.origin.x)
-                + f32::from(-self.main_window_tabs.scroll_handle.offset().x);
+                + f32::from(
+                    -self
+                        .main_window_tabs
+                        .read(cx)
+                        .state
+                        .scroll_handle
+                        .offset()
+                        .x,
+                );
             let layout = self.tab_strip_layout(window, cx);
             let hovered = self.main_tabs(cx).find_map(|(_, tab)| {
                 layout
@@ -261,23 +183,17 @@ impl WorkspaceApp {
         let Some(target) = target else {
             return false;
         };
-        if self.tab_host.read(cx).is_detached(source) {
-            self.return_detached_tab_to_main(source, window, cx);
-        }
-        let (direction, before) = target.edge.placement();
-        self.combine_tabs_at(
-            source,
-            target.tab,
-            target.pane,
-            direction,
-            before,
-            window,
-            cx,
-        )
+        self.pane_request(ShellPaneRequest::Drop { source, target }, window, cx)
     }
 
     pub(in crate::workspace) fn cancel_tab_merge_drag(&mut self, cx: &mut Context<Self>) -> bool {
-        let main_drag = self.main_window_tabs.drag.take();
+        let main_drag = self.main_window_tabs.update(cx, |strip, cx| {
+            let drag = strip.state.drag.take();
+            if drag.is_some() {
+                cx.notify()
+            }
+            drag
+        });
         let active = main_drag.is_some() | self.detached_tab_return_drag.take().is_some();
         self.split_drop_target = None;
         if let Some(drag) = main_drag
@@ -293,9 +209,9 @@ impl WorkspaceApp {
         active
     }
 
-    pub(in crate::workspace) fn render_tab_drag_capture(
+    pub(in crate::workspace) fn render_detached_tab_drag_capture(
         &self,
-        detached: Option<TabId>,
+        tab: TabId,
         cx: &Context<Self>,
     ) -> AnyElement {
         // Per-frame capture listeners keep receiving a release outside the source element.
@@ -311,20 +227,13 @@ impl WorkspaceApp {
                     }
                     let handled = move_owner
                         .update(cx, |workspace, cx| {
-                            if let Some(tab) = detached {
-                                if !workspace
-                                    .detached_tab_return_drag
-                                    .is_some_and(|drag| drag.tab_id == tab)
-                                {
-                                    return false;
-                                }
-                                workspace.update_detached_tab_return_drag(tab, event, window, cx);
-                            } else {
-                                if workspace.main_window_tabs.drag.is_none() {
-                                    return false;
-                                }
-                                workspace.update_tab_drag(event, window, cx);
+                            if !workspace
+                                .detached_tab_return_drag
+                                .is_some_and(|drag| drag.tab_id == tab)
+                            {
+                                return false;
                             }
+                            workspace.update_detached_tab_return_drag(tab, event, window, cx);
                             true
                         })
                         .unwrap_or(false);
@@ -339,20 +248,13 @@ impl WorkspaceApp {
                     }
                     let handled = up_owner
                         .update(cx, |workspace, cx| {
-                            if let Some(tab) = detached {
-                                if !workspace
-                                    .detached_tab_return_drag
-                                    .is_some_and(|drag| drag.tab_id == tab)
-                                {
-                                    return false;
-                                }
-                                workspace.finish_detached_tab_return_drag(tab, event, window, cx);
-                            } else {
-                                if workspace.main_window_tabs.drag.is_none() {
-                                    return false;
-                                }
-                                workspace.finish_tab_drag(event, window, cx);
+                            if !workspace
+                                .detached_tab_return_drag
+                                .is_some_and(|drag| drag.tab_id == tab)
+                            {
+                                return false;
                             }
+                            workspace.finish_detached_tab_return_drag(tab, event, window, cx);
                             true
                         })
                         .unwrap_or(false);
@@ -371,22 +273,7 @@ impl WorkspaceApp {
         &self,
         window: &Window,
     ) -> Option<AnyElement> {
-        let target = self.split_drop_target?;
-        let mut bounds = preview_bounds(target.bounds, target.edge);
-        bounds.origin -= window.bounds().origin;
-        Some(
-            div()
-                .absolute()
-                .left(bounds.origin.x)
-                .top(bounds.origin.y)
-                .w(bounds.size.width)
-                .h(bounds.size.height)
-                .bg(rgba((self.tokens.ui.accent << 8) | 0x30))
-                .border_2()
-                .border_color(rgb(self.tokens.ui.accent))
-                .rounded(px(self.tokens.radii.md))
-                .into_any_element(),
-        )
+        Some(self.split_drop_target?.preview(window, &self.tokens))
     }
 }
 

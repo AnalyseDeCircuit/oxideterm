@@ -156,22 +156,22 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn open_tab_context_menu(
         &mut self,
         tab_id: TabId,
-        event: &MouseDownEvent,
+        position: Point<Pixels>,
         cx: &mut Context<Self>,
     ) {
         if self.onboarding_disclaimer_locked() {
             return;
         }
-        self.main_window_tabs.context_menu = Some(TabContextMenu {
+        self.tab_context_menu = Some(TabContextMenu {
             tab_id,
-            x: f32::from(event.position.x),
-            y: f32::from(event.position.y),
+            x: f32::from(position.x),
+            y: f32::from(position.y),
         });
         cx.notify();
     }
 
     pub(in crate::workspace) fn close_tab_context_menu(&mut self) -> bool {
-        self.main_window_tabs.context_menu.take().is_some()
+        self.tab_context_menu.take().is_some()
     }
 
     /// Resolves the SSH node actions offered by the tab context menu: the node
@@ -925,7 +925,10 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let screen_point = Self::detached_window_screen_point(window, event.position);
-        self.main_window_tabs.drag = None;
+        self.main_window_tabs.update(cx, |strip, cx| {
+            strip.state.drag = None;
+            cx.notify()
+        });
         self.split_drop_target = None;
         self.detached_tab_return_drag = Some(DetachedTabReturnDrag {
             tab_id,
@@ -1144,7 +1147,7 @@ impl WorkspaceApp {
         window: &Window,
         cx: &App,
     ) -> Option<AnyElement> {
-        let drag = self.main_window_tabs.drag.as_ref()?;
+        let drag = self.main_window_tabs.read(cx).state.drag.as_ref()?;
         if !drag.active || drag.mode != TabDragMode::Detach {
             return None;
         }
@@ -1329,7 +1332,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let menu = self.main_window_tabs.context_menu?;
+        let menu = self.tab_context_menu?;
         let renamable = self.tab_by_id(menu.tab_id, cx).is_some_and(|tab| {
             matches!(
                 tab.kind,
@@ -1935,6 +1938,10 @@ impl WorkspaceApp {
         .when_some(entry_handoff, |root, handoff| root.child(handoff))
         // Detached tabs use their own native window root as the modal portal.
         .children(tab_window_modals)
+        .when(
+            self.tab_host.read(cx).detached_close_dialog() == Some(tab_id),
+            |root| root.child(self.render_tab_close_confirm_dialog(cx)),
+        )
         .when(self.mermaid_zoom.is_some(), |root| {
             root.child(self.render_mermaid_zoom_modal(window, cx))
         })

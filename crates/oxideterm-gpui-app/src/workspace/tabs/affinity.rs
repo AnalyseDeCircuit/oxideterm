@@ -12,19 +12,8 @@ pub(in crate::workspace) enum TabAffinity {
     Plugin(String),
 }
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
-pub(in crate::workspace) enum TabScope {
-    #[default]
-    All,
-    Affinity(TabAffinity),
-}
-
-/// Terminal pages retain session IDs when merging removes their original tab descriptors.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(in crate::workspace) enum TabContent {
-    Page(TabId),
-    Terminal(TerminalSessionId),
-}
+use oxideterm_gpui_shell::tabs::TabContent;
+pub(in crate::workspace) type TabScope = oxideterm_gpui_shell::tabs::TabScope<TabAffinity>;
 
 impl WorkspaceApp {
     pub(in crate::workspace) fn tab_affinities(&self, tab_id: TabId, cx: &App) -> Vec<TabAffinity> {

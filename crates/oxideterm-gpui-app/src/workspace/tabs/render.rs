@@ -3,6 +3,10 @@ use super::helpers::{
     effective_shortcut_label, welcome_layout_is_compact, welcome_recent_connections,
 };
 use super::*;
+use oxideterm_gpui_shell::tabs::{
+    geometry::{TabStripItemKind, TabStripState},
+    strip::{TabStripFrame, TabVisual},
+};
 
 use gpui::StatefulInteractiveElement;
 
@@ -110,15 +114,17 @@ impl WorkspaceApp {
 
     pub(super) fn tab_reconnect_controls_width(
         &self,
+        state: &TabStripState,
         job: &ReconnectProgress,
         window: &Window,
     ) -> f32 {
         let phases_width =
             TAB_RECONNECT_PHASES.len() as f32 * 4.0 + (TAB_RECONNECT_PHASES.len() - 1) as f32 * 2.0;
         12.0 + phases_width
-            + self.tab_text_width(
+            + state.text_width(
                 &tab_reconnect_phase_text(job),
                 self.tokens.metrics.ui_text_2xs,
+                settings_ui_font_family(&self.settings_store.settings().appearance.ui_font_family),
                 window,
             )
             + self.tokens.metrics.tab_close_button_size
@@ -148,338 +154,129 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(in crate::workspace) fn render_tab_bar(
+    pub(in crate::workspace) fn tab_strip_frame(
         &mut self,
+        state: &TabStripState,
         window: &Window,
         cx: &mut Context<Self>,
-    ) -> AnyElement {
+    ) -> TabStripFrame {
+        let layout = self.measure_tab_strip(state, window, cx);
+        let active = self.active_tab_id(cx);
         let theme = self.tokens.ui;
-        let has_window_background = self.window_background_preferences().is_some();
-        let strip_bg = theme.shell_bg();
-        let bar = div()
-            .when(self.settings_store.settings().sidebar_ui.zen_mode, |bar| {
-                bar.ml(px(self.tabbar_left_x(window)))
-            })
-            .h(px(self.tokens.metrics.tabbar_height))
-            .flex()
-            .flex_row()
-            .items_center()
-            .relative()
-            .overflow_hidden()
-            .border_b_1()
-            .border_color(self.workspace_chrome_divider())
-            .bg(self.workspace_chrome_background(strip_bg));
-
-        // Tauri's scroll container measures the full inline-flex tab row as
-        // scrollWidth. GPUI's ScrollHandle computes max_offset from direct
-        // child bounds, so tab items must stay direct children of this viewport.
-        // Keep overflow hidden instead of overflow_x_scroll: the custom wheel
-        // adapter owns browser-style scrollLeft clamping, while track_scroll
-        // still measures and applies the offset without GPUI boundary overscroll.
-        let mut scroll_viewport = div()
-            .id("workspace-tab-scroll-viewport")
-            .debug_selector(|| "workspace-tab-scroll-viewport".into())
-            .h_full()
-            .flex_1()
-            .min_w(px(0.0))
-            .relative()
-            .flex()
-            .flex_row()
-            .items_center()
-            .pl(px(self.tokens.metrics.tabbar_leading_offset))
-            .overflow_hidden()
-            .track_scroll(&self.main_window_tabs.scroll_handle)
-            .on_scroll(cx.listener(|this, event: &ScrollEvent, window, cx| {
-                this.handle_tabbar_scroll(event, window, cx);
-            }));
-
-        let tabs_with_unread_terminal_output =
-            self.tab_host.read(cx).unread_terminal_output_tab_ids();
-        let tabs_with_bell_highlight = self.tab_host.read(cx).bell_highlighted_tab_ids();
-        let active_tab_id = self.active_tab_id(cx);
-        let layout = self.tab_strip_layout(window, cx);
-        self.scroll_reordering_tab(&layout, window, cx);
-        if !self.main_window_tabs.exiting_tabs.is_empty() {
-            window.request_animation_frame();
-        }
-        let live_tab_count = self.main_tabs(cx).count();
-        let insertion_slot = self.main_window_tabs.drag.as_ref().and_then(|drag| {
-            (drag.mode == TabDragMode::Reorder
-                && super::navigation::tab_reorder_target_visible_index(
-                    drag.from_index,
-                    drag.drop_target_index,
-                ) != drag.from_index)
-                .then_some(drag.drop_target_index)
-        });
-        let mut visible_tab_index = 0;
-        for item in layout.items {
-            if let TabStripItemKind::Exiting(index) = item.kind {
-                let exiting = &self.main_window_tabs.exiting_tabs[index];
-                scroll_viewport =
-                    scroll_viewport.child(self.render_exiting_tab_visual(exiting, item.width, cx));
-                continue;
-            }
-            let Some(tab) = self.tab_by_id(item.tab_id, cx) else {
-                continue;
-            };
-            let tab_id = tab.id;
-            let tab_width = item.width;
-            let tab_text = self.tab_display_title(tab);
-            if item.kind == TabStripItemKind::Returning {
-                scroll_viewport =
-                    scroll_viewport.child(self.render_detached_return_tab_placeholder(
-                        tab_id, &tab.kind, &tab_text, tab_width, cx,
-                    ));
-                continue;
-            }
-            let tab_index = self.tab_index_by_id(tab_id, cx).unwrap();
-            let reconnect_node_id = self.reconnect_node_id_for_tab(tab, cx);
-            let reconnect_job = reconnect_node_id.as_ref().and_then(|node_id| {
-                self.workspace_runtime
-                    .read(cx)
-                    .reconnect_active_progress(node_id)
-            });
-            let current_visible_index = visible_tab_index;
-            visible_tab_index += 1;
-            let active = Some(tab_id) == active_tab_id;
-            let has_unread_terminal_output = tabs_with_unread_terminal_output.contains(&tab_id);
-            let has_bell_highlight = tabs_with_bell_highlight.contains(&tab_id);
-            let drag_state = self.main_window_tabs.drag.as_ref();
-            let drag_active = drag_state.is_some_and(|drag| drag.active);
-            let is_being_dragged = drag_state.is_some_and(|drag| drag.tab_id == tab_id);
-            let after_last = insertion_slot == Some(live_tab_count)
-                && current_visible_index + 1 == live_tab_count;
-            let show_reconnect_progress = reconnect_job.is_some();
-            let hide_close_button = show_reconnect_progress
-                || (tab.kind == TabKind::Onboarding && self.onboarding_disclaimer_locked());
-            let tab_tooltip_label = tab_text.clone();
-            let tab_tooltip_id = format!("workspace-tab-title-{}", tab_id.0);
-            let middle_click_tooltip_id = tab_tooltip_id.clone();
-            let close_button_tooltip_id = tab_tooltip_id.clone();
-            let tab_text_color = if active {
-                rgb(theme.text)
-            } else if has_bell_highlight {
-                rgb(theme.warning)
-            } else if has_unread_terminal_output {
-                rgb(theme.success)
-            } else {
-                rgb(theme.text_muted)
-            };
-            let tab_element = div()
-                .id(("workspace-tab", tab_id.0))
-                .debug_selector(move || format!("workspace-tab-{}", tab_id.0))
-                .h_full()
-                .flex_none()
-                .w(px(tab_width))
-                .px(px(self.tokens.metrics.tab_padding_x))
-                .relative()
-                .flex()
-                .flex_row()
-                .items_center()
-                .gap(px(self.tokens.metrics.tab_gap))
-                .border_r_1()
-                .border_color(if show_reconnect_progress {
-                    rgb(theme.warning)
-                } else {
-                    self.workspace_chrome_divider()
-                })
-                .bg(self.workspace_tab_background(active))
-                .when(!active, |tab| {
-                    tab.hover(|style| style.bg(rgb(theme.bg_hover)))
-                })
-                .text_color(tab_text_color)
-                .opacity(if is_being_dragged && drag_active {
-                    0.5
-                } else {
-                    1.0
-                })
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                        this.start_tab_drag_candidate(tab_id, tab_index, event, window, cx);
-                        cx.stop_propagation();
-                    }),
-                )
-                .on_mouse_down(
-                    MouseButton::Right,
-                    cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
-                        this.open_tab_context_menu(tab_id, event, cx);
-                        cx.stop_propagation();
-                    }),
-                )
-                .on_mouse_down(
-                    MouseButton::Middle,
-                    cx.listener(move |this, _event, window, cx| {
-                        this.clear_workspace_tooltip(&middle_click_tooltip_id, cx);
-                        this.request_close_tab_by_id(tab_id, window, cx);
-                        cx.stop_propagation();
-                    }),
-                )
-                .on_mouse_move(cx.listener({
-                    let tooltip_id = tab_tooltip_id.clone();
-                    move |this, event: &MouseMoveEvent, _window, cx| {
-                        this.queue_workspace_tooltip(
-                            tooltip_id.clone(),
-                            tab_tooltip_label.clone(),
-                            f32::from(event.position.x) + 12.0,
-                            f32::from(event.position.y) + 16.0,
+        let host = self.tab_host.read(cx);
+        let bells = host.bell_highlighted_tab_ids();
+        let unread = host.unread_terminal_output_tab_ids();
+        let locked = self.onboarding_disclaimer_locked();
+        let visuals = layout
+            .items
+            .iter()
+            .map(|item| {
+                if let TabStripItemKind::Exiting(index) = item.kind {
+                    let exit = &state.exiting_tabs[index];
+                    return TabVisual {
+                        title: exit.title.clone(),
+                        icon: self.render_tab_bar_icon(
+                            &exit.kind,
+                            TabVisual::color(&self.tokens, exit.was_active, false, false),
                             cx,
-                        );
-                    }
-                }))
-                .on_hover(cx.listener(move |this, hovered: &bool, _window, cx| {
-                    if !*hovered {
-                        this.clear_workspace_tooltip(&tab_tooltip_id, cx);
-                    }
-                }))
-                .when(
-                    insertion_slot == Some(current_visible_index) || after_last,
-                    |tab| {
-                        tab.child(
-                            div()
-                                .absolute()
-                                .when_else(after_last, |line| line.right_0(), |line| line.left_0())
-                                .top_0()
-                                .bottom_0()
-                                .w(px(2.0))
-                                .bg(rgb(theme.accent)),
-                        )
-                    },
-                )
-                .when(active || show_reconnect_progress, |tab| {
-                    tab.child(
-                        div()
-                            .absolute()
-                            .top_0()
-                            .left_0()
-                            .right_0()
-                            .h(px(self.tokens.metrics.tab_active_accent_height))
-                            .bg(rgb(if show_reconnect_progress {
-                                theme.warning
-                            } else {
-                                theme.accent
-                            })),
-                    )
-                })
-                .child(self.render_tab_bar_icon(&tab.kind, tab_text_color, cx))
-                .child(
-                    div()
-                        .id(("workspace-tab-title", tab_id.0))
-                        .debug_selector(move || format!("workspace-tab-title-{}", tab_id.0))
-                        .flex_1()
-                        .whitespace_nowrap()
-                        .text_size(px(self.tokens.metrics.tab_font_size))
-                        .child(tab_text),
-                )
-                .when(has_bell_highlight && !active, |tab| {
-                    tab.child(
-                        div()
-                            .size(px(6.0))
-                            .rounded_full()
-                            .bg(rgb(theme.warning))
-                            .flex_shrink_0(),
-                    )
-                })
-                .when_some(
-                    reconnect_job.zip(reconnect_node_id),
-                    |tab, (job, node_id)| {
-                        tab.child(self.render_tab_reconnect_indicator(&job, node_id, cx))
-                    },
-                )
-                .when(!hide_close_button, |tab| {
-                    tab.child(
-                        div()
-                            .size(px(self.tokens.metrics.tab_close_button_size))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .rounded(px(self.tokens.radii.sm))
-                            .cursor_pointer()
-                            .text_color(rgb(theme.text_muted))
-                            .child(Self::render_lucide_icon(
-                                LucideIcon::X,
-                                self.tokens.metrics.tab_close_icon_size,
-                                rgb(theme.text_muted),
-                            ))
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(move |this, _event, window, cx| {
-                                    this.clear_workspace_tooltip(&close_button_tooltip_id, cx);
-                                    this.set_active_tab(tab_id, window, cx);
-                                    this.request_close_active_tab(window, cx);
-                                    cx.stop_propagation();
-                                }),
-                            ),
-                    )
-                });
-            scroll_viewport = scroll_viewport.child(oxideterm_gpui_ui::motion::slide_fade_in_x(
-                &self.tokens,
-                ("workspace-tab-open", tab_id.0),
-                div()
-                    .w(px(tab_width))
-                    .h_full()
-                    .flex_none()
-                    .child(tab_element),
-                -12.0,
-                oxideterm_gpui_ui::motion::MotionDuration::Control,
-            ));
-        }
-
-        // Only the trailing filler is draggable. Do not mark the tabbar parent
-        // or scroll viewport as WindowControlArea::Drag; those elements contain
-        // interactive tabs and close buttons that must keep receiving normal
-        // GPUI mouse events.
-        scroll_viewport = scroll_viewport
-            .child(self.render_window_drag_region("workspace-tabbar-drag-region", cx));
-
-        let bar = bar
-            .child(scroll_viewport)
-            .child(self.render_tabbar_scrollbar(window, cx))
-            .when(self.settings_store.settings().sidebar_ui.zen_mode, |bar| {
-                let label = self.i18n.t("zen_mode.exit");
-                let shortcut = effective_shortcut_label(
-                    "app.zenMode",
-                    &self.settings_store.settings().keybindings.overrides,
-                );
-                let tokens = self.tokens;
-                let workspace = cx.entity().downgrade();
-                bar.child(
-                    oxideterm_gpui_ui::button::icon_button(
-                        &tokens,
-                        Self::render_lucide_icon(
-                            LucideIcon::Eye,
-                            tokens.metrics.sidebar_action_icon_size,
-                            rgb(theme.text_muted),
                         ),
-                        oxideterm_gpui_ui::IconButtonOptions::compact(self.zen_exit_tabbar_width()),
-                    )
-                    .id("zen-exit-tabbar-button")
-                    .debug_selector(|| "zen-exit-tabbar-button".into())
-                    .flex_none()
-                    .role(gpui::Role::Button)
-                    .aria_label(label.clone())
-                    .on_a11y_action(gpui::AccessibleAction::Click, move |_, _, cx| {
-                        let _ = workspace.update(cx, |this, cx| this.toggle_zen_mode(cx));
+                        status: None,
+                        bell: false,
+                        unread: false,
+                        closeable: false,
+                        draggable: false,
+                        detachable: false,
+                    };
+                }
+                let tab = self
+                    .tab_by_id(item.tab_id, cx)
+                    .expect("measured live or returning tab");
+                let title = self.tab_display_title(tab);
+                let bell = bells.contains(&tab.id);
+                let unread = unread.contains(&tab.id);
+                let color = if item.kind == TabStripItemKind::Returning {
+                    rgba((theme.accent << 8) | 0xcc)
+                } else {
+                    TabVisual::color(&self.tokens, Some(tab.id) == active, bell, unread)
+                };
+                let icon = self.render_tab_bar_icon(&tab.kind, color, cx);
+                let onboarding = tab.kind == TabKind::Onboarding;
+                let status = self
+                    .reconnect_node_id_for_tab(tab, cx)
+                    .and_then(|node| {
+                        self.workspace_runtime
+                            .read(cx)
+                            .reconnect_active_progress(&node)
+                            .map(|job| (node, job))
                     })
-                    .tooltip(move |_, cx| {
-                        oxideterm_gpui_ui::tooltip::tooltip_view(
-                            tokens,
-                            label.clone(),
-                            shortcut.clone(),
-                            cx,
-                        )
-                    })
-                    .on_click(cx.listener(|this, _, _, cx| this.toggle_zen_mode(cx))),
+                    .map(|(node, job)| self.render_tab_reconnect_indicator(&job, node, cx));
+                TabVisual {
+                    title,
+                    icon,
+                    status,
+                    bell,
+                    unread,
+                    closeable: !onboarding || !locked,
+                    draggable: !locked && !onboarding,
+                    detachable: !onboarding,
+                }
+            })
+            .collect();
+        let zen = self.settings_store.settings().sidebar_ui.zen_mode;
+        let quick_actions = zen.then(|| {
+            let label = self.i18n.t("zen_mode.exit");
+            let shortcut = effective_shortcut_label(
+                "app.zenMode",
+                &self.settings_store.settings().keybindings.overrides,
+            );
+            let tokens = self.tokens;
+            let workspace = cx.entity().downgrade();
+            oxideterm_gpui_ui::button::icon_button(
+                &tokens,
+                Self::render_lucide_icon(
+                    LucideIcon::Eye,
+                    tokens.metrics.sidebar_action_icon_size,
+                    rgb(theme.text_muted),
+                ),
+                oxideterm_gpui_ui::IconButtonOptions::compact(self.zen_exit_tabbar_width()),
+            )
+            .id("zen-exit-tabbar-button")
+            .debug_selector(|| "zen-exit-tabbar-button".into())
+            .flex_none()
+            .role(gpui::Role::Button)
+            .aria_label(label.clone())
+            .on_a11y_action(gpui::AccessibleAction::Click, move |_, _, cx| {
+                let _ = workspace.update(cx, |this, cx| this.toggle_zen_mode(cx));
+            })
+            .tooltip(move |_, cx| {
+                oxideterm_gpui_ui::tooltip::tooltip_view(
+                    tokens,
+                    label.clone(),
+                    shortcut.clone(),
+                    cx,
                 )
             })
-            .into_any_element();
-        if has_window_background {
-            oxideterm_gpui_ui::surface::tab_surface(&self.tokens, bar)
-        } else {
-            bar
+            .on_click(cx.listener(|this, _, _, cx| this.toggle_zen_mode(cx)))
+            .into_any_element()
+        });
+        TabStripFrame {
+            tokens: self.tokens,
+            layout,
+            visuals,
+            active,
+            supports_detach: true,
+            background: self.workspace_chrome_background(theme.shell_bg()),
+            divider: self.workspace_chrome_divider(),
+            active_background: self.workspace_tab_background(true),
+            idle_background: self.workspace_tab_background(false),
+            translucent: self.window_background_preferences().is_some(),
+            leading_margin: if zen { self.tabbar_left_x(window) } else { 0. },
+            filler: Some(self.render_window_drag_region("workspace-tabbar-drag-region", cx)),
+            quick_actions,
+            quick_actions_width: self.zen_exit_tabbar_width(),
+            new_tab_label: (!locked).then(|| self.i18n.t("menu.new_terminal")),
         }
     }
-
     fn workspace_tab_background(&self, active: bool) -> Rgba {
         if !active && self.window_background_preferences().is_some() {
             // The strip owns the idle fill; only the selected tab adds a surface.
@@ -491,271 +288,6 @@ impl WorkspaceApp {
                 self.tokens.ui.shell_bg()
             })
         }
-    }
-
-    fn render_detached_return_tab_placeholder(
-        &self,
-        tab_id: TabId,
-        tab_kind: &TabKind,
-        tab_title: &str,
-        tab_width: f32,
-        cx: &Context<Self>,
-    ) -> AnyElement {
-        let theme = self.tokens.ui;
-        let accent = theme.accent;
-        let placeholder = div()
-            .w_full()
-            .h(px((self.tokens.metrics.tabbar_height - 8.0).max(24.0)))
-            .px(px(self.tokens.metrics.tab_padding_x))
-            .flex()
-            .items_center()
-            .gap(px(self.tokens.metrics.tab_gap))
-            .rounded(px(self.tokens.radii.sm))
-            .border_1()
-            .border_color(rgba((accent << 8) | 0x88))
-            .bg(rgba((accent << 8) | 0x18))
-            .text_color(rgba((theme.text << 8) | 0xcc))
-            .child(self.render_tab_bar_icon(tab_kind, rgba((accent << 8) | 0xcc), cx))
-            .child(
-                div()
-                    .flex_1()
-                    .whitespace_nowrap()
-                    .text_size(px(self.tokens.metrics.tab_font_size))
-                    .child(tab_title.to_string()),
-            )
-            .child(Self::render_lucide_icon(
-                LucideIcon::PanelLeft,
-                self.tokens.metrics.tab_close_icon_size,
-                rgba((accent << 8) | 0xcc),
-            ));
-
-        // The placeholder participates in tab layout, so later tabs move out
-        // of the future slot before the detached window is actually closed.
-        div()
-            .id(("detached-tab-return-placeholder", tab_id.0))
-            .w(px(tab_width))
-            .h_full()
-            .flex_none()
-            .flex()
-            .items_center()
-            .child(placeholder)
-            .into_any_element()
-    }
-
-    fn render_tabbar_scrollbar(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
-        let Some(geometry) = self.tabbar_scrollbar_geometry(window, cx) else {
-            return div().into_any_element();
-        };
-        let scrollbar_dragging = self.main_window_tabs.scrollbar_drag.is_some();
-        let thumb_color = if scrollbar_dragging {
-            rgb(self.tokens.ui.accent)
-        } else if self.main_window_tabs.scrollbar_hovered {
-            rgba((self.tokens.ui.accent << 8) | TABBAR_SCROLLBAR_HOVER_ALPHA)
-        } else {
-            rgba((self.tokens.ui.text_muted << 8) | TABBAR_SCROLLBAR_ALPHA)
-        };
-
-        // The visible thumb stays subtle, while the transparent hit target remains easy to drag.
-        div()
-            .id("workspace-tabbar-thin-scrollbar")
-            .absolute()
-            .left(px(0.0))
-            .right(px(self.zen_exit_tabbar_width()))
-            .bottom_0()
-            .h(px(TABBAR_SCROLLBAR_DRAG_HEIGHT))
-            .cursor(if scrollbar_dragging {
-                CursorStyle::ClosedHand
-            } else {
-                CursorStyle::OpenHand
-            })
-            .on_hover(cx.listener(|this, hovered: &bool, _window, cx| {
-                if this.main_window_tabs.scrollbar_hovered != *hovered {
-                    this.main_window_tabs.scrollbar_hovered = *hovered;
-                    cx.notify();
-                }
-            }))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, event: &MouseDownEvent, window, cx| {
-                    this.start_tabbar_scrollbar_drag(event, window, cx);
-                }),
-            )
-            .child(
-                div()
-                    .absolute()
-                    .left(px(geometry.thumb_left))
-                    .bottom_0()
-                    .w(px(geometry.thumb_width))
-                    .h(px(TABBAR_SCROLLBAR_HEIGHT))
-                    .rounded(px(TABBAR_SCROLLBAR_RADIUS))
-                    .bg(thumb_color),
-            )
-            .into_any_element()
-    }
-
-    fn tabbar_scrollbar_geometry(
-        &self,
-        window: &Window,
-        cx: &App,
-    ) -> Option<TabbarScrollbarGeometry> {
-        let viewport_bounds = self.main_window_tabs.scroll_handle.bounds();
-        let measured_width = f32::from(viewport_bounds.size.width);
-        let viewport_width = if measured_width > 1.0 {
-            measured_width
-        } else {
-            self.tabbar_scroll_viewport_width(window)
-        };
-        let viewport_left = if measured_width > 1.0 {
-            f32::from(viewport_bounds.origin.x)
-        } else {
-            self.tabbar_left_x(window)
-        };
-        calculate_tabbar_scrollbar_geometry(
-            viewport_left,
-            viewport_width,
-            self.tabbar_max_scroll(window, cx),
-            self.tabbar_effective_scroll_x(window, cx),
-        )
-    }
-
-    fn start_tabbar_scrollbar_drag(
-        &mut self,
-        event: &MouseDownEvent,
-        window: &Window,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(geometry) = self.tabbar_scrollbar_geometry(window, cx) else {
-            return;
-        };
-        let pointer_x = f32::from(event.position.x) - geometry.viewport_left;
-        let track_left = TABBAR_SCROLLBAR_HORIZONTAL_INSET;
-        let track_right = track_left + geometry.track_width;
-        let thumb_right = geometry.thumb_left + geometry.thumb_width;
-        let grab_offset_x = if pointer_x >= geometry.thumb_left && pointer_x <= thumb_right {
-            pointer_x - geometry.thumb_left
-        } else {
-            geometry.thumb_width / 2.0
-        };
-        self.main_window_tabs.scrollbar_drag = Some(TabbarScrollbarDragState { grab_offset_x });
-        let thumb_left =
-            (pointer_x - grab_offset_x).clamp(track_left, track_right - geometry.thumb_width);
-        self.set_tabbar_scroll_x(
-            tabbar_scroll_x_for_thumb_left(thumb_left, geometry),
-            window,
-            cx,
-        );
-        cx.notify();
-        cx.stop_propagation();
-    }
-
-    pub(in crate::workspace) fn update_tabbar_scrollbar_drag(
-        &mut self,
-        event: &MouseMoveEvent,
-        window: &Window,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(drag) = self.main_window_tabs.scrollbar_drag else {
-            return;
-        };
-        if !event.dragging() {
-            self.finish_tabbar_scrollbar_drag(cx);
-            return;
-        }
-        let Some(geometry) = self.tabbar_scrollbar_geometry(window, cx) else {
-            self.finish_tabbar_scrollbar_drag(cx);
-            return;
-        };
-        let pointer_x = f32::from(event.position.x) - geometry.viewport_left;
-        let track_left = TABBAR_SCROLLBAR_HORIZONTAL_INSET;
-        let max_thumb_left = track_left + geometry.track_width - geometry.thumb_width;
-        let thumb_left = (pointer_x - drag.grab_offset_x).clamp(track_left, max_thumb_left);
-        self.set_tabbar_scroll_x(
-            tabbar_scroll_x_for_thumb_left(thumb_left, geometry),
-            window,
-            cx,
-        );
-        cx.notify();
-        cx.stop_propagation();
-    }
-
-    pub(in crate::workspace) fn finish_tabbar_scrollbar_drag(&mut self, cx: &mut Context<Self>) {
-        if self.main_window_tabs.scrollbar_drag.take().is_some() {
-            cx.notify();
-        }
-    }
-
-    fn render_exiting_tab_visual(
-        &self,
-        exiting: &ExitingTabVisual,
-        width: f32,
-        cx: &Context<Self>,
-    ) -> AnyElement {
-        let theme = self.tokens.ui;
-        let tab = div()
-            .h_full()
-            .flex_none()
-            .w(px(exiting.width))
-            .relative()
-            .px(px(self.tokens.metrics.tab_padding_x))
-            .flex()
-            .items_center()
-            .gap(px(self.tokens.metrics.tab_gap))
-            .border_r_1()
-            .border_color(self.workspace_chrome_divider())
-            .bg(self.workspace_tab_background(exiting.was_active))
-            .text_color(rgb(if exiting.was_active {
-                theme.text
-            } else {
-                theme.text_muted
-            }))
-            .when(exiting.was_active, |tab| {
-                tab.child(
-                    div()
-                        .absolute()
-                        .top_0()
-                        .left_0()
-                        .right_0()
-                        .h(px(self.tokens.metrics.tab_active_accent_height))
-                        .bg(rgb(theme.accent)),
-                )
-            })
-            .child(self.render_tab_bar_icon(
-                &exiting.kind,
-                rgb(if exiting.was_active {
-                    theme.text
-                } else {
-                    theme.text_muted
-                }),
-                cx,
-            ))
-            .child(
-                div()
-                    .flex_1()
-                    .whitespace_nowrap()
-                    .text_size(px(self.tokens.metrics.tab_font_size))
-                    .child(exiting.title.clone()),
-            )
-            .child(Self::render_lucide_icon(
-                LucideIcon::X,
-                self.tokens.metrics.tab_close_icon_size,
-                rgb(theme.text_muted),
-            ));
-        let visibility =
-            exiting.exit_visibility(cx.background_executor().now(), self.tokens.motion.enabled);
-        let content_opacity = (visibility * 1.45).clamp(0.0, 1.0);
-        // The strip and the clipping viewport consume the same animated width, while
-        // inner text/icons clear earlier so labels never crush against the edge.
-        let tab_id = exiting.tab_id;
-        div()
-            .id(("workspace-tab-exit", exiting.tab_id.0))
-            .debug_selector(move || format!("workspace-tab-exit-{}", tab_id.0))
-            .h_full()
-            .w(px(width))
-            .flex_none()
-            .overflow_hidden()
-            .opacity(visibility)
-            .child(tab.opacity(content_opacity))
-            .into_any_element()
     }
 
     pub(in crate::workspace) fn render_node_disconnect_confirm_dialog(
@@ -809,12 +341,13 @@ impl WorkspaceApp {
         };
         let (title_key, description_key, other_tab_count) = match &snapshot.confirm {
             TabCloseConfirm::ApplicationQuit => ("menu.quit", Some("menu.confirm_quit"), None),
-            TabCloseConfirm::Single { .. } => (
+            TabCloseConfirm::Single { .. } | TabCloseConfirm::SshPane { .. } => (
                 "tabbar.confirm_close_terminal_title",
                 Some("tabbar.confirm_close_terminal_desc"),
                 None,
             ),
-            TabCloseConfirm::LocalChildProcess { .. }
+            TabCloseConfirm::LocalChildPane { .. }
+            | TabCloseConfirm::LocalChildProcess { .. }
             | TabCloseConfirm::LocalChildProcessBatch { .. } => {
                 ("tabbar.child_process_warning", None, None)
             }
@@ -831,7 +364,9 @@ impl WorkspaceApp {
         };
         let is_ssh_confirmation = matches!(
             &snapshot.confirm,
-            TabCloseConfirm::Single { .. } | TabCloseConfirm::Other { .. }
+            TabCloseConfirm::Single { .. }
+                | TabCloseConfirm::SshPane { .. }
+                | TabCloseConfirm::Other { .. }
         );
         let description = if is_ssh_confirmation {
             Some(

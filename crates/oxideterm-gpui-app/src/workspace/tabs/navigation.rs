@@ -9,67 +9,13 @@ fn is_terminal_tab_kind(kind: &TabKind) -> bool {
     )
 }
 
-fn tab_exit_visual_index(live_visual_index: usize, occupied_indices: &[usize]) -> usize {
-    let mut visual_index = live_visual_index;
-    for occupied in occupied_indices {
-        if *occupied <= visual_index {
-            visual_index += 1;
-        }
-    }
-    visual_index
-}
-
-pub(super) const TAB_DRAG_THRESHOLD_PX: f32 = 10.0;
-
-fn tab_drag_is_horizontal_reorder(delta_x: f32, delta_y: f32) -> bool {
-    let horizontal = delta_x.abs();
-    let vertical = delta_y.abs();
-    horizontal > TAB_DRAG_THRESHOLD_PX && horizontal >= vertical
-}
-
-impl TabDragState {
-    fn edge_scroll_step(&self, viewport: Bounds<Pixels>) -> Option<f32> {
-        let pointer = gpui::point(px(self.current_x), px(self.current_y));
-        if self.mode != TabDragMode::Reorder || !viewport.contains(&pointer) {
-            return None;
-        }
-        crate::workspace::virtual_list::browser_drag_edge_scroll_step(
-            viewport.left(),
-            viewport.right(),
-            pointer.x,
-        )
-    }
-}
-
-fn tab_drag_is_detach(delta_x: f32, delta_y: f32, tabbar_height: f32) -> bool {
-    let threshold = (tabbar_height * 0.72).max(24.0);
-    delta_y > threshold && delta_y.abs() >= delta_x.abs() * 0.85
-}
-
-// Pointer hit-testing returns a slot in the pre-removal strip. Moving right
-// must discount the source tab after it is removed from that strip.
-pub(super) fn tab_reorder_target_visible_index(
-    source_visible_index: usize,
-    insertion_slot: usize,
-) -> usize {
-    insertion_slot.saturating_sub(usize::from(source_visible_index < insertion_slot))
-}
-
-fn tabbar_wheel_scroll_delta(delta_x: f32, delta_y: f32) -> f32 {
-    // Minor cross-axis trackpad movement must not override the intended direction.
-    if delta_x.abs() > delta_y.abs() {
-        delta_x
-    } else {
-        delta_y
-    }
-}
-
-// GPUI wheel deltas are applied to negative scroll offsets. The tab bar keeps a
-// browser-like positive scrollLeft value, so advancing the strip subtracts delta.
-fn tabbar_scroll_x_after_wheel(current_scroll_x: f32, wheel_delta: f32, max_scroll: f32) -> f32 {
-    (current_scroll_x - wheel_delta).clamp(0.0, max_scroll)
-}
-
+pub(super) use oxideterm_gpui_shell::tabs::geometry::TAB_DRAG_THRESHOLD_PX;
+use oxideterm_gpui_shell::tabs::geometry::tab_exit_visual_index;
+#[cfg(test)]
+use oxideterm_gpui_shell::tabs::geometry::{
+    tab_drag_is_detach, tab_drag_is_horizontal_reorder, tab_reorder_target_visible_index,
+    tabbar_scroll_x_after_wheel, tabbar_wheel_scroll_delta,
+};
 fn focus_terminal_node_projection(
     node_id: &NodeId,
     active_node_id: &mut Option<NodeId>,
@@ -816,6 +762,42 @@ impl WorkspaceApp {
         })
     }
 
+    pub(in crate::workspace) fn request_close_terminal_pane(
+        &mut self,
+        tab_id: TabId,
+        pane_id: PaneId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self
+            .ide_workspace
+            .read(cx)
+            .shell_surface_for_pane(pane_id)
+            .is_some()
+        {
+            self.close_terminal_pane_in_tab(tab_id, pane_id, window, cx);
+            return;
+        }
+        match self.terminal_kind_for_pane(pane_id, cx) {
+            Some(oxideterm_terminal::TerminalSessionKind::SshPty)
+                if self.ssh_close_confirmation_enabled() =>
+            {
+                self.skip_future_ssh_close_confirmations = false;
+                self.tab_host.update(cx, |host, cx| {
+                    host.open_close_confirm(TabCloseConfirm::SshPane { tab_id, pane_id }, cx)
+                });
+                cx.notify()
+            }
+            Some(oxideterm_terminal::TerminalSessionKind::LocalPty) => self
+                .request_local_terminal_close_check(
+                    LocalTerminalCloseCheck::Pane { tab_id, pane_id },
+                    window,
+                    cx,
+                ),
+            _ => self.close_terminal_pane_in_tab(tab_id, pane_id, window, cx),
+        }
+    }
+
     fn request_local_terminal_close_check(
         &mut self,
         request: LocalTerminalCloseCheck,
@@ -835,7 +817,7 @@ impl WorkspaceApp {
                     root_pane.collect_pane_ids(&mut pane_ids);
                     pane_ids
                 })
-                .filter(|pane_id| seen_panes.insert(*pane_id))
+                .filter(|pane| !matches!(request, LocalTerminalCloseCheck::Pane {pane_id,..} if pane_id != *pane) && seen_panes.insert(*pane))
                 .filter_map(|pane_id| {
                     let pane = tab_host.panes().get(&pane_id)?.read(cx);
                     if pane.session_kind() != oxideterm_terminal::TerminalSessionKind::LocalPty {
@@ -854,6 +836,9 @@ impl WorkspaceApp {
             // Preserve immediate close behavior when the selected tabs do not own a live local
             // terminal pane; there is no process state that needs a background refresh.
             match request {
+                LocalTerminalCloseCheck::Pane { tab_id, pane_id } => {
+                    self.close_terminal_pane_in_tab(tab_id, pane_id, window, cx)
+                }
                 LocalTerminalCloseCheck::Single { tab_id } => {
                     self.close_tab_by_id(tab_id, window, cx);
                 }
@@ -887,6 +872,19 @@ impl WorkspaceApp {
         }
 
         match completion.request {
+            LocalTerminalCloseCheck::Pane { tab_id, pane_id } => {
+                if completion.has_foreground_child {
+                    self.tab_host.update(cx, |host, cx| {
+                        host.open_close_confirm(
+                            TabCloseConfirm::LocalChildPane { tab_id, pane_id },
+                            cx,
+                        )
+                    });
+                    cx.notify()
+                } else {
+                    self.close_terminal_pane_in_tab(tab_id, pane_id, window, cx)
+                }
+            }
             LocalTerminalCloseCheck::Single { tab_id } => {
                 if completion.has_foreground_child {
                     self.tab_host.update(cx, |tab_host, cx| {
@@ -936,7 +934,9 @@ impl WorkspaceApp {
             if self.skip_future_ssh_close_confirmations
                 && matches!(
                     &confirm,
-                    TabCloseConfirm::Single { .. } | TabCloseConfirm::Other { .. }
+                    TabCloseConfirm::Single { .. }
+                        | TabCloseConfirm::SshPane { .. }
+                        | TabCloseConfirm::Other { .. }
                 )
             {
                 self.disable_future_ssh_close_confirmations(cx);
@@ -984,6 +984,10 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         match confirm {
+            TabCloseConfirm::SshPane { tab_id, pane_id }
+            | TabCloseConfirm::LocalChildPane { tab_id, pane_id } => {
+                self.close_terminal_pane_in_tab(tab_id, pane_id, window, cx)
+            }
             TabCloseConfirm::ApplicationQuit => {
                 self.quit_after_confirmation(cx);
             }
@@ -1171,11 +1175,10 @@ impl WorkspaceApp {
         self.apply_tab_mount_cleanup(mount_cleanup, window.as_deref_mut(), cx);
         self.sync_host_tools_lifecycle(false, cx);
         if self
-            .main_window_tabs
-            .context_menu
+            .tab_context_menu
             .is_some_and(|menu| menu.tab_id == tab.id)
         {
-            self.main_window_tabs.context_menu = None;
+            self.tab_context_menu = None;
         }
         if let TabKind::Plugin { plugin_id, tab_id } = &tab.kind {
             self.plugin_entity.update(cx, |plugins, _cx| {
@@ -1304,6 +1307,8 @@ impl WorkspaceApp {
             .position(|(_, candidate)| candidate.id == tab.id)?;
         let mut occupied_indices = self
             .main_window_tabs
+            .read(cx)
+            .state
             .exiting_tabs
             .iter()
             .map(|exiting| exiting.visual_index)
@@ -1328,41 +1333,14 @@ impl WorkspaceApp {
 
     pub(super) fn begin_tab_visual_exit(
         &mut self,
-        mut exiting_visual: ExitingTabVisual,
+        exiting_visual: ExitingTabVisual,
         cx: &mut Context<Self>,
     ) {
-        let delay = exiting_visual.duration;
-        if !self.tokens.motion.enabled || delay.is_zero() {
-            return;
+        if self.tokens.motion.enabled && !exiting_visual.duration.is_zero() {
+            self.main_window_tabs
+                .update(cx, |strip, cx| strip.begin_exit(exiting_visual, cx));
         }
-        let tab_id = exiting_visual.tab_id;
-        exiting_visual.started_at = cx.background_executor().now();
-        let timer = cx.background_executor().timer(delay);
-        self.main_window_tabs.exiting_tabs.push(exiting_visual);
-        cx.spawn(async move |weak, cx| {
-            timer.await;
-            let _ = weak.update(cx, |this, cx| {
-                let Some(position) = this
-                    .main_window_tabs
-                    .exiting_tabs
-                    .iter()
-                    .position(|exiting| exiting.tab_id == tab_id)
-                else {
-                    return;
-                };
-                let removed_index = this.main_window_tabs.exiting_tabs[position].visual_index;
-                this.main_window_tabs.exiting_tabs.remove(position);
-                for exiting in &mut this.main_window_tabs.exiting_tabs {
-                    if exiting.visual_index > removed_index {
-                        exiting.visual_index -= 1;
-                    }
-                }
-                cx.notify();
-            });
-        })
-        .detach();
     }
-
     pub(super) fn close_tabs_for_node(
         &mut self,
         node_id: &NodeId,
@@ -1480,12 +1458,29 @@ impl WorkspaceApp {
         (window_width
             - self.tabbar_left_x(window)
             - context_sidebar_width
-            - self.zen_exit_tabbar_width())
+            - self.zen_exit_tabbar_width()
+            - if self.onboarding_disclaimer_locked() {
+                0.
+            } else {
+                self.tokens.metrics.tabbar_height
+            })
         .max(0.0)
     }
 
-    pub(in crate::workspace) fn tabbar_scroll_viewport_width(&self, window: &Window) -> f32 {
-        let measured_width = f32::from(self.main_window_tabs.scroll_handle.bounds().size.width);
+    pub(in crate::workspace) fn tabbar_scroll_viewport_width(
+        &self,
+        window: &Window,
+        cx: &App,
+    ) -> f32 {
+        let measured_width = f32::from(
+            self.main_window_tabs
+                .read(cx)
+                .state
+                .scroll_handle
+                .bounds()
+                .size
+                .width,
+        );
         if measured_width > 1.0 {
             return measured_width;
         }
@@ -1507,113 +1502,20 @@ impl WorkspaceApp {
         }
     }
 
-    pub(in crate::workspace) fn tabbar_max_scroll(&self, window: &Window, cx: &App) -> f32 {
-        (self.tab_strip_layout(window, cx).content_width()
-            - self.tabbar_scroll_viewport_width(window))
-        .max(0.0)
+    pub(super) fn tabbar_effective_scroll_x(&self, window: &Window, cx: &App) -> f32 {
+        self.main_window_tabs.read(cx).state.offset(
+            (self.tab_strip_layout(window, cx).content_width()
+                - self.tabbar_scroll_viewport_width(window, cx))
+            .max(0.),
+        )
     }
-
-    fn clamp_tab_scroll(&mut self, window: &Window, cx: &App) {
-        let scroll_x = self.tabbar_effective_scroll_x(window, cx);
-        self.set_tabbar_scroll_x(scroll_x, window, cx);
-    }
-
-    fn tabbar_has_overflow(&self, window: &Window, cx: &App) -> bool {
-        self.tabbar_max_scroll(window, cx) > 1.0
-    }
-
-    pub(in crate::workspace) fn tabbar_effective_scroll_x(&self, window: &Window, cx: &App) -> f32 {
-        if self.tabbar_has_overflow(window, cx) {
-            f32::from(-self.main_window_tabs.scroll_handle.offset().x)
-                .clamp(0.0, self.tabbar_max_scroll(window, cx))
-        } else {
-            0.0
-        }
-    }
-
-    pub(in crate::workspace) fn set_tabbar_scroll_x(
-        &mut self,
-        scroll_x: f32,
-        window: &Window,
-        cx: &App,
-    ) {
-        let next = scroll_x.clamp(0.0, self.tabbar_max_scroll(window, cx));
-        self.main_window_tabs
-            .scroll_handle
-            .set_offset(Point::new(px(-next), px(0.0)));
-    }
-
-    pub(in crate::workspace) fn handle_tabbar_scroll(
-        &mut self,
-        event: &ScrollEvent,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let max_scroll = self.tabbar_max_scroll(window, cx);
-        if max_scroll <= 1.0 {
-            let had_offset = self.main_window_tabs.scroll_handle.offset().x != px(0.0);
-            self.set_tabbar_scroll_x(0.0, window, cx);
-            if had_offset {
-                cx.notify();
-            }
-            cx.stop_propagation();
-            return;
-        }
-
-        let delta = event
-            .delta
-            .pixel_delta(px(self.tokens.metrics.tabbar_height));
-        // Keep vertical wheels usable while respecting the dominant trackpad axis.
-        // Keep ScrollHandle as the measured clamp, but make this
-        // the only wheel adapter so GPUI's default listener cannot double-scroll.
-        let scroll_delta = tabbar_wheel_scroll_delta(f32::from(delta.x), f32::from(delta.y));
-        if scroll_delta == 0.0 {
-            return;
-        }
-
-        let current_scroll_x = self.tabbar_effective_scroll_x(window, cx);
-        let next_scroll_x = tabbar_scroll_x_after_wheel(current_scroll_x, scroll_delta, max_scroll);
-        if (next_scroll_x - current_scroll_x).abs() < 0.01 {
-            cx.stop_propagation();
-            return;
-        }
-
-        // Avoid calling set_tabbar_scroll_x here: max_scroll was already read
-        // for this wheel event, and re-reading it on every trackpad frame causes
-        // unnecessary work. The handle owns the measured clamp, so write the
-        // matching negative GPUI offset directly.
-        self.main_window_tabs
-            .scroll_handle
-            .set_offset(Point::new(px(-next_scroll_x), px(0.0)));
-        cx.notify();
-        cx.stop_propagation();
-    }
-
     pub(in crate::workspace) fn reveal_active_tab(&mut self, window: &Window, cx: &App) {
-        let Some(index) = self.active_tab_index(cx) else {
-            self.clamp_tab_scroll(window, cx);
-            return;
-        };
-        let Some(bounds) = self
-            .tab_strip_layout(window, cx)
-            .bounds(self.tabs(cx)[index].id)
-        else {
-            return;
-        };
-        let tab_left = bounds.start;
-        let tab_right = bounds.end;
-        let viewport_width = self.tabbar_scroll_viewport_width(window);
-
-        let current_scroll_x = self.tabbar_effective_scroll_x(window, cx);
-        let mut next_scroll_x = current_scroll_x;
-        if tab_left < current_scroll_x || tab_right - tab_left > viewport_width {
-            next_scroll_x = tab_left;
-        } else if tab_right > current_scroll_x + viewport_width {
-            next_scroll_x = tab_right - viewport_width;
-        }
-        self.set_tabbar_scroll_x(next_scroll_x, window, cx);
+        self.main_window_tabs.read(cx).state.reveal(
+            &self.tab_strip_layout(window, cx),
+            self.active_tab_id(cx),
+            self.tabbar_scroll_viewport_width(window, cx),
+        );
     }
-
     pub(in crate::workspace) fn tab_display_title(&self, tab: &Tab) -> String {
         let title = match tab.title_source {
             TabTitleSource::Static => tab.title.clone(),
@@ -1629,209 +1531,74 @@ impl WorkspaceApp {
         title
     }
 
-    pub(super) fn scroll_reordering_tab(
+    pub(in crate::workspace) fn handle_tab_request(
         &mut self,
-        layout: &super::layout::TabStripLayout,
-        window: &Window,
-        cx: &App,
-    ) {
-        let tabs = &mut self.main_window_tabs;
-        let Some(drag) = tabs.drag.as_mut() else {
-            return;
-        };
-        let viewport = tabs.scroll_handle.bounds();
-        let limit = (layout.content_width() - f32::from(viewport.size.width)).max(0.0);
-        let offset = f32::from(-tabs.scroll_handle.offset().x).clamp(0.0, limit);
-        let Some(step) = drag
-            .edge_scroll_step(viewport)
-            .filter(|step| (*step < 0.0 && offset > 0.0) || (*step > 0.0 && offset < limit))
-        else {
-            drag.last_edge_scroll_frame = None;
-            return;
-        };
-
-        // Scroll on display frames, not mouse events. Use elapsed time so a high
-        // refresh rate or an unrelated redraw doesn't make the strip move faster.
-        let now = cx.background_executor().now();
-        let elapsed = drag
-            .last_edge_scroll_frame
-            .replace(now)
-            .map_or(0.0, |last| {
-                now.saturating_duration_since(last).as_secs_f32().min(0.05)
-            });
-        let next = (offset + step * elapsed * 60.0).clamp(0.0, limit);
-        tabs.scroll_handle
-            .set_offset(gpui::point(px(-next), px(0.0)));
-        drag.drop_target_index = layout.insertion_at_pointer(drag.current_x, &tabs.scroll_handle);
-        if (step < 0.0 && next > 0.0) || (step > 0.0 && next < limit) {
-            window.request_animation_frame();
-        } else {
-            drag.last_edge_scroll_frame = None;
-        }
-    }
-
-    pub(in crate::workspace) fn start_tab_drag_candidate(
-        &mut self,
-        tab_id: TabId,
-        index: usize,
-        event: &MouseDownEvent,
+        request: ShellTabRequest,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.onboarding_disclaimer_locked() {
-            return;
-        }
-        if index >= self.tabs(cx).len()
-            || self.tabs(cx).get(index).is_none_or(|tab| tab.id != tab_id)
-        {
-            return;
-        }
-        if self.tabs(cx)[index].kind == TabKind::Onboarding {
-            self.set_active_tab(tab_id, window, cx);
-            return;
-        }
-        let start_x = f32::from(event.position.x);
-        let start_y = f32::from(event.position.y);
-        let Some(visible_index) = self.main_tabs(cx).position(|(_, tab)| tab.id == tab_id) else {
-            return;
-        };
-        // Select on press: native chrome can consume release or cancel capture with a
-        // buttonless move. Those events should cancel dragging, not tab navigation.
-        let destination_tab = self.active_tab_id(cx).filter(|id| *id != tab_id);
-        self.split_drop_target = None;
-        self.set_active_tab(tab_id, window, cx);
-        let layout = self.tab_strip_layout(window, cx);
-        let drop_target_index =
-            layout.insertion_at_pointer(start_x, &self.main_window_tabs.scroll_handle);
-        self.main_window_tabs.drag = Some(TabDragState {
-            tab_id,
-            from_index: visible_index,
-            destination_tab,
-            start_x,
-            start_y,
-            current_x: start_x,
-            current_y: start_y,
-            tab_widths: layout.live_widths(),
-            last_edge_scroll_frame: None,
-            active: false,
-            mode: TabDragMode::Pending,
-            drop_target_index,
-        });
-        cx.notify();
-    }
-
-    pub(in crate::workspace) fn update_tab_drag(
-        &mut self,
-        event: &MouseMoveEvent,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(mut drag) = self.main_window_tabs.drag.clone() else {
-            return;
-        };
-        if event.pressed_button != Some(MouseButton::Left) {
-            // Win32 can lose the matching mouse-up during a re-entrant native callback.
-            // A buttonless move is authoritative and must release the logical tab capture.
-            self.cancel_tab_merge_drag(cx);
-            return;
-        }
-        let was_active = drag.active;
-        let previous_mode = drag.mode.clone();
-        let previous_split_target = self.split_drop_target;
-        let previous_drop_target_index = drag.drop_target_index;
-        let viewport = self.main_window_tabs.scroll_handle.bounds();
-        let previous_edge = drag.edge_scroll_step(viewport).map(f32::signum);
-        // Browser tab drags keep pointer capture after leaving the tab label;
-        // the root mouse-up is responsible for finishing or cancelling.
-        drag.current_x = f32::from(event.position.x);
-        drag.current_y = f32::from(event.position.y);
-        let layout = self.tab_strip_layout(window, cx);
-        drag.tab_widths = layout.live_widths();
-        let delta_x = drag.current_x - drag.start_x;
-        let delta_y = drag.current_y - drag.start_y;
-        // Tauri uses a 10px pointer threshold for reorder. GPUI also needs the
-        // browser strip axis check here so vertical drags do not become tab
-        // reorders just because the root view is acting as pointer capture.
-        let over_content = delta_x.hypot(delta_y) > TAB_DRAG_THRESHOLD_PX
-            && self.update_tab_split_destination(&mut drag, event, window, cx);
-        if over_content {
-            drag.active = true;
-            drag.mode = TabDragMode::Content;
-        } else if tab_drag_is_detach(delta_x, delta_y, self.tokens.metrics.tabbar_height) {
-            drag.active = true;
-            drag.mode = TabDragMode::Detach;
-            drag.drop_target_index = drag.from_index;
-        } else if tab_drag_is_horizontal_reorder(delta_x, delta_y) {
-            drag.active = true;
-            drag.mode = TabDragMode::Reorder;
-            drag.drop_target_index =
-                layout.insertion_at_pointer(drag.current_x, &self.main_window_tabs.scroll_handle);
-        } else {
-            drag.active = false;
-            drag.mode = TabDragMode::Pending;
-            drag.drop_target_index = drag.from_index;
-        }
-        let edge_changed = previous_edge != drag.edge_scroll_step(viewport).map(f32::signum);
-        if edge_changed {
-            drag.last_edge_scroll_frame = None;
-        }
-        let changed = edge_changed
-            || drag.active != was_active
-            || drag.mode != previous_mode
-            || drag.drop_target_index != previous_drop_target_index
-            || self.split_drop_target != previous_split_target;
-        self.main_window_tabs.drag = Some(drag);
-        if changed {
-            // The tab strip renders activation and drop-target changes, not raw
-            // pointer coordinates. Avoid repainting every captured mouse move.
-            cx.notify();
-        }
-    }
-
-    pub(in crate::workspace) fn finish_tab_drag(
-        &mut self,
-        event: &MouseUpEvent,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if event.button != MouseButton::Left {
-            return;
-        }
-        let Some(drag) = self.main_window_tabs.drag.take() else {
-            return;
-        };
-        if drag.active
-            && self.finish_tab_split_drop(
-                drag.tab_id,
-                event.position + window.bounds().origin,
-                window,
-                cx,
-            )
-        {
-            return;
-        }
-        self.split_drop_target = None;
-        match drag.mode {
-            TabDragMode::Detach => {
-                let handoff_origin = self.tab_detach_handoff_origin(&drag, window);
-                self.detach_tab_to_window(drag.tab_id, handoff_origin, window, cx);
+        match request {
+            ShellTabRequest::CancelDrag(id) => {
+                self.split_drop_target = None;
+                if self.tab_by_id(id, cx).is_some()
+                    && !self.tab_host.read(cx).is_outside_main_window(id)
+                {
+                    self.set_main_window_active_tab(Some(id), cx);
+                    self.sync_active_tab_surface(cx)
+                }
+                cx.notify()
             }
-            TabDragMode::Reorder if drag.active => {
-                self.set_active_tab(drag.tab_id, window, cx);
-                let target_visible_index =
-                    tab_reorder_target_visible_index(drag.from_index, drag.drop_target_index);
-                if self.move_tab_to_visible_index(drag.tab_id, target_visible_index, cx) {
-                    self.clamp_tab_scroll(window, cx);
+            ShellTabRequest::DragChanged => {
+                if self.main_window_tabs.read(cx).state.drag.is_none() {
+                    self.split_drop_target = None
+                }
+                cx.notify()
+            }
+            ShellTabRequest::Select(id) => {
+                self.split_drop_target = None;
+                self.set_active_tab(id, window, cx)
+            }
+            ShellTabRequest::DoubleClick(id) => {
+                if !self.onboarding_disclaimer_locked() {
+                    self.begin_tab_rename(id, window, cx);
+                }
+            }
+            ShellTabRequest::ContextMenu(id, position) => {
+                self.open_tab_context_menu(id, position, cx)
+            }
+            ShellTabRequest::CloseTab { tab, select_first } => {
+                self.clear_workspace_tooltip(&format!("workspace-tab-title-{}", tab.0), cx);
+                if select_first {
+                    self.set_active_tab(tab, window, cx);
+                }
+                self.request_close_tab_by_id(tab, window, cx)
+            }
+            ShellTabRequest::NewTab => {
+                window.dispatch_action(Box::new(NewTerminal), cx);
+            }
+            ShellTabRequest::ShowTitle(tab, title, point) => self.queue_workspace_tooltip(
+                format!("workspace-tab-title-{}", tab.0),
+                title,
+                f32::from(point.x) + 12.,
+                f32::from(point.y) + 16.,
+                cx,
+            ),
+            ShellTabRequest::HideTitle(tab) => {
+                self.clear_workspace_tooltip(&format!("workspace-tab-title-{}", tab.0), cx)
+            }
+            ShellTabRequest::Detach(drag) => {
+                let origin = self.tab_detach_handoff_origin(&drag, window);
+                self.detach_tab_to_window(drag.tab_id, origin, window, cx);
+            }
+            ShellTabRequest::Reorder(tab, index) => {
+                self.set_active_tab(tab, window, cx);
+                if self.move_tab_to_visible_index(tab, index, cx) {
                     self.reveal_active_tab(window, cx);
                     cx.notify();
                 }
             }
-            // Selection already happened on press; release owns only drag completion.
-            TabDragMode::Pending | TabDragMode::Reorder | TabDragMode::Content => {}
         }
-        cx.notify();
     }
-
     pub(super) fn move_tab_to_visible_index(
         &mut self,
         tab_id: TabId,

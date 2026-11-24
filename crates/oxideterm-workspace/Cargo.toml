@@ -7,6 +7,10 @@ edition.workspace = true
 license.workspace = true
 version.workspace = true
 
+[features]
+default = ["delivery"]
+delivery = ["dep:tokio"]
+
 [dependencies]
-tokio = { version = "1.52", default-features = false, features = ["sync"] }
+tokio = { optional = true, version = "1.52", default-features = false, features = ["sync"] }
 web-time.workspace = true

@@ -861,7 +861,11 @@ impl WorkspaceApp {
                 .remote_shell_integration_confirm_open(),
             terminal_trigger_quick_command_open: self.terminal_trigger_quick_command_pending(),
             cloud_sync_phase,
-            tab_close_phase: self.tab_host.read(cx).close_confirm_phase(),
+            tab_close_phase: self
+                .tab_host
+                .read(cx)
+                .close_confirm_phase()
+                .filter(|_| self.tab_host.read(cx).detached_close_dialog().is_none()),
             host_tools_modal: self.host_tools.read(cx).window_modal_snapshot(),
             host_redis_dialog,
             native_plugin_phase,

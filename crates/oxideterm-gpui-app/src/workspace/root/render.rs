@@ -186,7 +186,9 @@ impl WorkspaceApp {
         // owner once avoids repeatedly cloning typed payloads during render.
         let ai_chat_confirm_snapshot = self.ai.state.read(cx).chat_confirm_snapshot();
         let overlay_confirm_snapshot = self.overlay.read(cx).confirm_snapshot();
-        let tab_close_confirm_open = self.tab_host.read(cx).close_confirm().is_some();
+        let host = self.tab_host.read(cx);
+        let tab_close_confirm_open =
+            host.close_confirm().is_some() && host.detached_close_dialog().is_none();
         let title = self
             .active_tab(cx)
             .map(|tab| self.tab_display_title(tab))
@@ -801,8 +803,6 @@ impl WorkspaceApp {
                 this.update_split_drag(event, window, cx);
                 this.update_settings_slider_drag(event, cx);
                 this.update_terminal_cast_seek_drag(event, cx);
-                // Continue scrollbar dragging after the pointer leaves its thin hit target.
-                this.update_tabbar_scrollbar_drag(event, window, cx);
                 if this.read_only_selection_drag_active() && !event.dragging() {
                     // A platform capture loss can omit the matching mouse-up. The
                     // next buttonless move must release the logical text drag so
@@ -816,7 +816,6 @@ impl WorkspaceApp {
                     cx.stop_propagation();
                 }
                 this.update_sftp_drag_capture(event.position, cx);
-                this.update_tab_drag(event, window, cx);
                 if let Some(drag) = this.detached_tab_return_drag {
                     this.update_detached_tab_return_drag(drag.tab_id, event, window, cx);
                 }
@@ -1162,7 +1161,7 @@ impl WorkspaceApp {
             effective_titlebar_height,
             cx,
         );
-        let tab_bar = tabbar_visible.then(|| self.render_tab_bar(window, cx));
+        let tab_bar = tabbar_visible.then(|| self.main_window_tabs.clone().into_any_element());
         let right_body = (!zen_mode && self.rails.right.mounted())
             .then(|| self.render_context_right_sidebar_frame(cx));
         let right_visible = self.context_sidebar_visible();
@@ -1494,9 +1493,6 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        if self.main_window_tabs.drag.is_some() {
-            return self.render_tab_drag_capture(None, cx);
-        }
         if self.rails.resizing_side().is_some() {
             return oxideterm_gpui_shell::rail_resize_capture(cx);
         }
@@ -1523,7 +1519,6 @@ impl WorkspaceApp {
             .occlude()
             .bg(rgba(0x00000000))
             .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
-                this.update_tab_drag(event, window, cx);
                 this.update_file_manager_bookmarks_resize(event, window, cx);
                 this.update_embedded_sftp_sidebar_resize(event, window, cx);
                 this.update_sftp_resize(event, window, cx);
@@ -1559,13 +1554,11 @@ impl WorkspaceApp {
         self.finish_split_drag(cx);
         self.finish_settings_slider_drag(cx);
         self.finish_terminal_cast_seek_drag(cx);
-        self.finish_tabbar_scrollbar_drag(cx);
         self.finish_ime_selection_drag(cx);
         self.stop_selectable_text_autoscroll();
         if let Some(drag) = self.detached_tab_return_drag {
             self.finish_detached_tab_return_drag(drag.tab_id, event, window, cx);
         }
-        self.finish_tab_drag(event, window, cx);
         let cancelled_sftp_drag = self.cancel_sftp_drag_capture(cx);
         if cancelled_sftp_drag {
             cx.notify();

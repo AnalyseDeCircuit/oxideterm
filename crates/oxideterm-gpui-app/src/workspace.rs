@@ -226,7 +226,6 @@ use oxideterm_theme::{ThemeTokens, UiDensityProfile, UiMotionProfile, UiRadii};
 use oxideterm_workspace::{
     ActiveSessionNode, ActiveSessionReadiness, ActiveSessionStatus, MAX_PANES_PER_TAB, PaneId,
     PaneNode, SplitDirection, Tab, TabId, TabKind, TabTitleSource, TerminalSessionId,
-    adjusted_split_sizes,
 };
 
 use self::connection_monitor::{
@@ -338,29 +337,10 @@ struct ShortcutsModalState {
 
 use oxideterm_gpui_ai::state::AiModelSelectorScope;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-enum TabDragMode {
-    Pending,
-    Reorder,
-    Detach,
-    Content,
-}
-
-#[derive(Clone, Debug)]
-struct TabDragState {
-    tab_id: TabId,
-    from_index: usize,
-    destination_tab: Option<TabId>,
-    start_x: f32,
-    start_y: f32,
-    current_x: f32,
-    current_y: f32,
-    tab_widths: Vec<f32>,
-    last_edge_scroll_frame: Option<Instant>,
-    active: bool,
-    mode: TabDragMode,
-    drop_target_index: usize,
-}
+use oxideterm_gpui_shell::tabs::{
+    geometry::{ExitingTabVisual, TabDragMode, TabDragState},
+    strip::{MeasuredTabStrip, ShellTabRequest},
+};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct TabContextMenu {
@@ -376,22 +356,12 @@ struct TabRenameDialog {
     draft: String,
 }
 
-#[derive(Clone, Debug)]
-struct ExitingTabVisual {
-    tab_id: TabId,
-    kind: TabKind,
-    title: String,
-    width: f32,
-    visual_index: usize,
-    was_active: bool,
-    started_at: Instant,
-    duration: Duration,
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum TabCloseConfirm {
     ApplicationQuit,
     Single { tab_id: TabId },
+    SshPane { tab_id: TabId, pane_id: PaneId },
+    LocalChildPane { tab_id: TabId, pane_id: PaneId },
     LocalChildProcess { tab_id: TabId },
     LocalChildProcessBatch { tab_ids: Vec<TabId> },
     Other { tab_ids: Vec<TabId> },
@@ -399,6 +369,7 @@ pub(in crate::workspace) enum TabCloseConfirm {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum LocalTerminalCloseCheck {
+    Pane { tab_id: TabId, pane_id: PaneId },
     Single { tab_id: TabId },
     Batch { tab_ids: Vec<TabId> },
 }
@@ -406,26 +377,10 @@ enum LocalTerminalCloseCheck {
 impl LocalTerminalCloseCheck {
     fn tab_ids(&self) -> Vec<TabId> {
         match self {
-            Self::Single { tab_id } => vec![*tab_id],
+            Self::Pane { tab_id, .. } | Self::Single { tab_id } => vec![*tab_id],
             Self::Batch { tab_ids } => tab_ids.clone(),
         }
     }
-}
-
-struct WorkspaceWindowTabState {
-    drag: Option<TabDragState>,
-    context_menu: Option<TabContextMenu>,
-    exiting_tabs: Vec<ExitingTabVisual>,
-    scroll_handle: ScrollHandle,
-    scrollbar_drag: Option<TabbarScrollbarDragState>,
-    scrollbar_hovered: bool,
-    tab_text_width_cache: RefCell<HashMap<(String, u32, String), f32>>,
-}
-
-#[derive(Clone, Copy, Debug)]
-struct TabbarScrollbarDragState {
-    // Preserve the pointer's position inside the thumb to prevent a jump on drag start.
-    grab_offset_x: f32,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -455,20 +410,6 @@ struct DetachedTabReturnHandoff {
     generation: u64,
 }
 
-impl WorkspaceWindowTabState {
-    fn new() -> Self {
-        Self {
-            drag: None,
-            context_menu: None,
-            exiting_tabs: Vec::new(),
-            scroll_handle: ScrollHandle::new(),
-            scrollbar_drag: None,
-            scrollbar_hovered: false,
-            tab_text_width_cache: RefCell::new(HashMap::new()),
-        }
-    }
-}
-
 #[derive(Clone)]
 pub(super) struct SelectableTextFragmentState {
     pub join_previous: bool,
@@ -490,7 +431,8 @@ pub(super) struct ThemeTransitionState {
 
 pub(crate) struct WorkspaceApp {
     focus_handle: FocusHandle,
-    main_window_tabs: WorkspaceWindowTabState,
+    main_window_tabs: Entity<MeasuredTabStrip>,
+    tab_context_menu: Option<TabContextMenu>,
     tab_rename_dialog: Option<TabRenameDialog>,
     detached_tab_return_drag: Option<DetachedTabReturnDrag>,
     detached_tab_return_handoff: Option<DetachedTabReturnHandoff>,
