@@ -1,3 +1,5 @@
+mod chrome;
+mod sidebar;
 use crate::{
     connections, demo::*, files::FileViews, palette::Palette, terminal::Session, tools::Tools,
     transport::*,
@@ -8,6 +10,7 @@ use oxideterm_gpui_connections::{
     PortableCatalogData, PortableCatalogView,
     views::{ConnectionsEnvironment, PortableConnectionFormView},
 };
+use oxideterm_gpui_host_tools::ContextSidebarTool;
 use oxideterm_gpui_settings_view::surface::{PortableSettingsChanged, PortableSettingsSurface};
 use oxideterm_gpui_shell::{
     notifications::*,
@@ -17,7 +20,7 @@ use oxideterm_gpui_shell::{
     tabs::{TabLayout, geometry::TabStripState, strip::*},
     *,
 };
-use oxideterm_gpui_ui::{ButtonTone, button, motion::ExitPhase};
+use oxideterm_gpui_ui::{icons::LucideIcon, motion::ExitPhase};
 use oxideterm_i18n::I18n;
 use oxideterm_notification_center::*;
 use oxideterm_theme::ThemeTokens;
@@ -42,6 +45,10 @@ pub enum Action {
     Ide,
     Assistant,
     Monitor,
+    Docker,
+    Services,
+    Theme,
+    Zen,
 }
 impl Action {
     pub const ALL: &[Self] = &[
@@ -55,6 +62,8 @@ impl Action {
         Self::Forwards,
         Self::Quick,
         Self::Monitor,
+        Self::Docker,
+        Self::Services,
         Self::Assistant,
         Self::Settings,
         Self::Welcome,
@@ -64,7 +73,11 @@ impl Action {
     pub fn key(self) -> &'static str {
         match self {
             Self::Assistant => "sidebar.panels.ai",
-            Self::Monitor => "sidebar.panels.host_tools",
+            Self::Monitor => ContextSidebarTool::Monitor.label_key(),
+            Self::Docker => ContextSidebarTool::Docker.label_key(),
+            Self::Services => ContextSidebarTool::Services.label_key(),
+            Self::Zen => "sidebar.actions.enter_zen",
+            Self::Theme => "settings_view.appearance.configure_schemes",
             Self::Terminal => "menu.new_terminal",
             Self::Close => "menu.close_tab",
             Self::Split => "menu.split_horizontal",
@@ -93,6 +106,7 @@ pub struct Workspace {
     rails: WorkspaceRails,
     strip: Entity<MeasuredTabStrip>,
     drag: Option<SplitDrag>,
+    zen_exit: zen::ZenExitAffordance,
     pub palette: Palette,
     transients: TransientOverlays<String, ()>,
     deadline: Option<Task<()>>,
@@ -129,6 +143,7 @@ impl Workspace {
         {
             preferences.general.language = language;
         }
+        let sidebar = preferences.sidebar_ui.clone();
         let settings = cx.new(|cx| PortableSettingsSurface::new(preferences, actions.clone(), cx));
         let (tokens, i18n) = settings.read(cx).environment(dark(w), cx);
         let focus = cx.focus_handle();
@@ -166,7 +181,7 @@ impl Workspace {
         let dispatch = owner.clone();
         let strip = cx.new(|_| {
             MeasuredTabStrip::new(
-                move |s, w, cx| owner.read_with(cx, |h, _| h.strip_frame(s, w)).ok(),
+                move |s, w, cx| owner.update(cx, |h, cx| h.strip_frame(s, w, cx)).ok(),
                 move |req, w, cx| {
                     let _ = dispatch.update(cx, |h, cx| h.tab_request(req, w, cx));
                 },
@@ -208,13 +223,26 @@ impl Workspace {
             actions,
             layout: Default::default(),
             rails: WorkspaceRails::new(
-                RailState::new(RailSide::Left, 218., false, true, &tokens),
-                RailState::new(RailSide::Right, 310., true, false, &tokens),
+                RailState::new(
+                    RailSide::Left,
+                    sidebar.width as f32,
+                    sidebar.collapsed,
+                    !sidebar.collapsed,
+                    &tokens,
+                ),
+                RailState::new(
+                    RailSide::Right,
+                    sidebar.ai_sidebar_width as f32,
+                    sidebar.ai_sidebar_collapsed,
+                    !sidebar.ai_sidebar_collapsed,
+                    &tokens,
+                ),
                 SidebarSection::Sessions,
                 ContextSidebarPanel::HostTools,
             ),
             strip,
             drag: None,
+            zen_exit: Default::default(),
             palette,
             transients: TransientOverlays::new(Duration::from_millis(120)),
             deadline: None,
@@ -364,18 +392,34 @@ impl Workspace {
                 self.palette.open(&self.focus, w, cx);
                 self.changed(cx);
             }
+            Theme => self.toggle_theme(w, cx),
+            Zen => self.toggle_zen(cx),
             Settings => self.open_page(TabKind::Settings, a.key(), cx),
             Notifications => self.open_page(TabKind::NotificationCenter, a.key(), cx),
             Welcome => self.open_page(TabKind::Onboarding, a.key(), cx),
             _ if !self.demo => self.notice("remote_desktop.capability_unsupported", cx),
             Catalog => self.open_page(TabKind::SessionManager, a.key(), cx),
-            Monitor | Assistant => {
-                self.rails.context_panel = if a == Monitor {
-                    ContextSidebarPanel::HostTools
-                } else {
-                    ContextSidebarPanel::Assistant
+            Monitor | Docker | Services => {
+                let tool = match a {
+                    Docker => ContextSidebarTool::Docker,
+                    Services => ContextSidebarTool::Services,
+                    _ => ContextSidebarTool::Monitor,
                 };
-                self.rails.right.set_collapsed(false, &self.tokens);
+                if let Some(m) = &self.tools.monitor {
+                    let close = !self.rails.right.collapsed()
+                        && self.rails.context_panel == ContextSidebarPanel::HostTools
+                        && m.read(cx).active_tool(cx) == tool;
+                    m.update(cx, |m, cx| m.select(tool, cx));
+                    self.rails.context_panel = ContextSidebarPanel::HostTools;
+                    self.collapse(RailSide::Right, close, cx);
+                    self.changed(cx);
+                }
+            }
+            Assistant => {
+                let close = !self.rails.right.collapsed()
+                    && self.rails.context_panel == ContextSidebarPanel::Assistant;
+                self.rails.context_panel = ContextSidebarPanel::Assistant;
+                self.collapse(RailSide::Right, close, cx);
                 self.changed(cx);
             }
             NewConnection => self.form(None, None, w, cx),
@@ -394,24 +438,21 @@ impl Workspace {
             }
         }
     }
-    fn control(&self, a: Action, cx: &Context<Self>) -> AnyElement {
-        button(&self.tokens, self.i18n.t(a.key()), ButtonTone::Secondary)
-            .id(a.key())
-            .on_click(cx.listener(move |h, _, w, cx| h.action(a, w, cx)))
-            .into_any_element()
-    }
     pub fn frame(&mut self, w: &mut Window, cx: &mut Context<Self>) -> ShellContent {
         let t = self.tokens;
         let bg = rgb(t.ui.bg);
-        let border = rgb(t.ui.border);
+        let border = self.chrome_divider();
+        let settings = self.settings.read(cx).settings(cx);
+        let zen = settings.sidebar_ui.zen_mode;
+        let tabbar_visible = !zen || settings.appearance.zen_mode_keep_tabbar;
         let env = ShellEnvironment {
             tokens: t,
             i18n: self.i18n.clone(),
-            zen_mode: false,
+            zen_mode: zen,
             chrome_locked: self.form.is_some() || self.palette.model.read(cx).is_open(),
-            chrome_background: rgb(t.ui.bg_panel),
+            chrome_background: rgb(t.ui.shell_bg()),
             divider: border,
-            left_divider: border,
+            left_divider: rgba((t.ui.border << 8) | 0x40),
         };
         let center = if let Some(tab) = self.layout.active_tab().cloned() {
             if let Some(root) = tab.root_pane {
@@ -424,7 +465,7 @@ impl Workspace {
                     drop_regions: None,
                     tokens: t,
                     i18n: &self.i18n.clone(),
-                    header_background: rgb(t.ui.bg_panel),
+                    header_background: rgb(t.ui.shell_bg()),
                     divider: border,
                 }
                 .render(&root, self, w, cx)
@@ -432,83 +473,24 @@ impl Workspace {
                 self.page(&tab, cx)
             }
         } else {
-            div()
-                .size_full()
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(self.control(Action::Terminal, cx))
-                .into_any_element()
+            self.empty_workspace(cx)
         };
-        let left = !self.rails.left.collapsed();
-        let right = !self.rails.right.collapsed();
-        let nav = div()
-            .id("workspace-navigation")
-            .overflow_y_scroll()
-            .flex()
-            .flex_col()
-            .p_2()
-            .gap_1()
-            .children(
-                Action::ALL
-                    .iter()
-                    .copied()
-                    .filter(|a| !matches!(a, Action::Close | Action::Split | Action::Terminal))
-                    .filter(|a| {
-                        self.demo
-                            || matches!(
-                                a,
-                                Action::Welcome | Action::Settings | Action::Notifications
-                            )
-                    })
-                    .map(|a| self.control(a, cx)),
-            );
+        let top = t.metrics.titlebar_height;
+        let left = self.rails.left.mounted().then(|| self.left_drawer(cx));
         let left_panel = self
             .rails
             .left
-            .present(Some(nav.into_any_element()), left, &env, 0., cx);
-        let right_body = match self.rails.context_panel {
-            ContextSidebarPanel::Assistant => self
-                .assistant
-                .as_ref()
-                .map(|a| a.clone().into_any_element()),
-            ContextSidebarPanel::HostTools => self
-                .tools
-                .monitor
-                .as_ref()
-                .map(|m| m.clone().into_any_element()),
-        }
-        .unwrap_or_else(|| self.center.clone().into_any_element());
-        let right_panel = self
+            .present(left, !self.rails.left.collapsed(), &env, top, cx);
+        let right = self
             .rails
             .right
-            .present(Some(right_body), right, &env, 0., cx);
-        let top = div()
-            .flex()
-            .items_center()
-            .gap_2()
-            .px_2()
-            .py_1()
-            .bg(rgb(t.ui.bg_panel))
-            .child(self.i18n.t("menu.app"))
-            .child(div().flex_1())
-            .children(
-                [
-                    Action::Terminal,
-                    Action::Split,
-                    Action::Palette,
-                    Action::Settings,
-                ]
-                .map(|a| self.control(a, cx)),
-            )
-            .children(self.gateway_host.clone())
-            .when(!self.ready, |d| {
-                d.child(self.i18n.t(if self.connecting {
-                    "common.status_connecting"
-                } else {
-                    "connections.state.disconnected"
-                }))
-            });
+            .mounted()
+            .then(|| self.right_drawer(cx))
+            .flatten();
+        let right_panel =
+            self.rails
+                .right
+                .present(right, !self.rails.right.collapsed(), &env, top, cx);
         let root = div()
             .id("web-workspace")
             .track_focus(&self.focus)
@@ -551,6 +533,18 @@ impl Workspace {
             overlays.at(PALETTE);
             overlays.extend([self.palette.view.clone().into_any_element()]);
         }
+        if zen && !tabbar_visible {
+            overlays.at(10);
+            overlays.extend([self.zen_exit.hot_zone(px(0.), cx)]);
+            if self.zen_exit.visible() {
+                overlays.extend([self.zen_exit.pill(
+                    px(0.),
+                    &env,
+                    self.shortcut("app.zenMode", cx).unwrap_or_default(),
+                    cx,
+                )]);
+            }
+        }
         overlays.at(200);
         let owner = cx.weak_entity();
         overlays.extend([self
@@ -580,13 +574,13 @@ impl Workspace {
         ShellContent::Frame(ShellFrameSlots {
             root,
             background: None,
-            title_row: Some(top.into_any_element()),
-            left_rail: Some(activity_rail(RailSide::Left, left, div(), &env, cx)),
-            right_rail: Some(activity_rail(RailSide::Right, right, div(), &env, cx)),
+            title_row: (!zen).then(|| self.titlebar(cx)),
+            left_rail: Some(self.left_activity_rail(&env, cx)),
+            right_rail: self.demo.then(|| self.right_activity_rail(&env, cx)),
             left_panel,
             right_panel,
             center,
-            tab_bar: Some(self.strip.clone().into_any_element()),
+            tab_bar: tabbar_visible.then(|| self.strip.clone().into_any_element()),
             overlays,
             environment: env,
         })
@@ -655,6 +649,7 @@ impl Workspace {
             let a = match def.id.as_ref() {
                 "app.newTerminal" => Action::Terminal,
                 "app.closeTab" => Action::Close,
+                "app.zenMode" => Action::Zen,
                 "app.settings" => Action::Settings,
                 "app.commandPalette" => Action::Palette,
                 "app.newConnection" => Action::NewConnection,
@@ -671,14 +666,20 @@ impl Workspace {
         w.prevent_default();
         cx.stop_propagation();
     }
-    fn strip_frame(&self, s: &TabStripState, w: &Window) -> TabStripFrame {
+    fn strip_frame(&self, s: &TabStripState, w: &Window, cx: &Context<Self>) -> TabStripFrame {
         let t = self.tokens;
         let tabs = self.layout.main_tabs().map(|(_, t)| t).collect::<Vec<_>>();
         let layout = s.layout(
             tabs.iter().map(|tab| {
                 (
                     tab.id,
-                    s.natural_width(&tab.title, 24., "IBM Plex Sans".into(), &t, w),
+                    s.natural_width(
+                        &tab.title,
+                        t.metrics.tab_close_button_size,
+                        "IBM Plex Sans".into(),
+                        &t,
+                        w,
+                    ),
                 )
             }),
             None,
@@ -687,6 +688,7 @@ impl Workspace {
         );
         let bells = self.layout.bell_highlighted_tab_ids();
         let unread = self.layout.unread_terminal_output_tab_ids();
+        let (quick_actions, quick_actions_width) = self.strip_actions(cx);
         TabStripFrame {
             tokens: t,
             layout,
@@ -695,7 +697,13 @@ impl Workspace {
                 .map(|tab| TabVisual {
                     title: tab.title.clone(),
                     icon: svg()
-                        .path("lucide/app-window.svg")
+                        .path(oxideterm_gpui_shell::chrome::tab_icon(&tab.kind).path())
+                        .text_color(TabVisual::color(
+                            &t,
+                            self.layout.active_tab_id() == Some(tab.id),
+                            bells.contains(&tab.id),
+                            unread.contains(&tab.id),
+                        ))
                         .size(px(t.metrics.tab_icon_size))
                         .into_any_element(),
                     status: None,
@@ -708,16 +716,16 @@ impl Workspace {
                 .collect(),
             active: self.layout.active_tab_id(),
             supports_detach: false,
-            background: rgb(t.ui.bg_panel),
-            divider: rgb(t.ui.border),
-            active_background: rgb(t.ui.bg),
-            idle_background: rgb(t.ui.bg_panel),
+            background: rgb(t.ui.shell_bg()),
+            divider: self.chrome_divider(),
+            active_background: rgb(t.ui.shell_active_tab_bg()),
+            idle_background: rgb(t.ui.shell_bg()),
             translucent: false,
             leading_margin: 0.,
             filler: None,
-            quick_actions: None,
-            quick_actions_width: 0.,
-            new_tab_label: Some(self.i18n.t("menu.new_terminal")),
+            quick_actions,
+            quick_actions_width,
+            new_tab_label: self.ready.then(|| self.i18n.t("menu.new_terminal")),
         }
     }
     fn tab_request(&mut self, r: ShellTabRequest, w: &mut Window, cx: &mut Context<Self>) {
@@ -774,16 +782,23 @@ fn dark(w: &Window) -> bool {
 impl ShellHost for Workspace {
     fn request(&mut self, r: ShellRequest, w: &mut Window, cx: &mut Context<Self>) {
         match r {
+            ShellRequest::ExitZen => self.toggle_zen(cx),
+            ShellRequest::HoverZenStrip(hovered) => {
+                self.zen_exit.set_hot_zone_hovered(hovered);
+                self.zen_hover(hovered, cx);
+            }
+            ShellRequest::HoverZenPill(hovered) => {
+                self.zen_exit.set_pill_hovered(hovered);
+                self.zen_hover(hovered, cx);
+            }
             ShellRequest::Toggle(side) => {
-                let rail = self.rails.rail_mut(side);
-                let close = !rail.collapsed();
-                let generation = rail.set_collapsed(close, &self.tokens);
-                if close {
-                    rail.finish_collapse(generation);
-                }
+                let close = !self.rails.rail_mut(side).collapsed();
+                self.collapse(side, close, cx);
             }
             ShellRequest::Select(section) => {
+                let close = self.rails.section == section && !self.rails.left.collapsed();
                 self.rails.select_section(section, &self.tokens);
+                self.collapse(RailSide::Left, close, cx);
             }
             ShellRequest::BeginResize(side, _) => {
                 let rail = self.rails.rail_mut(side);
@@ -795,6 +810,22 @@ impl ShellHost for Workspace {
                         x.into(),
                         w.viewport_size().width.into(),
                         self.tokens.metrics.activity_bar_width,
+                    );
+                    let (min, max) = match side {
+                        RailSide::Left => (
+                            self.tokens.metrics.sidebar_min_width,
+                            self.tokens.metrics.sidebar_max_width,
+                        ),
+                        RailSide::Right => (
+                            oxideterm_settings::AI_SIDEBAR_ABSOLUTE_MIN_WIDTH,
+                            oxideterm_settings::AI_SIDEBAR_ABSOLUTE_MAX_WIDTH,
+                        ),
+                    };
+                    let width = clamp_responsive_sidebar_width(
+                        width,
+                        w.viewport_size().width.into(),
+                        min,
+                        max,
                     );
                     self.rails
                         .rail_mut(side)
@@ -812,7 +843,6 @@ impl ShellHost for Workspace {
                 self.hint(side.toggle_id().into(), Some((label, p)), cx)
             }
             ShellRequest::HideToggleHint(side) => self.hint(side.toggle_id().into(), None, cx),
-            _ => return,
         }
         self.changed(cx)
     }
@@ -924,6 +954,7 @@ fn notification_frame(
                     SelectView(_) | InvokeAction(_) => return,
                 }
                 h.refresh_center(cx);
+                cx.notify();
             });
         }),
     }

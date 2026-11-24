@@ -154,9 +154,10 @@ impl Workspace {
         self.form = Some(form);
         self.changed(cx);
     }
-    fn refresh_catalog(&self, cx: &mut App) {
+    fn refresh_catalog(&self, cx: &mut Context<Self>) {
         self.catalog.update(cx, |v, cx| {
             v.set_catalog_data(self.catalog_data.clone(), cx)
         });
+        cx.notify();
     }
 }

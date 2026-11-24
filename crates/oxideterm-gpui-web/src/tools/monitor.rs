@@ -138,10 +138,17 @@ impl HostToolsBridge for SampleHost {
 }
 pub struct Monitor {
     entity: Entity<HostToolsEntity>,
+    pub width: f32,
     pub tokens: ThemeTokens,
     pub i18n: I18n,
 }
 impl Monitor {
+    pub fn active_tool(&self, cx: &App) -> ContextSidebarTool {
+        self.entity.read(cx).active_tool()
+    }
+    pub fn select(&self, tool: ContextSidebarTool, cx: &mut App) {
+        self.entity.update(cx, |e, cx| e.select_tool(tool, cx));
+    }
     pub fn new(tokens: ThemeTokens, i18n: I18n, cx: &mut Context<Self>) -> Self {
         let entity = cx.new(|cx| {
             HostToolsEntity::with_bridge(
@@ -155,13 +162,14 @@ impl Monitor {
         cx.observe(&entity, |_, _, cx| cx.notify()).detach();
         Self {
             entity,
+            width: oxideterm_settings::AI_SIDEBAR_DEFAULT_WIDTH as f32,
             tokens,
             i18n,
         }
     }
 }
 impl Render for Monitor {
-    fn render(&mut self, w: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let frame = MonitorRenderContext {
             tokens: self.tokens,
             i18n: self.i18n.clone(),
@@ -169,15 +177,20 @@ impl Render for Monitor {
             selectable_text: HostToolsText::new(|_, _, _, s, c, _| {
                 div().text_color(rgb(c)).child(s).into_any_element()
             }),
-            sidebar_width: f32::from(w.viewport_size().width).min(600.),
+            sidebar_width: self.width,
         };
         div()
             .id("web-monitor")
             .size_full()
-            .overflow_y_scroll()
-            .child(
-                self.entity
-                    .update(cx, |s, cx| s.render_host_monitor_panel(&frame, true, cx)),
-            )
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .overflow_hidden()
+            .child(self.entity.update(cx, |s, cx| match s.active_tool() {
+                ContextSidebarTool::Docker => s.render_sampled_docker_list(&frame, cx),
+                ContextSidebarTool::Services => s.render_sampled_service_list(&frame, cx),
+                ContextSidebarTool::Monitor => s.render_host_monitor_panel(&frame, true, cx),
+                _ => unreachable!("only sampled tools are mounted"),
+            }))
     }
 }

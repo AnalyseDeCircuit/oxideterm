@@ -1,6 +1,7 @@
 //! Platform-independent workspace chrome. Hosts provide feature content and own
 //! window services; the shell owns frame layout, activity rails, tabs and split panes.
 mod assets;
+pub mod chrome;
 mod frame;
 mod host;
 pub mod notifications;

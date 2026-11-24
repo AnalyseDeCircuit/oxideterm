@@ -56,6 +56,36 @@ impl HostToolsEntity {
         })
     }
 
+    /// Sample-only bridges can inspect and expand rows without offering native host operations.
+    pub fn render_sampled_docker_list(
+        &self,
+        render: &MonitorRenderContext,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(s) = self.docker_panel_snapshot() else {
+            return host_tools_center_state(
+                "lucide/wifi-off.svg",
+                render.tokens.ui.text_muted,
+                render.i18n.t("profiler.panel.no_connection"),
+                &render.selectable_text,
+                cx,
+            );
+        };
+        self.sync_host_docker_list_state(&s.rows, &s.selected_connection_id);
+        self.render_host_docker_list(
+            s.rows,
+            s.has_metrics,
+            s.status,
+            s.selected_connection_id,
+            RowActions::Inspect,
+            render.sidebar_width,
+            &render.tokens,
+            &render.i18n,
+            render.mono_font_family.clone(),
+            &render.selectable_text,
+            cx,
+        )
+    }
     #[allow(clippy::too_many_arguments)]
     pub fn render_host_docker_panel(
         &self,
@@ -85,7 +115,7 @@ impl HostToolsEntity {
             snapshot.has_metrics,
             std::mem::take(&mut snapshot.status),
             selected_connection_id.clone(),
-            terminal_available,
+            RowActions::Manage { terminal_available },
             sidebar_width,
             tokens,
             i18n,
@@ -250,7 +280,7 @@ impl HostToolsEntity {
         has_metrics: bool,
         status: ResourceDockerStatus,
         selected_connection_id: String,
-        terminal_available: bool,
+        actions: RowActions,
         sidebar_width: f32,
         tokens: &ThemeTokens,
         i18n: &I18n,
@@ -365,7 +395,7 @@ impl HostToolsEntity {
                                 host_tools.render_host_docker_row(
                                     selected_connection_id.as_str(),
                                     rows.get(index).cloned(),
-                                    terminal_available,
+                                    actions,
                                     show_context_columns,
                                     &row_tokens,
                                     &row_i18n,
@@ -433,7 +463,7 @@ impl HostToolsEntity {
         &self,
         connection_id: &str,
         container: Option<ResourceDockerContainer>,
-        terminal_available: bool,
+        actions: RowActions,
         show_context_columns: bool,
         tokens: &ThemeTokens,
         i18n: &I18n,
@@ -536,14 +566,16 @@ impl HostToolsEntity {
                                 image_status
                             }),
                     )
-                    .child(self.render_host_docker_inline_actions(
-                        connection_id,
-                        &container,
-                        terminal_available,
-                        tokens,
-                        i18n,
-                        cx,
-                    )),
+                    .when_some(actions.terminal_access(), |row, terminal_available| {
+                        row.child(self.render_host_docker_inline_actions(
+                            connection_id,
+                            &container,
+                            terminal_available,
+                            tokens,
+                            i18n,
+                            cx,
+                        ))
+                    }),
             )
             .when(expanded, |row| {
                 row.child(self.render_host_docker_detail(

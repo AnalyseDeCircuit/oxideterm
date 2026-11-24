@@ -279,6 +279,47 @@ impl HostToolsEntity {
         )
     }
 
+    /// Sample-only bridges can inspect and expand rows without offering native host operations.
+    pub fn render_sampled_service_list(
+        &self,
+        render: &MonitorRenderContext,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let connections = self.monitor_connections();
+        let selected = self.selected_connection_id_owned();
+        let Some(host) = connections
+            .iter()
+            .find(|c| Some(c.connection_id.as_str()) == selected.as_deref())
+            .or_else(|| connections.first())
+        else {
+            return host_tools_center_state(
+                "lucide/wifi-off.svg",
+                render.tokens.ui.text_muted,
+                render.i18n.t("profiler.panel.no_connection"),
+                &render.selectable_text,
+                cx,
+            );
+        };
+        let id = host.connection_id.as_str();
+        let metrics = self.profiler_current(id).and_then(|(metrics, _)| metrics);
+        let loading = metrics.is_none();
+        let services = metrics.map(|m| m.services).unwrap_or_default();
+        let rows = visible_service_rows(&services.services, "");
+        self.sync_host_service_list_state(&rows, id);
+        self.render_host_service_list(
+            rows,
+            loading,
+            services.status,
+            id,
+            RowActions::Inspect,
+            render.sidebar_width,
+            &render.tokens,
+            &render.i18n,
+            render.mono_font_family.clone(),
+            &render.selectable_text,
+            cx,
+        )
+    }
     #[allow(clippy::too_many_arguments)]
     pub fn render_host_services_panel(
         &self,
@@ -366,7 +407,9 @@ impl HostToolsEntity {
                 snapshot_in_flight,
                 service_status,
                 selected_id,
-                follow_terminal_available,
+                RowActions::Manage {
+                    terminal_available: follow_terminal_available,
+                },
                 sidebar_width,
                 tokens,
                 i18n,
@@ -494,7 +537,7 @@ impl HostToolsEntity {
         loading: bool,
         status: ResourceServiceStatus,
         selected_id: &str,
-        follow_terminal_available: bool,
+        actions: RowActions,
         sidebar_width: f32,
         tokens: &ThemeTokens,
         i18n: &I18n,
@@ -578,7 +621,7 @@ impl HostToolsEntity {
                                 host_tools.render_host_service_row(
                                     selected_id.as_str(),
                                     rows.get(index).cloned(),
-                                    follow_terminal_available,
+                                    actions,
                                     show_context_columns,
                                     &row_tokens,
                                     &row_i18n,
@@ -653,7 +696,7 @@ impl HostToolsEntity {
         &self,
         connection_id: &str,
         service: Option<ResourceService>,
-        follow_terminal_available: bool,
+        actions: RowActions,
         show_context_columns: bool,
         tokens: &ThemeTokens,
         i18n: &I18n,
@@ -778,14 +821,16 @@ impl HostToolsEntity {
                                 parts.join(" · ")
                             }),
                     )
-                    .child(self.render_host_service_inline_actions(
-                        connection_id,
-                        &service,
-                        follow_terminal_available,
-                        tokens,
-                        i18n,
-                        cx,
-                    )),
+                    .when_some(actions.terminal_access(), |row, terminal_available| {
+                        row.child(self.render_host_service_inline_actions(
+                            connection_id,
+                            &service,
+                            terminal_available,
+                            tokens,
+                            i18n,
+                            cx,
+                        ))
+                    }),
             )
             .when(expanded, |row| {
                 row.child(Self::render_host_service_detail(

@@ -10,7 +10,7 @@ use oxideterm_connection_monitor::container::{
     ContainerCapture, ContainerInstance, ContainerStatus, container_action_availability,
     pod_action_availability,
 };
-use oxideterm_gpui_ui::button::{ButtonVariant, IconButtonOptions};
+use oxideterm_gpui_ui::button::IconButtonOptions;
 
 const HOST_CONTAINER_ACTION_TIMEOUT: Duration = Duration::from_secs(20);
 const HOST_CONTAINER_ACTION_MAX_OUTPUT: usize = 4096;

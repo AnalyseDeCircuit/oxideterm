@@ -12,7 +12,41 @@ const HOST_TOOLS_SELECTOR_MENU_PADDING_Y: f32 = 8.0;
 const HOST_TOOLS_SELECTOR_VISIBLE_OPTIONS: usize = 4;
 const HOST_TOOLS_SELECTOR_GAP: f32 = 8.0;
 
+#[derive(Clone, Copy)]
+enum RowActions {
+    Inspect,
+    Manage { terminal_available: bool },
+}
+
+impl RowActions {
+    fn terminal_access(self) -> Option<bool> {
+        match self {
+            Self::Inspect => None,
+            Self::Manage { terminal_available } => Some(terminal_available),
+        }
+    }
+}
+
 impl ContextSidebarTool {
+    pub fn icon(self) -> oxideterm_gpui_ui::icons::LucideIcon {
+        use oxideterm_gpui_ui::icons::LucideIcon;
+        match self {
+            ContextSidebarTool::Monitor => LucideIcon::Activity,
+            ContextSidebarTool::Gpu => LucideIcon::Gpu,
+            ContextSidebarTool::Processes => LucideIcon::ListTree,
+            ContextSidebarTool::Services => LucideIcon::ServerCog,
+            ContextSidebarTool::Logs => LucideIcon::FileText,
+            ContextSidebarTool::Tmux => LucideIcon::SplitSquareHorizontal,
+            ContextSidebarTool::Docker => LucideIcon::Docker,
+            ContextSidebarTool::Container => LucideIcon::Container,
+            ContextSidebarTool::Ports => LucideIcon::Network,
+            ContextSidebarTool::Schedules => LucideIcon::CalendarClock,
+            ContextSidebarTool::Filesystems => LucideIcon::HardDrive,
+            ContextSidebarTool::Packages => LucideIcon::Package,
+            ContextSidebarTool::Redis => LucideIcon::Database,
+        }
+    }
+
     pub fn label_key(self) -> &'static str {
         match self {
             Self::Monitor => "sidebar.panels.host_monitor",

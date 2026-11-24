@@ -245,88 +245,41 @@ impl WorkspaceApp {
         } else {
             theme.accent
         };
-        let badge_text_color = if badge_color == theme.accent {
-            theme.accent_text
-        } else {
-            theme.bg
-        };
-
         let ai_disabled =
             section == SidebarSection::Assistant && !self.settings_store.settings().ai.enabled;
-        // Activity entries use the same static selected-card treatment as the
-        // settings navigation while retaining the shared icon-button states.
-        let button = oxideterm_gpui_ui::button::icon_button(
+        oxideterm_gpui_shell::chrome::activity_button(
             &self.tokens,
-            Self::render_lucide_icon(
-                icon,
-                self.tokens.metrics.activity_icon_glyph_size,
-                rgb(context_rail_icon_color_hex(
-                    &self.tokens,
-                    active,
-                    ai_disabled,
-                )),
-            ),
-            context_rail_icon_button_options(self, active, ai_disabled),
-        );
-        let button = if active {
-            oxideterm_gpui_ui::theme_card_surface_shadow(button, &self.tokens)
-        } else {
-            button
-        };
-
-        button
-            .id(("activity-icon", section as u64))
-            .relative()
-            .mb(px(self.tokens.metrics.activity_icon_gap))
-            .when(badge_count > 0, |icon_el| {
-                icon_el.child(
-                    div()
-                        .absolute()
-                        // Tauri badges sit outside the `h-9 w-9` Button
-                        // (`-top-1 -right-1`) so the active button chrome and
-                        // numeric pill do not visually collide.
-                        .right(px(-4.0))
-                        .top(px(-4.0))
-                        .min_w(px(14.0))
-                        .h(px(14.0))
-                        .px(px(3.0))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .rounded_full()
-                        .bg(rgb(badge_color))
-                        .text_color(rgb(badge_text_color))
-                        .text_size(px(self.tokens.metrics.ui_text_2xs))
-                        .child(if badge_count > 99 {
-                            "99+".to_string()
-                        } else {
-                            badge_count.to_string()
-                        }),
-                )
-            })
-            .on_mouse_move(cx.listener({
-                move |this, event: &MouseMoveEvent, _window, cx| {
-                    this.queue_workspace_tooltip(
-                        tooltip_id_for_move.clone(),
-                        tooltip.clone(),
-                        f32::from(event.position.x) + 12.0,
-                        f32::from(event.position.y) + 16.0,
-                        cx,
-                    );
-                }
-            }))
-            .on_hover(cx.listener(move |this, hovered: &bool, _window, cx| {
-                if !*hovered {
-                    this.clear_workspace_tooltip(&tooltip_id, cx);
-                }
-            }))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event, window, cx| {
-                    this.request(ShellRequest::Select(section), window, cx);
-                }),
-            )
-            .into_any_element()
+            icon,
+            active,
+            ai_disabled,
+            self.settings_panel_background(theme.shell_active_bg()),
+            badge_count,
+            badge_color,
+        )
+        .id(("activity-icon", section as u64))
+        .on_mouse_move(cx.listener({
+            move |this, event: &MouseMoveEvent, _window, cx| {
+                this.queue_workspace_tooltip(
+                    tooltip_id_for_move.clone(),
+                    tooltip.clone(),
+                    f32::from(event.position.x) + 12.0,
+                    f32::from(event.position.y) + 16.0,
+                    cx,
+                );
+            }
+        }))
+        .on_hover(cx.listener(move |this, hovered: &bool, _window, cx| {
+            if !*hovered {
+                this.clear_workspace_tooltip(&tooltip_id, cx);
+            }
+        }))
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, _event, window, cx| {
+                this.request(ShellRequest::Select(section), window, cx);
+            }),
+        )
+        .into_any_element()
     }
 
     pub(in crate::workspace) fn activity_icon_tooltip(&self, section: SidebarSection) -> String {

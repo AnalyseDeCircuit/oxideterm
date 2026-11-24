@@ -37,6 +37,61 @@ impl ForwardsViews {
         }
     }
 
+    /// A narrow navigator uses the same addresses and status labels as the full rules table.
+    pub fn sidebar(&self, rules: &[ForwardRule], tokens: &ThemeTokens, i18n: &I18n) -> AnyElement {
+        let theme = tokens.ui;
+        div()
+            .id("forward-rules-sidebar")
+            .size_full()
+            .overflow_y_scroll()
+            .px_3()
+            .pt_1()
+            .text_size(px(tokens.metrics.ui_text_sm))
+            .when(rules.is_empty(), |d| {
+                d.child(
+                    div()
+                        .py_3()
+                        .text_color(gpui::rgb(theme.text_muted))
+                        .child(i18n.t("forwards.table.no_forwards")),
+                )
+            })
+            .children(rules.iter().map(|rule| {
+                let (local, remote) = crate::helpers::forward_addresses(rule);
+                div()
+                    .w_full()
+                    .py_2()
+                    .border_b_1()
+                    .border_color(gpui::rgba((theme.border << 8) | 0x66))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .child(crate::helpers::forward_type_key(rule.forward_type, i18n))
+                            .child(
+                                div()
+                                    .text_size(px(tokens.metrics.ui_text_xs))
+                                    .text_color(gpui::rgb(theme.text_muted))
+                                    .child(
+                                        i18n.t(crate::helpers::forward_status_key(&rule.status)),
+                                    ),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .truncate()
+                            .font_family("Lilex")
+                            .text_size(px(tokens.metrics.ui_text_xs))
+                            .child(if rule.forward_type == ForwardType::Dynamic {
+                                local
+                            } else {
+                                format!("{local} → {remote}")
+                            }),
+                    )
+            }))
+            .into_any_element()
+    }
+
     pub fn body(&self) -> AnyElement {
         self.body.clone().into_any_element()
     }

@@ -23,24 +23,6 @@ const TOOLS: [ContextSidebarTool; 13] = [
 
 const MONITORING_TOOL_COUNT: usize = 5;
 
-pub(super) fn context_sidebar_tool_icon(tool: ContextSidebarTool) -> LucideIcon {
-    match tool {
-        ContextSidebarTool::Monitor => LucideIcon::Activity,
-        ContextSidebarTool::Gpu => LucideIcon::Gpu,
-        ContextSidebarTool::Processes => LucideIcon::ListTree,
-        ContextSidebarTool::Services => LucideIcon::ServerCog,
-        ContextSidebarTool::Logs => LucideIcon::FileText,
-        ContextSidebarTool::Tmux => LucideIcon::SplitSquareHorizontal,
-        ContextSidebarTool::Docker => LucideIcon::Docker,
-        ContextSidebarTool::Container => LucideIcon::Container,
-        ContextSidebarTool::Ports => LucideIcon::Network,
-        ContextSidebarTool::Schedules => LucideIcon::CalendarClock,
-        ContextSidebarTool::Filesystems => LucideIcon::HardDrive,
-        ContextSidebarTool::Packages => LucideIcon::Package,
-        ContextSidebarTool::Redis => LucideIcon::Database,
-    }
-}
-
 fn visible_tool_count(available_height: f32, row_height: f32, separator_height: f32) -> usize {
     // Reserve More only for overflow, and the second divider only when both groups show.
     (0..=TOOLS.len())
@@ -210,10 +192,15 @@ impl WorkspaceApp {
                     .flex_none()
                     .mb(px(self.tokens.metrics.activity_icon_gap))
                     .child(self.workspace_tooltip_icon_button(
-                        context_sidebar_tool_icon(tool),
+                        tool.icon(),
                         self.tokens.metrics.activity_icon_glyph_size,
                         rgb(context_rail_icon_color_hex(&self.tokens, active, dimmed)),
-                        context_rail_icon_button_options(self, active, dimmed),
+                        context_rail_icon_button_options(
+                            &self.tokens,
+                            self.settings_panel_background(self.tokens.ui.shell_active_bg()),
+                            active,
+                            dimmed,
+                        ),
                         self.context_tool_tooltip(tool.label_key(), local_only),
                         "context-tool",
                         true,
@@ -242,7 +229,12 @@ impl WorkspaceApp {
                         LucideIcon::MoreVertical,
                         self.tokens.metrics.activity_icon_glyph_size,
                         rgb(context_rail_icon_color_hex(&self.tokens, active, dimmed)),
-                        context_rail_icon_button_options(self, active, dimmed),
+                        context_rail_icon_button_options(
+                            &self.tokens,
+                            self.settings_panel_background(self.tokens.ui.shell_active_bg()),
+                            active,
+                            dimmed,
+                        ),
                         self.i18n.t("sidebar.panels.more_tools"),
                         "context-tools-more",
                         true,

@@ -45,20 +45,6 @@ fn tab_kind_icon(
     cx: &Context<WorkspaceApp>,
 ) -> LucideIcon {
     match kind {
-        TabKind::Workspace => LucideIcon::AppWindow,
-        TabKind::LocalTerminal => LucideIcon::Square,
-        TabKind::SshTerminal => LucideIcon::Terminal,
-        TabKind::MoshTerminal => LucideIcon::Terminal,
-        TabKind::FileManager => LucideIcon::FolderOpen,
-        TabKind::Graphics | TabKind::RemoteDesktop => LucideIcon::Monitor,
-        TabKind::Runtime | TabKind::ConnectionPool => LucideIcon::Gauge,
-        TabKind::Topology => LucideIcon::Network,
-        TabKind::NotificationCenter => LucideIcon::Bell,
-        TabKind::Sftp => LucideIcon::FolderInput,
-        TabKind::Ide => LucideIcon::Code2,
-        TabKind::Forwards => LucideIcon::ArrowLeftRight,
-        TabKind::SessionManager => LucideIcon::LayoutList,
-        TabKind::PluginManager => LucideIcon::Puzzle,
         TabKind::Plugin { plugin_id, tab_id } => workspace
             .plugin_entity
             .read(cx)
@@ -67,10 +53,7 @@ fn tab_kind_icon(
             .tab_contribution(plugin_id, tab_id)
             .map(|contribution| LucideIcon::from_plugin_name(&contribution.definition.icon))
             .unwrap_or(LucideIcon::Puzzle),
-        TabKind::CloudSync => LucideIcon::Cloud,
-        TabKind::Knowledge => LucideIcon::BookOpen,
-        TabKind::Settings => LucideIcon::Settings,
-        TabKind::Onboarding => LucideIcon::Sparkles,
+        _ => oxideterm_gpui_shell::chrome::tab_icon(kind),
     }
 }
 

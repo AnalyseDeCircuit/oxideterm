@@ -29,6 +29,10 @@ pub struct Tools {
     pub quick: TerminalQuickCommandsState,
 }
 impl Tools {
+    pub fn forwards_sidebar(&self, t: &ThemeTokens, i: &I18n) -> AnyElement {
+        self.forwards.sidebar(&self.rules.rules, t, i)
+    }
+
     pub fn new(
         demo: bool,
         t: ThemeTokens,
@@ -522,5 +526,6 @@ impl Workspace {
         self.tools.forwards.state.update(cx, |s, cx| {
             s.complete_operation(Ok(()), true, Duration::ZERO, cx)
         });
+        cx.notify();
     }
 }

@@ -9,7 +9,6 @@
 use super::*;
 
 use oxideterm_connection_monitor::ResourceRedisValue;
-use oxideterm_gpui_ui::button::{ButtonVariant, IconButtonOptions};
 
 /// Rows drawn per frame around the visible band of the value viewer.
 const HOST_REDIS_VALUE_ROW_OVERSCAN: usize = 11;
