@@ -8,3 +8,4 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+web-time.workspace = true

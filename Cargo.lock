@@ -7839,6 +7839,7 @@ dependencies = [
  "oxideterm-gpui-editor",
  "oxideterm-gpui-markdown",
  "oxideterm-gpui-platform",
+ "oxideterm-gpui-shell",
  "oxideterm-gpui-terminal",
  "oxideterm-gpui-ui",
  "oxideterm-i18n",
@@ -7905,10 +7906,14 @@ name = "oxideterm-gpui-shell"
 version = "2.4.1"
 dependencies = [
  "gpui-pre",
+ "oxideterm-editor-core",
  "oxideterm-gpui-ui",
  "oxideterm-i18n",
+ "oxideterm-notification-center",
  "oxideterm-theme",
  "oxideterm-workspace",
+ "serde",
+ "serde_json",
  "web-time",
 ]
 
@@ -8114,6 +8119,9 @@ dependencies = [
 [[package]]
 name = "oxideterm-notification-center"
 version = "2.4.1"
+dependencies = [
+ "web-time",
+]
 
 [[package]]
 name = "oxideterm-pcm-audio"

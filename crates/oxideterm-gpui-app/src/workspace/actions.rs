@@ -1428,7 +1428,7 @@ impl WorkspaceApp {
             return false;
         };
 
-        let terminal_active = self.active_tab(cx).is_some_and(|tab| {
+        let terminal_active = self.keyboard_content_tab(cx).is_some_and(|tab| {
             matches!(
                 tab.kind,
                 TabKind::LocalTerminal
@@ -1478,9 +1478,11 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> bool {
         match action_id {
-            "app.newTerminal" => {
-                let _ = self.create_local_terminal_tab(window, cx);
-            }
+            "app.newTerminal" => self.tab_shortcut(
+                oxideterm_gpui_shell::shortcuts::TabShortcut::New,
+                window,
+                cx,
+            ),
             "app.shellLauncher" => self.open_local_shell_launcher(cx),
             "app.closeTab" => self.request_close_active_tab(window, cx),
             "app.closeOtherTabs" => self.request_close_other_tabs_or_active_pane(window, cx),

@@ -58,6 +58,7 @@ impl HostRedisDialogKind {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum ActiveWindowModalOwner {
     NewConnection,
+    SftpPresentation,
     LocalShellLauncher,
     JumpServer,
     HostKeyChallenge,
@@ -186,86 +187,154 @@ pub(in crate::workspace) enum ActiveWindowModalOwner {
     MermaidZoom,
 }
 
+#[derive(Clone, Copy)]
+#[repr(u16)]
+pub(super) enum DesktopPortal {
+    Base,
+    ConnectionForm,
+    SftpPresentation,
+    Launcher,
+    FormDialogs,
+    HostKeyChallenge,
+    KeyboardInteractiveChallenge,
+    AiEnable,
+    AiProviderKeyRemove,
+    AiProviderRemove,
+    AiSafety,
+    AiSummarize,
+    AiClearAll,
+    AiDeleteMessage,
+    SettingsReset,
+    SettingsDataDirectory,
+    RemoteShellIntegration,
+    TerminalTriggerQuickCommand,
+    CloudSync,
+    NodeDisconnect,
+    TabClose,
+    HostProcessConfirm,
+    HostPackageConfirm,
+    HostDockerConfirm,
+    HostDockerLogs,
+    HostContainerConfirm,
+    HostContainerText,
+    HostContainerInput,
+    RedisValue,
+    RedisDelete,
+    RedisEdit,
+    HostServiceConfirm,
+    HostServiceLogs,
+    HostTmuxConfirm,
+    HostTmuxInput,
+    HostMuxConfirm,
+    HostMuxInput,
+    HostMuxRead,
+    HostScheduleConfirm,
+    HostScheduleLogs,
+    NativePluginConfirm,
+    TabRename,
+    ArchiveCommand,
+    ActiveTabWindowModal,
+    TerminalCastPlayer,
+    ThemeEditor,
+    SettingsSshConfigImport,
+    TerminalCommandSpecsEditor,
+    TerminalTriggerEditor,
+    SemanticSchemeEditor,
+    HighlightRuleEditor,
+    PublicMcpClientEditor,
+    QuickCommandsManager,
+    AiTextEditor,
+    OxideImport,
+    OxideExport,
+    BatchAdd,
+    CommandPalette,
+    VersionMigration,
+    LegalNotice,
+    NativeUpdateReleaseNotes,
+    Shortcuts,
+    AppLockDialog,
+    MermaidZoom,
+}
+
 impl ActiveWindowModalOwner {
-    fn render_rank(self) -> u8 {
-        // These ranks mirror the portal child order in root/render.rs. A later
-        // child is visually above an earlier child and therefore owns keys.
+    fn slot(self) -> DesktopPortal {
         match self {
-            Self::NewConnection => 0,
-            Self::LocalShellLauncher => 1,
-            Self::JumpServer => 2,
-            Self::HostKeyChallenge => 3,
-            Self::KeyboardInteractiveChallenge => 4,
-            Self::AiEnable { .. } => 5,
-            Self::AiProviderKeyRemove { .. } => 6,
-            Self::AiProviderRemove { .. } => 7,
-            Self::AiSafety { .. } => 8,
-            Self::AiSummarize { .. } => 9,
-            Self::AiClearAll { .. } => 10,
-            Self::AiDeleteMessage { .. } => 11,
-            Self::SettingsReset { .. } => 12,
+            Self::NewConnection => DesktopPortal::ConnectionForm,
+            Self::SftpPresentation => DesktopPortal::SftpPresentation,
+            Self::LocalShellLauncher => DesktopPortal::Launcher,
+            Self::JumpServer => DesktopPortal::FormDialogs,
+            Self::HostKeyChallenge => DesktopPortal::HostKeyChallenge,
+            Self::KeyboardInteractiveChallenge => DesktopPortal::KeyboardInteractiveChallenge,
+            Self::AiEnable { .. } => DesktopPortal::AiEnable,
+            Self::AiProviderKeyRemove { .. } => DesktopPortal::AiProviderKeyRemove,
+            Self::AiProviderRemove { .. } => DesktopPortal::AiProviderRemove,
+            Self::AiSafety { .. } => DesktopPortal::AiSafety,
+            Self::AiSummarize { .. } => DesktopPortal::AiSummarize,
+            Self::AiClearAll { .. } => DesktopPortal::AiClearAll,
+            Self::AiDeleteMessage { .. } => DesktopPortal::AiDeleteMessage,
+            Self::SettingsReset { .. } => DesktopPortal::SettingsReset,
             // Shares the SettingsReset overlay slot; the two cannot be open
             // together.
-            Self::CommandHistoryClear { .. } => 12,
-            Self::SettingsDataDirectory { .. } => 13,
-            Self::RemoteShellIntegration => 14,
-            Self::TerminalTriggerQuickCommand => 15,
-            Self::CloudSync { .. } => 16,
-            Self::NodeDisconnect { .. } => 17,
-            Self::TabClose { .. } => 18,
-            Self::HostProcessConfirm { .. } => 19,
-            Self::HostPackageConfirm { .. } => 20,
-            Self::HostDockerConfirm { .. } => 21,
-            Self::HostDockerLogs => 22,
-            Self::HostContainerConfirm { .. } => 23,
-            Self::HostContainerText => 24,
-            Self::HostContainerInput => 25,
+            Self::CommandHistoryClear { .. } => DesktopPortal::SettingsReset,
+            Self::SettingsDataDirectory { .. } => DesktopPortal::SettingsDataDirectory,
+            Self::RemoteShellIntegration => DesktopPortal::RemoteShellIntegration,
+            Self::TerminalTriggerQuickCommand => DesktopPortal::TerminalTriggerQuickCommand,
+            Self::CloudSync { .. } => DesktopPortal::CloudSync,
+            Self::NodeDisconnect { .. } => DesktopPortal::NodeDisconnect,
+            Self::TabClose { .. } => DesktopPortal::TabClose,
+            Self::HostProcessConfirm { .. } => DesktopPortal::HostProcessConfirm,
+            Self::HostPackageConfirm { .. } => DesktopPortal::HostPackageConfirm,
+            Self::HostDockerConfirm { .. } => DesktopPortal::HostDockerConfirm,
+            Self::HostDockerLogs => DesktopPortal::HostDockerLogs,
+            Self::HostContainerConfirm { .. } => DesktopPortal::HostContainerConfirm,
+            Self::HostContainerText => DesktopPortal::HostContainerText,
+            Self::HostContainerInput => DesktopPortal::HostContainerInput,
             // Never compared: the inline credential field is only returned when
             // no portal owner exists.
-            Self::HostRedisPassword => 0,
-            Self::HostRedisDialog(HostRedisDialogKind::Value) => 26,
-            Self::HostRedisDialog(HostRedisDialogKind::Delete) => 27,
+            Self::HostRedisPassword => DesktopPortal::ConnectionForm,
+            Self::HostRedisDialog(HostRedisDialogKind::Value) => DesktopPortal::RedisValue,
+            Self::HostRedisDialog(HostRedisDialogKind::Delete) => DesktopPortal::RedisDelete,
             // Rename, set-value, TTL and create-key share one dialog.
-            Self::HostRedisDialog(_) => 28,
-            Self::HostServiceConfirm { .. } => 29,
-            Self::HostServiceLogs => 30,
-            Self::HostTmuxConfirm { .. } => 31,
-            Self::HostTmuxInput => 32,
-            Self::HostMuxConfirm { .. } => 33,
-            Self::HostMuxInput => 34,
-            Self::HostMuxRead => 35,
-            Self::HostScheduleConfirm { .. } => 36,
-            Self::HostScheduleLogs => 37,
-            Self::NativePluginConfirm { .. } => 38,
-            Self::TabRename => 39,
-            Self::ArchiveCommand => 40,
-            Self::SshTunnel => 1,
-            Self::ActiveTabWindowModal { .. } => 41,
-            Self::TerminalCastPlayer => 42,
-            Self::ThemeEditor { .. } => 43,
-            Self::SettingsSshConfigImport { .. } => 44,
-            Self::TerminalCommandSpecsEditor => 45,
-            Self::TerminalTriggerEditor => 46,
-            Self::SemanticSchemeEditor => 47,
-            Self::HighlightRuleEditor => 48,
-            Self::PublicMcpClientEditor => 49,
-            Self::QuickCommandsManager => 50,
-            Self::AiTextEditor => 51,
-            Self::OxideImport { .. } => 52,
-            Self::OxideExport { .. } => 53,
-            Self::BatchAdd { .. } => 54,
-            Self::CommandPalette => 55,
-            Self::VersionMigration => 56,
-            Self::Onboarding => 57,
-            Self::LegalNotice { .. } => 58,
-            Self::NativeUpdateReleaseNotes { .. } => 59,
-            Self::Shortcuts => 60,
-            Self::AppLockDialog => 61,
-            Self::MermaidZoom => 62,
+            Self::HostRedisDialog(_) => DesktopPortal::RedisEdit,
+            Self::HostServiceConfirm { .. } => DesktopPortal::HostServiceConfirm,
+            Self::HostServiceLogs => DesktopPortal::HostServiceLogs,
+            Self::HostTmuxConfirm { .. } => DesktopPortal::HostTmuxConfirm,
+            Self::HostTmuxInput => DesktopPortal::HostTmuxInput,
+            Self::HostMuxConfirm { .. } => DesktopPortal::HostMuxConfirm,
+            Self::HostMuxInput => DesktopPortal::HostMuxInput,
+            Self::HostMuxRead => DesktopPortal::HostMuxRead,
+            Self::HostScheduleConfirm { .. } => DesktopPortal::HostScheduleConfirm,
+            Self::HostScheduleLogs => DesktopPortal::HostScheduleLogs,
+            Self::NativePluginConfirm { .. } => DesktopPortal::NativePluginConfirm,
+            Self::TabRename => DesktopPortal::TabRename,
+            Self::ArchiveCommand => DesktopPortal::ArchiveCommand,
+            Self::SshTunnel => DesktopPortal::FormDialogs,
+            Self::ActiveTabWindowModal { .. } => DesktopPortal::ActiveTabWindowModal,
+            Self::TerminalCastPlayer => DesktopPortal::TerminalCastPlayer,
+            Self::ThemeEditor { .. } => DesktopPortal::ThemeEditor,
+            Self::SettingsSshConfigImport { .. } => DesktopPortal::SettingsSshConfigImport,
+            Self::TerminalCommandSpecsEditor => DesktopPortal::TerminalCommandSpecsEditor,
+            Self::TerminalTriggerEditor => DesktopPortal::TerminalTriggerEditor,
+            Self::SemanticSchemeEditor => DesktopPortal::SemanticSchemeEditor,
+            Self::HighlightRuleEditor => DesktopPortal::HighlightRuleEditor,
+            Self::PublicMcpClientEditor => DesktopPortal::PublicMcpClientEditor,
+            Self::QuickCommandsManager => DesktopPortal::QuickCommandsManager,
+            Self::AiTextEditor => DesktopPortal::AiTextEditor,
+            Self::OxideImport { .. } => DesktopPortal::OxideImport,
+            Self::OxideExport { .. } => DesktopPortal::OxideExport,
+            Self::BatchAdd { .. } => DesktopPortal::BatchAdd,
+            Self::CommandPalette => DesktopPortal::CommandPalette,
+            Self::VersionMigration => DesktopPortal::VersionMigration,
+            Self::Onboarding => DesktopPortal::Base,
+            Self::LegalNotice { .. } => DesktopPortal::LegalNotice,
+            Self::NativeUpdateReleaseNotes { .. } => DesktopPortal::NativeUpdateReleaseNotes,
+            Self::Shortcuts => DesktopPortal::Shortcuts,
+            Self::AppLockDialog => DesktopPortal::AppLockDialog,
+            Self::MermaidZoom => DesktopPortal::MermaidZoom,
         }
     }
 
-    fn phase(self) -> oxideterm_gpui_ui::motion::ExitPhase {
+    pub(in crate::workspace) fn phase(self) -> oxideterm_gpui_ui::motion::ExitPhase {
         match self {
             Self::AiEnable { phase }
             | Self::AiProviderKeyRemove { phase }
@@ -298,6 +367,7 @@ impl ActiveWindowModalOwner {
             | Self::LegalNotice { phase }
             | Self::NativeUpdateReleaseNotes { phase } => phase,
             Self::NewConnection
+            | Self::SftpPresentation
             | Self::LocalShellLauncher
             | Self::JumpServer
             | Self::HostKeyChallenge
@@ -369,41 +439,30 @@ impl ActiveWindowModalOwner {
                 | Self::OxideExport { .. }
                 | Self::BatchAdd { .. }
                 | Self::CommandPalette
+                | Self::Shortcuts
                 | Self::AppLockDialog
                 | Self::Onboarding
         )
     }
 
-    fn key_route(self, key: &str) -> ActiveWindowModalKeyRoute {
-        let visible = self.phase() == oxideterm_gpui_ui::motion::ExitPhase::Visible;
-        let focused_child_owns_key = visible
-            && (matches!(self, Self::AiTextEditor | Self::ArchiveCommand)
-                || matches!(
-                    self,
-                    Self::ActiveTabWindowModal {
+    fn layer(self) -> oxideterm_gpui_shell::overlays::ModalLayer<Self> {
+        oxideterm_gpui_shell::overlays::ModalLayer {
+            owner: self,
+            priority: self.slot() as u16,
+            phase: self.phase(),
+            editor: matches!(
+                self,
+                Self::AiTextEditor
+                    | Self::ArchiveCommand
+                    | Self::ActiveTabWindowModal {
                         kind: ActiveTabWindowModalKind::SftpEditor,
                         ..
                     }
-                ))
-            && key != "escape";
-        ActiveWindowModalKeyRoute {
-            // Document editors must receive navigation and mutation keys at
-            // their focused element; the modal keeps Escape at the capture layer.
-            dispatch_owner: (visible && !focused_child_owns_key).then_some(self),
-            consume_in_capture: !focused_child_owns_key,
+            ),
         }
     }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct ActiveWindowModalKeyRoute {
-    dispatch_owner: Option<ActiveWindowModalOwner>,
-    consume_in_capture: bool,
-}
-
-impl ActiveWindowModalKeyRoute {
-    fn consumes_key(self) -> bool {
-        self.consume_in_capture
+    fn key_route(self, key: &str) -> oxideterm_gpui_shell::overlays::ModalKeyRoute<Self> {
+        self.layer().key_route(key)
     }
 }
 
@@ -412,6 +471,7 @@ impl ActiveWindowModalKeyRoute {
 pub(in crate::workspace) struct ActiveWindowModalProjection {
     pub(in crate::workspace) new_connection_open: bool,
     pub(in crate::workspace) local_shell_launcher_open: bool,
+    pub(in crate::workspace) sftp_presentation_open: bool,
     pub(in crate::workspace) jump_server_open: bool,
     pub(in crate::workspace) host_key_challenge_open: bool,
     pub(in crate::workspace) keyboard_interactive_challenge_open: bool,
@@ -675,54 +735,59 @@ impl ActiveWindowModalProjection {
         // handoffs, the broadcast menu, and AI floating controls are excluded.
         // They are transient nonblocking layers and keep their own focused
         // input or Escape handling instead of consuming every window key.
-        [
-            new_connection_owner,
-            local_shell_owner,
-            jump_server_owner,
-            host_key_owner,
-            keyboard_interactive_owner,
-            ai_enable_owner,
-            ai_provider_key_remove_owner,
-            ai_provider_remove_owner,
-            ai_safety_owner,
-            ai_summarize_owner,
-            ai_owner,
-            overlay_owner,
-            settings_data_owner,
-            remote_shell_owner,
-            terminal_trigger_owner,
-            cloud_sync_owner,
-            tab_owner,
-            host_tools_owner,
-            host_redis_owner,
-            native_plugin_owner,
-            tab_rename_owner,
-            archive_command_owner,
-            ssh_tunnel_owner,
-            active_tab_owner,
-            terminal_cast_owner,
-            theme_editor_owner,
-            ssh_import_owner,
-            command_specs_owner,
-            terminal_trigger_editor_owner,
-            semantic_scheme_owner,
-            highlight_rule_owner,
-            public_mcp_client_owner,
-            quick_commands_manager_owner,
-            ai_text_editor_owner,
-            oxide_import_owner,
-            oxide_export_owner,
-            batch_add_owner,
-            command_palette_owner,
-            version_migration_owner,
-            onboarding_owner,
-            shortcuts_owner,
-            app_lock_owner,
-            mermaid_owner,
-        ]
-        .into_iter()
-        .flatten()
-        .max_by_key(|owner| owner.render_rank())
+        oxideterm_gpui_shell::overlays::top_blocking(
+            [
+                new_connection_owner,
+                self.sftp_presentation_open
+                    .then_some(ActiveWindowModalOwner::SftpPresentation),
+                local_shell_owner,
+                jump_server_owner,
+                host_key_owner,
+                keyboard_interactive_owner,
+                ai_enable_owner,
+                ai_provider_key_remove_owner,
+                ai_provider_remove_owner,
+                ai_safety_owner,
+                ai_summarize_owner,
+                ai_owner,
+                overlay_owner,
+                settings_data_owner,
+                remote_shell_owner,
+                terminal_trigger_owner,
+                cloud_sync_owner,
+                tab_owner,
+                host_tools_owner,
+                host_redis_owner,
+                native_plugin_owner,
+                tab_rename_owner,
+                archive_command_owner,
+                ssh_tunnel_owner,
+                active_tab_owner,
+                terminal_cast_owner,
+                theme_editor_owner,
+                ssh_import_owner,
+                command_specs_owner,
+                terminal_trigger_editor_owner,
+                semantic_scheme_owner,
+                highlight_rule_owner,
+                public_mcp_client_owner,
+                quick_commands_manager_owner,
+                ai_text_editor_owner,
+                oxide_import_owner,
+                oxide_export_owner,
+                batch_add_owner,
+                command_palette_owner,
+                version_migration_owner,
+                onboarding_owner,
+                shortcuts_owner,
+                app_lock_owner,
+                mermaid_owner,
+            ]
+            .into_iter()
+            .flatten()
+            .map(ActiveWindowModalOwner::layer),
+        )
+        .map(|layer| layer.owner)
     }
 }
 
@@ -814,6 +879,7 @@ impl WorkspaceApp {
         let top_owner = ActiveWindowModalProjection {
             new_connection_open,
             local_shell_launcher_open: self.local_shell_launcher_open,
+            sftp_presentation_open: self.sftp_presentation_request.is_some(),
             jump_server_open,
             host_key_challenge_open: self.connections.flow.read(cx).has_host_key_challenge(),
             keyboard_interactive_challenge_open: self
@@ -1162,6 +1228,7 @@ impl WorkspaceApp {
             return self.active_ide_surface(cx).is_some_and(|surface| {
                 surface.update(cx, |surface, cx| {
                     surface.handle_modal_key(event, window, cx)
+                        || !surface.focus_handle(cx).contains_focused(window, cx)
                 })
             });
         }
@@ -1186,7 +1253,8 @@ impl WorkspaceApp {
         {
             return false;
         }
-        if matches!(owner, ActiveWindowModalOwner::BatchAdd { .. })
+        if owner.phase() == oxideterm_gpui_ui::motion::ExitPhase::Visible
+            && matches!(owner, ActiveWindowModalOwner::BatchAdd { .. })
             && self.batch_add_text_editor_focused(window, cx)
             && !matches!(event.keystroke.key.as_str(), "escape" | "tab")
         {
@@ -1207,6 +1275,7 @@ impl WorkspaceApp {
         let route = owner.key_route(event.keystroke.key.as_str());
         if route.dispatch_owner.is_some() && owner.allows_modal_ime() {
             if self.defer_active_ime_key(&event.keystroke, window, cx) {
+                window.focus(&self.focus_handle, cx);
                 // The root keeps background routing blocked while the top modal
                 // receives committed text through the platform input pipeline.
                 return false;
@@ -1223,7 +1292,31 @@ impl WorkspaceApp {
             }
         }
         let Some(owner) = route.dispatch_owner else {
-            return route.consumes_key();
+            if route.consumes_key() {
+                return true;
+            }
+            // A document editor may yield only into its own focused subtree.
+            return !match owner {
+                ActiveWindowModalOwner::AiTextEditor => self
+                    .settings_views
+                    .ai_text_editor
+                    .read(cx)
+                    .owns_focus(window, cx),
+                ActiveWindowModalOwner::ArchiveCommand => self
+                    .archive_command
+                    .as_ref()
+                    .is_some_and(|p| p.editor.focus_handle(cx).contains_focused(window, cx)),
+                ActiveWindowModalOwner::ActiveTabWindowModal {
+                    kind: ActiveTabWindowModalKind::SftpEditor,
+                    ..
+                } => self
+                    .embedded_sftp_sidebar_dialog_view(cx)
+                    .unwrap_or_else(|| self.sftp_view().read(cx))
+                    .preview_editor
+                    .as_ref()
+                    .is_some_and(|e| e.focus_handle(cx).contains_focused(window, cx)),
+                _ => false,
+            };
         };
         match owner {
             ActiveWindowModalOwner::NewConnection | ActiveWindowModalOwner::JumpServer => {
@@ -1233,6 +1326,12 @@ impl WorkspaceApp {
                     }
                 } else {
                     let _ = self.handle_new_connection_key(event, window, cx);
+                }
+            }
+            ActiveWindowModalOwner::SftpPresentation => {
+                if event.keystroke.key == "escape" {
+                    self.sftp_presentation_request = None;
+                    cx.notify();
                 }
             }
             ActiveWindowModalOwner::LocalShellLauncher => {

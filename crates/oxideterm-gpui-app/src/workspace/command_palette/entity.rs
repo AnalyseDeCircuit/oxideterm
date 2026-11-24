@@ -1,335 +1,78 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{collections::HashSet, ops::Range, sync::Arc};
-
-use gpui::{Context, Task, UniformListScrollHandle};
+use gpui::{Context, Task};
 use oxideterm_connections::{SshConfigHost, list_ssh_config_hosts};
-use oxideterm_editor_core::utf16::replace_utf16;
-use oxideterm_gpui_ui::motion::{ExitPhase, ExitPresence};
-use oxideterm_workspace::{CommandPaletteMode as PaletteMode, parse_command_palette_query};
-use std::time::Duration;
-
-use super::{PaletteExecution, PaletteItem};
-
-#[derive(Clone, Copy, Eq, PartialEq)]
-pub(in crate::workspace) enum PaletteContent {
-    Commands,
-    TabScopes,
-    QuickBarCategories,
-    BackgroundTasks,
-}
-
-/// Immutable palette state consumed by the window renderer.
-#[derive(Clone)]
-pub(super) struct CommandPaletteView {
-    pub(super) phase: ExitPhase,
-    pub(super) motion_generation: usize,
-    pub(super) raw_query: String,
-    pub(super) mode: PaletteMode,
-    pub(super) scroll_handle: UniformListScrollHandle,
-    pub(super) error: Option<String>,
-    pub(super) content: PaletteContent,
-}
-
-/// Owns command-palette interaction state and SSH-config discovery lifetime.
-pub(in crate::workspace) struct CommandPaletteEntity {
-    open: bool,
-    content: PaletteContent,
-    presence: ExitPresence,
-    exit_task: Option<Task<()>>,
-    motion_generation: usize,
-    raw_query: String,
-    mode: PaletteMode,
-    selected_index: usize,
-    scroll_handle: UniformListScrollHandle,
+use oxideterm_gpui_shell::palette::{PaletteContent, PaletteModel, PaletteProvider};
+use std::{collections::HashSet, sync::Arc};
+pub(in crate::workspace) type CommandPaletteEntity = PaletteModel<DesktopPaletteProvider>;
+pub(in crate::workspace) struct DesktopPaletteProvider {
     ssh_config_hosts: Arc<[SshConfigHost]>,
     ssh_config_hosts_loading: bool,
-    error: Option<String>,
+
     load_generation: u64,
     load_task: Option<Task<()>>,
     runtime: Arc<tokio::runtime::Runtime>,
 }
-
-impl CommandPaletteEntity {
-    pub(in crate::workspace) fn new(runtime: Arc<tokio::runtime::Runtime>) -> Self {
+impl From<Arc<tokio::runtime::Runtime>> for DesktopPaletteProvider {
+    fn from(runtime: Arc<tokio::runtime::Runtime>) -> Self {
         Self {
-            open: false,
-            content: PaletteContent::Commands,
-            presence: ExitPresence::visible(),
-            exit_task: None,
-            motion_generation: 0,
-            raw_query: String::new(),
-            mode: PaletteMode::All,
-            selected_index: 0,
-            scroll_handle: UniformListScrollHandle::new(),
             ssh_config_hosts: Arc::default(),
             ssh_config_hosts_loading: false,
-            error: None,
+
             load_generation: 0,
             load_task: None,
             runtime,
         }
     }
-
-    pub(super) fn view(&self) -> CommandPaletteView {
-        CommandPaletteView {
-            phase: self.presence.phase(),
-            motion_generation: self.motion_generation,
-            raw_query: self.raw_query.clone(),
-            mode: self.mode,
-            scroll_handle: self.scroll_handle.clone(),
-            error: self.error.clone(),
-            content: self.content,
-        }
-    }
-
-    pub(in crate::workspace) fn is_open(&self) -> bool {
-        self.open
-    }
-
-    pub(super) fn is_tab_scope_picker(&self) -> bool {
-        self.content == PaletteContent::TabScopes
-    }
-
-    pub(super) fn open_tab_scopes(&mut self, cx: &mut Context<Self>) {
-        self.open(false, HashSet::new(), cx);
-        self.content = PaletteContent::TabScopes;
-    }
-
-    pub(super) fn is_background_task_picker(&self) -> bool {
-        self.content == PaletteContent::BackgroundTasks
-    }
-
-    pub(super) fn is_quick_bar_category_picker(&self) -> bool {
-        self.content == PaletteContent::QuickBarCategories
-    }
-
-    pub(super) fn open_quick_bar_categories(&mut self, cx: &mut Context<Self>) {
-        self.open(false, HashSet::new(), cx);
-        self.content = PaletteContent::QuickBarCategories;
-    }
-
-    pub(super) fn open_background_tasks(&mut self, cx: &mut Context<Self>) {
-        self.open(false, HashSet::new(), cx);
-        self.content = PaletteContent::BackgroundTasks;
-    }
-
-    pub(in crate::workspace) fn query(&self) -> &str {
-        &self.raw_query
-    }
-
-    pub(in crate::workspace) fn selected_index(&self) -> usize {
-        self.selected_index
-    }
-
-    pub(in crate::workspace) fn scroll_handle(&self) -> &UniformListScrollHandle {
-        &self.scroll_handle
-    }
-
-    pub(in crate::workspace) fn ssh_config_hosts(&self) -> Arc<[SshConfigHost]> {
-        self.ssh_config_hosts.clone()
-    }
-
-    pub(in crate::workspace) fn open(
-        &mut self,
-        auto_load_hosts: bool,
-        existing_names: HashSet<String>,
-        cx: &mut Context<Self>,
-    ) {
-        self.exit_task = None;
-        self.presence.reopen();
-        // Keep the mounted springs when reopening during their exit.
-        if !self.open {
-            self.motion_generation = self.motion_generation.wrapping_add(1);
-        }
-        self.open = true;
-        self.reset_interaction();
-        if auto_load_hosts {
-            self.start_ssh_config_load(existing_names, cx);
-        } else {
-            self.invalidate_load();
-            self.ssh_config_hosts = Arc::default();
-            self.ssh_config_hosts_loading = false;
-        }
-        cx.notify();
-    }
-
-    pub(in crate::workspace) fn is_closing(&self) -> bool {
-        self.presence.phase() == ExitPhase::Exiting
-    }
-
-    pub(in crate::workspace) fn begin_close(&mut self, delay: Duration, cx: &mut Context<Self>) {
-        if !self.open {
-            return;
-        }
-        let Some(generation) = self.presence.begin_exit() else {
-            return;
-        };
-        self.invalidate_load();
-        self.ssh_config_hosts_loading = false;
-        if delay.is_zero() {
-            self.close(cx);
-            return;
-        }
-        // The entity keeps its existing view until fade-out ends; reopening cancels this task.
-        let timer = cx.background_executor().timer(delay);
-        self.exit_task = Some(cx.spawn(async move |weak, cx| {
-            timer.await;
-            let _ = weak.update(cx, |this, cx| {
-                if this.presence.finish_exit(generation) {
-                    this.close(cx);
-                }
-            });
-        }));
-        cx.notify();
-    }
-
-    pub(in crate::workspace) fn close(&mut self, cx: &mut Context<Self>) {
-        self.exit_task = None;
-        self.invalidate_load();
-        self.open = false;
-        self.reset_interaction();
-        self.ssh_config_hosts_loading = false;
-        cx.notify();
-    }
-
-    pub(in crate::workspace) fn reload_ssh_config_hosts(
-        &mut self,
-        auto_load_hosts: bool,
-        existing_names: HashSet<String>,
-        cx: &mut Context<Self>,
-    ) {
-        if auto_load_hosts {
-            self.start_ssh_config_load(existing_names, cx);
-        } else {
-            self.invalidate_load();
-            self.ssh_config_hosts = Arc::default();
-            self.ssh_config_hosts_loading = false;
-            self.error = None;
-            cx.notify();
-        }
-    }
-
-    pub(in crate::workspace) fn push_query_text(
-        &mut self,
-        text: &str,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        if self.is_closing() || text.is_empty() {
-            return false;
-        }
-        self.raw_query.push_str(text);
-        self.finish_query_change();
-        cx.notify();
-        true
-    }
-
-    pub(in crate::workspace) fn pop_query(&mut self, cx: &mut Context<Self>) -> bool {
-        if self.is_closing() || self.raw_query.pop().is_none() {
-            return false;
-        }
-        self.finish_query_change();
-        cx.notify();
-        true
-    }
-
-    pub(in crate::workspace) fn replace_query_utf16(
-        &mut self,
-        replacement_range: Option<Range<usize>>,
-        text: &str,
-        cx: &mut Context<Self>,
-    ) {
-        if self.is_closing() {
-            return;
-        }
-        replace_utf16(&mut self.raw_query, replacement_range, text);
-        self.finish_query_change();
-        cx.notify();
-    }
-
-    pub(in crate::workspace) fn set_selected_index(
-        &mut self,
-        index: usize,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        if self.is_closing() || self.selected_index == index {
-            return false;
-        }
-        self.selected_index = index;
-        cx.notify();
-        true
-    }
-
-    pub(super) fn take_selected_action(
-        &mut self,
-        items: &[PaletteItem],
-        close_delay: Duration,
-        cx: &mut Context<Self>,
-    ) -> Option<PaletteExecution> {
-        let item = items.get(self.selected_index)?;
-        self.take_item_action(item, close_delay, cx)
-    }
-
-    pub(super) fn take_item_action(
-        &mut self,
-        item: &PaletteItem,
-        close_delay: Duration,
-        cx: &mut Context<Self>,
-    ) -> Option<PaletteExecution> {
-        if !self.open || self.is_closing() || item.disabled {
-            return None;
-        }
-        let execution = PaletteExecution {
-            id: item.id.clone(),
-            action: item.action.clone(),
-        };
-        self.begin_close(close_delay, cx);
-        Some(execution)
-    }
-
-    pub(in crate::workspace) fn set_error(&mut self, error: String, cx: &mut Context<Self>) {
-        self.error = Some(error);
-        cx.notify();
-    }
-
-    fn reset_interaction(&mut self) {
-        self.content = PaletteContent::Commands;
-        self.raw_query.clear();
-        self.mode = PaletteMode::All;
-        self.selected_index = 0;
-        self.scroll_handle = UniformListScrollHandle::new();
-        self.error = None;
-    }
-
-    fn finish_query_change(&mut self) {
-        let (mode, _) = parse_command_palette_query(&self.raw_query);
-        self.mode = if self.content != PaletteContent::Commands {
-            PaletteMode::All
-        } else {
-            mode
-        };
-        self.selected_index = 0;
-        self.scroll_handle = UniformListScrollHandle::new();
-        self.error = None;
-    }
-
-    fn invalidate_load(&mut self) {
+}
+impl PaletteProvider for DesktopPaletteProvider {
+    fn cancel_pending(&mut self) {
         self.load_generation = self.load_generation.wrapping_add(1);
-        self.load_task.take();
+        self.load_task = None;
+        self.ssh_config_hosts_loading = false;
     }
-
-    fn begin_load_generation(&mut self) -> u64 {
-        self.invalidate_load();
-        self.ssh_config_hosts_loading = true;
-        self.error = None;
-        self.load_generation
+}
+pub(super) trait DesktopPalette: Sized {
+    fn open(&mut self, auto_load: bool, names: HashSet<String>, cx: &mut Context<Self>);
+    fn reload_ssh_config_hosts(
+        &mut self,
+        auto_load: bool,
+        names: HashSet<String>,
+        cx: &mut Context<Self>,
+    );
+    fn begin_load_generation(&mut self) -> u64;
+    fn apply_ssh_config_load(
+        &mut self,
+        generation: u64,
+        result: Result<Vec<SshConfigHost>, String>,
+    ) -> bool;
+    fn ssh_config_hosts(&self) -> Arc<[SshConfigHost]>;
+}
+impl DesktopPalette for CommandPaletteEntity {
+    fn open(&mut self, auto_load: bool, names: HashSet<String>, cx: &mut Context<Self>) {
+        self.open_content(PaletteContent::Commands, cx);
+        self.reload_ssh_config_hosts(auto_load, names, cx);
     }
-
-    fn start_ssh_config_load(&mut self, existing_names: HashSet<String>, cx: &mut Context<Self>) {
+    fn ssh_config_hosts(&self) -> Arc<[SshConfigHost]> {
+        self.provider.ssh_config_hosts.clone()
+    }
+    fn reload_ssh_config_hosts(
+        &mut self,
+        auto_load: bool,
+        existing_names: HashSet<String>,
+        cx: &mut Context<Self>,
+    ) {
+        if !auto_load {
+            self.provider.cancel_pending();
+            self.provider.ssh_config_hosts = Arc::default();
+            self.set_provider_error(None);
+            cx.notify();
+            return;
+        }
         let generation = self.begin_load_generation();
-        let runtime = self.runtime.clone();
-        self.load_task = Some(cx.spawn(async move |entity, cx| {
+        let runtime = self.provider.runtime.clone();
+        self.provider.load_task = Some(cx.spawn(async move |entity, cx| {
             let result = runtime
                 .spawn_blocking(move || list_ssh_config_hosts(&existing_names))
                 .await
@@ -343,24 +86,31 @@ impl CommandPaletteEntity {
         }));
     }
 
+    fn begin_load_generation(&mut self) -> u64 {
+        self.provider.cancel_pending();
+        self.provider.ssh_config_hosts_loading = true;
+        self.set_provider_error(None);
+        self.provider.load_generation
+    }
+
     fn apply_ssh_config_load(
         &mut self,
         generation: u64,
         result: Result<Vec<SshConfigHost>, String>,
     ) -> bool {
-        if generation != self.load_generation {
+        if generation != self.provider.load_generation {
             return false;
         }
-        self.load_task = None;
-        self.ssh_config_hosts_loading = false;
+        self.provider.load_task = None;
+        self.provider.ssh_config_hosts_loading = false;
         match result {
             Ok(hosts) => {
-                self.ssh_config_hosts = hosts.into();
-                self.error = None;
+                self.provider.ssh_config_hosts = hosts.into();
+                self.set_provider_error(None);
             }
             Err(error) => {
-                self.ssh_config_hosts = Arc::default();
-                self.error = Some(error);
+                self.provider.ssh_config_hosts = Arc::default();
+                self.set_provider_error(Some(error));
             }
         }
         true
@@ -373,9 +123,11 @@ mod tests {
 
     use gpui::{AppContext, TestAppContext};
 
-    use super::super::{PaletteAction, PaletteSection};
+    use super::super::{PaletteAction, PaletteItem, PaletteSection};
     use super::*;
     use crate::workspace::LucideIcon;
+    use oxideterm_workspace::CommandPaletteMode as PaletteMode;
+    use std::time::Duration;
 
     fn test_runtime() -> Arc<tokio::runtime::Runtime> {
         Arc::new(tokio::runtime::Runtime::new().expect("test runtime"))
@@ -413,15 +165,15 @@ mod tests {
             assert!(view.error.is_none());
             assert!(!Rc::ptr_eq(&view.scroll_handle.0, &previous_scroll.0));
 
-            entity.open_background_tasks(cx);
+            entity.open_content(PaletteContent::BackgroundTasks, cx);
             entity.push_query_text("@archive.tar", cx);
             assert_eq!(entity.query(), "@archive.tar");
             assert_eq!(entity.view().mode, PaletteMode::All);
-            assert!(entity.is_background_task_picker());
+            assert!((entity.content() == PaletteContent::BackgroundTasks));
             entity.open(false, HashSet::new(), cx);
             entity.push_query_text("@session", cx);
             assert_eq!(entity.view().mode, PaletteMode::Sessions);
-            assert!(!entity.is_background_task_picker());
+            assert!(!(entity.content() == PaletteContent::BackgroundTasks));
         });
     }
 
@@ -434,9 +186,9 @@ mod tests {
             let current = entity.begin_load_generation();
 
             assert!(!entity.apply_ssh_config_load(stale, Ok(Vec::new())));
-            assert!(entity.ssh_config_hosts_loading);
+            assert!(entity.provider.ssh_config_hosts_loading);
             assert!(entity.apply_ssh_config_load(current, Ok(Vec::new())));
-            assert!(!entity.ssh_config_hosts_loading);
+            assert!(!entity.provider.ssh_config_hosts_loading);
             let stale = entity.begin_load_generation();
             entity.close(cx);
             entity.open(false, HashSet::new(), cx);

@@ -11,6 +11,7 @@ version.workspace = true
 anyhow.workspace = true
 chrono.workspace = true
 gpui.workspace = true
+oxideterm-gpui-shell = { path = "../oxideterm-gpui-shell" }
 oxideterm-editor-core = { path = "../oxideterm-editor-core" }
 oxideterm-gpui-editor = { path = "../oxideterm-gpui-editor" }
 oxideterm-gpui-markdown = { path = "../oxideterm-gpui-markdown" }

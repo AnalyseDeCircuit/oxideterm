@@ -44,6 +44,7 @@ use zeroize::{Zeroize, Zeroizing};
 
 mod focus;
 mod history;
+mod modal;
 use history::{InputHistory, InputSnapshot};
 
 const READ_ONLY_TEXT_EM_WIDTH: f32 = 16.0;
@@ -1253,6 +1254,10 @@ impl WorkspaceApp {
 
     pub(super) fn notify_ime_target(&self, target: WorkspaceImeTarget, cx: &mut Context<Self>) {
         match target {
+            WorkspaceImeTarget::CommandPalette => {
+                App::notify(cx, self.palette_surface.entity_id());
+                return;
+            }
             WorkspaceImeTarget::AiModelSelectorSearch => {
                 App::notify(cx, self.ai.model_picker.menu.entity_id());
                 return;
@@ -1311,6 +1316,18 @@ impl WorkspaceApp {
     }
 
     pub(super) fn active_ime_target(&self, cx: &App) -> Option<WorkspaceImeTarget> {
+        if !self.app_lock.locked
+            && self
+                .window_registry
+                .handle_for_role(super::window_registry::WindowRole::Main)
+                .is_some_and(|main| {
+                    cx.active_window()
+                        .is_none_or(|active| active.window_id() == main.window_id())
+                })
+            && let Some(owner) = self.active_window_modal_owner(cx)
+        {
+            return self.modal_ime_target(owner, cx);
+        }
         if self.app_lock.locked {
             return Some(WorkspaceImeTarget::Settings(
                 SettingsInput::AppLockCurrentPassword,
@@ -1465,51 +1482,7 @@ impl WorkspaceApp {
         if self.host_tools_visibility(cx).main_window_is_visible()
             && let Some(input) = self.host_tools.read(cx).ui.focused_input
         {
-            return Some(match input {
-                HostToolsTextInput::ProcessSearch => WorkspaceImeTarget::HostProcessSearch,
-                HostToolsTextInput::ProcessRenice => WorkspaceImeTarget::HostProcessRenice,
-                HostToolsTextInput::DockerSearch => WorkspaceImeTarget::HostDockerSearch,
-                HostToolsTextInput::ServiceSearch => WorkspaceImeTarget::HostServiceSearch,
-                HostToolsTextInput::LogSearch => WorkspaceImeTarget::HostLogSearch,
-                HostToolsTextInput::TmuxSearch => WorkspaceImeTarget::HostTmuxSearch,
-                HostToolsTextInput::TmuxDialog => WorkspaceImeTarget::HostTmuxDialogInput,
-                HostToolsTextInput::MuxDialog => WorkspaceImeTarget::HostMuxDialog,
-                HostToolsTextInput::PortSearch => WorkspaceImeTarget::HostPortSearch,
-                HostToolsTextInput::ScheduleSearch => WorkspaceImeTarget::HostScheduleSearch,
-                HostToolsTextInput::FilesystemSearch => WorkspaceImeTarget::HostFilesystemSearch,
-                HostToolsTextInput::PackageSearch => WorkspaceImeTarget::HostPackageSearch,
-                HostToolsTextInput::ContainerSearch => WorkspaceImeTarget::HostContainerSearch,
-                HostToolsTextInput::ContainerDialog => WorkspaceImeTarget::HostContainerDialog,
-                HostToolsTextInput::ContainerDialogRegistry => {
-                    WorkspaceImeTarget::HostContainerDialogRegistry
-                }
-                HostToolsTextInput::ContainerRunName => WorkspaceImeTarget::HostContainerRunName,
-                HostToolsTextInput::ContainerRunPorts => WorkspaceImeTarget::HostContainerRunPorts,
-                HostToolsTextInput::ContainerRunVolumes => {
-                    WorkspaceImeTarget::HostContainerRunVolumes
-                }
-                HostToolsTextInput::ContainerRunCommand => {
-                    WorkspaceImeTarget::HostContainerRunCommand
-                }
-                HostToolsTextInput::RedisPassword => WorkspaceImeTarget::HostRedisPassword,
-                HostToolsTextInput::RedisRename => WorkspaceImeTarget::HostRedisRename,
-                HostToolsTextInput::RedisSetValue => WorkspaceImeTarget::HostRedisSetValue,
-                HostToolsTextInput::RedisSetValueField => {
-                    WorkspaceImeTarget::HostRedisSetValueField
-                }
-                HostToolsTextInput::RedisCreateKeyName => {
-                    WorkspaceImeTarget::HostRedisCreateKeyName
-                }
-                HostToolsTextInput::RedisCreateKeyValue => {
-                    WorkspaceImeTarget::HostRedisCreateKeyValue
-                }
-                HostToolsTextInput::RedisCreateKeyField => {
-                    WorkspaceImeTarget::HostRedisCreateKeyField
-                }
-                HostToolsTextInput::RedisCreateKeyTtl => WorkspaceImeTarget::HostRedisCreateKeyTtl,
-                HostToolsTextInput::RedisTtl => WorkspaceImeTarget::HostRedisTtl,
-                HostToolsTextInput::RedisSearch => WorkspaceImeTarget::HostRedisSearch,
-            });
+            return Some(modal::host_target(input));
         }
 
         let terminal_tab_visible = self.keyboard_content_tab(cx).is_some_and(is_terminal_tab);
@@ -3565,7 +3538,6 @@ impl WorkspaceApp {
                     palette.replace_query_utf16(replacement_range, text, cx);
                 });
                 self.show_active_input_caret(cx);
-                cx.notify();
             }
             WorkspaceImeTarget::KnowledgeSearch | WorkspaceImeTarget::KnowledgeRename => {
                 if let Some(mut draft) = self.knowledge_input_text(target, cx) {

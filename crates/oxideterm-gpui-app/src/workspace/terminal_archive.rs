@@ -25,7 +25,7 @@ pub(super) struct ArchiveCommandPreview {
     target: String,
     shell: Option<ArchiveShell>,
     capabilities: Option<ArchiveCapabilities>,
-    editor: Entity<TextEditorView>,
+    pub(super) editor: Entity<TextEditorView>,
     summary: Option<(String, String)>,
     error: Option<&'static str>,
     loading: bool,

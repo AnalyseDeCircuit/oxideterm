@@ -43,9 +43,15 @@ pub struct ShellFrameSlots {
     pub center: AnyElement,
     pub right_panel: RailElements,
     pub right_rail: Option<AnyElement>,
-    pub overlays: Vec<AnyElement>,
+    pub overlays: crate::overlays::OverlayStack,
 }
 
+impl ShellFrameSlots {
+    pub fn at(mut self, priority: u16) -> Self {
+        self.overlays.at(priority);
+        self
+    }
+}
 impl FluentBuilder for ShellFrameSlots {}
 impl ParentElement for ShellFrameSlots {
     fn extend(&mut self, elements: impl IntoIterator<Item = AnyElement>) {

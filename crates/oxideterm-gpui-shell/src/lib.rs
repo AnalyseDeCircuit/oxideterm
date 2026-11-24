@@ -3,8 +3,12 @@
 mod assets;
 mod frame;
 mod host;
+pub mod notifications;
+pub mod overlays;
+pub mod palette;
 pub mod panes;
 mod rails;
+pub mod shortcuts;
 pub mod tabs;
 pub mod zen;
 

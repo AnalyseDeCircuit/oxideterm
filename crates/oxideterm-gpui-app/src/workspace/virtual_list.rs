@@ -6,9 +6,7 @@ pub(crate) use oxideterm_gpui_ui::virtual_list::{
     sync_virtual_list_state_by_signatures, tauri_virtual_list, tauri_virtual_list_state,
 };
 
-pub(crate) use oxideterm_gpui_ui::virtual_list::{
-    TauriVirtualScrollAlign, scroll_tauri_virtual_list_to_index, tauri_virtual_uniform_list,
-};
+pub(crate) use oxideterm_gpui_ui::virtual_list::tauri_virtual_uniform_list;
 
 #[allow(dead_code)]
 pub(super) fn sync_tauri_virtual_list_state_by_signatures(

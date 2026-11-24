@@ -1,5 +1,5 @@
 use std::collections::VecDeque;
-use std::time::SystemTime;
+use web_time::SystemTime;
 
 pub const DEFAULT_EVENT_LOG_CAPACITY: usize = 500;
 pub const DEFAULT_NOTIFICATION_CAPACITY: usize = 200;

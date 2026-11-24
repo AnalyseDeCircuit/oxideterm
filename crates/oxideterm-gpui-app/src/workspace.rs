@@ -160,9 +160,7 @@ use oxideterm_gpui_ui::{
     ConfirmDialogAction, ConfirmDialogVariant, ConfirmDialogView, checkbox,
     modal::{popover_backdrop, set_tauri_backdrop_blur_allowed},
     text_input::TextInputView,
-    toast::{ToastVariant, ToastView, toast_close},
-    toaster::toaster,
-    tooltip::tooltip_surface,
+    toast::ToastVariant,
 };
 use oxideterm_i18n::{I18n, Locale};
 use oxideterm_ide_fs::NodeAgentIdeFileSystem;
@@ -170,12 +168,8 @@ use oxideterm_notification_center::{
     ActivityView as WorkspaceActivityView, EventCategory as WorkspaceEventCategory,
     EventSeverity as WorkspaceEventSeverity, NotificationCenterState,
     NotificationEntry as WorkspaceNotificationEntry, NotificationKind as WorkspaceNotificationKind,
-    NotificationKindFilter as WorkspaceNotificationKindFilter,
     NotificationScope as WorkspaceNotificationScope,
     NotificationSeverity as WorkspaceNotificationSeverity,
-    NotificationSeverityFilter as WorkspaceNotificationSeverityFilter,
-    NotificationStatus as WorkspaceNotificationStatus,
-    NotificationStatusFilter as WorkspaceNotificationStatusFilter,
 };
 use oxideterm_plugin_host_api::runtime as plugin_runtime;
 use oxideterm_plugin_registry as plugin_host;
@@ -291,8 +285,7 @@ use oxideterm_gpui_ui::text_input::TextInputAnchor;
 use oxideterm_gpui_ui::typography::tauri_ui_font_family as settings_ui_font_family;
 pub(super) use selectable_text::{SelectableTextRole, SelectableTextScrollExt};
 pub(super) use virtual_list::{
-    TauriVirtualListSpec, TauriVirtualScrollAlign, scroll_tauri_virtual_list_to_index,
-    tauri_virtual_list, tauri_virtual_list_state, tauri_virtual_uniform_list,
+    TauriVirtualListSpec, tauri_virtual_list, tauri_virtual_list_state, tauri_virtual_uniform_list,
 };
 use virtual_list::{VirtualListSignatureCache, sync_tauri_variable_list_state_by_signatures};
 
@@ -313,8 +306,6 @@ const CONFIRM_DIALOG_FOOTER_ACTIONS: [ConfirmDialogAction; 2] =
 // Tauri NotificationsPanel uses variable-height grouped rows. Keep the native
 // estimate/overscan as a virtual-list spec instead of a raw overdraw number so
 // notification/event-log surfaces share the same browser virtualizer contract.
-const NOTIFICATION_SIDEBAR_ROW_HEIGHT_ESTIMATE: f32 = 72.0;
-const NOTIFICATION_SIDEBAR_VIRTUAL_OVERSCAN: usize = 10;
 
 use oxideterm_gpui_ai::state::AiContextTokenBreakdown;
 
@@ -478,6 +469,8 @@ pub(crate) struct WorkspaceApp {
     standalone_connections: standalone_connections::StandaloneConnectionRegistry,
     detached_local_terminals_popover_open: bool,
     command_palette: Entity<command_palette::CommandPaletteEntity>,
+    palette_surface:
+        Entity<oxideterm_gpui_shell::palette::ShellPalette<command_palette::PaletteAction>>,
     _command_palette_observation: Subscription,
     version_migration: VersionMigrationState,
     onboarding: OnboardingState,
@@ -587,8 +580,8 @@ pub(crate) struct WorkspaceApp {
     sftp_progress_store: Arc<dyn ProgressStore>,
     node_router: NodeRouter,
     notification_center: NotificationCenterState,
-    notification_sidebar_list_state: ListState,
-    notification_sidebar_list_cache: RefCell<VirtualListSignatureCache>,
+    notification_surface:
+        RefCell<Option<Entity<oxideterm_gpui_shell::notifications::NotificationCenter>>>,
     ssh_nodes: HashMap<NodeId, WorkspaceSshNode>,
     saved_ssh_nodes: HashMap<String, NodeId>,
     expanded_ssh_nodes: HashSet<NodeId>,

@@ -633,10 +633,29 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(tab_id) = self.active_tab_id(cx) else {
+        self.tab_shortcut(
+            oxideterm_gpui_shell::shortcuts::TabShortcut::Close,
+            window,
+            cx,
+        );
+    }
+    pub(in crate::workspace) fn tab_shortcut(
+        &mut self,
+        shortcut: oxideterm_gpui_shell::shortcuts::TabShortcut,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.onboarding_disclaimer_locked() {
             return;
-        };
-        self.request_close_tab_by_id(tab_id, window, cx);
+        }
+        let host = self.tab_host.read(cx);
+        let container = self
+            .keyboard_content_tab(cx)
+            .map(|tab| host.container_tab_id(tab.id))
+            .or(host.active_tab_id());
+        if let Some(request) = shortcut.request(host, container) {
+            self.handle_tab_request(request, window, cx);
+        }
     }
 
     /// Applies the same user-facing close checks to close buttons, shortcuts, and middle-clicks.
@@ -729,7 +748,15 @@ impl WorkspaceApp {
         }
 
         let tab_ids = self.tab_host.read(cx).other_main_tab_ids(active_tab_id);
-        if tab_ids.is_empty() {
+        self.request_close_tab_batch(tab_ids, window, cx);
+    }
+    pub(in crate::workspace) fn request_close_tab_batch(
+        &mut self,
+        tab_ids: Vec<TabId>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if tab_ids.is_empty() || self.onboarding_disclaimer_locked() {
             return;
         }
         if self.tab_close_ids_include_ssh_terminal(&tab_ids, cx) {
@@ -1390,35 +1417,11 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.onboarding_disclaimer_locked() {
-            return;
-        }
-        let visible_tabs = self
-            .main_tabs(cx)
-            .map(|(_, tab)| tab.id)
-            .collect::<Vec<_>>();
-        if visible_tabs.is_empty() {
-            return;
-        }
-        let current = self
-            .active_tab_id(cx)
-            .and_then(|active| visible_tabs.iter().position(|tab_id| *tab_id == active))
-            .unwrap_or(0);
-        let next = if forward {
-            (current + 1) % visible_tabs.len()
-        } else if current == 0 {
-            visible_tabs.len() - 1
-        } else {
-            current - 1
-        };
-        self.set_main_window_active_tab(Some(visible_tabs[next]), cx);
-        self.sync_active_tab_surface(cx);
-        self.needs_active_pane_focus = self
-            .active_tab(cx)
-            .is_some_and(|tab| is_terminal_tab_kind(&tab.kind));
-        self.focus_active_pane(window, cx);
-        self.reveal_active_tab(window, cx);
-        cx.notify();
+        self.tab_shortcut(
+            oxideterm_gpui_shell::shortcuts::TabShortcut::Cycle(forward),
+            window,
+            cx,
+        );
     }
 
     pub(in crate::workspace) fn go_to_tab(
@@ -1427,20 +1430,11 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.onboarding_disclaimer_locked() {
-            return;
-        }
-        let tab_id = self.main_tabs(cx).nth(index).map(|(_, tab)| tab.id);
-        if let Some(tab_id) = tab_id {
-            self.set_main_window_active_tab(Some(tab_id), cx);
-            self.sync_active_tab_surface(cx);
-            self.needs_active_pane_focus = self
-                .active_tab(cx)
-                .is_some_and(|tab| is_terminal_tab_kind(&tab.kind));
-            self.focus_active_pane(window, cx);
-            self.reveal_active_tab(window, cx);
-            cx.notify();
-        }
+        self.tab_shortcut(
+            oxideterm_gpui_shell::shortcuts::TabShortcut::Index(index),
+            window,
+            cx,
+        );
     }
 
     pub(super) fn zen_exit_tabbar_width(&self) -> f32 {

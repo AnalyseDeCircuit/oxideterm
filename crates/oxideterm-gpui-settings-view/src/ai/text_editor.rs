@@ -61,6 +61,12 @@ impl Render for AiTextEditor {
 }
 
 impl AiTextEditor {
+    pub fn owns_focus(&self, window: &Window, cx: &App) -> bool {
+        self.draft
+            .as_ref()
+            .is_some_and(|draft| draft.editor.focus_handle(cx).contains_focused(window, cx))
+    }
+
     pub fn is_open(&self) -> bool {
         self.draft.is_some()
     }

@@ -374,7 +374,7 @@ impl WorkspaceApp {
         self.update_main_window_tabbar_drop_bounds(window, titlebar_visible, tabbar_visible, cx);
 
         let mut key_context = gpui::KeyContext::new_with_defaults(cx.platform_info().os);
-        key_context.add("Workspace");
+        key_context.add(oxideterm_gpui_shell::shortcuts::WORKSPACE_CONTEXT);
         #[cfg(target_os = "macos")]
         if self
             .settings_views
@@ -383,7 +383,7 @@ impl WorkspaceApp {
             .state
             .recording_keybinding
         {
-            key_context.add("KeybindingRecording");
+            key_context.add(oxideterm_gpui_shell::shortcuts::RECORDING_CONTEXT);
         }
         if self.active_window_modal_owner(cx).is_some() && !self.ide_modal_owns_input(cx) {
             // IDE dialogs register this context on their independently observed window layer.
@@ -449,21 +449,6 @@ impl WorkspaceApp {
                 }
             }))
             .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                if event.keystroke.key == "escape"
-                    && this.cancel_file_manager_bookmarks_resize(
-                        window.window_handle().window_id(),
-                        cx,
-                    )
-                {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                    return;
-                }
-                if event.keystroke.key == "escape" && this.cancel_tab_merge_drag(cx) {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                    return;
-                }
                 let page = this.active_content_tab_id(cx);
                 let kind = page
                     .and_then(|id| this.tab_by_id(id, cx))
@@ -484,6 +469,21 @@ impl WorkspaceApp {
                 }
                 if this.active_window_modal_owner(cx).is_some() {
                     // Yield only to the modal's own input or editor, never background routing.
+                    return;
+                }
+                if event.keystroke.key == "escape"
+                    && this.cancel_file_manager_bookmarks_resize(
+                        window.window_handle().window_id(),
+                        cx,
+                    )
+                {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                    return;
+                }
+                if event.keystroke.key == "escape" && this.cancel_tab_merge_drag(cx) {
+                    window.prevent_default();
+                    cx.stop_propagation();
                     return;
                 }
                 if this.audit.read(cx).owns_keyboard(window) {
@@ -637,13 +637,6 @@ impl WorkspaceApp {
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this.handle_ai_inline_panel_key(event, window, cx) {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                } else if this.sftp_presentation_request.is_some() {
-                    if event.keystroke.key.eq_ignore_ascii_case("escape") {
-                        this.sftp_presentation_request = None;
-                        cx.notify();
-                    }
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this.handle_transient_workspace_overlay_escape(event, window, cx) {
@@ -1174,9 +1167,10 @@ impl WorkspaceApp {
         );
         let right_rail =
             (!zen_mode).then(|| self.render_context_activity_bar(window, &environment, cx));
+        use super::modal_owner::DesktopPortal;
         let frame = ShellFrameSlots {
             root, environment, background: window_background_layer, title_row, left_rail, left_panel,
-            tab_bar, center: content, right_panel, right_rail, overlays: Vec::new(),
+            tab_bar, center: content, right_panel, right_rail, overlays: Default::default(),
         }
             .when(embedded_sftp_resize_cursor_active, |root| {
                 root.child(
@@ -1217,35 +1211,45 @@ impl WorkspaceApp {
             .when_some(self.render_context_tools_menu(window, cx), |root, menu| {
                 root.child(menu)
             })
+            .at(DesktopPortal::ConnectionForm as u16)
             .child(self.connections.form_body())
             .when_some(
                 self.render_plugin_connection_form(window, cx),
                 |root, form| root.child(form),
             )
+            .at(DesktopPortal::SftpPresentation as u16)
             .when_some(self.render_sftp_presentation_dialog(cx), |root, dialog| {
                 root.child(dialog)
             })
+            .at(DesktopPortal::Launcher as u16)
             .when(self.local_shell_launcher_open, |root| {
                 root.child(self.render_local_shell_launcher(window, cx))
             })
+            .at(DesktopPortal::FormDialogs as u16)
             .child(self.connections.form_overlays())
             .child(self.connections.batch_menus())
+            .at(DesktopPortal::HostKeyChallenge as u16)
             .child(self.connections.authentication())
+            .at(DesktopPortal::AiEnable as u16)
             .child(self.settings_views.ai_confirm.clone())
+            .at(DesktopPortal::AiSafety as u16)
             .when(
                 self.ai.state.read(cx).chat_ui().safety_confirm_open,
                 |root| root.child(self.ai_sidebar_layer(oxideterm_gpui_ai::sidebar::transcript::AiSidebarLayerKind::SafetyConfirm)),
             )
+            .at(DesktopPortal::AiSummarize as u16)
             .when(
                 self.ai.state.read(cx).chat_ui().summarize_confirm_open,
                 |root| root.child(self.ai_sidebar_layer(oxideterm_gpui_ai::sidebar::transcript::AiSidebarLayerKind::SummaryConfirm)),
             )
+            .at(DesktopPortal::AiClearAll as u16)
             .when(
                 ai_chat_confirm_snapshot.as_ref().is_some_and(|snapshot| {
                     matches!(&snapshot.kind, ai_state::AiChatConfirmKind::ClearAll)
                 }),
                 |root| root.child(self.ai_sidebar_layer(oxideterm_gpui_ai::sidebar::transcript::AiSidebarLayerKind::ClearAllConfirm)),
             )
+            .at(DesktopPortal::AiDeleteMessage as u16)
             .when(
                 ai_chat_confirm_snapshot.as_ref().is_some_and(|snapshot| {
                     matches!(
@@ -1255,6 +1259,7 @@ impl WorkspaceApp {
                 }),
                 |root| root.child(self.ai_sidebar_layer(oxideterm_gpui_ai::sidebar::transcript::AiSidebarLayerKind::DeleteMessageConfirm)),
             )
+            .at(DesktopPortal::SettingsReset as u16)
             .when(
                 overlay_confirm_snapshot.as_ref().is_some_and(|snapshot| {
                     matches!(
@@ -1265,20 +1270,25 @@ impl WorkspaceApp {
                 }),
                 |root| root.child(self.render_settings_reset_confirm_dialog(cx)),
             )
+            .at(DesktopPortal::SettingsDataDirectory as u16)
             .when_some(
                 self.settings_views.window_chrome.read(cx).state.data_directory
                     .and_then(|_| self.render_settings_data_directory_confirm_dialog(cx)),
                 |root, dialog| root.child(dialog),
             )
+            .at(DesktopPortal::RemoteShellIntegration as u16)
             .when_some(
                 self.render_remote_shell_integration_confirm(cx),
                 |root, dialog| root.child(dialog),
             )
+            .at(DesktopPortal::TerminalTriggerQuickCommand as u16)
             .when_some(
                 self.render_terminal_trigger_quick_command_confirm(cx),
                 |root, dialog| root.child(dialog),
             )
+            .at(DesktopPortal::CloudSync as u16)
             .child(self.cloud_sync_confirm.clone())
+            .at(DesktopPortal::NodeDisconnect as u16)
             .when(
                 matches!(
                     overlay_confirm_snapshot
@@ -1288,74 +1298,94 @@ impl WorkspaceApp {
                 ),
                 |root| root.child(self.render_node_disconnect_confirm_dialog(cx)),
             )
+            .at(DesktopPortal::TabClose as u16)
             .when(tab_close_confirm_open, |root| {
                 root.child(self.render_tab_close_confirm_dialog(cx))
             })
+            .at(DesktopPortal::HostProcessConfirm as u16)
             .when_some(
                 self.render_host_process_confirm_dialog(cx),
                 |root, dialog| root.child(dialog),
             )
+            .at(DesktopPortal::HostPackageConfirm as u16)
             .when_some(
                 self.render_host_package_confirm_dialog(cx),
                 |root, dialog| root.child(dialog),
             )
+            .at(DesktopPortal::HostDockerConfirm as u16)
             .when_some(
                 self.render_host_docker_confirm_dialog(cx),
                 |root, dialog| root.child(dialog),
             )
+            .at(DesktopPortal::HostDockerLogs as u16)
             .when_some(self.render_host_docker_logs_dialog(cx), |root, dialog| {
                 root.child(dialog)
             })
+            .at(DesktopPortal::HostContainerConfirm as u16)
             .when_some(
                 self.render_host_container_confirm_dialog(cx),
                 |root, dialog| root.child(dialog),
             )
+            .at(DesktopPortal::HostContainerText as u16)
             .when(oxideterm_gpui_host_tools::HostToolsDialogs::visible(self.host_tools.read(cx)), |root| {
                 let focus = self.standard_confirm_focus();
                 self.host_tool_dialogs.update(cx, |view,_| view.sync_window(self.tokens, &self.i18n, settings_mono_font_family(self.settings_store.settings()), focus));
                 root.child(self.host_tool_dialogs.clone())
             })
+            .at(DesktopPortal::HostServiceConfirm as u16)
             .when_some(
                 self.render_host_service_confirm_dialog(cx),
                 |root, dialog| root.child(dialog),
             )
+            .at(DesktopPortal::HostServiceLogs as u16)
             .when_some(self.render_host_service_logs_dialog(cx), |root, dialog| {
                 root.child(dialog)
             })
+            .at(DesktopPortal::HostTmuxConfirm as u16)
             .when_some(self.render_host_tmux_confirm_dialog(cx), |root, dialog| {
                 root.child(dialog)
             })
+            .at(DesktopPortal::HostTmuxInput as u16)
             .when_some(self.render_host_tmux_input_dialog(cx), |root, dialog| {
                 root.child(dialog)
             })
+            .at(DesktopPortal::HostMuxConfirm as u16)
             .when_some(self.render_host_mux_confirm_dialog(cx), |root, dialog| {
                 root.child(dialog)
             })
+            .at(DesktopPortal::HostMuxInput as u16)
             .when_some(self.render_host_mux_input_dialog(cx), |root, dialog| {
                 root.child(dialog)
             })
+            .at(DesktopPortal::HostMuxRead as u16)
             .when_some(self.render_host_mux_read_dialog(cx), |root, dialog| {
                 root.child(dialog)
             })
+            .at(DesktopPortal::HostScheduleConfirm as u16)
             .when_some(
                 self.render_host_schedule_confirm_dialog(cx),
                 |root, dialog| root.child(dialog),
             )
+            .at(DesktopPortal::HostScheduleLogs as u16)
             .when_some(self.render_host_schedule_logs_dialog(cx), |root, dialog| {
                 root.child(dialog)
             })
+            .at(DesktopPortal::NativePluginConfirm as u16)
             .when_some(
                 self.render_native_plugin_confirm_dialog(cx),
                 |root, dialog| root.child(dialog),
             )
             // Tab renaming is a main-window portal and never remounts the terminal tab.
+            .at(DesktopPortal::TabRename as u16)
             .when_some(self.render_tab_rename_dialog(cx), |root, dialog| {
                 root.child(dialog)
             })
+            .at(DesktopPortal::ArchiveCommand as u16)
             .when_some(self.render_archive_command(window, cx), |root, dialog| {
                 root.child(dialog)
             })
             // Tab-owned dialogs are portaled here so their backdrops cover all window chrome.
+            .at(DesktopPortal::ActiveTabWindowModal as u16)
             .children(active_tab_window_modals)
             .children(sidebar_sftp_modal)
             .children(sidebar_session_manager_modals)
@@ -1395,14 +1425,17 @@ impl WorkspaceApp {
             .when_some(self.render_tab_context_menu(window, cx), |root, menu| {
                 root.child(menu)
             })
+            .at(DesktopPortal::TerminalCastPlayer as u16)
             .when_some(self.render_terminal_cast_player(cx), |root, player| {
                 root.child(player)
             })
+            .at(DesktopPortal::ThemeEditor as u16)
             .when(self.settings_views.window_chrome.read(cx).state.theme_editor.is_some(), |root| {
                 // Theme editing is a workspace modal, not a settings-pane overlay.
                 // Mount it here so the backdrop covers every persistent chrome region.
                 root.child(self.settings_views.theme_editor_dialog.clone())
             })
+            .at(DesktopPortal::SettingsSshConfigImport as u16)
             .when_some(
                 self.settings_views.window_chrome.read(cx).state.ssh_import
                     .and_then(|_| self.render_settings_ssh_config_import_dialog(cx)),
@@ -1412,23 +1445,28 @@ impl WorkspaceApp {
                     root.child(modal)
                 },
             )
+            .at(DesktopPortal::TerminalCommandSpecsEditor as u16)
             .when(self.settings_views.window_chrome.read(cx).state.command_specs, |root| {
                 // Structured command specs use the same workspace-wide modal
                 // ownership so the settings list never contains a nested editor.
                 root.child(self.settings_views.command_specs_dialog.clone())
             })
+            .at(DesktopPortal::TerminalTriggerEditor as u16)
             .when(self.settings_views.window_chrome.read(cx).state.terminal_trigger_editor, |root| {
                 root.child(self.settings_views.terminal_trigger_editor.clone())
             })
+            .at(DesktopPortal::SemanticSchemeEditor as u16)
             .when({
                 let settings = &self.settings_views.window_chrome.read(cx).state;
                 settings.semantic_scheme_editor || settings.highlight_rule_editor_index.is_some()
             }, |root| root.child(self.settings_views.highlight_editor.clone()))
+            .at(DesktopPortal::PublicMcpClientEditor as u16)
             .when_some(
                 self.settings_views.window_chrome.read(cx).state.public_mcp_client.is_some()
                     .then(|| self.render_public_mcp_client_editor_modal(cx)).flatten(),
                 |root, modal| root.child(modal),
             )
+            .at(DesktopPortal::QuickCommandsManager as u16)
             .when(
                 self.terminal.read(cx).quick_commands.manager_open(),
                 |root| {
@@ -1437,15 +1475,21 @@ impl WorkspaceApp {
                     root.child(self.render_quick_commands_manager_modal(cx))
                 },
             )
+            .at(DesktopPortal::AiTextEditor as u16)
             .child(self.settings_views.ai_text_editor.clone())
+            .at(DesktopPortal::OxideImport as u16)
             .child(self.connections.oxide_dialogs())
+            .at(DesktopPortal::BatchAdd as u16)
             .child(self.connections.batch_dialog())
+            .at(DesktopPortal::CommandPalette as u16)
             .when(self.command_palette.read(cx).is_open(), |root| {
-                root.child(self.render_command_palette(window, cx))
+                root.child(self.palette_surface.clone())
             })
+            .at(DesktopPortal::VersionMigration as u16)
             .when(self.version_migration.open, |root| {
                 root.child(self.render_version_migration_modal(window, cx))
             })
+            .at(DesktopPortal::LegalNotice as u16)
             .when(
                 overlay_confirm_snapshot.as_ref().is_some_and(|snapshot| {
                     matches!(
@@ -1456,6 +1500,7 @@ impl WorkspaceApp {
                 }),
                 |root| root.child(self.render_help_legal_notice_dialog(cx)),
             )
+            .at(DesktopPortal::NativeUpdateReleaseNotes as u16)
             .when(
                 overlay_confirm_snapshot.as_ref().is_some_and(|snapshot| {
                     matches!(
@@ -1465,12 +1510,15 @@ impl WorkspaceApp {
                 }),
                 |root| root.child(self.render_native_update_release_notes_dialog(cx)),
             )
+            .at(DesktopPortal::Shortcuts as u16)
             .when(self.shortcuts_modal.open, |root| {
                 root.child(self.render_shortcuts_modal(cx))
             })
+            .at(DesktopPortal::AppLockDialog as u16)
             .when_some(self.render_app_lock_dialog(cx), |root, dialog| {
                 root.child(dialog)
             })
+            .at(DesktopPortal::MermaidZoom as u16)
             .when(self.mermaid_zoom.is_some(), |root| {
                 root.child(self.render_mermaid_zoom_modal(window, cx))
             })

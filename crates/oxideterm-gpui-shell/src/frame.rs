@@ -74,7 +74,7 @@ impl Render for WorkspaceShell {
             )
             .children(slots.left_panel.handle.filter(|_| !env.zen_mode))
             .children(slots.right_panel.handle.filter(|_| !env.zen_mode))
-            .children(slots.overlays)
+            .children(slots.overlays.ordered())
             .into_any_element()
     }
 }

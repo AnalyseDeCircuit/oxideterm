@@ -46,7 +46,7 @@ pub(in crate::workspace) use oxideterm_gpui_settings_view::entity::{
     PortableStatusRefresh, SettingsWorkspaceEntity, SettingsWorkspaceEvent, SettingsWorkspaceToast,
 };
 mod general_terminal_pages;
-mod highlight;
+pub(super) mod highlight;
 mod local_terminal;
 pub(in crate::workspace) use local_terminal::expand_local_terminal_cwd;
 mod navigation_editor;

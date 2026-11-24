@@ -612,43 +612,6 @@ impl WorkspaceApp {
             .resolve_connection_for_node(&node_id.0);
     }
 
-    pub(in crate::workspace) fn recount_notifications(&mut self) {
-        self.notification_center.notifications.recount();
-    }
-
-    pub(in crate::workspace) fn clear_notifications(&mut self) {
-        self.notification_center.notifications.clear();
-    }
-
-    pub(in crate::workspace) fn mark_all_notifications_read(&mut self) {
-        self.notification_center.notifications.mark_all_read();
-    }
-
-    pub(in crate::workspace) fn dismiss_notification(&mut self, id: u64) {
-        self.notification_center.notifications.remove(id);
-    }
-
-    pub(in crate::workspace) fn cycle_notification_status_filter(&mut self) {
-        self.notification_center.notifications.cycle_status_filter();
-    }
-
-    pub(in crate::workspace) fn cycle_notification_severity_filter(&mut self) {
-        self.notification_center
-            .notifications
-            .cycle_severity_filter();
-    }
-
-    pub(in crate::workspace) fn cycle_notification_kind_filter(&mut self) {
-        self.notification_center.notifications.cycle_kind_filter();
-    }
-
-    pub(in crate::workspace) fn notification_matches_filter(
-        &self,
-        entry: &WorkspaceNotificationEntry,
-    ) -> bool {
-        self.notification_center.notifications.matches_filter(entry)
-    }
-
     pub(in crate::workspace) fn push_reconnect_notice(
         &self,
         title: impl Into<String>,

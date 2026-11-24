@@ -4,6 +4,7 @@
 use super::*;
 use gpui::{Task, WeakEntity, point};
 use oxideterm_gpui_settings_view::{SettingsSelectAnchorExt, settings_slider_anchor_id};
+use oxideterm_gpui_shell::overlays::transients::*;
 use oxideterm_gpui_ui::select::{OverlayAnchor, SelectAnchorId};
 
 impl WorkspaceApp {
@@ -210,12 +211,7 @@ pub(in crate::workspace) fn select_anchor_tracks_while_closed(anchor_id: SelectA
 
 const WORKSPACE_NOTICE_TTL: Duration = Duration::from_secs(4);
 const PLUGIN_REQUIRED_NOTICE_TTL: Duration = Duration::from_secs(12);
-const TOOLTIP_DELAY: Duration = Duration::from_millis(300);
-const TOOLTIP_EXIT_DURATION: Duration = Duration::from_millis(90);
-const TOOLTIP_REENTRY_WINDOW: Duration = Duration::from_millis(250);
-const TOOLTIP_ENTER_OFFSET_Y: f32 = 3.0;
-const TOOLTIP_SWITCH_ROW_TOLERANCE: f32 = 12.0;
-const TOOLTIP_SWITCH_MAX_DISTANCE: f32 = 96.0;
+
 const CONNECTION_TRACE_UPDATE_COALESCE: Duration = Duration::from_millis(45);
 const CONNECTION_TRACE_SUCCESS_TTL: Duration = Duration::from_millis(720);
 const CONNECTION_TRACE_HISTORY_LIMIT: usize = 12;
@@ -334,16 +330,6 @@ pub(in crate::workspace) struct WorkspaceOverlayConfirmOwnerSnapshot {
 }
 
 #[derive(Clone, Debug)]
-struct OverlayToast {
-    id: u64,
-    notice: TerminalNotice,
-    action: Option<NoticeAction>,
-    expires_at: Instant,
-    remove_at: Option<Instant>,
-    presence: oxideterm_gpui_ui::motion::ExitPresence,
-}
-
-#[derive(Clone, Debug)]
 struct NoticeAction {
     target: NoticeActionTarget,
     label: String,
@@ -383,50 +369,6 @@ struct ActiveConnectionCard {
     presence: oxideterm_gpui_ui::motion::ExitPresence,
 }
 
-#[derive(Clone, Debug)]
-struct WorkspaceTooltip {
-    generation: u64,
-    remove_at: Option<Instant>,
-    fade_from: f32,
-    opacity: std::rc::Rc<std::cell::Cell<f32>>,
-    position_from: gpui::Point<f32>,
-    position: std::rc::Rc<std::cell::Cell<gpui::Point<f32>>>,
-    switching: bool,
-    id: String,
-    label: String,
-    x: f32,
-    y: f32,
-}
-
-impl WorkspaceTooltip {
-    fn new(id: String, label: String, position: gpui::Point<f32>, generation: u64) -> Self {
-        let position_from = gpui::point(position.x, position.y + TOOLTIP_ENTER_OFFSET_Y);
-        Self {
-            generation,
-            remove_at: None,
-            fade_from: 0.0,
-            opacity: std::rc::Rc::new(std::cell::Cell::new(0.0)),
-            position_from,
-            position: std::rc::Rc::new(std::cell::Cell::new(position_from)),
-            switching: false,
-            id,
-            label,
-            x: position.x,
-            y: position.y,
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-struct WorkspaceTooltipPending {
-    id: String,
-    label: String,
-    x: f32,
-    y: f32,
-    generation: u64,
-    show_at: Instant,
-}
-
 /// Owns every window-global transient overlay and its delivery/timer lifetime.
 pub(in crate::workspace) struct WorkspaceOverlayEntity {
     notice_tx: delivery::ActiveDeliverySender<TerminalNotice>,
@@ -435,16 +377,9 @@ pub(in crate::workspace) struct WorkspaceOverlayEntity {
     _notice_delivery_task: Task<()>,
     deadline_task: Option<Task<()>>,
     deadline_generation: u64,
-    control_exit_duration: Duration,
-    next_toast_id: u64,
-    standard_toasts: Vec<OverlayToast>,
-    plugin_progress_toasts: HashMap<String, OverlayToast>,
+    transients: TransientOverlays<TerminalNotice, NoticeAction>,
     connection_trace_cards: HashMap<String, ActiveConnectionCard>,
     dismissed_connection_traces: VecDeque<String>,
-    tooltip: Option<WorkspaceTooltip>,
-    tooltip_pending: Option<WorkspaceTooltipPending>,
-    tooltip_generation: u64,
-    tooltip_warm_until: Option<Instant>,
     zen_hint: Option<ZenHint>,
     terminal_font_size_hud: Option<TerminalFontSizeHud>,
     terminal_font_size_hud_generation: u64,
@@ -494,18 +429,12 @@ impl WorkspaceOverlayEntity {
             _notice_delivery_task: notice_delivery_task,
             deadline_task: None,
             deadline_generation: 0,
-            control_exit_duration,
-            next_toast_id: 1,
-            standard_toasts: Vec::new(),
-            plugin_progress_toasts: HashMap::new(),
+            transients: TransientOverlays::new(control_exit_duration),
             connection_trace_cards: HashMap::new(),
             dismissed_connection_traces: VecDeque::new(),
-            tooltip: None,
-            tooltip_pending: None,
-            tooltip_generation: 0,
-            tooltip_warm_until: None,
             zen_hint: None,
             terminal_font_size_hud: None,
+
             terminal_font_size_hud_generation: 0,
             confirm: None,
             confirm_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
@@ -527,7 +456,8 @@ impl WorkspaceOverlayEntity {
     ) -> bool {
         let changed = match intent {
             WorkspaceOverlayIntent::Notice { notice, ttl } => {
-                self.push_notice(notice, ttl, None, cx.background_executor().now());
+                self.transients
+                    .push_notice(notice, ttl, None, cx.background_executor().now());
                 true
             }
             WorkspaceOverlayIntent::PluginRequired {
@@ -536,7 +466,7 @@ impl WorkspaceOverlayEntity {
                 label,
                 workspace,
             } => {
-                self.push_notice(
+                self.transients.push_notice(
                     notice,
                     PLUGIN_REQUIRED_NOTICE_TTL,
                     Some(NoticeAction {
@@ -554,7 +484,7 @@ impl WorkspaceOverlayEntity {
                 label,
                 workspace,
             } => {
-                self.push_notice(
+                self.transients.push_notice(
                     notice,
                     Duration::from_secs(12),
                     Some(NoticeAction {
@@ -572,7 +502,7 @@ impl WorkspaceOverlayEntity {
                 label,
                 workspace,
             } => {
-                self.push_notice(
+                self.transients.push_notice(
                     notice,
                     Duration::from_secs(12),
                     Some(NoticeAction {
@@ -585,22 +515,27 @@ impl WorkspaceOverlayEntity {
                 true
             }
             WorkspaceOverlayIntent::PluginProgress { key, notice, ttl } => {
-                self.upsert_plugin_progress(key, notice, ttl, cx.background_executor().now());
+                self.transients.upsert_plugin_progress(
+                    key,
+                    notice,
+                    ttl,
+                    cx.background_executor().now(),
+                );
                 true
             }
-            WorkspaceOverlayIntent::DismissPluginProgress { key } => {
-                self.dismiss_plugin_progress(&key, cx.background_executor().now())
-            }
+            WorkspaceOverlayIntent::DismissPluginProgress { key } => self
+                .transients
+                .dismiss_plugin_progress(&key, cx.background_executor().now()),
             WorkspaceOverlayIntent::ConnectionTraceEvents(events) => {
                 self.apply_connection_trace_events(events, cx.background_executor().now())
             }
-            WorkspaceOverlayIntent::QueueTooltip { id, label, x, y } => {
-                self.queue_tooltip(id, label, x, y, cx.background_executor().now())
-            }
-            WorkspaceOverlayIntent::ClearTooltip { id } => {
-                self.clear_tooltip(&id, cx.background_executor().now())
-            }
-            WorkspaceOverlayIntent::ClearAllTooltips => self.clear_all_tooltips(),
+            WorkspaceOverlayIntent::QueueTooltip { id, label, x, y } => self
+                .transients
+                .queue_tooltip(id, label, x, y, cx.background_executor().now()),
+            WorkspaceOverlayIntent::ClearTooltip { id } => self
+                .transients
+                .clear_tooltip(&id, cx.background_executor().now()),
+            WorkspaceOverlayIntent::ClearAllTooltips => self.transients.clear_all_tooltips(),
             WorkspaceOverlayIntent::ShowZenHint { ttl, label } => {
                 self.zen_hint = Some(ZenHint {
                     label,
@@ -632,15 +567,8 @@ impl WorkspaceOverlayEntity {
         duration: Duration,
         cx: &mut Context<Self>,
     ) {
-        if self.control_exit_duration != duration {
-            self.control_exit_duration = duration;
-            if duration.is_zero()
-                && self
-                    .tooltip
-                    .as_ref()
-                    .is_some_and(|tooltip| tooltip.remove_at.is_some())
-            {
-                self.tooltip = None;
+        if self.transients.control_exit_duration != duration {
+            if self.transients.set_exit_duration(duration) {
                 cx.notify();
             }
             self.schedule_next_deadline(cx);
@@ -817,7 +745,7 @@ impl WorkspaceOverlayEntity {
             delivery::drain_channel(&self.notice_rx, delivery::NOTIFICATION_DELIVERY_BUDGET);
         if !batch.items.is_empty() {
             for notice in batch.items {
-                self.push_notice(
+                self.transients.push_notice(
                     notice,
                     WORKSPACE_NOTICE_TTL,
                     None,
@@ -828,160 +756,6 @@ impl WorkspaceOverlayEntity {
             cx.notify();
         }
         batch.outcome.backlog_remaining
-    }
-
-    fn push_notice(
-        &mut self,
-        notice: TerminalNotice,
-        ttl: Duration,
-        action: Option<NoticeAction>,
-        now: Instant,
-    ) {
-        let id = self.next_toast_id;
-        self.next_toast_id = self.next_toast_id.wrapping_add(1).max(1);
-        self.standard_toasts.push(OverlayToast {
-            id,
-            notice,
-            action,
-            expires_at: now + ttl,
-            remove_at: None,
-            presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
-        });
-    }
-
-    fn upsert_plugin_progress(
-        &mut self,
-        key: String,
-        notice: TerminalNotice,
-        ttl: Duration,
-        now: Instant,
-    ) {
-        let expires_at = now + ttl;
-        if let Some(toast) = self.plugin_progress_toasts.get_mut(&key) {
-            toast.notice = notice;
-            toast.expires_at = expires_at;
-            toast.remove_at = None;
-            if toast.presence.phase() == oxideterm_gpui_ui::motion::ExitPhase::Exiting {
-                toast.presence.reopen();
-            }
-            return;
-        }
-        let id = self.next_toast_id;
-        self.next_toast_id = self.next_toast_id.wrapping_add(1).max(1);
-        self.plugin_progress_toasts.insert(
-            key,
-            OverlayToast {
-                id,
-                notice,
-                action: None,
-                expires_at,
-                remove_at: None,
-                presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
-            },
-        );
-    }
-
-    fn queue_tooltip(&mut self, id: String, label: String, x: f32, y: f32, now: Instant) -> bool {
-        if let Some(tooltip) = self.tooltip.as_mut()
-            && tooltip.id == id
-            && tooltip.remove_at.is_none_or(|deadline| now < deadline)
-        {
-            let resumed = tooltip.remove_at.take().is_some();
-            if resumed {
-                self.tooltip_generation = self.tooltip_generation.wrapping_add(1);
-                tooltip.generation = self.tooltip_generation;
-                tooltip.fade_from = tooltip.opacity.get();
-                tooltip.position_from = tooltip.position.get();
-                tooltip.switching = true;
-                tooltip.x = x;
-                tooltip.y = y;
-            }
-            // A visible hint stays still while the pointer moves within its trigger.
-            let changed = resumed || tooltip.label != label;
-            tooltip.label = label;
-            return changed;
-        }
-        if let Some(pending) = self.tooltip_pending.as_mut()
-            && pending.id == id
-        {
-            pending.label = label;
-            pending.x = x;
-            pending.y = y;
-            return false;
-        }
-        self.tooltip_generation = self.tooltip_generation.wrapping_add(1);
-        let previous = self
-            .tooltip
-            .take()
-            .filter(|tooltip| tooltip.remove_at.is_none_or(|deadline| now < deadline));
-        let warm = previous.is_some() || self.tooltip_warm_until.is_some_and(|until| now < until);
-        if warm {
-            self.tooltip_pending = None;
-            let mut tooltip =
-                WorkspaceTooltip::new(id, label, gpui::point(x, y), self.tooltip_generation);
-            if let Some(previous) = previous
-                && (previous.y - y).abs() <= TOOLTIP_SWITCH_ROW_TOLERANCE
-                && (previous.x - x).abs() <= TOOLTIP_SWITCH_MAX_DISTANCE
-            {
-                tooltip.fade_from = previous.opacity.get();
-                tooltip.position_from = previous.position.get();
-                tooltip.position.set(tooltip.position_from);
-                tooltip.switching = true;
-            }
-            self.tooltip = Some(tooltip);
-            return true;
-        }
-        self.tooltip_pending = Some(WorkspaceTooltipPending {
-            id,
-            label,
-            x,
-            y,
-            generation: self.tooltip_generation,
-            show_at: now + TOOLTIP_DELAY,
-        });
-        true
-    }
-
-    fn clear_tooltip(&mut self, id: &str, now: Instant) -> bool {
-        let mut changed = false;
-        if self
-            .tooltip_pending
-            .as_ref()
-            .is_some_and(|pending| pending.id == id)
-        {
-            self.tooltip_pending = None;
-            self.tooltip_generation = self.tooltip_generation.wrapping_add(1);
-            changed = true;
-        }
-        if let Some(tooltip) = self.tooltip.as_mut()
-            && tooltip.id == id
-            && tooltip.remove_at.is_none()
-        {
-            self.tooltip_warm_until = Some(now + TOOLTIP_REENTRY_WINDOW);
-            if self.control_exit_duration.is_zero() {
-                self.tooltip = None;
-            } else {
-                self.tooltip_generation = self.tooltip_generation.wrapping_add(1);
-                tooltip.generation = self.tooltip_generation;
-                tooltip.fade_from = tooltip.opacity.get();
-                tooltip.position_from = tooltip.position.get();
-                tooltip.remove_at =
-                    Some(now + self.control_exit_duration.min(TOOLTIP_EXIT_DURATION));
-            }
-            changed = true;
-        }
-        changed
-    }
-
-    fn clear_all_tooltips(&mut self) -> bool {
-        self.tooltip_warm_until = None;
-        let visible = self.tooltip.take().is_some();
-        let pending = self.tooltip_pending.take().is_some();
-        let changed = visible || pending;
-        if changed {
-            self.tooltip_generation = self.tooltip_generation.wrapping_add(1);
-        }
-        changed
     }
 
     fn apply_connection_trace_events(
@@ -1106,40 +880,6 @@ impl WorkspaceOverlayEntity {
         changed
     }
 
-    fn begin_standard_exit(&mut self, toast_id: u64, now: Instant) -> bool {
-        let Some(toast) = self
-            .standard_toasts
-            .iter_mut()
-            .find(|toast| toast.id == toast_id)
-        else {
-            return false;
-        };
-        if toast.presence.begin_exit().is_none() {
-            return false;
-        }
-        if self.control_exit_duration.is_zero() {
-            self.standard_toasts.retain(|toast| toast.id != toast_id);
-        } else {
-            toast.remove_at = Some(now + self.control_exit_duration);
-        }
-        true
-    }
-
-    fn dismiss_plugin_progress(&mut self, key: &str, now: Instant) -> bool {
-        let Some(toast) = self.plugin_progress_toasts.get_mut(key) else {
-            return false;
-        };
-        if toast.presence.begin_exit().is_none() {
-            return false;
-        }
-        if self.control_exit_duration.is_zero() {
-            self.plugin_progress_toasts.remove(key);
-        } else {
-            toast.remove_at = Some(now + self.control_exit_duration);
-        }
-        true
-    }
-
     fn begin_trace_exit(&mut self, attempt_id: &str, now: Instant) -> bool {
         let Some(trace) = self.connection_trace_cards.get_mut(attempt_id) else {
             return false;
@@ -1148,10 +888,10 @@ impl WorkspaceOverlayEntity {
             return false;
         }
         trace.expires_at = None;
-        if self.control_exit_duration.is_zero() {
+        if self.transients.control_exit_duration.is_zero() {
             self.connection_trace_cards.remove(attempt_id);
         } else {
-            trace.remove_at = Some(now + self.control_exit_duration);
+            trace.remove_at = Some(now + self.transients.control_exit_duration);
         }
         true
     }
@@ -1186,16 +926,10 @@ impl WorkspaceOverlayEntity {
             return;
         };
         let generation = self.deadline_generation;
-        let delay = deadline.saturating_duration_since(cx.background_executor().now());
-        let timer = cx.background_executor().timer(delay);
-        self.deadline_task = Some(cx.spawn(async move |overlay, cx| {
-            timer.await;
-            let _ = overlay.update(cx, |overlay, cx| {
-                overlay.handle_deadline_generation(generation, cx.background_executor().now(), cx);
-            });
+        self.deadline_task = Some(at_deadline(deadline, cx, move |overlay, now, cx| {
+            overlay.handle_deadline_generation(generation, now, cx)
         }));
     }
-
     fn handle_deadline_generation(
         &mut self,
         generation: u64,
@@ -1212,30 +946,7 @@ impl WorkspaceOverlayEntity {
     }
 
     fn process_due_deadlines(&mut self, now: Instant) -> bool {
-        let mut changed = false;
-        if self
-            .tooltip
-            .as_ref()
-            .is_some_and(|tooltip| tooltip.remove_at.is_some_and(|deadline| deadline <= now))
-        {
-            self.tooltip = None;
-            changed = true;
-        }
-        if self
-            .tooltip_pending
-            .as_ref()
-            .is_some_and(|pending| pending.show_at <= now)
-            && let Some(pending) = self.tooltip_pending.take()
-            && pending.generation == self.tooltip_generation
-        {
-            self.tooltip = Some(WorkspaceTooltip::new(
-                pending.id,
-                pending.label,
-                gpui::point(pending.x, pending.y),
-                pending.generation,
-            ));
-            changed = true;
-        }
+        let mut changed = self.transients.process_due_deadlines(now);
         if self
             .zen_hint
             .as_ref()
@@ -1249,46 +960,6 @@ impl WorkspaceOverlayEntity {
             .is_some_and(|hud| hud.expires_at <= now)
         {
             self.terminal_font_size_hud = None;
-            changed = true;
-        }
-
-        let standard_expired = self
-            .standard_toasts
-            .iter()
-            .filter(|toast| {
-                toast.expires_at <= now
-                    && toast.presence.phase() == oxideterm_gpui_ui::motion::ExitPhase::Visible
-            })
-            .map(|toast| toast.id)
-            .collect::<Vec<_>>();
-        for toast_id in standard_expired {
-            changed |= self.begin_standard_exit(toast_id, now);
-        }
-        let standard_count = self.standard_toasts.len();
-        self.standard_toasts
-            .retain(|toast| !toast.remove_at.is_some_and(|remove_at| remove_at <= now));
-        changed |= self.standard_toasts.len() != standard_count;
-
-        let plugin_expired = self
-            .plugin_progress_toasts
-            .iter()
-            .filter(|(_, toast)| {
-                toast.expires_at <= now
-                    && toast.presence.phase() == oxideterm_gpui_ui::motion::ExitPhase::Visible
-            })
-            .map(|(key, _)| key.clone())
-            .collect::<Vec<_>>();
-        for key in plugin_expired {
-            changed |= self.dismiss_plugin_progress(&key, now);
-        }
-        let plugin_remove = self
-            .plugin_progress_toasts
-            .iter()
-            .filter(|(_, toast)| toast.remove_at.is_some_and(|remove_at| remove_at <= now))
-            .map(|(key, _)| key.clone())
-            .collect::<Vec<_>>();
-        for key in plugin_remove {
-            self.plugin_progress_toasts.remove(&key);
             changed = true;
         }
 
@@ -1333,33 +1004,9 @@ impl WorkspaceOverlayEntity {
     }
 
     fn next_deadline(&self) -> Option<Instant> {
-        let mut next = self.tooltip_pending.as_ref().map(|pending| pending.show_at);
-        next = min_deadline(
-            next,
-            self.tooltip.as_ref().and_then(|tooltip| tooltip.remove_at),
-        );
+        let mut next = self.transients.next_deadline();
         next = min_deadline(next, self.zen_hint.as_ref().map(|hint| hint.expires_at));
         next = min_deadline(next, self.terminal_font_size_hud.map(|hud| hud.expires_at));
-        for toast in &self.standard_toasts {
-            next = min_deadline(
-                next,
-                if toast.presence.phase() == oxideterm_gpui_ui::motion::ExitPhase::Visible {
-                    Some(toast.expires_at)
-                } else {
-                    toast.remove_at
-                },
-            );
-        }
-        for toast in self.plugin_progress_toasts.values() {
-            next = min_deadline(
-                next,
-                if toast.presence.phase() == oxideterm_gpui_ui::motion::ExitPhase::Visible {
-                    Some(toast.expires_at)
-                } else {
-                    toast.remove_at
-                },
-            );
-        }
         for trace in self.connection_trace_cards.values() {
             next = min_deadline(next, trace.flush_deadline.map(|(deadline, _)| deadline));
             next = min_deadline(next, trace.expires_at);
@@ -1378,13 +1025,7 @@ impl WorkspaceOverlayEntity {
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
         let mut layers = Vec::new();
-        if let Some(tooltip) = self.tooltip.clone() {
-            layers.push(render_tooltip(
-                tokens,
-                tooltip,
-                self.control_exit_duration.min(TOOLTIP_EXIT_DURATION),
-            ));
-        }
+        layers.extend(self.transients.render_tooltip(tokens));
         if let Some(hint) = &self.zen_hint
             && hint.expires_at > cx.background_executor().now()
         {
@@ -1413,110 +1054,63 @@ impl WorkspaceOverlayEntity {
         native_update: AnyElement,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let overlay = cx.entity();
-        let standard = self.standard_toasts.iter().map(|toast| {
-            let toast_id = toast.id;
-            let overlay = overlay.clone();
-            ToastView {
-                id: format!("workspace-{}", toast.id),
-                phase: toast.presence.phase(),
-                title: toast.notice.title.clone(),
-                description: toast.notice.description.clone(),
-                status_text: toast.notice.status_text.clone(),
-                progress: toast.notice.progress,
-                variant: toast_variant_from_terminal(toast.notice.variant),
-                actions: toast.action.as_ref().map(|action| {
-                    let action = action.clone();
-                    let overlay = overlay.clone();
-                    oxideterm_gpui_ui::button::button_with(
-                        tokens,
-                        action.label.clone(),
-                        oxideterm_gpui_ui::button::ButtonOptions {
-                            variant: oxideterm_gpui_ui::button::ButtonVariant::Outline,
-                            size: oxideterm_gpui_ui::button::ButtonSize::Sm,
-                            ..Default::default()
-                        },
-                    )
-                    .on_mouse_down(MouseButton::Left, move |_event, window, cx| {
-                        let _ = action
-                            .workspace
-                            .update(cx, |workspace, cx| match &action.target {
-                                NoticeActionTarget::Plugin(plugin_id) => {
-                                    workspace.open_required_plugin(plugin_id, window, cx)
+        let owner = cx.weak_entity();
+        self.transients
+            .render_toasts(
+                tokens,
+                |notice| ToastContent {
+                    title: notice.title.clone(),
+                    description: notice.description.clone(),
+                    status_text: notice.status_text.clone(),
+                    progress: notice.progress,
+                    variant: toast_variant_from_terminal(notice.variant),
+                },
+                |action| action.label.clone(),
+                Rc::new(move |request, window, cx| {
+                    let action = owner
+                        .update(cx, |this, cx| {
+                            let now = cx.background_executor().now();
+                            let action = match &request {
+                                ToastRequest::Invoke(id) => this.transients.action(*id).cloned(),
+                                _ => None,
+                            };
+                            let changed = match request {
+                                ToastRequest::Invoke(id) | ToastRequest::Dismiss(id) => {
+                                    this.transients.begin_standard_exit(id, now)
                                 }
-                                NoticeActionTarget::SshTerminal(node_id) => {
-                                    let _ = workspace.queue_ssh_terminal_tab_for_sidebar_node(
-                                        node_id.clone(),
-                                        window,
-                                        cx,
-                                    );
+                                ToastRequest::DismissProgress(key) => {
+                                    this.transients.dismiss_plugin_progress(&key, now)
                                 }
-                                NoticeActionTarget::AppearanceSettings(scheme) => {
-                                    workspace.open_appearance_settings(*scheme, window, cx);
-                                }
-                            });
-                        let _ = overlay.update(cx, |overlay, cx| {
-                            if overlay.begin_standard_exit(toast_id, cx.background_executor().now())
-                            {
-                                overlay.schedule_next_deadline(cx);
+                            };
+                            if changed {
+                                this.schedule_next_deadline(cx);
                                 cx.notify();
                             }
-                        });
-                        cx.stop_propagation();
-                    })
-                    .into_any_element()
+                            action
+                        })
+                        .ok()
+                        .flatten();
+                    if let Some(action) = action {
+                        let _ = action
+                            .workspace
+                            .update(cx, |workspace, cx| match action.target {
+                                NoticeActionTarget::Plugin(id) => {
+                                    workspace.open_required_plugin(&id, window, cx)
+                                }
+                                NoticeActionTarget::SshTerminal(node) => {
+                                    let _ = workspace
+                                        .queue_ssh_terminal_tab_for_sidebar_node(node, window, cx);
+                                }
+                                NoticeActionTarget::AppearanceSettings(scheme) => {
+                                    workspace.open_appearance_settings(scheme, window, cx)
+                                }
+                            });
+                    }
                 }),
-                close: Some(
-                    toast_close(tokens)
-                        .on_mouse_down(MouseButton::Left, move |_event, _window, cx| {
-                            let _ = overlay.update(cx, |overlay, cx| {
-                                if overlay
-                                    .begin_standard_exit(toast_id, cx.background_executor().now())
-                                {
-                                    overlay.schedule_next_deadline(cx);
-                                    cx.notify();
-                                }
-                            });
-                            cx.stop_propagation();
-                        })
-                        .into_any_element(),
-                ),
-            }
-        });
-        let plugin = self.plugin_progress_toasts.iter().map(|(key, toast)| {
-            let key = key.clone();
-            let overlay = overlay.clone();
-            ToastView {
-                id: format!("plugin-{key}"),
-                phase: toast.presence.phase(),
-                title: toast.notice.title.clone(),
-                description: toast.notice.description.clone(),
-                status_text: toast.notice.status_text.clone(),
-                progress: toast.notice.progress,
-                variant: toast_variant_from_terminal(toast.notice.variant),
-                actions: None,
-                close: Some(
-                    toast_close(tokens)
-                        .on_mouse_down(MouseButton::Left, move |_event, _window, cx| {
-                            let _ = overlay.update(cx, |overlay, cx| {
-                                if overlay
-                                    .dismiss_plugin_progress(&key, cx.background_executor().now())
-                                {
-                                    overlay.schedule_next_deadline(cx);
-                                    cx.notify();
-                                }
-                            });
-                            cx.stop_propagation();
-                        })
-                        .into_any_element(),
-                ),
-            }
-        });
-        toaster(tokens, standard.chain(plugin))
+            )
             .child(native_update)
             .into_any_element()
     }
-
     fn render_connection_cards(
         &self,
         tokens: &ThemeTokens,
@@ -2364,14 +1958,6 @@ fn connection_trace_transport(stage: ConnectionTraceStage) -> TraceTransport {
     }
 }
 
-fn min_deadline(current: Option<Instant>, candidate: Option<Instant>) -> Option<Instant> {
-    match (current, candidate) {
-        (Some(current), Some(candidate)) => Some(current.min(candidate)),
-        (Some(current), None) => Some(current),
-        (None, candidate) => candidate,
-    }
-}
-
 pub(super) fn coalesce_connection_trace_running_events(
     events: Vec<ConnectionTraceEvent>,
 ) -> Vec<ConnectionTraceEvent> {
@@ -2391,93 +1977,6 @@ pub(super) fn coalesce_connection_trace_running_events(
         }
     }
     coalesced
-}
-
-fn render_tooltip(
-    tokens: &ThemeTokens,
-    tooltip: WorkspaceTooltip,
-    exit_duration: Duration,
-) -> AnyElement {
-    let exiting = tooltip.remove_at.is_some();
-    let target = if exiting { 0.0 } else { 1.0 };
-    let target_position = if exiting {
-        tooltip.position_from
-    } else {
-        gpui::point(tooltip.x, tooltip.y)
-    };
-    let surface = tooltip_surface(tokens, tooltip.label, None)
-        .debug_selector(|| "workspace-tooltip-surface".into());
-    let anchored_surface = if !tokens.motion.enabled {
-        tooltip.opacity.set(target);
-        tooltip.position.set(target_position);
-        anchored()
-            .anchor(Corner::TopLeft)
-            .position(gpui::point(px(target_position.x), px(target_position.y)))
-            .position_mode(AnchoredPositionMode::Window)
-            .child(surface.opacity(target))
-            .into_any_element()
-    } else {
-        let duration = if exiting {
-            exit_duration
-        } else {
-            oxideterm_gpui_ui::motion::duration(
-                tokens,
-                if tooltip.switching {
-                    oxideterm_gpui_ui::motion::MotionDuration::Control
-                } else {
-                    oxideterm_gpui_ui::motion::MotionDuration::Micro
-                },
-            )
-        };
-        let opacity = tooltip.opacity;
-        let from = tooltip.fade_from;
-        let position = tooltip.position;
-        let position_from = tooltip.position_from;
-        let spatial = tokens.motion.spatial_enabled;
-        let easing = if tooltip.switching && !exiting {
-            oxideterm_gpui_ui::motion::ease_in_out_cubic
-        } else {
-            oxideterm_gpui_ui::motion::ease_out_cubic
-        };
-        let surface = surface.with_animation(
-            ("workspace-tooltip-fade", tooltip.generation as usize),
-            Animation::new(duration).with_easing(easing),
-            move |surface, progress| {
-                let value = from + (target - from) * progress;
-                opacity.set(value);
-                oxideterm_gpui_ui::motion::surface_opacity(surface, value)
-            },
-        );
-        let anchor = anchored()
-            .anchor(Corner::TopLeft)
-            .position_mode(AnchoredPositionMode::Window)
-            .child(surface);
-        if spatial {
-            // Move the anchor so viewport fitting applies to every animation frame.
-            anchor
-                .with_animation(
-                    ("workspace-tooltip-position", tooltip.generation as usize),
-                    Animation::new(duration).with_easing(easing),
-                    move |anchor, progress| {
-                        let point = gpui::point(
-                            position_from.x + (target_position.x - position_from.x) * progress,
-                            position_from.y + (target_position.y - position_from.y) * progress,
-                        );
-                        position.set(point);
-                        anchor.position(gpui::point(px(point.x), px(point.y)))
-                    },
-                )
-                .into_any_element()
-        } else {
-            position.set(target_position);
-            anchor
-                .position(gpui::point(px(target_position.x), px(target_position.y)))
-                .into_any_element()
-        }
-    };
-    deferred(anchored_surface)
-        .with_priority(oxideterm_gpui_ui::modal::TAURI_TOOLTIP_LAYER_PRIORITY)
-        .into_any_element()
 }
 
 fn render_zen_hint(tokens: &ThemeTokens, label: &str) -> AnyElement {
@@ -2840,7 +2339,7 @@ mod tests {
                     workspace.show_required_plugin_notice(id, name, cx);
                 }
                 let overlay = workspace.overlay.read(cx);
-                let toast = overlay.standard_toasts.last().unwrap();
+                let toast = overlay.transients.standard_toasts.last().unwrap();
                 assert_eq!(toast.notice.title, format!("The {name} plugin is not installed. Install it from the plugin marketplace, then retry."));
                 let action = toast.action.as_ref().unwrap();
                 assert_eq!(action.target, NoticeActionTarget::Plugin(id.to_string()));
@@ -2874,7 +2373,7 @@ mod tests {
                 } else {
                     workspace.show_required_plugin_notice(id, name, cx);
                 }
-                let toast = workspace.overlay.read(cx).standard_toasts.last().unwrap();
+                let toast = workspace.overlay.read(cx).transients.standard_toasts.last().unwrap();
                 assert_eq!(toast.notice.title, format!("The installed {name} plugin is unavailable. Enable or update it in Plugin Manager, then retry."));
                 assert_eq!(toast.action.as_ref().unwrap().label, "Manage plugin");
                 assert_eq!(toast.action.as_ref().unwrap().target, NoticeActionTarget::Plugin(id.to_string()));
@@ -2979,7 +2478,7 @@ mod tests {
         let overlay = workspace.read_with(cx, |workspace, _| workspace.overlay.clone());
         overlay.read_with(cx, |overlay, _| {
             assert_eq!(
-                overlay.standard_toasts.iter().map(|toast| (
+                overlay.transients.standard_toasts.iter().map(|toast| (
                     toast.notice.title.as_str(), toast.notice.variant
                 )).collect::<Vec<_>>(),
                 vec![(
@@ -3008,17 +2507,32 @@ mod tests {
         let overlay = cx.new(|cx| WorkspaceOverlayEntity::new(Duration::from_millis(300), cx));
         overlay.update(cx, |overlay, _| {
             let start = Instant::now();
-            overlay.queue_tooltip("cloud".into(), "Cloud sync".into(), 10.0, 20.0, start);
+            overlay.transients.queue_tooltip(
+                "cloud".into(),
+                "Cloud sync".into(),
+                10.0,
+                20.0,
+                start,
+            );
             overlay.process_due_deadlines(start + Duration::from_millis(299));
-            assert!(overlay.tooltip.is_none());
+            assert!(overlay.transients.tooltip.is_none());
             let shown = start + TOOLTIP_DELAY;
             overlay.process_due_deadlines(shown);
-            assert_eq!(overlay.tooltip.as_ref().unwrap().label, "Cloud sync");
-            assert!(!overlay.queue_tooltip("cloud".into(), "Cloud sync".into(), 12.0, 22.0, shown));
-            assert_eq!(overlay.tooltip.as_ref().unwrap().x, 10.0);
-            overlay.clear_tooltip("cloud", shown);
+            assert_eq!(
+                overlay.transients.tooltip.as_ref().unwrap().label,
+                "Cloud sync"
+            );
+            assert!(!overlay.transients.queue_tooltip(
+                "cloud".into(),
+                "Cloud sync".into(),
+                12.0,
+                22.0,
+                shown
+            ));
+            assert_eq!(overlay.transients.tooltip.as_ref().unwrap().x, 10.0);
+            overlay.transients.clear_tooltip("cloud", shown);
             assert_eq!(overlay.next_deadline(), Some(shown + TOOLTIP_EXIT_DURATION));
-            overlay.queue_tooltip(
+            overlay.transients.queue_tooltip(
                 "cloud".into(),
                 "Cloud sync".into(),
                 15.0,
@@ -3026,48 +2540,63 @@ mod tests {
                 shown + Duration::from_millis(30),
             );
             overlay.process_due_deadlines(shown + TOOLTIP_EXIT_DURATION);
-            let tooltip = overlay.tooltip.as_ref().unwrap();
+            let tooltip = overlay.transients.tooltip.as_ref().unwrap();
             assert_eq!(
                 (tooltip.label.as_str(), tooltip.x, tooltip.y),
                 ("Cloud sync", 15.0, 25.0)
             );
             let switch = shown + Duration::from_millis(100);
-            overlay.queue_tooltip("tools".into(), "Host tools".into(), 80.0, 25.0, switch);
-            let tooltip = overlay.tooltip.as_ref().unwrap();
+            overlay.transients.queue_tooltip(
+                "tools".into(),
+                "Host tools".into(),
+                80.0,
+                25.0,
+                switch,
+            );
+            let tooltip = overlay.transients.tooltip.as_ref().unwrap();
             assert_eq!(tooltip.label, "Host tools");
             assert!(tooltip.switching);
-            overlay.clear_tooltip("cloud", switch);
+            overlay.transients.clear_tooltip("cloud", switch);
             let exit = switch;
-            overlay.clear_tooltip("tools", exit);
-            overlay.clear_tooltip("tools", exit + Duration::from_millis(30));
+            overlay.transients.clear_tooltip("tools", exit);
+            overlay
+                .transients
+                .clear_tooltip("tools", exit + Duration::from_millis(30));
             overlay.process_due_deadlines(exit + Duration::from_millis(89));
-            assert_eq!(overlay.tooltip.as_ref().unwrap().id, "tools");
+            assert_eq!(overlay.transients.tooltip.as_ref().unwrap().id, "tools");
             overlay.process_due_deadlines(exit + TOOLTIP_EXIT_DURATION);
-            assert!(overlay.tooltip.is_none());
+            assert!(overlay.transients.tooltip.is_none());
             let warm = exit + Duration::from_millis(100);
-            overlay.queue_tooltip("theme".into(), "Theme".into(), 110.0, 25.0, warm);
-            assert_eq!(overlay.tooltip.as_ref().unwrap().id, "theme");
-            overlay.clear_tooltip("theme", warm);
+            overlay
+                .transients
+                .queue_tooltip("theme".into(), "Theme".into(), 110.0, 25.0, warm);
+            assert_eq!(overlay.transients.tooltip.as_ref().unwrap().id, "theme");
+            overlay.transients.clear_tooltip("theme", warm);
             let cold = warm + TOOLTIP_REENTRY_WINDOW;
             overlay.process_due_deadlines(cold);
-            overlay.queue_tooltip("late".into(), "Delayed again".into(), 0.0, 0.0, cold);
+            overlay
+                .transients
+                .queue_tooltip("late".into(), "Delayed again".into(), 0.0, 0.0, cold);
             overlay.process_due_deadlines(cold + TOOLTIP_DELAY - Duration::from_millis(1));
-            assert!(overlay.tooltip.is_none());
+            assert!(overlay.transients.tooltip.is_none());
             overlay.process_due_deadlines(cold + TOOLTIP_DELAY);
-            assert_eq!(overlay.tooltip.as_ref().unwrap().label, "Delayed again");
-            overlay.clear_all_tooltips();
+            assert_eq!(
+                overlay.transients.tooltip.as_ref().unwrap().label,
+                "Delayed again"
+            );
+            overlay.transients.clear_all_tooltips();
             let cancelled = cold + TOOLTIP_DELAY;
-            overlay.queue_tooltip(
+            overlay.transients.queue_tooltip(
                 "cancelled".into(),
                 "Never shown".into(),
                 0.0,
                 0.0,
                 cancelled,
             );
-            assert!(overlay.tooltip.is_none());
-            overlay.clear_tooltip("cancelled", cancelled);
+            assert!(overlay.transients.tooltip.is_none());
+            overlay.transients.clear_tooltip("cancelled", cancelled);
             overlay.process_due_deadlines(cancelled + TOOLTIP_DELAY);
-            assert!(overlay.tooltip.is_none());
+            assert!(overlay.transients.tooltip.is_none());
         });
     }
 
@@ -3103,9 +2632,15 @@ mod tests {
         let overlay = cx.new(|cx| WorkspaceOverlayEntity::new(Duration::from_millis(200), cx));
         let start = Instant::now();
         let tooltip = overlay.update(cx, |overlay, _| {
-            overlay.queue_tooltip("cloud".into(), "Cloud sync".into(), 10.0, 20.0, start);
+            overlay.transients.queue_tooltip(
+                "cloud".into(),
+                "Cloud sync".into(),
+                10.0,
+                20.0,
+                start,
+            );
             overlay.process_due_deadlines(start + TOOLTIP_DELAY);
-            overlay.tooltip.clone().unwrap()
+            overlay.transients.tooltip.clone().unwrap()
         });
         let opacity = tooltip.opacity.clone();
         let position = tooltip.position.clone();
@@ -3126,14 +2661,14 @@ mod tests {
         assert_tooltip_origin(cx, 10.0, 20.375);
         view.update(cx, |view, cx| {
             overlay.update(cx, |overlay, _| {
-                overlay.queue_tooltip(
+                overlay.transients.queue_tooltip(
                     "tools".into(),
                     "Host tools".into(),
                     70.0,
                     20.0,
                     start + TOOLTIP_DELAY,
                 );
-                view.tooltip = overlay.tooltip.clone().unwrap();
+                view.tooltip = overlay.transients.tooltip.clone().unwrap();
             });
             cx.notify();
         });
@@ -3150,8 +2685,10 @@ mod tests {
         assert_tooltip_origin(cx, 40.0, 20.1875);
         view.update(cx, |view, cx| {
             overlay.update(cx, |overlay, _| {
-                overlay.clear_tooltip("tools", start + TOOLTIP_DELAY);
-                view.tooltip = overlay.tooltip.clone().unwrap();
+                overlay
+                    .transients
+                    .clear_tooltip("tools", start + TOOLTIP_DELAY);
+                view.tooltip = overlay.transients.tooltip.clone().unwrap();
             });
             cx.notify();
         });
@@ -3166,14 +2703,14 @@ mod tests {
         assert_tooltip_origin(cx, 40.0, 20.1875);
         view.update(cx, |view, cx| {
             overlay.update(cx, |overlay, _| {
-                overlay.queue_tooltip(
+                overlay.transients.queue_tooltip(
                     "tools".into(),
                     "Host tools".into(),
                     70.0,
                     20.0,
                     start + TOOLTIP_DELAY + Duration::from_millis(45),
                 );
-                view.tooltip = overlay.tooltip.clone().unwrap();
+                view.tooltip = overlay.transients.tooltip.clone().unwrap();
             });
             cx.notify();
         });
@@ -3190,8 +2727,14 @@ mod tests {
         let edge = start + TOOLTIP_DELAY + TOOLTIP_REENTRY_WINDOW;
         view.update(cx, |view, cx| {
             overlay.update(cx, |overlay, _| {
-                overlay.queue_tooltip("caption".into(), "Caption button".into(), 650.0, 20.0, edge);
-                view.tooltip = overlay.tooltip.clone().unwrap();
+                overlay.transients.queue_tooltip(
+                    "caption".into(),
+                    "Caption button".into(),
+                    650.0,
+                    20.0,
+                    edge,
+                );
+                view.tooltip = overlay.transients.tooltip.clone().unwrap();
             });
             cx.notify();
         });
@@ -3200,14 +2743,14 @@ mod tests {
         cx.update(|window, cx| window.draw(cx).clear(cx));
         view.update(cx, |view, cx| {
             overlay.update(cx, |overlay, _| {
-                overlay.queue_tooltip(
+                overlay.transients.queue_tooltip(
                     "neighbor".into(),
                     "A neighboring button with a longer hint".into(),
                     620.0,
                     20.0,
                     edge + Duration::from_millis(120),
                 );
-                view.tooltip = overlay.tooltip.clone().unwrap();
+                view.tooltip = overlay.transients.tooltip.clone().unwrap();
             });
             cx.notify();
         });
@@ -3266,16 +2809,23 @@ mod tests {
         let overlay = cx.new(|cx| WorkspaceOverlayEntity::new(Duration::ZERO, cx));
         overlay.update(cx, |overlay, _| {
             let now = Instant::now();
-            overlay.queue_tooltip("cloud".into(), "Cloud sync".into(), 0.0, 0.0, now);
+            overlay
+                .transients
+                .queue_tooltip("cloud".into(), "Cloud sync".into(), 0.0, 0.0, now);
             let shown = now + TOOLTIP_DELAY;
             overlay.process_due_deadlines(shown);
-            overlay.clear_tooltip("cloud", shown);
-            assert!(overlay.tooltip.is_none());
-            overlay.queue_tooltip("tools".into(), "Host tools".into(), 0.0, 0.0, shown);
-            assert_eq!(overlay.tooltip.as_ref().unwrap().label, "Host tools");
-            overlay.clear_all_tooltips();
+            overlay.transients.clear_tooltip("cloud", shown);
+            assert!(overlay.transients.tooltip.is_none());
+            overlay
+                .transients
+                .queue_tooltip("tools".into(), "Host tools".into(), 0.0, 0.0, shown);
+            assert_eq!(
+                overlay.transients.tooltip.as_ref().unwrap().label,
+                "Host tools"
+            );
+            overlay.transients.clear_all_tooltips();
             overlay.process_due_deadlines(shown + TOOLTIP_DELAY);
-            assert!(overlay.tooltip.is_none());
+            assert!(overlay.transients.tooltip.is_none());
         });
     }
 
@@ -3551,13 +3101,19 @@ mod tests {
 
         cx.read(|cx| {
             let overlay = overlay.read(cx);
-            assert_eq!(overlay.standard_toasts.len(), 130);
-            assert_eq!(overlay.standard_toasts[0].notice.title, "notice-0");
-            assert_eq!(overlay.standard_toasts[129].notice.title, "notice-129");
+            assert_eq!(overlay.transients.standard_toasts.len(), 130);
+            assert_eq!(
+                overlay.transients.standard_toasts[0].notice.title,
+                "notice-0"
+            );
+            assert_eq!(
+                overlay.transients.standard_toasts[129].notice.title,
+                "notice-129"
+            );
         });
         cx.executor().advance_clock(WORKSPACE_NOTICE_TTL);
         cx.run_until_parked();
-        cx.read(|cx| assert!(overlay.read(cx).standard_toasts.is_empty()));
+        cx.read(|cx| assert!(overlay.read(cx).transients.standard_toasts.is_empty()));
     }
 
     #[gpui::test]

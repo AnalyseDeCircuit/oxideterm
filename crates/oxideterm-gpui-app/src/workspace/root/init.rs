@@ -790,7 +790,24 @@ impl WorkspaceApp {
         );
         let command_palette =
             cx.new(|_| command_palette::CommandPaletteEntity::new(forwarding_runtime.clone()));
-        let command_palette_observation = cx.observe(&command_palette, |_, _, cx| cx.notify());
+        let palette_surface = Self::palette_surface(&command_palette, cx);
+        let command_palette_observation = cx.subscribe_in(
+            &command_palette,
+            window,
+            |app, palette, _: &oxideterm_gpui_shell::palette::PaletteClosed, window, cx| {
+                if !palette.read(cx).is_open() {
+                    let restore = app.active_window_modal_owner(cx).is_none();
+                    palette.update(cx, |p, cx| {
+                        if restore {
+                            p.focus.restore(&app.focus_handle, window, cx)
+                        } else {
+                            p.focus.forget()
+                        }
+                    });
+                }
+                cx.notify();
+            },
+        );
         let sender_context_menu_labels = oxideterm_gpui_editor::EditorContextMenuLabels {
             copy: i18n.t("menu.copy"),
             cut: i18n.t("fileManager.cut"),
@@ -914,6 +931,7 @@ impl WorkspaceApp {
             standalone_connections: standalone_connections::StandaloneConnectionRegistry::default(),
             detached_local_terminals_popover_open: false,
             command_palette,
+            palette_surface,
             _command_palette_observation: command_palette_observation,
             version_migration,
             onboarding: OnboardingState::from_settings(&settings),
@@ -1068,15 +1086,7 @@ impl WorkspaceApp {
             node_router,
             notification_center: NotificationCenterState::default(),
             audit,
-            notification_sidebar_list_state: tauri_virtual_list_state(
-                0,
-                ListAlignment::Top,
-                TauriVirtualListSpec::new(
-                    px(NOTIFICATION_SIDEBAR_ROW_HEIGHT_ESTIMATE),
-                    NOTIFICATION_SIDEBAR_VIRTUAL_OVERSCAN,
-                ),
-            ),
-            notification_sidebar_list_cache: RefCell::new(VirtualListSignatureCache::default()),
+            notification_surface: RefCell::default(),
             ssh_nodes: HashMap::new(),
             saved_ssh_nodes: HashMap::new(),
             expanded_ssh_nodes: HashSet::new(),

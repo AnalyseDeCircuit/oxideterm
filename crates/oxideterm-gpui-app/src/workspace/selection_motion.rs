@@ -7,8 +7,7 @@ const AI_SETTINGS_SWITCHER_ID: &str = "ai-settings-page-switcher";
 pub(in crate::workspace) use oxideterm_gpui_cloud_sync::panel::CLOUD_SYNC_SWITCHER_ID;
 pub(in crate::workspace) const PLUGIN_MANAGER_SWITCHER_ID: &str = "plugin-manager-tab-bar";
 pub(in crate::workspace) const CONNECTION_RUNTIME_SWITCHER_ID: &str = "connection-runtime-tab-bar";
-pub(in crate::workspace) const NOTIFICATION_CENTER_SWITCHER_ID: &str =
-    "notification-center-tab-bar";
+
 #[cfg(test)]
 const SETTINGS_NAVIGATION_ID: &str = "settings-navigation";
 #[cfg(test)]
