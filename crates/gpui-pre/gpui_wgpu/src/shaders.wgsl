@@ -488,7 +488,8 @@ fn prepare_gradient_color(tag: u32, color_space: u32,
 
 fn mineral_noise(cell: vec2<f32>) -> f32 {
     let p = vec2<u32>(floor(cell));
-    var h = p.x * 0x9e3779b9u ^ p.y * 0x85ebca6bu;
+    // WGSL forbids mixing `*` and `^` without explicit parentheses.
+    var h = (p.x * 0x9e3779b9u) ^ (p.y * 0x85ebca6bu);
     h ^= h >> 16u;
     h *= 0x7feb352du;
     h ^= h >> 15u;

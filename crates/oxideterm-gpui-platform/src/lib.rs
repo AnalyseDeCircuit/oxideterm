@@ -27,7 +27,11 @@ pub fn application() -> gpui::Application {
 #[cfg(target_family = "wasm")]
 pub fn application() -> gpui::Application {
     gpui_web::init_logging();
-    let platform = std::rc::Rc::new(gpui_web::WebPlatform::new(false));
+    let platform = std::rc::Rc::new(gpui_web::WebPlatform::new_with_backend_and_font_fallback(
+        false,
+        gpui_web::WebBackendPreference::default(),
+        gpui_web::CanvasFontFallback::EmojiAndCjk,
+    ));
     let http_client = std::sync::Arc::new(platform.fetch_http_client());
     gpui::Application::with_platform(platform).with_http_client(http_client)
 }
