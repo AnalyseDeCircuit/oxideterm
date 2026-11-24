@@ -955,8 +955,17 @@ fn settings_search_score(title: &str, haystack: &str, query: &str) -> Option<usi
 }
 
 pub fn settings_search_results(i18n: &I18n, query: &str) -> Vec<SettingsSearchResult> {
+    filtered_results(i18n, query, |_, _| true)
+}
+
+pub(crate) fn filtered_results(
+    i18n: &I18n,
+    query: &str,
+    include: fn(SettingsTab, SettingsSectionId) -> bool,
+) -> Vec<SettingsSearchResult> {
     let mut results = settings_search_specs()
         .into_iter()
+        .filter(|spec| include(spec.tab, spec.section))
         .filter_map(|spec| {
             let label = i18n.t(spec.title_key);
             let mut search_text =

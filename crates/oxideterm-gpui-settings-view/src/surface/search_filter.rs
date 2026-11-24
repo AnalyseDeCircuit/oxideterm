@@ -1,23 +1,49 @@
-use std::{cell::RefCell, rc::Rc, time::Duration};
+#[cfg(not(target_family = "wasm"))]
+use std::time::Duration;
+use std::{cell::RefCell, rc::Rc};
 
+#[cfg(not(target_family = "wasm"))]
 use gpui::{Context, Task};
 use oxideterm_i18n::{I18n, Locale};
 
+#[cfg(not(target_family = "wasm"))]
 use super::SettingsSurfaceView;
-use crate::{SettingsSearchResult, settings_search_results};
+use crate::{SettingsSearchResult, SettingsTab};
+use oxideterm_settings_model::SettingsSectionId;
 
+#[cfg(not(target_family = "wasm"))]
 const SEARCH_FILTER_DELAY: Duration = Duration::from_millis(120);
 type SearchCache = (Locale, Rc<[SettingsSearchResult]>);
 
-#[derive(Default)]
 pub(super) struct SettingsSearchFilter {
+    #[cfg(not(target_family = "wasm"))]
     observed_query: String,
     applied_query: String,
+    include: fn(SettingsTab, SettingsSectionId) -> bool,
     cached: RefCell<Option<SearchCache>>,
+    #[cfg(not(target_family = "wasm"))]
     pending: Option<Task<()>>,
 }
 
+impl Default for SettingsSearchFilter {
+    fn default() -> Self {
+        Self::new(|_, _| true)
+    }
+}
+
 impl SettingsSearchFilter {
+    pub(super) fn new(include: fn(SettingsTab, SettingsSectionId) -> bool) -> Self {
+        Self {
+            #[cfg(not(target_family = "wasm"))]
+            observed_query: String::new(),
+            #[cfg(not(target_family = "wasm"))]
+            pending: None,
+            applied_query: String::new(),
+            include,
+            cached: Default::default(),
+        }
+    }
+    #[cfg(not(target_family = "wasm"))]
     pub(super) fn observed_query(&self) -> &str {
         &self.observed_query
     }
@@ -32,18 +58,19 @@ impl SettingsSearchFilter {
         let results: Rc<[_]> = if self.applied_query.is_empty() {
             Rc::from([])
         } else {
-            settings_search_results(i18n, &self.applied_query).into()
+            crate::search::filtered_results(i18n, &self.applied_query, self.include).into()
         };
         *cache = Some((i18n.locale(), results.clone()));
         results
     }
 
-    fn apply(&mut self, query: String) {
+    pub(super) fn apply(&mut self, query: String) {
         self.applied_query = query;
         self.cached.get_mut().take();
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl SettingsSurfaceView {
     pub(super) fn queue_search_filter(&mut self, query: String, cx: &mut Context<Self>) {
         let filter = &mut self.search_filter;

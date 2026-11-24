@@ -103,7 +103,7 @@ fn next_theme_option<'a>(
 }
 
 pub fn appearance_theme_palette(settings: &PersistedSettings, id: &str) -> TerminalTheme {
-    let mut palette = theme_by_id(id).terminal;
+    let palette = theme_by_id(id).terminal;
     let Some(colors) = settings
         .custom_themes
         .get(id)
@@ -111,6 +111,18 @@ pub fn appearance_theme_palette(settings: &PersistedSettings, id: &str) -> Termi
     else {
         return palette;
     };
+    preview_palette(palette, |key| {
+        colors
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .and_then(parse_color_hex)
+    })
+}
+
+pub(crate) fn preview_palette(
+    mut palette: TerminalTheme,
+    color: impl Fn(&str) -> Option<u32>,
+) -> TerminalTheme {
     // Preview only needs RGB values. The full runtime parser allocates static
     // selection-color strings, which must not be repeated on hover repaint.
     for (key, target) in [
@@ -124,11 +136,7 @@ pub fn appearance_theme_palette(settings: &PersistedSettings, id: &str) -> Termi
         ("magenta", &mut palette.magenta),
         ("cyan", &mut palette.cyan),
     ] {
-        if let Some(color) = colors
-            .get(key)
-            .and_then(serde_json::Value::as_str)
-            .and_then(parse_color_hex)
-        {
+        if let Some(color) = color(key) {
             *target = color;
         }
     }
@@ -155,14 +163,25 @@ pub struct SettingsThemePicker {
     selected: Option<String>,
     preview: Option<String>,
     scroll: ScrollHandle,
-    settings: gpui::WeakEntity<crate::entity::SettingsWorkspaceEntity>,
+    #[cfg(not(target_family = "wasm"))]
+    preview_owner: Option<gpui::WeakEntity<crate::entity::SettingsWorkspaceEntity>>,
     frame: Rc<dyn Fn(&Window, &App) -> Option<SettingsThemePickerFrame>>,
     apply: Rc<dyn Fn(SettingsSelect, String, &mut App)>,
 }
 
 impl SettingsThemePicker {
+    #[cfg(not(target_family = "wasm"))]
     pub fn new(
         settings: gpui::WeakEntity<crate::entity::SettingsWorkspaceEntity>,
+        frame: Rc<dyn Fn(&Window, &App) -> Option<SettingsThemePickerFrame>>,
+        apply: Rc<dyn Fn(SettingsSelect, String, &mut App)>,
+    ) -> Self {
+        let mut picker = Self::for_surface(frame, apply);
+        picker.preview_owner = Some(settings);
+        picker
+    }
+
+    pub fn for_surface(
         frame: Rc<dyn Fn(&Window, &App) -> Option<SettingsThemePickerFrame>>,
         apply: Rc<dyn Fn(SettingsSelect, String, &mut App)>,
     ) -> Self {
@@ -171,7 +190,8 @@ impl SettingsThemePicker {
             selected: None,
             preview: None,
             scroll: ScrollHandle::new(),
-            settings,
+            #[cfg(not(target_family = "wasm"))]
+            preview_owner: None,
             frame,
             apply,
         }
@@ -200,7 +220,10 @@ impl SettingsThemePicker {
     }
 
     fn notify_preview(&self, cx: &mut Context<Self>) {
-        let _ = self.settings.update(cx, |_, cx| cx.notify());
+        #[cfg(not(target_family = "wasm"))]
+        if let Some(owner) = &self.preview_owner {
+            let _ = owner.update(cx, |_, cx| cx.notify());
+        }
         cx.notify();
     }
 

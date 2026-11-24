@@ -1,6 +1,9 @@
 use super::*;
 use crate::SettingsTabIcon;
-use gpui::{MouseButton, MouseDownEvent, MouseMoveEvent, Rgba, ScrollHandle, svg};
+#[cfg(not(target_family = "wasm"))]
+use gpui::{MouseButton, MouseDownEvent, MouseMoveEvent, ScrollHandle};
+use gpui::{Rgba, svg};
+#[cfg(not(target_family = "wasm"))]
 use oxideterm_gpui_ui::{
     button::{ButtonRadius, IconButtonOptions, icon_button},
     entity_row::{EntityListRowOptions, entity_list_row},
@@ -8,6 +11,7 @@ use oxideterm_gpui_ui::{
     separator::{SeparatorOrientation, separator},
 };
 
+#[cfg(not(target_family = "wasm"))]
 const SETTINGS_NAVIGATION_ID: &str = "settings-navigation";
 
 pub(crate) fn render_icon(icon: &'static str, size: f32, color: Rgba) -> AnyElement {
@@ -18,6 +22,7 @@ pub(crate) fn render_icon(icon: &'static str, size: f32, color: Rgba) -> AnyElem
         .into_any_element()
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn panel_background(frame: &SettingsSurfaceFrame, color: u32) -> Rgba {
     if frame.has_background {
         rgba((color << 8) | oxideterm_gpui_ui::theme_glass_card_background_alpha(&frame.tokens))
@@ -44,6 +49,7 @@ pub(crate) fn tab_icon(tab: SettingsTab) -> &'static str {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn settings_nav_item_index(groups: &[Vec<SettingsTab>], tab: SettingsTab) -> Option<usize> {
     let mut item_index = 0;
     for (group_index, group) in groups.iter().enumerate() {
@@ -60,6 +66,7 @@ fn settings_nav_item_index(groups: &[Vec<SettingsTab>], tab: SettingsTab) -> Opt
     None
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn settings_nav_vertical_offset(
     scroll_handle: &ScrollHandle,
     source_index: usize,
@@ -70,6 +77,7 @@ fn settings_nav_vertical_offset(
     Some(f32::from(source_bounds.origin.y - target_bounds.origin.y))
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl SettingsSurfaceView {
     fn action(
         &self,
@@ -322,52 +330,7 @@ impl SettingsSurfaceView {
                 None => surface.into_any_element(),
             }
         });
-        div()
-            // Keep selection and hover surfaces stable when the settings
-            // window has spare vertical space. Do not clip overflow on the row
-            // itself: `nav_motion.render_vertical` slides `selection_surface`
-            // across sibling rows from the previous tab's y-offset, while the
-            // label child truncates horizontal text independently.
-            .h(px(frame.tokens.metrics.ui_button_lg_height))
-            .w_full()
-            .min_w_0()
-            .flex_none()
-            .mb(px(4.0))
-            .px_3()
-            .relative()
-            .flex()
-            .items_center()
-            .gap(px(10.0))
-            .rounded(px(frame.tokens.radii.md))
-            .bg(rgba(0x00000000))
-            .text_size(px(frame.tokens.metrics.ui_text_sm))
-            .font_weight(gpui::FontWeight::NORMAL)
-            .text_color(rgb(if active {
-                theme.text_heading
-            } else {
-                theme.text
-            }))
-            .cursor_pointer()
-            .hover(move |item| {
-                if active {
-                    item
-                } else {
-                    item.bg(rgba((theme.bg_hover << 8) | 0x80))
-                }
-            })
-            .when_some(selection_surface, |item, surface| item.child(surface))
-            .child(
-                div()
-                    .flex_none()
-                    .child(render_icon(tab_icon(tab), 18.0, rgb(theme.accent))),
-            )
-            .child(
-                div()
-                    .min_w(px(0.0))
-                    .flex_1()
-                    .truncate()
-                    .child(frame.i18n.t(tab.label_key())),
-            )
+        nav_row(&frame.tokens, &frame.i18n, tab, active, selection_surface)
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _, window, cx| {
@@ -556,4 +519,60 @@ impl SettingsSurfaceView {
             )
             .into_any_element()
     }
+}
+
+pub(super) fn nav_row(
+    tokens: &ThemeTokens,
+    i18n: &I18n,
+    tab: SettingsTab,
+    active: bool,
+    selection_surface: Option<AnyElement>,
+) -> gpui::Div {
+    let theme = tokens.ui;
+    div()
+        // Keep selection and hover surfaces stable when the settings
+        // window has spare vertical space. Do not clip overflow on the row
+        // itself: `nav_motion.render_vertical` slides `selection_surface`
+        // across sibling rows from the previous tab's y-offset, while the
+        // label child truncates horizontal text independently.
+        .h(px(tokens.metrics.ui_button_lg_height))
+        .w_full()
+        .min_w_0()
+        .flex_none()
+        .mb(px(4.0))
+        .px_3()
+        .relative()
+        .flex()
+        .items_center()
+        .gap(px(10.0))
+        .rounded(px(tokens.radii.md))
+        .bg(rgba(0x00000000))
+        .text_size(px(tokens.metrics.ui_text_sm))
+        .font_weight(gpui::FontWeight::NORMAL)
+        .text_color(rgb(if active {
+            theme.text_heading
+        } else {
+            theme.text
+        }))
+        .cursor_pointer()
+        .hover(move |item| {
+            if active {
+                item
+            } else {
+                item.bg(rgba((theme.bg_hover << 8) | 0x80))
+            }
+        })
+        .when_some(selection_surface, |item, surface| item.child(surface))
+        .child(
+            div()
+                .flex_none()
+                .child(render_icon(tab_icon(tab), 18.0, rgb(theme.accent))),
+        )
+        .child(
+            div()
+                .min_w(px(0.0))
+                .flex_1()
+                .truncate()
+                .child(i18n.t(tab.label_key())),
+        )
 }

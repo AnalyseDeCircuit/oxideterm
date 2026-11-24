@@ -1,97 +1,46 @@
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
-
-use gpui::{
-    AnyElement, App, Context, Entity, ListAlignment, ListState, Pixels, Point, Render, Rgba,
-    ScrollHandle, SharedString, Subscription, Task, Window, div, prelude::*, px, rgb, rgba,
-};
-use oxideterm_gpui_ui::virtual_list::{
-    TauriVirtualListSpec, VirtualListSignatureCache, sync_tauri_variable_list_state_by_signatures,
-    tauri_virtual_list,
-};
+use crate::{SettingsSearchResult, SettingsTab};
+use gpui::{AnyElement, App, Pixels, Point, Rgba, SharedString, div, prelude::*, px, rgb, rgba};
 use oxideterm_i18n::I18n;
-use oxideterm_settings_model::{
-    AiSettingsPage, SETTINGS_SECTION_HEADER_ITEM_COUNT, SettingsDynamicSectionCounts,
-    SettingsSectionId, settings_section_list_identity, settings_section_list_item_count,
-    settings_tab_section_at,
-};
+use oxideterm_settings_model::SettingsDynamicSectionCounts;
 use oxideterm_theme::ThemeTokens;
 
-use crate::{
-    SettingsSearchResult, SettingsTab, TerminalSettingsPage, entity::SettingsWorkspaceEntity,
+#[cfg(not(target_family = "wasm"))]
+use {
+    crate::{TerminalSettingsPage, entity::SettingsWorkspaceEntity},
+    gpui::{Context, Entity, Render, ScrollHandle, Subscription, Task, Window},
+    oxideterm_gpui_ui::{
+        motion::UserSegmentedControlMotionState, virtual_list::tauri_virtual_list,
+    },
+    oxideterm_settings_model::{
+        AiSettingsPage, SETTINGS_SECTION_HEADER_ITEM_COUNT, SettingsSectionId,
+        settings_section_list_item_count, settings_tab_section_at,
+    },
+    std::{collections::HashMap, rc::Rc},
 };
-use oxideterm_gpui_ui::motion::UserSegmentedControlMotionState;
-
+#[cfg(not(target_family = "wasm"))]
 mod host;
 pub(crate) mod nav;
+#[cfg(not(target_family = "wasm"))]
 pub(crate) mod pages;
+#[cfg(not(target_family = "wasm"))]
 pub use host::{
     McpTargetLabel, SettingsDocumentText, SettingsSurfaceHost, settings_controls_source,
 };
+#[cfg(not(target_family = "wasm"))]
+mod desktop_layout;
 mod search_filter;
 mod section_cache;
 
+#[cfg(not(target_family = "wasm"))]
+pub use desktop_layout::SettingsSectionLayout;
+#[cfg(not(target_family = "wasm"))]
 pub use pages::{
     KnowledgePageData, PreparedSettingsPage, SettingsPageAction, SettingsPageData,
     SettingsPageFrame, SettingsPageWindowAction, TriggerPageRuntime,
 };
-pub use section_cache::SettingsSectionLayout;
-
-/// Shared by the surface and commands that scroll to a semantic settings section.
-pub struct SettingsSectionList {
-    state: ListState,
-    cache: RefCell<VirtualListSignatureCache>,
-}
-
-impl Default for SettingsSectionList {
-    fn default() -> Self {
-        Self {
-            state: ListState::new(
-                4,
-                ListAlignment::Top,
-                Self::spec(SettingsTab::General).overdraw(),
-            )
-            .measure_all(),
-            cache: RefCell::new(VirtualListSignatureCache::default()),
-        }
-    }
-}
-
-impl SettingsSectionList {
-    pub fn scroll_to_section(
-        &self,
-        tab: SettingsTab,
-        section: SettingsSectionId,
-        counts: SettingsDynamicSectionCounts,
-    ) {
-        if let Some(item_ix) =
-            oxideterm_settings_model::settings_section_list_item_index(tab, section, counts)
-        {
-            self.state.scroll_to(gpui::ListOffset {
-                item_ix,
-                offset_in_item: px(0.0),
-            });
-        }
-    }
-
-    pub fn state(&self) -> &ListState {
-        &self.state
-    }
-
-    pub fn spec(tab: SettingsTab) -> TauriVirtualListSpec {
-        TauriVirtualListSpec::new(px(if tab == SettingsTab::Ai { 360.0 } else { 260.0 }), 2)
-    }
-
-    pub fn sync(&self, tab: SettingsTab, counts: SettingsDynamicSectionCounts, signatures: &[u64]) {
-        let identity = settings_section_list_identity(tab, counts.terminal_page, counts.ai_page);
-        sync_tauri_variable_list_state_by_signatures(
-            &self.state,
-            &mut self.cache.borrow_mut(),
-            &identity,
-            signatures,
-            Self::spec(tab),
-        );
-    }
-}
+pub use section_cache::SettingsSectionList;
+mod portable;
+pub use portable::{PortableSettingsChanged, PortableSettingsSurface};
 
 pub struct SettingsSurfaceFrame {
     pub tokens: ThemeTokens,
@@ -105,6 +54,7 @@ pub struct SettingsSurfaceFrame {
 }
 
 /// The application supplies data and window operations; the surface owns page layout.
+#[cfg(not(target_family = "wasm"))]
 pub struct SettingsSurfaceBindings {
     pub frame: Rc<dyn Fn(&App) -> Option<SettingsSurfaceFrame>>,
     pub page: Rc<
@@ -131,6 +81,7 @@ pub enum SettingsSurfaceRequest {
     Tooltip(String, Option<Point<Pixels>>),
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub struct SettingsSurfaceView {
     settings: Entity<SettingsWorkspaceEntity>,
     bindings: SettingsSurfaceBindings,
@@ -142,6 +93,7 @@ pub struct SettingsSurfaceView {
     route_motion_tasks: HashMap<&'static str, Task<()>>,
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl SettingsSurfaceView {
     pub fn follow_knowledge_progress<T: 'static>(
         &self,
@@ -275,6 +227,7 @@ impl SettingsSurfaceView {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl Render for SettingsSurfaceView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let Some(frame) = (self.bindings.frame)(cx) else {
@@ -475,7 +428,7 @@ fn page_header(
         .into_any_element()
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_family = "wasm")))]
 mod tests {
     use super::*;
     use gpui::AppContext;

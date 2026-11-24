@@ -10,8 +10,8 @@ use oxideterm_gpui_ui::{
 use std::{ops::Deref, rc::Rc};
 
 use gpui::{
-    AnyElement, App, Context, Div, Entity, MouseButton, MouseDownEvent, Render, ScrollHandle,
-    SharedString, Subscription, Window, div, prelude::*, px, rgb, rgba,
+    AnyElement, App, Context, Div, Entity, MouseButton, MouseDownEvent, ScrollHandle, SharedString,
+    Window, div, prelude::*, px, rgb, rgba,
 };
 use oxideterm_gpui_ui::{
     button::{
@@ -29,10 +29,7 @@ use oxideterm_settings_model::{
 };
 use oxideterm_theme::ThemeTokens;
 
-use crate::{
-    SettingsInput, appearance::*, entity::SettingsWorkspaceEntity, surface::nav::render_icon,
-    theme_display_name,
-};
+use crate::{SettingsInput, appearance::*, surface::nav::render_icon, theme_display_name};
 
 const THEME_EDITOR_MODAL_WIDTH: f32 = 672.0; // Tauri ThemeEditorModal max-w-2xl.
 const THEME_EDITOR_MODAL_MAX_HEIGHT: f32 = 760.0; // Tauri max-h-[85vh] on the default native window.
@@ -50,13 +47,26 @@ pub fn prepare_theme_editor(
     system_dark: bool,
     default_name: String,
 ) -> ThemeEditorState {
+    prepare_theme_editor_with_base(
+        settings,
+        target,
+        target.scheme_id(settings, scheme.unwrap_or(system_dark)),
+        edit_theme_id,
+        scheme,
+        default_name,
+    )
+}
+
+pub(crate) fn prepare_theme_editor_with_base(
+    settings: &oxideterm_settings::PersistedSettings,
+    target: oxideterm_settings_model::ThemeTarget,
+    base: &str,
+    edit_theme_id: Option<String>,
+    scheme: Option<bool>,
+    default_name: String,
+) -> ThemeEditorState {
     let mut initial = settings.clone();
-    target.apply(
-        &mut initial,
-        target
-            .scheme_id(settings, scheme.unwrap_or(system_dark))
-            .to_string(),
-    );
+    target.apply(&mut initial, base.to_owned());
     let mut editor = oxideterm_settings_model::theme_editor_from_settings(
         &initial,
         target,
@@ -108,6 +118,12 @@ pub struct ThemeEditorBindings {
     pub dispatch: Rc<dyn Fn(ThemeEditorRequest, &mut Window, &mut App)>,
 }
 
+#[cfg(not(target_family = "wasm"))]
+use crate::entity::SettingsWorkspaceEntity;
+#[cfg(not(target_family = "wasm"))]
+use gpui::{Render, Subscription};
+
+#[cfg(not(target_family = "wasm"))]
 pub struct ThemeEditorDialog {
     settings: Entity<SettingsWorkspaceEntity>,
     bindings: ThemeEditorBindings,
@@ -115,6 +131,7 @@ pub struct ThemeEditorDialog {
     _changed: Subscription,
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl ThemeEditorDialog {
     pub fn new(
         settings: &Entity<SettingsWorkspaceEntity>,
@@ -136,6 +153,7 @@ impl ThemeEditorDialog {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl Render for ThemeEditorDialog {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let state = self.settings.read(cx);
@@ -148,8 +166,28 @@ impl Render for ThemeEditorDialog {
         };
         let body = ThemeEditorBody {
             settings: &self.settings,
-            bindings: &self.bindings,
-            background: &*self.background,
+            ime: &*self.bindings.ime,
+            window: self.bindings.window.clone(),
+            dispatch: self.bindings.dispatch.clone(),
+            background: Some(&*self.background),
+            preview: &|editor, frame, cx| {
+                Some(
+                    crate::appearance_page::AppearancePreview {
+                        tokens: frame.tokens,
+                        i18n: &frame.i18n,
+                        state: &self.settings,
+                        open_settings_select: None,
+                        hovered_theme: None,
+                    }
+                    .render_editor(
+                        editor,
+                        oxideterm_settings_model::editor_terminal_theme(&editor.terminal_colors),
+                        oxideterm_settings_model::editor_ui_colors(&editor.ui_colors),
+                        frame.mono_font.clone(),
+                        cx,
+                    ),
+                )
+            },
             frame,
         };
         body.render_modal(&editor, phase, cx)
@@ -157,26 +195,52 @@ impl Render for ThemeEditorDialog {
     }
 }
 
-struct ThemeEditorBody<'a> {
-    settings: &'a Entity<SettingsWorkspaceEntity>,
-    bindings: &'a ThemeEditorBindings,
-    background: &'a dyn Fn(&mut App) -> AnyElement,
-    frame: ThemeEditorFrame,
+pub(crate) trait ThemeEditorOwner: Sized + 'static {
+    fn settings_entity_input_value(&self, input: SettingsInput) -> Option<&str>;
+    fn settings_entity_focused_input(&self) -> Option<SettingsInput>;
+    fn select_theme_editor_section(&mut self, section: ThemeEditorSection, cx: &mut Context<Self>);
+    fn derive_theme_editor_ui_colors(&mut self, cx: &mut Context<Self>);
 }
 
-impl Deref for ThemeEditorBody<'_> {
+#[cfg(not(target_family = "wasm"))]
+impl ThemeEditorOwner for SettingsWorkspaceEntity {
+    fn settings_entity_input_value(&self, input: SettingsInput) -> Option<&str> {
+        Self::settings_entity_input_value(self, input)
+    }
+    fn settings_entity_focused_input(&self) -> Option<SettingsInput> {
+        Self::settings_entity_focused_input(self)
+    }
+    fn select_theme_editor_section(&mut self, section: ThemeEditorSection, cx: &mut Context<Self>) {
+        Self::select_theme_editor_section(self, section, cx);
+    }
+    fn derive_theme_editor_ui_colors(&mut self, cx: &mut Context<Self>) {
+        Self::derive_theme_editor_ui_colors(self, cx);
+    }
+}
+pub(crate) struct ThemeEditorBody<'a, S: ThemeEditorOwner> {
+    pub settings: &'a Entity<S>,
+    pub ime:
+        &'a dyn for<'b> Fn(SettingsInput, &'b str, bool, &'b App) -> Option<SettingsImeFrame<'b>>,
+    pub window: SettingsWindowDispatch,
+    pub dispatch: Rc<dyn Fn(ThemeEditorRequest, &mut Window, &mut App)>,
+    pub background: Option<&'a dyn Fn(&mut App) -> AnyElement>,
+    pub preview: &'a dyn Fn(&ThemeEditorState, &ThemeEditorFrame, &mut App) -> Option<AnyElement>,
+    pub frame: ThemeEditorFrame,
+}
+
+impl<S: ThemeEditorOwner> Deref for ThemeEditorBody<'_, S> {
     type Target = ThemeEditorFrame;
     fn deref(&self) -> &Self::Target {
         &self.frame
     }
 }
 
-impl ThemeEditorBody<'_> {
+impl<S: ThemeEditorOwner> ThemeEditorBody<'_, S> {
     fn action(
         &self,
         request: ThemeEditorRequest,
-    ) -> impl Fn(&MouseDownEvent, &mut Window, &mut App) + use<> {
-        let dispatch = self.bindings.dispatch.clone();
+    ) -> impl Fn(&MouseDownEvent, &mut Window, &mut App) + use<S> {
+        let dispatch = self.dispatch.clone();
         move |_, window, cx| {
             dispatch(request, window, cx);
             cx.stop_propagation();
@@ -201,7 +265,7 @@ impl ThemeEditorBody<'_> {
             },
         )
     }
-    fn render_modal(
+    pub(crate) fn render_modal(
         &self,
         editor: &ThemeEditorState,
         editor_phase: ExitPhase,
@@ -271,29 +335,12 @@ impl ThemeEditorBody<'_> {
                     .flex_col()
                     .gap(px(THEME_EDITOR_BODY_GAP))
                     .child(self.theme_editor_name_duplicate_row(editor, cx))
-                    .child(
-                        crate::appearance_page::AppearancePreview {
-                            tokens: self.tokens,
-                            i18n: &self.i18n,
-                            state: self.settings,
-                            open_settings_select: None,
-                            hovered_theme: None,
-                        }
-                        .render_editor(
-                            editor,
-                            oxideterm_settings_model::editor_terminal_theme(
-                                &editor.terminal_colors,
-                            ),
-                            oxideterm_settings_model::editor_ui_colors(&editor.ui_colors),
-                            self.mono_font.clone(),
-                            cx,
-                        ),
-                    )
+                    .children((self.preview)(editor, &self.frame, cx))
                     .child(self.theme_editor_section_tabs(editor, cx))
-                    .child(if editor.active_section == ThemeEditorSection::Background {
-                        (self.background)(cx)
+                    .children(if editor.active_section == ThemeEditorSection::Background {
+                        self.background.map(|render| render(cx))
                     } else {
-                        self.theme_editor_color_grid(editor, cx)
+                        Some(self.theme_editor_color_grid(editor, cx))
                     }),
             )
             .child(
@@ -408,10 +455,10 @@ impl ThemeEditorBody<'_> {
         let settings = self.settings.read(cx);
         let value = settings.settings_entity_input_value(input).unwrap_or(value);
         let focused = settings.settings_entity_focused_input() == Some(input);
-        let Some(ime) = (self.bindings.ime)(input, value, focused, cx) else {
+        let Some(ime) = (self.ime)(input, value, focused, cx) else {
             return div().into_any_element();
         };
-        let dismiss = self.bindings.window.clone();
+        let dismiss = self.window.clone();
         render_settings_text_field(
             &self.tokens,
             ime,
@@ -429,7 +476,7 @@ impl ThemeEditorBody<'_> {
                     dismiss(SettingsWindowRequest::DismissInput(input), window, cx);
                 })
             },
-            self.bindings.window.clone(),
+            self.window.clone(),
         )
     }
 
@@ -443,7 +490,7 @@ impl ThemeEditorBody<'_> {
             Some(180.0),
             select_trigger_with_focus_visible(&self.tokens, label, false, false, focus_visible)
                 .h(px(32.0)),
-            self.bindings.window.clone(),
+            self.window.clone(),
         )
     }
 
@@ -491,12 +538,14 @@ impl ThemeEditorBody<'_> {
                 editor.active_section,
                 cx,
             ))
-            .child(self.theme_editor_section_tab(
-                ThemeEditorSection::Background,
-                "settings_view.terminal.bg_title",
-                editor.active_section,
-                cx,
-            ))
+            .when(self.background.is_some(), |tabs| {
+                tabs.child(self.theme_editor_section_tab(
+                    ThemeEditorSection::Background,
+                    "settings_view.terminal.bg_title",
+                    editor.active_section,
+                    cx,
+                ))
+            })
             .child(self.theme_editor_section_tab(
                 ThemeEditorSection::Ui,
                 "settings_view.custom_theme.ui_colors",
@@ -539,7 +588,7 @@ impl ThemeEditorBody<'_> {
             }))
             .on_mouse_down(MouseButton::Left, {
                 let settings = self.settings.downgrade();
-                let dispatch = self.bindings.dispatch.clone();
+                let dispatch = self.dispatch.clone();
                 move |_, window, cx| {
                     dispatch(ThemeEditorRequest::ChangeSection, window, cx);
                     let _ = settings.update(cx, |settings, cx| {

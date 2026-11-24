@@ -69,6 +69,7 @@ pub fn is_surface_input(input: SettingsInput) -> bool {
 }
 
 /// Borrowed window services for building settings controls in the current frame.
+#[derive(Clone)]
 pub struct SettingsControls<'a> {
     pub components: SettingsComponents<'a>,
     pub open_select: Option<SettingsSelect>,

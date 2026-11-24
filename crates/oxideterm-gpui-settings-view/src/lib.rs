@@ -1,14 +1,23 @@
 pub mod ai;
 pub mod appearance;
+pub mod appearance_page;
 pub mod components;
 pub mod dialog;
+pub mod ide_page;
 pub mod input;
+pub mod keybinding_page;
 pub mod keybindings;
 pub mod labels;
 mod navigation;
 pub mod options;
 mod search;
+pub mod select_menu;
+pub mod sftp_page;
 pub mod slider;
+pub mod surface;
+pub mod terminal_page;
+pub mod theme_editor;
+pub mod theme_picker;
 pub mod types;
 
 pub use ai::*;
@@ -21,8 +30,6 @@ pub use types::*;
 
 #[cfg(not(target_family = "wasm"))]
 pub mod app_lock_page;
-#[cfg(not(target_family = "wasm"))]
-pub mod appearance_page;
 #[cfg(not(target_family = "wasm"))]
 pub mod background_page;
 #[cfg(not(target_family = "wasm"))]
@@ -44,10 +51,6 @@ pub mod highlight;
 #[cfg(not(target_family = "wasm"))]
 pub mod highlight_page;
 #[cfg(not(target_family = "wasm"))]
-pub mod ide_page;
-#[cfg(not(target_family = "wasm"))]
-pub mod keybinding_page;
-#[cfg(not(target_family = "wasm"))]
 pub mod knowledge_page;
 #[cfg(not(target_family = "wasm"))]
 mod known_hosts_page;
@@ -66,19 +69,7 @@ pub mod proxy_page;
 #[cfg(not(target_family = "wasm"))]
 pub mod remote_shell;
 #[cfg(not(target_family = "wasm"))]
-pub mod select_menu;
-#[cfg(not(target_family = "wasm"))]
-pub mod sftp_page;
-#[cfg(not(target_family = "wasm"))]
-pub mod surface;
-#[cfg(not(target_family = "wasm"))]
-pub mod terminal_page;
-#[cfg(not(target_family = "wasm"))]
 pub mod terminal_triggers;
-#[cfg(not(target_family = "wasm"))]
-pub mod theme_editor;
-#[cfg(not(target_family = "wasm"))]
-pub mod theme_picker;
 #[cfg(not(target_family = "wasm"))]
 pub mod update_view;
 #[cfg(not(target_family = "wasm"))]

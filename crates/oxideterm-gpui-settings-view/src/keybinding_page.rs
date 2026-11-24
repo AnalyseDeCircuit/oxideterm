@@ -23,7 +23,6 @@ use crate::{
     components::{
         SettingsComponents, SettingsImeFrame, SettingsWindowDispatch, settings_mono_font_family,
     },
-    entity::{KeybindingRecordingFooterAction, SettingsWorkspaceEntity},
     keybindings::{ActionDefinition, ActionScope, KeybindingSide, effective_combo, format_combo},
 };
 
@@ -42,16 +41,46 @@ pub enum KeybindingTextRole {
     NonSelectable,
 }
 
-pub struct KeybindingPage<'a> {
+mod state;
+pub use state::*;
+
+pub trait KeybindingOwner: Sized + 'static {
+    const FILE_ACTIONS: bool;
+    fn shortcuts(&self) -> &KeybindingState;
+    fn shortcuts_mut(&mut self) -> &mut KeybindingState;
+    fn open_keybinding_reset_confirm(&mut self, cx: &mut gpui::Context<Self>);
+    fn keybinding_reset_confirm_snapshot(&self) -> Option<KeybindingResetConfirmSnapshot>;
+}
+
+#[cfg(not(target_family = "wasm"))]
+impl KeybindingOwner for crate::entity::SettingsWorkspaceEntity {
+    const FILE_ACTIONS: bool = true;
+    fn shortcuts(&self) -> &KeybindingState {
+        &self.shortcuts
+    }
+    fn shortcuts_mut(&mut self) -> &mut KeybindingState {
+        &mut self.shortcuts
+    }
+    fn open_keybinding_reset_confirm(&mut self, cx: &mut gpui::Context<Self>) {
+        Self::open_keybinding_reset_confirm(self, cx);
+    }
+    fn keybinding_reset_confirm_snapshot(&self) -> Option<KeybindingResetConfirmSnapshot> {
+        Self::keybinding_reset_confirm_snapshot(self)
+    }
+}
+
+#[cfg(not(target_family = "wasm"))]
+pub type KeybindingPage<'a> = KeybindingPageView<'a, crate::entity::SettingsWorkspaceEntity>;
+pub struct KeybindingPageView<'a, S: KeybindingOwner> {
     pub components: SettingsComponents<'a>,
-    pub state: &'a Entity<SettingsWorkspaceEntity>,
+    pub state: &'a Entity<S>,
     pub catalog: &'a [ActionDefinition],
     pub search: &'a dyn Fn(&App) -> AnyElement,
     pub label: &'a dyn Fn(KeybindingTextRole, u64, String, u32) -> AnyElement,
     pub dispatch: Rc<dyn Fn(KeybindingRequest, &mut App)>,
 }
 
-impl<'a> std::ops::Deref for KeybindingPage<'a> {
+impl<'a, S: KeybindingOwner> std::ops::Deref for KeybindingPageView<'a, S> {
     type Target = SettingsComponents<'a>;
     fn deref(&self) -> &Self::Target {
         &self.components
@@ -95,7 +124,7 @@ impl SettingsComponents<'_> {
     }
 }
 
-impl KeybindingPage<'_> {
+impl<S: KeybindingOwner> KeybindingPageView<'_, S> {
     fn render_display_text_with_role(
         &self,
         role: KeybindingTextRole,
@@ -144,7 +173,7 @@ impl KeybindingPage<'_> {
     fn request<R: Fn() -> KeybindingRequest + 'static>(
         &self,
         request: R,
-    ) -> impl Fn(&MouseDownEvent, &mut Window, &mut App) + use<R> {
+    ) -> impl Fn(&MouseDownEvent, &mut Window, &mut App) + use<R, S> {
         let dispatch = self.dispatch.clone();
         move |_, _, cx| {
             dispatch(request(), cx);
@@ -155,13 +184,15 @@ impl KeybindingPage<'_> {
     fn recording_footer(
         &self,
         action: KeybindingRecordingFooterAction,
-    ) -> impl Fn(&MouseDownEvent, &mut Window, &mut App) + use<> {
+    ) -> impl Fn(&MouseDownEvent, &mut Window, &mut App) + use<S> {
         let state = self.state.downgrade();
         let dispatch = self.dispatch.clone();
         move |_, _, cx| {
             if state
                 .update(cx, |state, cx| {
-                    state.activate_keybinding_recording_footer(action, cx)
+                    state
+                        .shortcuts_mut()
+                        .activate_keybinding_recording_footer(action, cx)
                 })
                 .unwrap_or(false)
             {
@@ -185,9 +216,18 @@ const KEYBINDING_HEADER_BG_ALPHA: u32 = 0x80; // Tauri bg-theme-bg-elevated/50.
 const KEYBINDING_ROW_DIVIDER_ALPHA: u32 = 0x4d; // Tauri divide-theme-border/30.
 const KEYBINDING_KBD_BORDER_ALPHA: u32 = 0x80; // Tauri border-theme-border/50.
 
+#[cfg(not(target_family = "wasm"))]
 pub fn visible_scope_count(
     catalog: &[ActionDefinition],
-    keybinding_state: &SettingsWorkspaceEntity,
+    keybinding_state: &crate::entity::SettingsWorkspaceEntity,
+    label: impl Fn(&ActionDefinition) -> String,
+) -> usize {
+    scope_count(catalog, &keybinding_state.shortcuts, label)
+}
+
+pub(crate) fn scope_count(
+    catalog: &[ActionDefinition],
+    keybinding_state: &KeybindingState,
     label: impl Fn(&ActionDefinition) -> String,
 ) -> usize {
     let query = keybinding_state
@@ -267,7 +307,7 @@ impl KeybindingToolbarAction {
     }
 }
 
-impl KeybindingPage<'_> {
+impl<S: KeybindingOwner> KeybindingPageView<'_, S> {
     fn keybinding_label(&self, definition: &ActionDefinition) -> String {
         definition
             .label
@@ -322,10 +362,11 @@ impl KeybindingPage<'_> {
         let query = self
             .state
             .read(cx)
+            .shortcuts()
             .keybinding_search_query()
             .trim()
             .to_lowercase();
-        let scope_filter = self.state.read(cx).keybinding_scope_filter();
+        let scope_filter = self.state.read(cx).shortcuts().keybinding_scope_filter();
         let mut visible_index = 0;
         for scope in [
             ActionScope::Global,
@@ -389,8 +430,21 @@ impl KeybindingPage<'_> {
                     .child((self.search)(cx))
                     .child(self.keybinding_scope_filter(cx))
                     .child(div().flex_1().min_w(px(0.0)))
-                    .child(self.keybinding_toolbar_button(KeybindingToolbarAction::Import, false))
-                    .child(self.keybinding_toolbar_button(KeybindingToolbarAction::Export, false))
+                    .when(S::FILE_ACTIONS, |toolbar| {
+                        toolbar
+                            .child(
+                                self.keybinding_toolbar_button(
+                                    KeybindingToolbarAction::Import,
+                                    false,
+                                ),
+                            )
+                            .child(
+                                self.keybinding_toolbar_button(
+                                    KeybindingToolbarAction::Export,
+                                    false,
+                                ),
+                            )
+                    })
                     .when(modified > 0, |toolbar| {
                         toolbar.child(self.keybinding_toolbar_button(
                             KeybindingToolbarAction::ResetAll,
@@ -402,7 +456,7 @@ impl KeybindingPage<'_> {
     }
 
     fn keybinding_scope_filter(&self, cx: &App) -> AnyElement {
-        let selected = self.state.read(cx).keybinding_scope_filter();
+        let selected = self.state.read(cx).shortcuts().keybinding_scope_filter();
         let mut filters = div().flex().flex_wrap().gap(px(4.0)).max_w_full();
         for filter in SettingsKeybindingScopeFilter::all().iter().copied() {
             let active = filter == selected;
@@ -417,7 +471,9 @@ impl KeybindingPage<'_> {
                 let state = self.state.downgrade();
                 move |_, _, cx| {
                     let _ = state.update(cx, |settings, cx| {
-                        settings.set_keybinding_scope_filter(filter, cx)
+                        settings
+                            .shortcuts_mut()
+                            .set_keybinding_scope_filter(filter, cx)
                     });
                     cx.stop_propagation();
                 }
@@ -588,6 +644,7 @@ impl KeybindingPage<'_> {
         let recording = self
             .state
             .read(cx)
+            .shortcuts()
             .keybinding_recording_action_id()
             .is_some_and(|id| id == definition.id);
         let action_id = definition.id.to_string();
@@ -595,7 +652,11 @@ impl KeybindingPage<'_> {
         let unbind_action_id = action_id.clone();
         let reset_action_id = action_id;
         let conflicts = if recording {
-            self.state.read(cx).keybinding_conflicts().to_vec()
+            self.state
+                .read(cx)
+                .shortcuts()
+                .keybinding_conflicts()
+                .to_vec()
         } else {
             Vec::new()
         };
@@ -677,7 +738,7 @@ impl KeybindingPage<'_> {
                                         let state = self.state.downgrade();
                                         move |_, _, cx| {
                                             let _ = state.update(cx, |settings, cx| {
-                                                settings.start_keybinding_recording(
+                                                settings.shortcuts_mut().start_keybinding_recording(
                                                     record_action_id.clone(),
                                                     cx,
                                                 )
@@ -735,6 +796,7 @@ impl KeybindingPage<'_> {
         let combo_display = self
             .state
             .read(cx)
+            .shortcuts()
             .keybinding_recording_combo()
             .map(format_combo);
         div()
@@ -896,7 +958,11 @@ impl KeybindingPage<'_> {
                 // Browser focus rings on Tauri's RecordingCell buttons are
                 // keyboard-origin only; mouse activation below clears this
                 // footer focus instead of synthesizing a focus-visible state.
-                focus_visible: self.state.read(cx).keybinding_recording_footer_focus()
+                focus_visible: self
+                    .state
+                    .read(cx)
+                    .shortcuts()
+                    .keybinding_recording_footer_focus()
                     == Some(KeybindingRecordingFooterAction::Confirm),
                 ..ToolbarButtonOptions::default()
             },
@@ -912,7 +978,11 @@ impl KeybindingPage<'_> {
             rgb(self.tokens.ui.text_muted),
             IconButtonOptions {
                 hover_background: Some(rgb(self.tokens.ui.bg_hover)),
-                focus_visible: self.state.read(cx).keybinding_recording_footer_focus()
+                focus_visible: self
+                    .state
+                    .read(cx)
+                    .shortcuts()
+                    .keybinding_recording_footer_focus()
                     == Some(KeybindingRecordingFooterAction::Cancel),
                 ..IconButtonOptions::opaque_toolbar(28.0, ButtonRadius::Sm)
             },
