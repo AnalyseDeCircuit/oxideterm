@@ -6,10 +6,10 @@ use std::{
     fs, io,
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
-    time::{SystemTime, UNIX_EPOCH},
 };
 
 use oxideterm_atomic_file::{durable_remove, durable_write_with_before_replace};
+use web_time::{SystemTime, UNIX_EPOCH};
 
 use crate::model::{
     QUICK_COMMANDS_SCHEMA_VERSION, QuickCommand, QuickCommandAvailability, QuickCommandCategory,
@@ -73,6 +73,12 @@ pub fn load_snapshot(settings_path: &Path) -> Result<QuickCommandsSnapshot, Stri
     load_snapshot_from_path(&path).map(|snapshot| snapshot.unwrap_or_else(default_snapshot))
 }
 
+#[cfg(all(target_family = "wasm", target_os = "unknown"))]
+pub fn save_snapshot(settings_path: &Path, snapshot: &QuickCommandsSnapshot) -> Result<(), String> {
+    save_snapshot_to_path(&quick_commands_path(settings_path), snapshot)
+}
+
+#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
 pub fn save_snapshot(settings_path: &Path, snapshot: &QuickCommandsSnapshot) -> Result<(), String> {
     let path = quick_commands_path(settings_path);
     let previous = load_snapshot_from_path(&path).ok().flatten();
@@ -98,6 +104,7 @@ pub fn save_snapshot(settings_path: &Path, snapshot: &QuickCommandsSnapshot) -> 
     result
 }
 
+#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
 fn quick_command_audit(action: &str) -> oxideterm_audit::AuditOperation {
     if oxideterm_audit::AuditContext::current_request()
         .as_ref()
@@ -120,6 +127,7 @@ fn quick_command_audit(action: &str) -> oxideterm_audit::AuditOperation {
     }
 }
 
+#[cfg(any(test, not(all(target_family = "wasm", target_os = "unknown"))))]
 fn quick_command_change_summary(
     previous: Option<&QuickCommandsSnapshot>,
     current: &QuickCommandsSnapshot,
@@ -176,6 +184,7 @@ fn quick_command_change_summary(
     )
 }
 
+#[cfg(any(test, not(all(target_family = "wasm", target_os = "unknown"))))]
 fn quick_commands_unchanged(
     previous: &QuickCommandsSnapshot,
     current: &QuickCommandsSnapshot,
@@ -190,6 +199,7 @@ fn quick_commands_unchanged(
         })
 }
 
+#[cfg(any(test, not(all(target_family = "wasm", target_os = "unknown"))))]
 fn quick_command_definition_eq(left: &QuickCommand, right: &QuickCommand) -> bool {
     left.id == right.id
         && left.name == right.name
@@ -240,6 +250,7 @@ pub fn restore_checkpoint(
     }
 }
 
+#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
 pub fn apply_snapshot_json(
     settings_path: &Path,
     snapshot_json: &str,
@@ -266,6 +277,15 @@ pub fn apply_snapshot_json(
         None,
     );
     result
+}
+
+#[cfg(all(target_family = "wasm", target_os = "unknown"))]
+pub fn apply_snapshot_json(
+    settings_path: &Path,
+    snapshot_json: &str,
+    strategy: QuickCommandImportStrategy,
+) -> QuickCommandImportResult {
+    apply_snapshot_json_inner(settings_path, snapshot_json, strategy)
 }
 
 fn apply_snapshot_json_inner(

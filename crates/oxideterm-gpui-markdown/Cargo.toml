@@ -22,7 +22,12 @@ ratex-parser = "0.1.8"
 ratex-svg = { version = "0.1.8", features = ["embed-fonts"] }
 ratex-types = "0.1.8"
 scraper = { version = "0.27", default-features = false }
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
 syntect = { version = "5", default-features = false, features = ["default-syntaxes", "default-themes", "regex-onig"] }
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+syntect = { version = "5", default-features = false, features = ["default-syntaxes", "default-themes", "regex-fancy"] }
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }

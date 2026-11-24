@@ -32,8 +32,8 @@ pub fn create_highlight_rule_set(
     name: impl Into<String>,
     rules: Vec<HighlightRule>,
 ) -> HighlightRuleSet {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    let nanos = web_time::SystemTime::now()
+        .duration_since(web_time::UNIX_EPOCH)
         .map(|duration| duration.as_nanos())
         .unwrap_or_default();
     HighlightRuleSet {
@@ -104,8 +104,8 @@ struct HighlightRuleCandidate {
 
 pub fn create_default_highlight_rule(overrides: impl FnOnce(&mut HighlightRule)) -> HighlightRule {
     let mut rule = HighlightRule::default();
-    let millis = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    let millis = web_time::SystemTime::now()
+        .duration_since(web_time::UNIX_EPOCH)
         .map(|duration| duration.as_millis())
         .unwrap_or_default();
     rule.id = format!("highlight-rule-1-{millis:x}");

@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use gpui::{
     AnyElement, App, Context, CursorStyle, FontWeight, MouseButton, Render, ScrollHandle,
-    Subscription, Task, Timer, Window, div, prelude::*, px, rgb, rgba,
+    Subscription, Task, Window, div, prelude::*, px, rgb, rgba,
 };
 use oxideterm_gpui_ui::button::ButtonVariant;
 use oxideterm_gpui_ui::motion::{self, MotionDuration, UserSegmentedControlMotionState};
@@ -73,7 +73,7 @@ impl OnboardingView {
             None,
         );
         let task = cx.spawn(async move |view, cx| {
-            Timer::after(motion.duration).await;
+            cx.background_executor().timer(motion.duration).await;
             let _ = view.update(cx, |this, cx| {
                 if this.control_motion.finish(control_id, generation) {
                     cx.notify();
@@ -114,7 +114,7 @@ impl OnboardingView {
             None,
         );
         cx.spawn(async move |view, cx| {
-            Timer::after(duration).await;
+            cx.background_executor().timer(duration).await;
             let _ = view.update(cx, |this, cx| {
                 if this
                     .step_motion

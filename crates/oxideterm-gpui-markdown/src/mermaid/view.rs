@@ -4,8 +4,8 @@ use std::{
 };
 
 use gpui::{
-    App, Context, IntoElement, ParentElement, RenderOnce, SharedString, Styled, Task, Timer,
-    Window, div, px,
+    App, Context, IntoElement, ParentElement, RenderOnce, SharedString, Styled, Task, Window, div,
+    px,
 };
 use oxideterm_theme::ThemeTokens;
 
@@ -39,7 +39,9 @@ impl MermaidRenderState {
         }
         let task = cx.spawn(async move |state, cx| {
             // Replacing a streaming block drops its state and cancels the idle wait.
-            Timer::after(Duration::from_millis(150)).await;
+            cx.background_executor()
+                .timer(Duration::from_millis(150))
+                .await;
             let result = cx
                 .background_executor()
                 .spawn(async move { request.render() })

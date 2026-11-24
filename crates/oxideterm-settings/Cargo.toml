@@ -8,16 +8,22 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
-oxideterm-audit = { path = "../oxideterm-audit" }
 anyhow.workspace = true
-oxideterm-atomic-file = { path = "../oxideterm-atomic-file" }
-oxideterm-portable-runtime = { path = "../oxideterm-portable-runtime" }
 oxideterm-render-policy = { path = "../oxideterm-render-policy" }
 oxideterm-terminal-semantic = { path = "../oxideterm-terminal-semantic", default-features = false }
 serde.workspace = true
 serde_json.workspace = true
 sys-locale.workspace = true
 uuid.workspace = true
+web-time.workspace = true
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+oxideterm-audit = { path = "../oxideterm-audit" }
+oxideterm-atomic-file = { path = "../oxideterm-atomic-file" }
+oxideterm-portable-runtime = { path = "../oxideterm-portable-runtime" }
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+uuid = { workspace = true, features = ["js"] }
 
 [dev-dependencies]
 tempfile = "3.23"

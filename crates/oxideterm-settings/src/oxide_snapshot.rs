@@ -1,13 +1,11 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{
-    collections::HashSet,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::collections::HashSet;
 
 use anyhow::{Context, Result};
 use serde_json::{Map, Value, json};
+use web_time::{SystemTime, UNIX_EPOCH};
 
 use crate::{PersistedSettings, SETTINGS_SCHEMA_VERSION, sanitize_settings_value};
 

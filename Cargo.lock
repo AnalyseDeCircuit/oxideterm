@@ -3090,6 +3090,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "fancy-regex"
+version = "0.16.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "998b056554fbe42e03ae0e152895cd1a7e1002aec800fdc6635d20270260c46f"
+dependencies = [
+ "bit-set 0.8.0",
+ "regex-automata",
+ "regex-syntax",
+]
+
+[[package]]
 name = "fast-srgb8"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8276,6 +8287,7 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
+ "web-time",
  "zeroize",
 ]
 
@@ -8354,6 +8366,7 @@ dependencies = [
  "sys-locale",
  "tempfile",
  "uuid",
+ "web-time",
 ]
 
 [[package]]
@@ -9871,7 +9884,7 @@ version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f4b154def1edd954eb49a9ade5f3767938b8f8f3befd14f2831aec60ee7340f9"
 dependencies = [
- "fancy-regex",
+ "fancy-regex 0.14.0",
  "ratex-font",
  "ratex-lexer",
  "ratex-types",
@@ -11979,6 +11992,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "656b45c05d95a5704399aeef6bd0ddec7b2b3531b7c9e900abbf7c4d2190c925"
 dependencies = [
  "bincode",
+ "fancy-regex 0.16.2",
  "flate2",
  "fnv",
  "once_cell",

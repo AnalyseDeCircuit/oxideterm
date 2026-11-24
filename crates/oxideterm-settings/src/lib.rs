@@ -6,6 +6,7 @@ mod model;
 mod normalize;
 mod oxide_snapshot;
 mod session_log_template;
+#[cfg(not(target_family = "wasm"))]
 mod store;
 
 pub use background_images::{
@@ -20,8 +21,10 @@ pub use oxide_snapshot::{
     OXIDE_SETTINGS_VERSION, export_oxide_settings_snapshot_json, merge_oxide_settings_snapshot,
     migrate_legacy_theme_selection,
 };
+#[cfg(not(target_family = "wasm"))]
 pub use oxideterm_portable_runtime as portable_runtime;
 pub use session_log_template::*;
+#[cfg(not(target_family = "wasm"))]
 pub use store::{
     DataDirectoryCheck, DataDirectoryInfo, SETTINGS_FILENAME, SettingsLoadResult,
     SettingsSaveResult, SettingsStore, SettingsStoreCheckpoint, check_data_directory,

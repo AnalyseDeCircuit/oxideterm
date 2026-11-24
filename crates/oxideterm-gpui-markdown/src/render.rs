@@ -19,7 +19,7 @@ use gpui::{
     AnyElement, App, ClipboardItem, Context, ElementId, Font, FontFeatures, FontStyle, FontWeight,
     Hsla, Image, InteractiveElement, IntoElement, MouseButton, ParentElement, RenderOnce,
     SharedString, StatefulInteractiveElement, StrikethroughStyle, Styled, StyledImage, StyledText,
-    Task, TextAlign, TextRun, Timer, UnderlineStyle, Window, div, image_cache, img,
+    Task, TextAlign, TextRun, UnderlineStyle, Window, div, image_cache, img,
     prelude::FluentBuilder, px, relative, retain_recent, svg,
 };
 use oxideterm_gpui_ui::{ScrollableElement, Scrollbar};
@@ -1655,7 +1655,9 @@ impl CodeCopyState {
     fn mark_copied(&mut self, cx: &mut Context<Self>) {
         self.copied = true;
         self._reset_task = Some(cx.spawn(async move |state, cx| {
-            Timer::after(Duration::from_millis(1600)).await;
+            cx.background_executor()
+                .timer(Duration::from_millis(1600))
+                .await;
             let _ = state.update(cx, |state, cx| {
                 state.copied = false;
                 state._reset_task = None;
@@ -3192,9 +3194,17 @@ fn resolved_link_url(url: &str, opts: &MarkdownOptions) -> Option<String> {
     if url_scheme(url).is_some() || url.starts_with("//") {
         return None;
     }
-    let base = url::Url::from_directory_path(opts.image_base_dir.as_ref()?).ok()?;
-    let resolved = base.join(url).ok()?;
-    (resolved.scheme() == "file").then(|| resolved.to_string())
+    #[cfg(not(target_family = "wasm"))]
+    {
+        let base = url::Url::from_directory_path(opts.image_base_dir.as_ref()?).ok()?;
+        let resolved = base.join(url).ok()?;
+        (resolved.scheme() == "file").then(|| resolved.to_string())
+    }
+    #[cfg(target_family = "wasm")]
+    {
+        let _ = (url, opts);
+        None
+    }
 }
 
 fn render_image(
