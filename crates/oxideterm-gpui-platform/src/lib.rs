@@ -1,5 +1,10 @@
 pub mod autostart;
+#[cfg(not(target_family = "wasm"))]
 pub mod http_client;
+#[cfg(target_family = "wasm")]
+pub mod http_client {
+    pub use gpui_web::FetchHttpClient as AssetHttpClient;
+}
 pub mod rendering;
 pub mod vibrancy;
 pub mod window_opacity;
@@ -13,8 +18,18 @@ use oxideterm_theme::UiMetrics;
 const OXIDETERM_APP_ID: &str = "com.oxideterm.app";
 
 /// Constructs the native GPUI application through the vendored platform boundary.
+#[cfg(not(target_family = "wasm"))]
 pub fn application() -> gpui::Application {
     gpui_platform::application()
+}
+
+/// Constructs a single-threaded GPUI application in the current browser window.
+#[cfg(target_family = "wasm")]
+pub fn application() -> gpui::Application {
+    gpui_web::init_logging();
+    let platform = std::rc::Rc::new(gpui_web::WebPlatform::new(false));
+    let http_client = std::sync::Arc::new(platform.fetch_http_client());
+    gpui::Application::with_platform(platform).with_http_client(http_client)
 }
 
 pub fn window_options(bounds: Bounds<Pixels>) -> WindowOptions {

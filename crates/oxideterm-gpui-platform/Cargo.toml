@@ -8,17 +8,22 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+gpui.workspace = true
+oxideterm-render-policy = { path = "../oxideterm-render-policy" }
+oxideterm-theme = { path = "../oxideterm-theme" }
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
 anyhow.workspace = true
 futures.workspace = true
 reqwest.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 zeroize.workspace = true
-gpui.workspace = true
 # GPUI-CE otherwise installs a no-op text system on macOS.
 gpui_platform = { workspace = true, features = ["font-kit"] }
-oxideterm-render-policy = { path = "../oxideterm-render-policy" }
-oxideterm-theme = { path = "../oxideterm-theme" }
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+gpui_web = { package = "gpui-pre-web", version = "=0.3.12", default-features = false }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = { version = "0.3.2", features = ["NSResponder", "NSView", "NSWindow"] }

@@ -7761,6 +7761,7 @@ dependencies = [
  "futures",
  "gpui-pre",
  "gpui-pre-platform",
+ "gpui-pre-web",
  "objc2-app-kit 0.3.2",
  "objc2-service-management",
  "oxideterm-render-policy",
