@@ -1,20 +1,7 @@
-use super::{LocalFileEntry, LocalFileType, directory_stats, local_preview_metadata};
+use super::{
+    LocalFileEntry, LocalFileProperties, LocalFileType, directory_stats, local_preview_metadata,
+};
 
-#[derive(Clone, Debug)]
-pub struct LocalFileProperties {
-    pub location: String,
-    pub size: u64,
-    pub modified: Option<i64>,
-    pub accessed: Option<i64>,
-    pub readonly: bool,
-    pub dir_files: Option<u64>,
-    pub dir_dirs: Option<u64>,
-    pub total_size: Option<u64>,
-    pub created: Option<i64>,
-    pub mode: Option<u32>,
-    pub mime_type: Option<String>,
-    pub is_symlink: bool,
-}
 pub fn local_file_properties(entry: &LocalFileEntry) -> LocalFileProperties {
     let metadata = local_preview_metadata(&entry.path);
     let accessed = metadata.as_ref().and_then(|metadata| metadata.accessed);

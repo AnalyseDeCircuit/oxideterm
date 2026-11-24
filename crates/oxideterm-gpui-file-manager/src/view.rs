@@ -36,8 +36,8 @@ use oxideterm_i18n::I18n;
 use oxideterm_i18n::Locale;
 use oxideterm_local_files::{
     BOOKMARKS_FILENAME as FILE_MANAGER_BOOKMARKS_FILENAME, LocalArchiveEntry, LocalArchiveInfo,
-    LocalBookmark, LocalChecksumResult, LocalClipboardMode, LocalDrive, LocalFileEntry,
-    LocalFileType, LocalPreview, LocalPreviewMetadata, LocalSidebarLocation,
+    LocalBookmark, LocalChecksumResult, LocalClipboard, LocalClipboardMode, LocalDrive,
+    LocalFileEntry, LocalFileType, LocalPreview, LocalPreviewMetadata, LocalSidebarLocation,
     LocalSidebarLocationKind, LocalSortDirection, LocalSortField,
 };
 use oxideterm_local_files::{
@@ -181,13 +181,6 @@ impl FileManagerInput {
             Self::DialogValue => 3,
         }
     }
-}
-
-#[derive(Clone, Debug)]
-pub(super) struct LocalClipboard {
-    mode: LocalClipboardMode,
-    paths: Vec<String>,
-    source_dir: String,
 }
 
 #[derive(Clone, Debug)]

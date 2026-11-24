@@ -1,8 +1,6 @@
 use gpui::ScrollHandle;
 use oxideterm_local_files::{PathCompletionCandidate, PathCompletionRequest};
 
-const PATH_COMPLETION_MAX_MATCHES: usize = 512;
-
 #[derive(Default)]
 pub struct PathCompletionState {
     request: Option<PathCompletionRequest>,
@@ -125,22 +123,7 @@ impl PathCompletionState {
             self.suggestions.clear();
             return;
         };
-        let prefix = request.prefix.to_lowercase();
-        let mut suggestions = self
-            .entries
-            .iter()
-            .filter(|entry| entry.name.to_lowercase().starts_with(&prefix))
-            .cloned()
-            .collect::<Vec<_>>();
-        suggestions.sort_by(|left, right| {
-            right
-                .is_directory
-                .cmp(&left.is_directory)
-                .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
-        });
-        // Bound pathological directories without confusing viewport height with result count.
-        suggestions.truncate(PATH_COMPLETION_MAX_MATCHES);
-        self.suggestions = suggestions;
+        self.suggestions = request.matching_candidates(&self.entries);
         self.scroll_handle = ScrollHandle::new();
         self.selected_index = self
             .selected_index

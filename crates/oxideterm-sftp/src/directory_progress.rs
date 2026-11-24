@@ -4,8 +4,10 @@
 use crate::TransferProgress;
 use std::{
     collections::{HashMap, VecDeque},
-    time::{Duration, Instant},
+    time::Duration,
 };
+
+use web_time::Instant;
 
 const SFTP_DIRECTORY_SPEED_WINDOW: Duration = Duration::from_secs(2); // Smooth bursts from parallel file workers.
 const SFTP_DIRECTORY_SPEED_SAMPLE_INTERVAL: Duration = Duration::from_millis(100); // Keep rolling history bounded at high event rates.
@@ -98,6 +100,7 @@ impl DirectoryProgressAccumulator {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub(crate) async fn next_browser_progress(
     events: &mut tokio::sync::mpsc::Receiver<TransferProgress>,
     accumulator: &mut Option<DirectoryProgressAccumulator>,

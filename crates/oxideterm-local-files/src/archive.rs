@@ -1,5 +1,7 @@
+#[cfg(not(target_family = "wasm"))]
 use std::path::Path;
 
+#[cfg(not(target_family = "wasm"))]
 use crate::{LocalArchiveEntry, LocalArchiveInfo};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -9,6 +11,7 @@ pub enum ArchiveEntryOutcome {
     Failed,
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn report_failure<T, E>(
     result: Result<T, E>,
     path: &Path,
@@ -27,6 +30,7 @@ pub fn can_extract_archive(file_name: &str) -> bool {
         .any(|ext| lower.ends_with(&format!(".{ext}")))
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub fn compress_local_files(
     files: &[String],
     archive_path: &str,
@@ -116,6 +120,7 @@ pub fn compress_local_files(
     Ok(())
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub fn extract_local_archive(
     archive_path: &str,
     dest_path: &str,
@@ -185,6 +190,7 @@ pub fn extract_local_archive(
     Ok(())
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub fn list_local_archive_contents(path: &str) -> Result<LocalArchiveInfo, String> {
     use std::fs::File;
     use zip::ZipArchive;
@@ -251,7 +257,7 @@ pub fn list_local_archive_contents(path: &str) -> Result<LocalArchiveInfo, Strin
     })
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_family = "wasm")))]
 mod tests {
     use super::*;
     use std::io::{Read, Write};

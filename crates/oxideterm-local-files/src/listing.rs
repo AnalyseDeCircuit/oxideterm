@@ -1,5 +1,8 @@
-use crate::{LocalFileEntry, LocalFileType, LocalSortDirection, LocalSortField};
+#[cfg(any(not(target_family = "wasm"), test))]
+use crate::LocalFileType;
+use crate::{LocalFileEntry, LocalSortDirection, LocalSortField};
 
+#[cfg(not(target_family = "wasm"))]
 pub fn list_local_files(path: &str) -> std::io::Result<Vec<LocalFileEntry>> {
     let mut entries = Vec::new();
     for entry in std::fs::read_dir(path)? {

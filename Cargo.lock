@@ -8050,6 +8050,7 @@ dependencies = [
  "sysinfo 0.33.1",
  "tempfile",
  "walkdir",
+ "web-time",
  "zeroize",
  "zip",
 ]
@@ -8421,6 +8422,7 @@ dependencies = [
  "oxideterm-ftp",
  "oxideterm-local-files",
  "oxideterm-preview",
+ "oxideterm-topology",
  "parking_lot",
  "redb",
  "rmp-serde",
@@ -8436,6 +8438,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "uuid",
+ "web-time",
  "zeroize",
  "zstd",
 ]

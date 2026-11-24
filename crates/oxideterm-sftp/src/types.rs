@@ -4,11 +4,15 @@
 use serde::{Deserialize, Serialize};
 
 pub use oxideterm_preview::{
-    PreviewAssetKind as AssetFileKind, PreviewContent, detect_and_decode, encode_to_encoding,
-    extension_to_language, font_mime_type, generate_hex_dump, is_font_extension,
+    PreviewAssetKind as AssetFileKind, PreviewContent, encode_to_encoding,
+};
+#[cfg(not(target_family = "wasm"))]
+pub use oxideterm_preview::{
+    detect_and_decode, extension_to_language, font_mime_type, generate_hex_dump, is_font_extension,
     is_likely_text_content,
 };
 
+#[cfg(not(target_family = "wasm"))]
 pub mod constants {
     pub const MAX_TEXT_PREVIEW_SIZE: u64 = 1024 * 1024;
     pub const MAX_PREVIEW_SIZE: u64 = 10 * 1024 * 1024;
@@ -121,9 +125,11 @@ pub enum TransferState {
     Cancelled,
 }
 
+#[cfg(not(target_family = "wasm"))]
 /// Backward-compatible namespace for the bulk SFTP chunk cap.
 pub struct AdaptiveChunkSizer;
 
+#[cfg(not(target_family = "wasm"))]
 impl AdaptiveChunkSizer {
     pub const MAX_CHUNK: usize = 2 * 1024 * 1024;
 }

@@ -1,13 +1,16 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
+#[cfg(not(target_family = "wasm"))]
 use std::sync::Arc;
 
+#[cfg(not(target_family = "wasm"))]
 use crate::{
-    BrowserTransferEvent, DirectoryProgressAccumulator, ProgressStore, RemoteRelayDisposition,
-    RemoteRelayProgressContext, SftpError, SftpSession, SftpTransferManager,
-    StoredTransferProgress, TransferDirection, TransferProtocol, TransferType,
-    directory_progress::next_browser_progress,
+    BrowserTransferEvent, DirectoryProgressAccumulator, ProgressStore, SftpError, SftpSession,
+    SftpTransferManager, TransferProtocol, TransferType, directory_progress::next_browser_progress,
+};
+use crate::{
+    RemoteRelayDisposition, RemoteRelayProgressContext, StoredTransferProgress, TransferDirection,
 };
 
 pub struct SftpRelayRequest {
@@ -21,6 +24,7 @@ pub struct SftpRelayRequest {
     pub resume: Option<StoredTransferProgress>,
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub async fn discard_sftp_relay_progress(
     destination: &SftpSession,
     store: &dyn ProgressStore,
@@ -30,6 +34,7 @@ pub async fn discard_sftp_relay_progress(
     store.delete(&progress.transfer_id).await
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub async fn run_sftp_relay(
     source: SftpSession,
     destination: SftpSession,

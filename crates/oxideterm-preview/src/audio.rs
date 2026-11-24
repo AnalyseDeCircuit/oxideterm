@@ -1,8 +1,11 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{fs::File, path::Path, time::Duration};
+#[cfg(not(target_family = "wasm"))]
+use std::fs::File;
+use std::{path::Path, time::Duration};
 
+#[cfg(not(target_family = "wasm"))]
 use rodio::{Decoder, OutputStream, OutputStreamBuilder, Sink, Source};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -34,6 +37,7 @@ pub trait AudioPreviewBackend {
     fn snapshot(&self) -> AudioPreviewSnapshot;
 }
 
+#[cfg(not(target_family = "wasm"))]
 #[derive(Default)]
 pub struct RodioAudioPreviewBackend {
     stream: Option<OutputStream>,
@@ -45,6 +49,7 @@ pub struct RodioAudioPreviewBackend {
 #[derive(Clone, Debug, Default)]
 pub struct UnsupportedAudioPreviewBackend;
 
+#[cfg(not(target_family = "wasm"))]
 impl AudioPreviewBackend for RodioAudioPreviewBackend {
     fn load(&mut self, path: &Path) -> Result<AudioPreviewSnapshot, String> {
         self.stop_current();
@@ -112,6 +117,7 @@ impl AudioPreviewBackend for RodioAudioPreviewBackend {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl RodioAudioPreviewBackend {
     pub fn new() -> Self {
         Self::default()
@@ -144,6 +150,7 @@ impl RodioAudioPreviewBackend {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl Drop for RodioAudioPreviewBackend {
     fn drop(&mut self) {
         self.stop_current();

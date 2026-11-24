@@ -3,6 +3,15 @@
 
 use serde::{Deserialize, Serialize};
 
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+pub struct NodeId(pub String);
+
+impl NodeId {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ConnectionTopologyStatus {

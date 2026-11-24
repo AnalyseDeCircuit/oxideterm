@@ -8,34 +8,38 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
-oxideterm-environment = { path = "../oxideterm-environment" }
-oxideterm-audit = { path = "../oxideterm-audit" }
+chrono.workspace = true
+oxideterm-local-files = { path = "../oxideterm-local-files" }
+oxideterm-preview = { path = "../oxideterm-preview" }
+oxideterm-topology = { path = "../oxideterm-topology" }
+serde.workspace = true
+thiserror.workspace = true
+web-time.workspace = true
+zeroize.workspace = true
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
 async-trait.workspace = true
 base64.workspace = true
 bytes.workspace = true
-chrono.workspace = true
 flate2.workspace = true
 futures-util.workspace = true
 glob = "0.3"
 mime_guess = "2"
 oxideterm-atomic-file = { path = "../oxideterm-atomic-file" }
-oxideterm-local-files = { path = "../oxideterm-local-files" }
-oxideterm-preview = { path = "../oxideterm-preview" }
+oxideterm-audit = { path = "../oxideterm-audit" }
+oxideterm-environment = { path = "../oxideterm-environment" }
 oxideterm-ftp = { path = "../oxideterm-ftp" }
 parking_lot.workspace = true
 redb = "2.1"
 rmp-serde.workspace = true
-russh.workspace = true
 russh-sftp = { path = "../russh-sftp" }
-serde.workspace = true
+russh.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 tar = "0.4"
-thiserror.workspace = true
 tempfile = "3.23"
-tokio.workspace = true
 tokio-util.workspace = true
+tokio.workspace = true
 tracing.workspace = true
 uuid.workspace = true
-zeroize.workspace = true
 zstd = "0.13"

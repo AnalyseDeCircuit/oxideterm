@@ -1,7 +1,7 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! Native preview core shared by SFTP and the local file manager.
+//! Preview models and native media backends shared by SFTP and the local file manager.
 //!
 //! The crate owns preview classification, asset lifetime, and backend-facing
 //! state. Feature UIs keep file-manager/SFTP business state outside this crate.
@@ -15,11 +15,14 @@ mod types;
 mod video;
 
 pub use asset::{PreviewAssetOwner, PreviewAssetOwnership};
+#[cfg(not(target_family = "wasm"))]
+pub use audio::RodioAudioPreviewBackend;
 pub use audio::{
     AudioPreviewBackend, AudioPreviewCommand, AudioPreviewSnapshot, AudioPreviewState,
-    RodioAudioPreviewBackend, UnsupportedAudioPreviewBackend,
+    UnsupportedAudioPreviewBackend,
 };
 pub use renderer::PreviewRenderer;
+pub use session::PreviewLoadError as PreviewError;
 pub use session::{
     PreviewAction, PreviewLoadError, PreviewLoadOptions, PreviewSession, PreviewSessionState,
     PreviewSource,

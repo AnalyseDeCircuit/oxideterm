@@ -19,6 +19,6 @@ pub use layout::{
 };
 pub use model::{
     ConnectionTopologyConsumerSummary, ConnectionTopologyEdge, ConnectionTopologyNode,
-    ConnectionTopologySnapshot, ConnectionTopologyStatus,
+    ConnectionTopologySnapshot, ConnectionTopologyStatus, NodeId,
 };
 pub use status::{TopologyViewStatus, matrix_view_status, matrix_visible};

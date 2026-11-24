@@ -1,14 +1,14 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
+#[cfg(test)]
+use crate::{FileInfo as RemoteFileInfo, FileType as RemoteFileType};
 use crate::{
-    FileInfo as RemoteFileInfo, FileType as RemoteFileType, ListFilter as RemoteListFilter,
-    PreviewContent, RemoteSftpListing, SftpError, SftpFileEntry, SftpFileType,
-    SftpPreviewSaveResult, SftpSession, SortOrder as RemoteSortOrder, encode_to_encoding,
+    ListFilter as RemoteListFilter, PreviewContent, RemoteSftpListing, SftpError,
+    SftpPreviewSaveResult, SftpSession, SortOrder as RemoteSortOrder,
+    remote_listing_from_file_infos,
 };
 use oxideterm_audit::{AuditCategory, AuditContext, AuditOperation};
-use oxideterm_preview::{TextLineEnding, restore_text_line_endings};
-use zeroize::Zeroizing;
 
 // Use short-lived channels for browser I/O so a slow operation cannot hold
 // the shared directory owner. A recoverable channel failure gets one retry.
@@ -85,23 +85,6 @@ async fn read_preview(
     }
 }
 
-pub fn encode_preview_text<'a>(
-    text: &str,
-    encoding: &'a str,
-    line_ending: TextLineEnding,
-) -> (Zeroizing<Vec<u8>>, &'a str) {
-    let encoding = if encoding.trim().is_empty() {
-        "UTF-8"
-    } else {
-        encoding
-    };
-    let restored = Zeroizing::new(restore_text_line_endings(text, line_ending));
-    (
-        Zeroizing::new(encode_to_encoding(&restored, encoding)),
-        encoding,
-    )
-}
-
 pub async fn write_sftp_preview(
     sftp: &SftpSession,
     path: &str,
@@ -142,42 +125,6 @@ async fn list_remote_sftp_once(
         )
         .await?;
     Ok(remote_listing_from_file_infos(cwd, entries))
-}
-
-fn remote_listing_from_file_infos(cwd: String, entries: Vec<RemoteFileInfo>) -> RemoteSftpListing {
-    let mut files = entries
-        .into_iter()
-        .map(|entry| SftpFileEntry {
-            // Selection keys are lossless components, not the rendered label.
-            name: entry
-                .path
-                .rsplit('/')
-                .next()
-                .unwrap_or(&entry.name)
-                .to_owned(),
-            path: entry.path,
-            file_type: match entry.file_type {
-                RemoteFileType::Directory => SftpFileType::Directory,
-                RemoteFileType::File | RemoteFileType::Symlink | RemoteFileType::Unknown => {
-                    SftpFileType::File
-                }
-            },
-            size_known: true,
-            size: entry.size,
-            modified: Some(entry.modified),
-            permissions: Some(entry.permissions),
-            owner: entry.owner,
-            group: entry.group,
-            is_symlink: entry.is_symlink,
-            symlink_target: entry.symlink_target,
-        })
-        .collect::<Vec<_>>();
-    files.sort_by(|left, right| match (left.file_type, right.file_type) {
-        (SftpFileType::Directory, SftpFileType::File) => std::cmp::Ordering::Less,
-        (SftpFileType::File, SftpFileType::Directory) => std::cmp::Ordering::Greater,
-        _ => left.name.to_lowercase().cmp(&right.name.to_lowercase()),
-    });
-    RemoteSftpListing { cwd, files }
 }
 
 #[cfg(test)]

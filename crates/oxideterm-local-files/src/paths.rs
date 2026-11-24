@@ -1,10 +1,15 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(not(target_family = "wasm"))]
+use std::path::PathBuf;
 
-use crate::{LocalPathSegment, LocalSidebarLocation, LocalSidebarLocationKind};
+use crate::LocalPathSegment;
+#[cfg(not(target_family = "wasm"))]
+use crate::{LocalSidebarLocation, LocalSidebarLocationKind};
 
 #[cfg(target_os = "macos")]
 const MACOS_APPLICATIONS_PATH: &str = "/Applications";
 
+#[cfg(not(target_family = "wasm"))]
 pub fn home_path() -> String {
     std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
@@ -20,12 +25,14 @@ pub fn home_path() -> String {
         })
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub fn default_download_path() -> String {
     select_default_download_path(dirs::download_dir(), std::env::temp_dir(), Path::is_dir)
         .to_string_lossy()
         .to_string()
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn select_default_download_path(
     download_directory: Option<PathBuf>,
     fallback_directory: PathBuf,
@@ -38,6 +45,7 @@ fn select_default_download_path(
         .unwrap_or(fallback_directory)
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub fn local_sidebar_locations() -> Vec<LocalSidebarLocation> {
     let candidates = [
         (
@@ -55,6 +63,7 @@ pub fn local_sidebar_locations() -> Vec<LocalSidebarLocation> {
     sidebar_locations_from_candidates(candidates, Path::is_dir)
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn sidebar_locations_from_candidates<const N: usize>(
     candidates: [(LocalSidebarLocationKind, Option<PathBuf>); N],
     is_directory: impl Fn(&Path) -> bool,
@@ -71,6 +80,7 @@ fn sidebar_locations_from_candidates<const N: usize>(
         .collect()
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn platform_applications_path() -> Option<PathBuf> {
     #[cfg(target_os = "macos")]
     {
@@ -86,6 +96,13 @@ fn platform_applications_path() -> Option<PathBuf> {
     }
 }
 
+#[cfg(target_family = "wasm")]
+pub fn normalize_local_path(path: &str) -> String {
+    // Browser paths have no host home directory to expand.
+    path.trim().to_string()
+}
+
+#[cfg(not(target_family = "wasm"))]
 pub fn normalize_local_path(path: &str) -> String {
     let trimmed = path.trim();
     if trimmed == "~" || trimmed == "$HOME" {
@@ -207,6 +224,7 @@ pub fn validate_local_name(name: &str) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub fn unique_copy_path(path: &Path) -> PathBuf {
     if !path.exists() {
         return path.to_path_buf();
@@ -229,6 +247,7 @@ pub fn unique_copy_path(path: &Path) -> PathBuf {
     parent.join(format!("{stem} (copy){ext}"))
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub fn would_move_directory_into_itself(source: &Path, target: &Path) -> bool {
     let Ok(source) = source.canonicalize() else {
         return false;
@@ -244,6 +263,7 @@ pub fn would_move_directory_into_itself(source: &Path, target: &Path) -> bool {
 mod tests {
     use super::*;
 
+    #[cfg(not(target_family = "wasm"))]
     #[test]
     fn default_download_path_uses_downloads_when_available_and_temp_otherwise() {
         for (available, expected) in [(true, "/home/alice/Downloads"), (false, "/tmp")] {
@@ -257,6 +277,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_family = "wasm"))]
     #[test]
     fn sidebar_locations_keep_only_available_directories_in_semantic_order() {
         let existing = [
@@ -306,6 +327,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(target_family = "wasm"))]
     #[test]
     fn sidebar_locations_preserve_redirected_system_paths() {
         let redirected_desktop = PathBuf::from(r"C:\Users\alice\OneDrive\Desktop");

@@ -1,7 +1,10 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(not(target_family = "wasm"))]
+use std::path::PathBuf;
 
 pub const BOOKMARKS_FILENAME: &str = "oxideterm-file-bookmarks.json";
 
+#[cfg(not(target_family = "wasm"))]
 pub fn default_file_manager_bookmarks_path() -> PathBuf {
     std::env::current_dir()
         .unwrap_or_else(|_| PathBuf::from("."))
@@ -9,8 +12,8 @@ pub fn default_file_manager_bookmarks_path() -> PathBuf {
 }
 
 pub fn new_file_manager_bookmark_id() -> String {
-    let millis = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    let millis = web_time::SystemTime::now()
+        .duration_since(web_time::UNIX_EPOCH)
         .map(|duration| duration.as_millis())
         .unwrap_or_default();
     format!("bookmark-{millis}")
@@ -26,14 +29,16 @@ pub fn bookmark_name_for_path(path: &str) -> String {
 }
 
 pub fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    web_time::SystemTime::now()
+        .duration_since(web_time::UNIX_EPOCH)
         .map(|duration| duration.as_millis() as u64)
         .unwrap_or_default()
 }
 
+#[cfg(not(target_family = "wasm"))]
 use super::LocalBookmark;
 
+#[cfg(not(target_family = "wasm"))]
 pub fn load_local_bookmarks(path: &Path) -> Vec<LocalBookmark> {
     std::fs::read(path)
         .ok()
@@ -41,11 +46,13 @@ pub fn load_local_bookmarks(path: &Path) -> Vec<LocalBookmark> {
         .unwrap_or_default()
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub fn save_local_bookmarks(path: &Path, bookmarks: &[LocalBookmark]) -> Result<(), String> {
     let bytes = serde_json::to_vec_pretty(bookmarks).map_err(|error| error.to_string())?;
     oxideterm_atomic_file::durable_write(path, &bytes).map_err(|error| error.to_string())
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub fn reorder_local_bookmarks(
     bookmarks: &mut Vec<LocalBookmark>,
     path: &Path,

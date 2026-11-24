@@ -27,14 +27,7 @@ use crate::{
     X11ForwardPolicy,
 };
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
-pub struct NodeId(pub String);
-
-impl NodeId {
-    pub fn new(value: impl Into<String>) -> Self {
-        Self(value.into())
-    }
-}
+pub use oxideterm_topology::NodeId;
 
 #[derive(Debug, Error, Serialize)]
 pub enum RouteError {

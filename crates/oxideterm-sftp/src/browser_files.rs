@@ -16,11 +16,13 @@ pub enum SftpSortDirection {
     Desc,
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub fn list_local_files(path: &str) -> std::io::Result<Vec<SftpFileEntry>> {
     oxideterm_local_files::list_local_files(&oxideterm_local_files::normalize_local_path(path))
         .map(|files| files.into_iter().map(sftp_file_entry_from_local).collect())
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn sftp_file_entry_from_local(entry: oxideterm_local_files::LocalFileEntry) -> SftpFileEntry {
     let is_symlink = entry.file_type == oxideterm_local_files::LocalFileType::Symlink;
     SftpFileEntry {
@@ -185,6 +187,7 @@ pub fn sftp_sorted_filtered_indices(
 mod sftp_helper_tests {
     use super::*;
 
+    #[cfg(not(target_family = "wasm"))]
     #[test]
     fn local_listing_reads_the_directory_again() {
         let directory =

@@ -8,19 +8,20 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+serde.workspace = true
+serde_json.workspace = true
+web-time.workspace = true
+zeroize.workspace = true
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
 dirs.workspace = true
 md5 = "0.7"
-serde.workspace = true
+oxideterm-atomic-file = { path = "../oxideterm-atomic-file" }
+oxideterm-audit = { path = "../oxideterm-audit" }
 sha2.workspace = true
 sysinfo.workspace = true
 walkdir = "2"
 zip.workspace = true
 
-oxideterm-audit = { path = "../oxideterm-audit" }
-zeroize.workspace = true
-
-oxideterm-atomic-file = { path = "../oxideterm-atomic-file" }
-serde_json.workspace = true
-
-[dev-dependencies]
+[target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
 tempfile = "3.23"

@@ -6,7 +6,9 @@ use std::{
     sync::Arc,
 };
 
-use crate::{PreviewAssetKind, PreviewContent};
+use crate::PreviewAssetKind;
+#[cfg(not(target_family = "wasm"))]
+use crate::PreviewContent;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PreviewAssetOwnership {
@@ -36,6 +38,7 @@ impl PreviewAssetOwner {
         Self::new(path, mime_type, kind, PreviewAssetOwnership::Local)
     }
 
+    #[cfg(not(target_family = "wasm"))]
     pub fn owned_temp(
         path: impl Into<PathBuf>,
         mime_type: impl Into<String>,
@@ -44,6 +47,7 @@ impl PreviewAssetOwner {
         Self::new(path, mime_type, kind, PreviewAssetOwnership::OwnedTemp)
     }
 
+    #[cfg(not(target_family = "wasm"))]
     pub fn from_asset_content_owned_temp(content: &PreviewContent) -> Option<Self> {
         match content {
             PreviewContent::AssetFile {
@@ -88,6 +92,7 @@ impl PreviewAssetOwner {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl Drop for PreviewAssetInner {
     fn drop(&mut self) {
         if self.ownership == PreviewAssetOwnership::OwnedTemp {
@@ -96,7 +101,7 @@ impl Drop for PreviewAssetInner {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_family = "wasm")))]
 mod tests {
     use std::fs;
 

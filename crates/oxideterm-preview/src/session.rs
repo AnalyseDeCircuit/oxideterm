@@ -1,16 +1,18 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{
-    io::SeekFrom,
-    path::{Path, PathBuf},
-};
+use std::path::PathBuf;
+#[cfg(not(target_family = "wasm"))]
+use std::{io::SeekFrom, path::Path};
 
+#[cfg(not(target_family = "wasm"))]
 use crate::{
-    PreviewAssetKind, PreviewAssetOwner, PreviewContent, PreviewKind, classify_preview_path,
-    detect_and_decode_with_hint, extension_to_language, generate_hex_dump, is_likely_text_content,
+    PreviewAssetKind, PreviewKind, classify_preview_path, detect_and_decode_with_hint,
+    extension_to_language, generate_hex_dump, is_likely_text_content,
 };
+use crate::{PreviewAssetOwner, PreviewContent};
 use thiserror::Error;
+#[cfg(not(target_family = "wasm"))]
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
 #[derive(Clone, Debug)]
@@ -56,6 +58,7 @@ impl Default for PreviewLoadOptions {
 pub enum PreviewLoadError {
     #[error("failed to read preview source: {0}")]
     Io(#[from] std::io::Error),
+    #[cfg(not(target_family = "wasm"))]
     #[error("preview I/O task failed: {0}")]
     Join(#[from] tokio::task::JoinError),
     #[error("preview source is a directory")]
@@ -97,10 +100,12 @@ pub enum PreviewAction {
 }
 
 impl PreviewSession {
+    #[cfg(not(target_family = "wasm"))]
     pub async fn load(source: PreviewSource) -> Self {
         Self::load_with_options(source, PreviewLoadOptions::default()).await
     }
 
+    #[cfg(not(target_family = "wasm"))]
     pub async fn load_with_options(source: PreviewSource, options: PreviewLoadOptions) -> Self {
         match Self::try_load_with_options(source, options).await {
             Ok(session) => session,
@@ -108,6 +113,7 @@ impl PreviewSession {
         }
     }
 
+    #[cfg(not(target_family = "wasm"))]
     pub async fn try_load_with_options(
         source: PreviewSource,
         options: PreviewLoadOptions,
@@ -197,11 +203,13 @@ impl PreviewSession {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 struct LoadedPreview {
     content: PreviewContent,
     asset: Option<PreviewAssetOwner>,
 }
 
+#[cfg(not(target_family = "wasm"))]
 async fn load_local_path(
     path: PathBuf,
     mime_type: Option<String>,
@@ -289,6 +297,7 @@ async fn load_local_path(
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn load_local_asset(
     path: PathBuf,
     mime_type: String,
@@ -317,6 +326,7 @@ fn load_local_asset(
     })
 }
 
+#[cfg(not(target_family = "wasm"))]
 async fn load_local_text(
     path: PathBuf,
     mime_type: String,
@@ -358,6 +368,7 @@ async fn load_local_text(
     })
 }
 
+#[cfg(not(target_family = "wasm"))]
 async fn load_local_hex(
     path: PathBuf,
     total_size: u64,
@@ -388,6 +399,7 @@ async fn load_local_hex(
     })
 }
 
+#[cfg(not(target_family = "wasm"))]
 async fn read_local_range(
     path: &Path,
     offset: u64,
@@ -415,6 +427,7 @@ async fn read_local_range(
     Ok(buffer)
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn read_local_range_mmap(
     path: &Path,
     offset: u64,
@@ -430,6 +443,7 @@ fn read_local_range_mmap(
     Ok(mmap[start..end].to_vec())
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn preview_asset_kind(kind: PreviewKind) -> PreviewAssetKind {
     match kind {
         PreviewKind::Image => PreviewAssetKind::Image,
@@ -468,6 +482,7 @@ mod tests {
         assert_eq!(session.rotation_degrees(), 0);
     }
 
+    #[cfg(not(target_family = "wasm"))]
     #[test]
     fn local_asset_limits_distinguish_pdf_media_and_other_documents() {
         let directory = tempfile::tempdir().unwrap();
@@ -557,6 +572,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_family = "wasm"))]
     #[test]
     fn load_local_text_honors_encoding_hint() {
         let dir = tempfile::tempdir().unwrap();
@@ -583,6 +599,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_family = "wasm"))]
     #[test]
     fn load_local_hex_uses_chunked_mmap_path() {
         let dir = tempfile::tempdir().unwrap();
@@ -621,6 +638,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_family = "wasm"))]
     #[test]
     fn inspection_sources_route_before_text_and_keep_local_file_ownership() {
         let directory = tempfile::tempdir().unwrap();

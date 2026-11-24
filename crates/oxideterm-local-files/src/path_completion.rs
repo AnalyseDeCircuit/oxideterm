@@ -11,6 +11,31 @@ pub struct PathCompletionCandidate {
     pub is_directory: bool,
 }
 
+const PATH_COMPLETION_MAX_MATCHES: usize = 512;
+
+impl PathCompletionRequest {
+    pub fn matching_candidates(
+        &self,
+        entries: &[PathCompletionCandidate],
+    ) -> Vec<PathCompletionCandidate> {
+        let prefix = self.prefix.to_lowercase();
+        let mut suggestions = entries
+            .iter()
+            .filter(|entry| entry.name.to_lowercase().starts_with(&prefix))
+            .cloned()
+            .collect::<Vec<_>>();
+        suggestions.sort_by(|left, right| {
+            right
+                .is_directory
+                .cmp(&left.is_directory)
+                .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
+        });
+        // Bound pathological directories without confusing viewport height with result count.
+        suggestions.truncate(PATH_COMPLETION_MAX_MATCHES);
+        suggestions
+    }
+}
+
 pub fn local_path_completion_request(input: &str) -> Option<PathCompletionRequest> {
     if input.trim().is_empty() {
         return None;

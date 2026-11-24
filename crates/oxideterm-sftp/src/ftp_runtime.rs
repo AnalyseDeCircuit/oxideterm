@@ -3,9 +3,9 @@
 
 use crate::{
     BackgroundTransferDirection, BackgroundTransferKind, BackgroundTransferSnapshot,
-    BackgroundTransferState, LocalDownloadDisposition, PreviewContent, RemoteSftpListing,
-    SftpFileEntry, SftpFileType, SftpPreviewSaveResult, SftpSession, SftpTransferManager,
-    TransferDirection, TransferProtocol, TransferStrategy,
+    BackgroundTransferState, BrowserTransferEvent, LocalDownloadDisposition, PreviewContent,
+    RemoteSftpListing, SftpFileEntry, SftpFileType, SftpPreviewSaveResult, SftpSession,
+    SftpTransferManager, TransferDirection, TransferProtocol, TransferStrategy,
 };
 use oxideterm_ftp::{ConnectOptions, FtpSession};
 use std::{
@@ -276,15 +276,6 @@ pub struct FtpTransferRequest<'a> {
     pub disposition: LocalDownloadDisposition,
     pub owner: &'a str,
     pub audit_context: Option<&'a oxideterm_audit::AuditContext>,
-}
-
-pub enum BrowserTransferEvent {
-    ProtocolResolved(TransferProtocol),
-    Progress {
-        transferred: u64,
-        total: u64,
-        speed: u64,
-    },
 }
 
 pub async fn run_ftp_transfer(

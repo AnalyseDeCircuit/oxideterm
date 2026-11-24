@@ -1,3 +1,24 @@
+pub struct LocalBatchProgress {
+    pub current: usize,
+    pub file_name: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct LocalFileProperties {
+    pub location: String,
+    pub size: u64,
+    pub modified: Option<i64>,
+    pub accessed: Option<i64>,
+    pub readonly: bool,
+    pub dir_files: Option<u64>,
+    pub dir_dirs: Option<u64>,
+    pub total_size: Option<u64>,
+    pub created: Option<i64>,
+    pub mode: Option<u32>,
+    pub mime_type: Option<String>,
+    pub is_symlink: bool,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LocalFileType {
     File,
@@ -22,6 +43,13 @@ pub enum LocalSortDirection {
 pub enum LocalClipboardMode {
     Copy,
     Cut,
+}
+
+#[derive(Clone, Debug)]
+pub struct LocalClipboard {
+    pub mode: LocalClipboardMode,
+    pub paths: Vec<String>,
+    pub source_dir: String,
 }
 
 #[derive(Clone, Debug)]

@@ -1,15 +1,10 @@
 use super::{
-    ArchiveEntryOutcome, LocalClipboardMode, compress_local_files, copy_recursively_with_progress,
-    extract_local_archive, local_file_audit_context, unique_copy_path,
-    would_move_directory_into_itself,
+    ArchiveEntryOutcome, LocalBatchProgress, LocalClipboardMode, compress_local_files,
+    copy_recursively_with_progress, extract_local_archive, local_file_audit_context,
+    unique_copy_path, would_move_directory_into_itself,
 };
 use oxideterm_audit::{AuditContext, AuditSource};
 use std::path::Path;
-
-pub struct LocalBatchProgress {
-    pub current: usize,
-    pub file_name: String,
-}
 
 pub fn paste_local_files(
     sources: Vec<String>,

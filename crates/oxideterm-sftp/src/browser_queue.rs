@@ -3,6 +3,15 @@
 
 use crate::{StoredTransferProgress, TransferDirection, TransferProtocol, TransferType};
 
+pub enum BrowserTransferEvent {
+    ProtocolResolved(TransferProtocol),
+    Progress {
+        transferred: u64,
+        total: u64,
+        speed: u64,
+    },
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SftpTransferState {
     Pending,

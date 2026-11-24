@@ -1,9 +1,15 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{collections::HashSet, path::PathBuf};
+use std::collections::HashSet;
+#[cfg(not(target_family = "wasm"))]
+use std::path::PathBuf;
 
 use crate::SftpError;
+#[cfg(target_family = "wasm")]
+use crate::remote_label::to_bytes;
+#[cfg(not(target_family = "wasm"))]
+use russh_sftp::path::to_bytes;
 
 pub fn is_absolute_remote_path(path: &str) -> bool {
     if path.starts_with('/') {
@@ -18,6 +24,7 @@ pub fn is_absolute_remote_path(path: &str) -> bool {
     false
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub fn join_local_path(base: &str, component: &str) -> String {
     let mut path = PathBuf::from(base);
     path.push(component);
@@ -29,9 +36,8 @@ pub fn local_download_name(name: &str) -> String {
     name.replace('\0', "%")
 }
 
-pub(crate) fn validate_remote_entry_name(name: &str) -> Result<(), SftpError> {
-    let raw =
-        russh_sftp::path::to_bytes(name).map_err(|error| SftpError::InvalidPath(error.into()))?;
+pub fn validate_remote_entry_name(name: &str) -> Result<(), SftpError> {
+    let raw = to_bytes(name).map_err(|error| SftpError::InvalidPath(error.into()))?;
     if name.is_empty()
         || name == "."
         || name == ".."

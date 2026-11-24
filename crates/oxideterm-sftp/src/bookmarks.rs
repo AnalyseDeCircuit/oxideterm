@@ -20,8 +20,10 @@ pub struct SftpPathBookmark {
     pub created_at: u64,
 }
 
+#[cfg(not(target_family = "wasm"))]
 const SFTP_PATH_BOOKMARKS_FILENAME: &str = "oxideterm-sftp-path-bookmarks.json";
 
+#[cfg(not(target_family = "wasm"))]
 fn sftp_path_bookmarks_path(settings_path: &std::path::Path) -> std::path::PathBuf {
     settings_path
         .parent()
@@ -29,6 +31,7 @@ fn sftp_path_bookmarks_path(settings_path: &std::path::Path) -> std::path::PathB
         .join(SFTP_PATH_BOOKMARKS_FILENAME)
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub fn load_sftp_path_bookmarks(settings_path: &std::path::Path) -> Vec<SftpPathBookmark> {
     let path = sftp_path_bookmarks_path(settings_path);
     let Ok(bytes) = std::fs::read(&path) else {
@@ -46,6 +49,7 @@ pub fn load_sftp_path_bookmarks(settings_path: &std::path::Path) -> Vec<SftpPath
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub fn save_sftp_path_bookmarks(
     settings_path: &std::path::Path,
     bookmarks: &[SftpPathBookmark],
@@ -56,13 +60,7 @@ pub fn save_sftp_path_bookmarks(
 }
 
 pub fn new_sftp_path_bookmark_id() -> String {
-    // Mirrors the file manager bookmark id shape; ids only need to be unique
-    // within this file and are never used as persistence keys.
-    let millis = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_millis())
-        .unwrap_or_default();
-    format!("bookmark-{millis}")
+    oxideterm_local_files::new_file_manager_bookmark_id()
 }
 
 /// Pick the smallest unused `{{index}}` substitution within the same endpoint.
@@ -169,6 +167,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(target_family = "wasm"))]
     #[test]
     fn bookmarks_roundtrip_with_expected_json_shape() {
         let directory = std::env::temp_dir().join(format!(

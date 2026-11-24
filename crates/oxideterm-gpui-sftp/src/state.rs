@@ -55,37 +55,7 @@ pub enum SftpSurfaceId {
     Sidebar,
 }
 
-/// Identifies the remote endpoint without implying NodeRouter ownership.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub enum SftpRemoteId {
-    Node(NodeId),
-    Standalone(String),
-    Ftp(String),
-}
-
-impl SftpRemoteId {
-    pub fn storage_key(&self) -> String {
-        match self {
-            Self::Node(node_id) => node_id.0.clone(),
-            Self::Standalone(profile_id) => format!("standalone-sftp:{profile_id}"),
-            Self::Ftp(profile_id) => format!("ftp:{profile_id}"),
-        }
-    }
-
-    pub fn node_id(&self) -> Option<&NodeId> {
-        match self {
-            Self::Node(node_id) => Some(node_id),
-            Self::Standalone(_) | Self::Ftp(_) => None,
-        }
-    }
-
-    pub fn standalone_endpoint_id(&self) -> Option<&str> {
-        match self {
-            Self::Node(_) | Self::Ftp(_) => None,
-            Self::Standalone(endpoint_id) => Some(endpoint_id),
-        }
-    }
-}
+pub use oxideterm_sftp::SftpRemoteId;
 
 #[derive(Debug)]
 pub enum SftpWorkerResult {
