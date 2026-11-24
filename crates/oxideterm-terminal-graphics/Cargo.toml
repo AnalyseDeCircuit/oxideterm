@@ -16,6 +16,7 @@ image.workspace = true
 oxideterm-image-decoder = { path = "../oxideterm-image-decoder" }
 memchr.workspace = true
 thiserror.workspace = true
+web-time.workspace = true
 zeroize.workspace = true
 
 [target.'cfg(unix)'.dependencies]

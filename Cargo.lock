@@ -8502,6 +8502,7 @@ dependencies = [
  "oxideterm-mosh",
  "oxideterm-network-proxy",
  "oxideterm-ssh",
+ "oxideterm-terminal-emulator",
  "oxideterm-terminal-encoding",
  "oxideterm-terminal-graphics",
  "oxideterm-terminal-model",
@@ -8528,6 +8529,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxideterm-terminal-emulator"
+version = "2.4.1"
+dependencies = [
+ "alacritty_terminal",
+ "oxideterm-terminal-graphics",
+ "oxideterm-terminal-model",
+ "web-time",
+ "zeroize",
+]
+
+[[package]]
 name = "oxideterm-terminal-encoding"
 version = "2.4.1"
 dependencies = [
@@ -8550,6 +8562,7 @@ dependencies = [
  "oxideterm-image-decoder",
  "tempfile",
  "thiserror 2.0.20",
+ "web-time",
  "zeroize",
 ]
 
@@ -13178,6 +13191,7 @@ dependencies = [
  "log",
  "memchr",
  "serde",
+ "web-time",
 ]
 
 [[package]]

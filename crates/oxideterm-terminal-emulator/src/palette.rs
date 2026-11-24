@@ -12,17 +12,17 @@ use crate::{TerminalAttrs, TerminalColor, TerminalStyleOrigin, TerminalUnderline
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TerminalPalette {
     pub(crate) foreground: TerminalColor,
-    pub(crate) background: TerminalColor,
+    pub background: TerminalColor,
     pub(crate) bright_foreground: TerminalColor,
     pub(crate) dim_foreground: TerminalColor,
     pub(crate) cursor: TerminalColor,
-    pub(crate) ansi: [TerminalColor; 16],
+    ansi: [TerminalColor; 16],
     pub(crate) dim_ansi: [TerminalColor; 8],
 }
 
 impl TerminalPalette {
     /// Report the host preference even when an application overrides its background with OSC 11.
-    pub(crate) fn color_scheme_report(&self) -> &'static str {
+    pub fn color_scheme_report(&self) -> &'static str {
         let background = Rgb {
             r: self.background.r,
             g: self.background.g,
@@ -133,7 +133,7 @@ pub(crate) fn color_to_rgb(
 }
 
 /// Answers OSC 4/10/11/12 queries with the same slot resolution used to paint cells.
-pub(crate) fn color_for_alacritty_request(
+pub fn color_for_alacritty_request(
     index: usize,
     palette: &TerminalPalette,
     overrides: &Colors,
@@ -585,3 +585,6 @@ fn find_nearest_contrasting_lightness(
 
     Some(best)
 }
+
+#[cfg(test)]
+mod tests;

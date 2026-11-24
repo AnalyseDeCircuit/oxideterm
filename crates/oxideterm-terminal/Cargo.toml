@@ -26,6 +26,7 @@ oxideterm-local-command = { path = "../oxideterm-local-command" }
 oxideterm-modem-transfer = { path = "../oxideterm-modem-transfer" }
 oxideterm-mosh = { path = "../oxideterm-mosh" }
 oxideterm-network-proxy = { path = "../oxideterm-network-proxy" }
+oxideterm-terminal-emulator = { path = "../oxideterm-terminal-emulator" }
 oxideterm-terminal-encoding = { path = "../oxideterm-terminal-encoding" }
 oxideterm-terminal-graphics = { path = "../oxideterm-terminal-graphics" }
 oxideterm-terminal-model = { path = "../oxideterm-terminal-model" }

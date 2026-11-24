@@ -816,7 +816,7 @@ mod tests {
         let mut ingress = GraphicsIngress::new(GraphicsOptions::default());
         let pending = ingress.advance(b"\x1b[?2026hpartial", cursor());
         assert_eq!(pending, GraphicsAdvance::default());
-        ingress.sync_deadline = Some(std::time::Instant::now());
+        ingress.sync_deadline = Some(web_time::Instant::now());
         assert_eq!(ingress.advance(b"", cursor()).terminal_bytes, b"partial");
         let mut oversized = b"\x1b[?2026h".to_vec();
         oversized.extend(std::iter::repeat_n(b'x', SYNC_LIMIT + 5));

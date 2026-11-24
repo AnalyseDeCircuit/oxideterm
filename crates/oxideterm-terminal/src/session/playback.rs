@@ -41,7 +41,7 @@ impl PlaybackTerminalSession {
             size,
             graphics_options: graphics_options.clone(),
             graphics_ingress: GraphicsIngress::new(graphics_options),
-            graphics: TerminalGraphicsState::default(),
+            graphics: crate::desktop_graphics_state(),
             palette: TerminalPalette::default(),
             shell_integration: TerminalShellIntegration::default(),
             scrollback_lines,
@@ -58,7 +58,7 @@ impl PlaybackTerminalSession {
         )));
         self.parser = Processor::new();
         self.graphics_ingress = GraphicsIngress::new(self.graphics_options.clone());
-        self.graphics = TerminalGraphicsState::default();
+        self.graphics = crate::desktop_graphics_state();
         self.shell_integration = TerminalShellIntegration::default();
         self.pending_events.clear();
         while self.event_rx.try_recv().is_ok() {}

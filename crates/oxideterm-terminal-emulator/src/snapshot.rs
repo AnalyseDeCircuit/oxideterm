@@ -163,21 +163,6 @@ pub struct TerminalImageSnapshot {
     pub data: Option<Arc<TerminalImageData>>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TerminalSearchRange {
-    pub line: i32,
-    pub start_col: usize,
-    pub end_col: usize,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TerminalSearchMatch {
-    pub line: i32,
-    pub start_col: usize,
-    pub end_col: usize,
-    pub ranges: Vec<TerminalSearchRange>,
-}
-
 #[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq)]
 pub enum TerminalCursorShape {
     #[default]

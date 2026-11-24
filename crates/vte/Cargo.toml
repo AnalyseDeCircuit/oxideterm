@@ -52,7 +52,7 @@ ansi = [
 ]
 default = ["std"]
 serde = ["dep:serde"]
-std = ["memchr/std"]
+std = ["memchr/std", "dep:web-time"]
 
 [lib]
 name = "vte"
@@ -88,3 +88,6 @@ default-features = false
 version = "1.0.160"
 features = ["derive"]
 optional = true
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+web-time = { version = "1.1.0", optional = true }

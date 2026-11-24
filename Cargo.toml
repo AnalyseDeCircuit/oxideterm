@@ -81,6 +81,7 @@ members = [
   "crates/oxideterm-ssh",
   "crates/oxideterm-security-key",
   "crates/oxideterm-terminal",
+  "crates/oxideterm-terminal-emulator",
   "crates/oxideterm-terminal-recording",
   "crates/oxideterm-terminal-triggers",
   "crates/oxideterm-terminal-encoding",

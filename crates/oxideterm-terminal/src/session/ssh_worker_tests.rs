@@ -251,10 +251,10 @@ fn ssh_palette_changes_rebuild_rows_and_answer_color_and_size_queries() {
     let settled = fixture.terminal.snapshot_incremental(&settled);
     assert_eq!(
         settled.lines[0].cells[0].bg,
-        crate::color::OXIDETERM_DARK_THEME.ansi[1]
+        TerminalColor::rgb(0xff, 0x5c, 0x5c)
     );
 
-    let mut ansi = crate::color::OXIDETERM_DARK_THEME.ansi;
+    let mut ansi = [TerminalColor::rgb(0, 0, 0); 16];
     ansi[1] = TerminalColor::rgb(0xdc, 0x32, 0x2f);
     let light = TerminalPalette::new(
         TerminalColor::rgb(0x65, 0x7b, 0x83),
@@ -330,14 +330,12 @@ fn ssh_color_scheme_reports_follow_theme_changes_only_while_subscribed() {
 
     fixture.send(b"\x1b[?2031h\x1b[?2031$p");
     expect_reply(b"\x1b[?2031;1$y");
-    let mut light = crate::color::OXIDETERM_DARK_THEME;
+    let mut light = TerminalPalette::default();
     light.background = TerminalColor::rgb(0xfd, 0xf6, 0xe3);
     fixture.terminal.set_palette(light);
     expect_reply(b"\x1b[?997;2n");
 
-    fixture
-        .terminal
-        .set_palette(crate::color::OXIDETERM_DARK_THEME);
+    fixture.terminal.set_palette(TerminalPalette::default());
     expect_reply(b"\x1b[?997;1n");
     // An application-owned OSC change must not masquerade as a host theme change.
     fixture.send(b"\x1b]11;#ffffff\x07\x1b[?996n\x1b[5n");

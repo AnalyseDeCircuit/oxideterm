@@ -1,26 +1,23 @@
 use std::{borrow::Cow, collections::HashMap, env, path::PathBuf, sync::Arc, thread::JoinHandle};
 
-use alacritty_terminal::term::cell::Cell as AlacrittyCell;
 use alacritty_terminal::{
-    event::{Event as AlacEvent, EventListener, Notify, OnResize, WindowSize},
+    event::{Event as AlacEvent, EventListener, Notify, OnResize},
     grid::{Dimensions, Scroll},
-    index::Line,
     sync::FairMutex,
-    term::{Config, Osc52, Term, TermDamage, cell::Flags, color::Colors},
+    term::{Config, Osc52, Term},
     tty::{self, Shell},
 };
 use anyhow::{Context, Result};
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use oxideterm_modem_transfer::{ModemTransfer, ModemTransferRequest};
 use oxideterm_terminal_encoding::{EncodingHint, TerminalInputEncoder};
-use oxideterm_terminal_graphics::{GraphicsCursor, TerminalGraphicsEvent, TerminalImagePlacement};
+use oxideterm_terminal_graphics::TerminalGraphicsEvent;
 
 mod activity;
 mod backpressure;
-mod color;
 mod command_sender;
-mod data;
 mod history;
+#[cfg(test)]
 mod logical_context;
 pub use history::{
     TerminalHistoryCapture, TerminalHistoryError, TerminalHistoryRow, TerminalHistoryStamp,
@@ -59,14 +56,6 @@ pub use command_sender::{
     TerminalSenderFrame, TerminalSenderInputMode, TerminalSenderPacing, TerminalSenderPlan,
     TerminalSenderPlanError, build_terminal_sender_plan,
 };
-pub use data::{
-    GraphicsOptions, KittyFileTransmissionControl, KittyFileTransmissionPrompt, TerminalAttrs,
-    TerminalCell, TerminalColor, TerminalCursorShape, TerminalImageAnimationState,
-    TerminalImageData, TerminalImageFrame, TerminalImageId, TerminalImageProtocol,
-    TerminalImageSnapshot, TerminalLogicalContext, TerminalLogicalContextRow,
-    TerminalLogicalMember, TerminalRow, TerminalSearchMatch, TerminalSearchRange, TerminalSnapshot,
-    TerminalStyleOrigin, TerminalUnderlineStyle,
-};
 pub use editor_integration::{
     EMACS_FREE_TYPE_INTEGRATION_SOURCE, TerminalEditorApplication, TerminalEditorCapabilities,
     TerminalEditorClipboardEvent, TerminalEditorClipboardOperation, TerminalEditorIntegrationEvent,
@@ -84,6 +73,14 @@ pub use local_shell_integration::TerminalCwdIntegrationLaunchState;
 pub use oxideterm_modem_transfer::{
     DetectedModemProtocol, ModemTransferDirection,
     ModemTransferRequest as TerminalModemTransferRequest,
+};
+pub use oxideterm_terminal_emulator::{
+    GraphicsOptions, KittyFileTransmissionControl, KittyFileTransmissionPrompt, TerminalAttrs,
+    TerminalCell, TerminalColor, TerminalCursorShape, TerminalImageAnimationState,
+    TerminalImageData, TerminalImageFrame, TerminalImageId, TerminalImageProtocol,
+    TerminalImageSnapshot, TerminalLogicalContext, TerminalLogicalContextRow,
+    TerminalLogicalMember, TerminalRow, TerminalSearchMatch, TerminalSearchRange, TerminalSnapshot,
+    TerminalStyleOrigin, TerminalUnderlineStyle,
 };
 pub use oxideterm_terminal_encoding::{
     EncodingMismatchDetector, TERMINAL_ENCODINGS, TerminalEncoding,
@@ -135,24 +132,38 @@ pub use shell_integration::{
     TerminalCommandMarkEvent, TerminalCommandPosition,
 };
 
-pub use color::TerminalPalette;
-use color::{
-    attrs_from_flags, color_for_alacritty_request, style_colors_for_cell, style_origin_for_cell,
+pub use oxideterm_terminal_emulator::TerminalPalette;
+use oxideterm_terminal_emulator::{
+    TerminalGraphicsState, TerminalSize,
+    convert::{
+        blank_snapshot_row, default_terminal_cell, incremental_snapshot_from_term,
+        scroll_snapshot_from_term, snapshot_from_term, snapshot_from_term_with_display_offset,
+    },
+    graphics::{apply_graphics_terminal_event, graphics_cursor_from_term},
+    palette::color_for_alacritty_request,
+    size::window_size,
 };
+
 use local_graphics_event_loop::{
     LocalGraphicsEventLoop, LocalGraphicsMsg, LocalGraphicsNotifier, LocalPtyReadReport,
 };
 use local_shell::shell_args_for_profile;
 use local_shell_integration::{LocalShellIntegration, prepare_local_shell_launch};
+use oxideterm_terminal_emulator::search::append_grid_line_text;
+#[cfg(test)]
+use oxideterm_terminal_emulator::search::search_logical_line_matches;
+pub(crate) use oxideterm_terminal_emulator::search::search_matches_from_term;
 use process::{ProcessState, TerminalSignal, signal_process_group};
 #[cfg(windows)]
 use process_lifecycle::WindowsTerminalJob;
 #[cfg(not(windows))]
 use process_lifecycle::cleanup_local_pty_process_tree;
-#[cfg(test)]
-use search::search_logical_line_matches;
-pub(crate) use search::search_matches_from_term;
-use search::{append_grid_line_text, viewport_row_for_grid_line};
+
+fn desktop_graphics_state() -> TerminalGraphicsState {
+    TerminalGraphicsState::with_error_reporter(
+        |error| tracing::debug!(%error, "terminal graphics protocol error"),
+    )
+}
 
 fn interactive_terminal_config(scrollback_lines: usize) -> Config {
     let mut config = Config::default();
@@ -168,7 +179,6 @@ fn interactive_terminal_config(scrollback_lines: usize) -> Config {
 // state and the public `oxideterm_terminal` API remain unchanged while the
 // previous monolithic lib.rs is split by responsibility.
 include!("local/events.rs");
-include!("local/graphics_state.rs");
 include!("local/env.rs");
 include!("local/pty.rs");
 include!("local/controls.rs");

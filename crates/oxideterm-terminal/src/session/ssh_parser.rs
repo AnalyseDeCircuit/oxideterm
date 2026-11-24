@@ -104,7 +104,7 @@ impl SshParser {
                 resize,
                 title: None,
                 graphics_ingress: GraphicsIngress::new(graphics_options),
-                graphics: TerminalGraphicsState::default(),
+                graphics: crate::desktop_graphics_state(),
                 palette: TerminalPalette::default(),
                 magic_scan: MagicScanWindow::default(),
                 encoding,

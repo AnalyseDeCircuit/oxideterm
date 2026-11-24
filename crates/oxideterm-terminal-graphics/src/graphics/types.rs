@@ -453,7 +453,7 @@ pub struct GraphicsIngress {
     image_order: VecDeque<(TerminalImageId, usize)>,
     storage_bytes: usize,
     sync_buffer: Option<Zeroizing<Vec<u8>>>,
-    sync_deadline: Option<std::time::Instant>,
+    sync_deadline: Option<web_time::Instant>,
 }
 
 struct KittyChunkAssembly {

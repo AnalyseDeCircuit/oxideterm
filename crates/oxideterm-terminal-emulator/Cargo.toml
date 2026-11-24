@@ -1,0 +1,15 @@
+[lints]
+workspace = true
+
+[package]
+name = "oxideterm-terminal-emulator"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+alacritty_terminal = { path = "../alacritty-terminal", default-features = false }
+oxideterm-terminal-graphics = { path = "../oxideterm-terminal-graphics" }
+oxideterm-terminal-model = { path = "../oxideterm-terminal-model" }
+web-time.workspace = true
+zeroize.workspace = true

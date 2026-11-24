@@ -605,7 +605,7 @@ impl BleSession {
             close_token,
             title: None,
             graphics_ingress: GraphicsIngress::new(graphics_options),
-            graphics: TerminalGraphicsState::default(),
+            graphics: crate::desktop_graphics_state(),
             palette: TerminalPalette::default(),
             output_queue: VecDeque::new(),
             magic_scan: MagicScanWindow::default(),

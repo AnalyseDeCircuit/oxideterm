@@ -164,7 +164,7 @@ impl MoshTerminalSession {
             startup_cancellation,
             connection_status: MoshConnectionStatus::Connecting,
             graphics_ingress: GraphicsIngress::new(graphics_options),
-            graphics: TerminalGraphicsState::default(),
+            graphics: crate::desktop_graphics_state(),
             palette: TerminalPalette::default(),
             output_queue: VecDeque::new(),
             output_processor: None,

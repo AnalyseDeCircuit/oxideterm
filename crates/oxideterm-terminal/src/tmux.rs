@@ -1610,7 +1610,7 @@ impl TmuxController {
                 cursor: (0, 0),
                 shell_integration: TerminalShellIntegration::default(),
                 graphics_ingress: GraphicsIngress::new(graphics_options),
-                graphics: Arc::new(Mutex::new(TerminalGraphicsState::default())),
+                graphics: Arc::new(Mutex::new(crate::desktop_graphics_state())),
             }
         });
         let size = TerminalSize {
@@ -2359,7 +2359,7 @@ mod tests {
             advance(b"%begin 1 6 1\n%end 1 6 1\n%begin 1 7 1\n%1 5 2\n%end 1 7 1\n%begin 1 8 1\n$1 @1 %1\n%end 1 8 1\n");
             assert!(display.is_ready(), "tmux {version} bootstrap");
 
-            let mut ansi = crate::color::OXIDETERM_DARK_THEME.ansi;
+            let mut ansi = [crate::TerminalColor::rgb(0, 0, 0); 16];
             ansi[0] = crate::TerminalColor::rgb(0x07, 0x36, 0x42);
             display.set_palette(TerminalPalette::new(
                 crate::TerminalColor::rgb(0x65, 0x7b, 0x83),

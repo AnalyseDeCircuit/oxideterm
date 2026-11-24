@@ -208,7 +208,7 @@ impl GraphicsIngress {
 
         if self
             .sync_deadline
-            .is_some_and(|deadline| deadline <= std::time::Instant::now())
+            .is_some_and(|deadline| deadline <= web_time::Instant::now())
         {
             self.commit_synchronized(&mut emit, &mut cursor);
         }
@@ -232,7 +232,7 @@ impl GraphicsIngress {
                 if buffer.ends_with(SYNC_BEGIN) {
                     let len = buffer.len() - SYNC_BEGIN.len();
                     buffer.truncate(len);
-                    self.sync_deadline = Some(std::time::Instant::now() + SYNC_TIMEOUT);
+                    self.sync_deadline = Some(web_time::Instant::now() + SYNC_TIMEOUT);
                 } else if buffer.ends_with(SYNC_END) {
                     let len = buffer.len() - SYNC_END.len();
                     buffer.truncate(len);
@@ -337,7 +337,11 @@ impl GraphicsIngress {
         self.emit_grid_changes(&mut emit);
     }
 
-    pub fn sync_deadline(&self) -> Option<std::time::Instant> {
+    pub fn options(&self) -> &GraphicsOptions {
+        &self.options
+    }
+
+    pub fn sync_deadline(&self) -> Option<web_time::Instant> {
         self.sync_deadline
     }
 
@@ -535,7 +539,7 @@ impl GraphicsIngress {
                 data.push(byte);
                 if data == SYNC_BEGIN {
                     self.sync_buffer = Some(Zeroizing::new(Vec::new()));
-                    self.sync_deadline = Some(std::time::Instant::now() + SYNC_TIMEOUT);
+                    self.sync_deadline = Some(web_time::Instant::now() + SYNC_TIMEOUT);
                 } else if SYNC_BEGIN.starts_with(&data) {
                     self.state = ParserState::SyncStart(data);
                 } else {

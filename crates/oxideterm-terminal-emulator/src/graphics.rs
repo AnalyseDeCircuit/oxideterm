@@ -1,4 +1,15 @@
-pub(crate) struct TerminalGraphicsState {
+use std::{collections::HashMap, sync::Arc};
+
+use alacritty_terminal::{event::EventListener, term::Term};
+use oxideterm_terminal_graphics::{GraphicsCursor, TerminalGraphicsEvent, TerminalImagePlacement};
+
+use crate::{
+    TerminalImageData, TerminalImageId, TerminalImageProtocol, TerminalImageSnapshot,
+    TerminalPalette, TerminalSize,
+};
+
+pub struct TerminalGraphicsState {
+    report_error: fn(&str),
     images: HashMap<TerminalImageId, Arc<TerminalImageData>>,
     next_image_version: u64,
     placements: Vec<TerminalImagePlacement>,
@@ -8,6 +19,7 @@ pub(crate) struct TerminalGraphicsState {
 impl Default for TerminalGraphicsState {
     fn default() -> Self {
         Self {
+            report_error: |_| {},
             images: HashMap::new(),
             next_image_version: 1,
             placements: Vec::new(),
@@ -17,7 +29,14 @@ impl Default for TerminalGraphicsState {
 }
 
 impl TerminalGraphicsState {
-    pub(crate) fn handle_event(&mut self, event: TerminalGraphicsEvent) -> Option<Vec<u8>> {
+    pub fn with_error_reporter(report_error: fn(&str)) -> Self {
+        Self {
+            report_error,
+            ..Self::default()
+        }
+    }
+
+    pub fn handle_event(&mut self, event: TerminalGraphicsEvent) -> Option<Vec<u8>> {
         match event {
             TerminalGraphicsEvent::Screen { alternate } => {
                 self.alternate_screen = alternate;
@@ -88,13 +107,13 @@ impl TerminalGraphicsState {
             }
             TerminalGraphicsEvent::Respond(bytes) => Some(bytes),
             TerminalGraphicsEvent::Error(error) => {
-                tracing::debug!(%error, "terminal graphics protocol error");
+                (self.report_error)(&error);
                 None
             }
         }
     }
 
-    pub(crate) fn clear(&mut self) {
+    pub fn clear(&mut self) {
         self.images.clear();
         self.placements.clear();
     }
@@ -106,7 +125,11 @@ impl TerminalGraphicsState {
         version
     }
 
-    fn visible_images(&self, display_offset: usize, rows: usize) -> Vec<TerminalImageSnapshot> {
+    pub(crate) fn visible_images(
+        &self,
+        display_offset: usize,
+        rows: usize,
+    ) -> Vec<TerminalImageSnapshot> {
         self.placements
             .iter()
             .filter_map(|placement| {
@@ -171,7 +194,7 @@ impl TerminalGraphicsState {
     }
 }
 
-fn resolve_sixel_backgrounds(
+pub(crate) fn resolve_sixel_backgrounds(
     images: &mut [TerminalImageSnapshot],
     palette: &TerminalPalette,
     colors: &alacritty_terminal::term::color::Colors,
@@ -181,7 +204,7 @@ fn resolve_sixel_backgrounds(
         if let Some(sixel) = &mut image.sixel
             && let Some(background) = sixel.background
         {
-            let rgb = crate::color::color_to_rgb(background, palette, colors);
+            let rgb = crate::palette::color_to_rgb(background, palette, colors);
             sixel.background = Some(Color::Spec(Rgb {
                 r: rgb.r,
                 g: rgb.g,
@@ -191,7 +214,7 @@ fn resolve_sixel_backgrounds(
     }
 }
 
-pub(crate) fn apply_graphics_terminal_event<T: EventListener>(
+pub fn apply_graphics_terminal_event<T: EventListener>(
     term: &mut Term<T>,
     event: &TerminalGraphicsEvent,
 ) {
@@ -203,7 +226,7 @@ pub(crate) fn apply_graphics_terminal_event<T: EventListener>(
     }
 }
 
-pub(crate) fn graphics_cursor_from_term<T: EventListener>(
+pub fn graphics_cursor_from_term<T: EventListener>(
     term: &Term<T>,
     size: TerminalSize,
 ) -> GraphicsCursor {
@@ -221,3 +244,10 @@ pub(crate) fn graphics_cursor_from_term<T: EventListener>(
         cell_height: size.cell_height,
     }
 }
+
+fn viewport_row_for_grid_line(line: i32, display_offset: usize) -> Option<usize> {
+    (line + display_offset as i32).try_into().ok()
+}
+
+#[cfg(test)]
+mod tests;

@@ -19,8 +19,10 @@ use core::ops::{Add, Sub};
 use core::str::FromStr;
 use core::time::Duration;
 use core::{iter, mem, str};
-#[cfg(feature = "std")]
+#[cfg(all(feature = "std", not(target_family = "wasm")))]
 use std::time::Instant;
+#[cfg(all(feature = "std", target_family = "wasm"))]
+use web_time::Instant;
 
 use bitflags::bitflags;
 #[doc(inline)]
