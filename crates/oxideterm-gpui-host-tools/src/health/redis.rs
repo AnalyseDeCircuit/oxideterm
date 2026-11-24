@@ -222,13 +222,17 @@ impl HostToolsEntity {
                 endpoints: Vec::new(),
             },
         };
-        self.host_redis.snapshot_connection_id = Some(delivery.request.connection_id.clone());
-        self.host_redis.snapshot = Some(snapshot);
-        self.sync_redis_endpoint_selection(
-            &delivery.request.connection_id,
-            delivery.request.failure_fallback,
-            cx,
-        );
+        if self.selected_connection_id() == Some(delivery.request.connection_id.as_str())
+            && self.active_tool() == ContextSidebarTool::Redis
+        {
+            self.host_redis.snapshot_connection_id = Some(delivery.request.connection_id.clone());
+            self.host_redis.snapshot = Some(snapshot);
+            self.sync_redis_endpoint_selection(
+                &delivery.request.connection_id,
+                delivery.request.failure_fallback,
+                cx,
+            );
+        }
         let pending = self.host_redis.snapshot_pending.take();
         if let Some(pending) = pending {
             self.start_redis_snapshot(pending.request, pending.runtime, cx);
@@ -256,6 +260,7 @@ impl HostToolsEntity {
             .as_ref()
             .is_some_and(|selected| endpoints.contains(selected));
         if !selected_is_live {
+            self.ui.host_redis_password = zeroize::Zeroizing::default();
             self.host_redis.keys_endpoint = endpoints.first().cloned();
             self.clear_redis_keys_cache();
             self.host_redis.collapsed_databases.clear();
@@ -275,6 +280,7 @@ impl HostToolsEntity {
         let changed = self.host_redis.keys_endpoint.as_ref() != Some(&endpoint);
         self.host_redis.keys_endpoint = Some(endpoint);
         if changed {
+            self.ui.host_redis_password = zeroize::Zeroizing::default();
             self.clear_redis_keys_cache();
             self.host_redis.collapsed_databases.clear();
             self.host_redis.expanded_segments.clear();
@@ -720,14 +726,21 @@ impl HostToolsEntity {
                 let active = selected == Some(endpoint);
                 let endpoint = endpoint.clone();
                 let icon = match endpoint.kind {
-                    ResourceRedisEndpointKind::Docker => "lucide/circle.svg",
+                    ResourceRedisEndpointKind::Podman | ResourceRedisEndpointKind::Docker => {
+                        "lucide/circle.svg"
+                    }
                     ResourceRedisEndpointKind::Host => "lucide/server.svg",
+                };
+                let label = match endpoint.kind {
+                    ResourceRedisEndpointKind::Host => endpoint.target.clone(),
+                    ResourceRedisEndpointKind::Docker => format!("Docker · {}", endpoint.target),
+                    ResourceRedisEndpointKind::Podman => format!("Podman · {}", endpoint.target),
                 };
                 div()
                     .id(host_tools_row_id(
                         "host-redis-endpoint",
                         &endpoint.target,
-                        endpoint.target.clone(),
+                        label.clone(),
                     ))
                     .h(px(HOST_REDIS_ENDPOINT_CHIP_HEIGHT))
                     .px_2()
@@ -763,7 +776,7 @@ impl HostToolsEntity {
                             .truncate()
                             .text_size(px(11.0))
                             .text_color(rgb(if active { theme.text } else { theme.text_muted }))
-                            .child(endpoint.target.clone()),
+                            .child(label),
                     )
                     .on_mouse_down(
                         MouseButton::Left,
@@ -1403,6 +1416,12 @@ impl HostToolsEntity {
             ResourceRedisValueKind::Other => "OTHER",
         });
         let size_text = value.map(|value| {
+            if value.kind == ResourceRedisValueKind::String
+                && let Some(len) = value.length
+                && len > value.elements.first().map_or(0, Vec::len) as u64
+            {
+                return format!("{} / {} B", value.elements.first().map_or(0, Vec::len), len);
+            }
             value
                 .memory_usage
                 .map(format_bytes)
@@ -1417,8 +1436,10 @@ impl HostToolsEntity {
             redis_value_json(value).is_some()
                 && value.kind != oxideterm_connection_monitor::ResourceRedisValueKind::Json
         });
-        let can_set_value =
-            value.is_some_and(|value| RedisValueWriteKind::from_value_kind(value.kind).is_some());
+        let can_set_value = value.is_some_and(|value| {
+            redis_value_copy_is_complete(value)
+                && RedisValueWriteKind::from_value_kind(value.kind).is_some()
+        });
 
         let mut two_column = false;
         let mut omitted_rows = 0usize;
@@ -1427,10 +1448,7 @@ impl HostToolsEntity {
         } else if let Some(error) = dialog.error.clone() {
             (HostRedisValueBody::Error(error), Vec::new())
         } else if let Some(value) = value {
-            let unsupported = matches!(
-                value.kind,
-                ResourceRedisValueKind::Stream | ResourceRedisValueKind::Other
-            );
+            let unsupported = matches!(value.kind, ResourceRedisValueKind::Other);
             if unsupported {
                 (
                     HostRedisValueBody::Unsupported(
@@ -1444,12 +1462,18 @@ impl HostToolsEntity {
             } else if !dialog.json_view && !redis_value_rows(value).is_empty() {
                 two_column = matches!(
                     value.kind,
-                    ResourceRedisValueKind::Hash | ResourceRedisValueKind::SortedSet
+                    ResourceRedisValueKind::Hash
+                        | ResourceRedisValueKind::SortedSet
+                        | ResourceRedisValueKind::Stream
                 );
                 let all_rows = redis_value_rows(value);
                 // The viewer draws a bounded band per frame; the rest is
                 // reported instead of silently disappearing.
-                omitted_rows = all_rows.len().saturating_sub(HOST_REDIS_VALUE_MAX_LINES);
+                omitted_rows = value
+                    .length
+                    .and_then(|n| usize::try_from(n).ok())
+                    .unwrap_or(all_rows.len())
+                    .saturating_sub(all_rows.len().min(HOST_REDIS_VALUE_MAX_LINES));
                 let rows = all_rows
                     .into_iter()
                     .take(HOST_REDIS_VALUE_MAX_LINES)
@@ -1787,6 +1811,11 @@ fn host_redis_tree_rows(
 }
 
 impl HostToolsEntity {
+    fn redis_target_selected(&self, host: &str, endpoint: &ResourceRedisEndpoint) -> bool {
+        self.selected_connection_id() == Some(host)
+            && self.host_redis.keys_endpoint.as_ref() == Some(endpoint)
+    }
+
     fn redis_value_target(&self) -> Option<(String, ResourceRedisEndpoint)> {
         let connection_id = self
             .selected_connection_id_owned()
@@ -2026,7 +2055,7 @@ impl HostToolsEntity {
                     cx.notify();
                     return;
                 }
-                let value = dialog.value.trim_matches(['\n', '\r']).to_string();
+                let value = dialog.value.to_string();
                 dialog.field = zeroize::Zeroizing::new(String::new());
                 dialog.value = zeroize::Zeroizing::new(String::new());
                 format!("{field}\t{value}")
@@ -2060,7 +2089,7 @@ impl HostToolsEntity {
                 format!("{member}\t{score}")
             }
             RedisCreateKind::List | RedisCreateKind::Set => {
-                let value = dialog.value.trim().to_string();
+                let value = dialog.value.to_string();
                 if value.is_empty() {
                     return;
                 }
@@ -2085,6 +2114,14 @@ impl HostToolsEntity {
 
     pub fn submit_redis_create_key(&mut self, cx: &mut Context<Self>) {
         let messages = self.messages.clone();
+        if !self
+            .ui
+            .host_redis_create_key_dialog
+            .as_ref()
+            .is_some_and(|d| self.redis_target_selected(&d.connection_id, &d.endpoint))
+        {
+            return;
+        }
         let Some(dialog) = self.ui.host_redis_create_key_dialog.as_mut() else {
             return;
         };
@@ -2148,13 +2185,11 @@ impl HostToolsEntity {
                     cx.notify();
                     return;
                 }
-                dialog
-                    .entries
-                    .iter()
-                    .map(|entry| entry.as_str())
-                    .collect::<Vec<_>>()
-                    .join("\n")
+                String::new()
             }
+        };
+        let Some(value) = dialog.kind.payload(&body, &dialog.entries, None) else {
+            return;
         };
         let request = HostRedisCreateKeyRequest {
             connection_id: dialog.connection_id.clone(),
@@ -2162,7 +2197,7 @@ impl HostToolsEntity {
             database: dialog.database,
             key: name,
             password: self.ui.host_redis_password.clone(),
-            value: zeroize::Zeroizing::new(body),
+            value,
             failure_fallback: messages
                 .as_ref()
                 .map(|messages| messages.redis_key_action_failed.clone())
@@ -2298,7 +2333,7 @@ impl HostToolsEntity {
         ) && value
             .length
             .is_some_and(|length| length > rows.len() as u64);
-        if capped {
+        if capped || !redis_value_copy_is_complete(&value) {
             cx.emit(HostToolsEvent::ShowNotice(
                 HostToolsNotice::RedisValueEditCapped,
             ));
@@ -2472,72 +2507,20 @@ impl HostToolsEntity {
             .as_ref()
             .map(|messages| messages.redis_key_action_failed.clone())
             .unwrap_or_default();
+        if !self
+            .ui
+            .host_redis_set_value_dialog
+            .as_ref()
+            .is_some_and(|d| self.redis_target_selected(&d.connection_id, &d.endpoint))
+        {
+            return;
+        }
         let Some(dialog) = self.ui.host_redis_set_value_dialog.as_mut() else {
             return;
         };
         if dialog.loading {
             return;
         }
-        if let Err(error) = validate_redis_set_value(dialog) {
-            dialog.error = Some(redis_set_value_error_text(
-                error,
-                &json_error_key,
-                &empty_entries_key,
-                &unsupported_message,
-            ));
-            cx.notify();
-            return;
-        }
-        let connection_id = dialog.connection_id.clone();
-        let endpoint = dialog.endpoint.clone();
-        let database = dialog.database;
-        let key = dialog.key.clone();
-        dialog.loading = true;
-        dialog.error = None;
-        // Saving is two steps: re-read the key, and only write when the server
-        // copy still matches the value the editor opened with. Writing first
-        // would silently drop an update made since.
-        if !self.request_redis_value(
-            connection_id,
-            endpoint,
-            database,
-            key,
-            HostRedisValuePurpose::VerifyWrite,
-            cx,
-        ) && let Some(dialog) = self.ui.host_redis_set_value_dialog.as_mut()
-        {
-            dialog.loading = false;
-            dialog.error = Some(action_failed_message);
-        }
-        cx.notify();
-    }
-
-    /// Writes the validated replacement. Called only after the pre-write
-    /// re-read confirmed the key still holds the editor's baseline.
-    fn start_redis_set_value_write(&mut self, cx: &mut Context<Self>) {
-        let json_error_key = self
-            .messages
-            .as_ref()
-            .map(|messages| messages.redis_value_set_invalid_json.clone())
-            .unwrap_or_default();
-        let empty_entries_key = self
-            .messages
-            .as_ref()
-            .map(|messages| messages.redis_create_key_empty_entries.clone())
-            .unwrap_or_default();
-        let unsupported_message = self
-            .messages
-            .as_ref()
-            .map(|messages| messages.redis_value_edit_unsupported.clone())
-            .unwrap_or_default();
-        let action_failed_message = self
-            .messages
-            .as_ref()
-            .map(|messages| messages.redis_key_action_failed.clone())
-            .unwrap_or_default();
-        let Some(dialog) = self.ui.host_redis_set_value_dialog.as_mut() else {
-            return;
-        };
         let body = match validate_redis_set_value(dialog) {
             Ok(body) => body,
             Err(error) => {
@@ -2552,13 +2535,19 @@ impl HostToolsEntity {
                 return;
             }
         };
+        let Some(base) = dialog.base.as_ref() else {
+            return;
+        };
+        let Some(value) = dialog.kind.payload(&body, &dialog.entries, Some(base)) else {
+            return;
+        };
         let request = HostRedisSetValueRequest {
             connection_id: dialog.connection_id.clone(),
             endpoint: dialog.endpoint.clone(),
             database: dialog.database,
             key: dialog.key.clone(),
             password: self.ui.host_redis_password.clone(),
-            value: zeroize::Zeroizing::new(body),
+            value,
             failure_fallback: action_failed_message,
         };
         let write_kind = dialog.kind;
@@ -2626,7 +2615,31 @@ impl HostToolsEntity {
                 let text = String::from_utf8_lossy(&output.stdout);
                 match parse_redis_key_mutation(&text) {
                     ResourceRedisStatus::Available => (true, String::new()),
-                    ResourceRedisStatus::Error { message } => (false, message),
+                    ResourceRedisStatus::Error { message }
+                        if message == "__OXIDE_VALUE_CHANGED__" =>
+                    {
+                        (
+                            false,
+                            self.messages
+                                .as_ref()
+                                .map(|m| m.redis_value_edit_conflict.clone())
+                                .unwrap_or_else(|| delivery.request.failure_fallback.clone()),
+                        )
+                    }
+                    ResourceRedisStatus::Error { message }
+                        if message == REDIS_KEY_EXISTS_SENTINEL =>
+                    {
+                        (
+                            false,
+                            self.messages
+                                .as_ref()
+                                .map(|m| m.redis_create_key_exists.clone())
+                                .unwrap_or_else(|| delivery.request.failure_fallback.clone()),
+                        )
+                    }
+                    ResourceRedisStatus::Error { .. } => {
+                        (false, delivery.request.failure_fallback.clone())
+                    }
                     _ => (false, delivery.request.failure_fallback.clone()),
                 }
             }
@@ -2963,6 +2976,9 @@ impl HostToolsEntity {
         let Some(runtime) = self.lifecycle_runtime.clone() else {
             return false;
         };
+        if !self.redis_target_selected(&connection_id, &endpoint) {
+            return false;
+        }
         let request = HostRedisValueRequest {
             connection_id,
             endpoint,
@@ -3038,14 +3054,6 @@ impl HostToolsEntity {
                     },
                 ));
             }
-            HostRedisValuePurpose::VerifyWrite => {
-                if let Some(dialog) = self.ui.host_redis_set_value_dialog.as_mut()
-                    && redis_set_value_matches_request(dialog, request)
-                {
-                    dialog.loading = false;
-                    dialog.error = Some(message);
-                }
-            }
         }
     }
 
@@ -3079,13 +3087,10 @@ impl HostToolsEntity {
         };
         match delivery.request.purpose {
             HostRedisValuePurpose::Open => {
-                self.install_redis_value(&delivery.request, value);
+                self.install_redis_value(&delivery.request, if truncated { None } else { value });
             }
             HostRedisValuePurpose::Copy => {
                 self.finish_redis_value_copy(&delivery.request, value.as_ref(), truncated, cx);
-            }
-            HostRedisValuePurpose::VerifyWrite => {
-                self.finish_redis_write_verification(&delivery.request, value, truncated, cx);
             }
         }
         let pending = self.host_redis.value_pending.take();
@@ -3173,7 +3178,7 @@ impl HostToolsEntity {
         ) {
             return;
         }
-        if redis_value_edit_unsupported(value) {
+        if !redis_value_copy_is_complete(value) || redis_value_edit_unsupported(value) {
             return;
         }
         // A draft for this exact target is the user's work in progress.
@@ -3252,49 +3257,6 @@ impl HostToolsEntity {
     /// Compares a save's pre-write re-read with the value the editor opened
     /// with. A different server copy aborts the write: overwriting it would
     /// silently drop someone else's update.
-    fn finish_redis_write_verification(
-        &mut self,
-        request: &HostRedisValueRequest,
-        value: Option<ResourceRedisValue>,
-        truncated: bool,
-        cx: &mut Context<Self>,
-    ) {
-        let readable = value
-            .filter(|value| !truncated && matches!(value.status, ResourceRedisStatus::Available));
-        let conflict_message = self
-            .messages
-            .as_ref()
-            .map(|messages| messages.redis_value_edit_conflict.clone())
-            .unwrap_or_default();
-        let proceed = {
-            let Some(dialog) = self.ui.host_redis_set_value_dialog.as_mut() else {
-                return;
-            };
-            if !redis_set_value_matches_request(dialog, request) {
-                return;
-            }
-            dialog.loading = false;
-            match (readable, dialog.base.as_ref()) {
-                (Some(current), Some(base)) if redis_value_content_matches(base, &current) => {
-                    dialog.error = None;
-                    true
-                }
-                (Some(_), _) => {
-                    dialog.error = Some(conflict_message);
-                    false
-                }
-                (None, _) => {
-                    dialog.error = Some(request.failure_fallback.clone());
-                    false
-                }
-            }
-        };
-        if proceed {
-            self.start_redis_set_value_write(cx);
-        }
-        cx.notify();
-    }
-
     fn request_redis_mutation(
         &mut self,
         connection_id: String,
@@ -3310,6 +3272,9 @@ impl HostToolsEntity {
         let Some(messages) = self.messages.clone() else {
             return;
         };
+        if !self.redis_target_selected(&connection_id, &endpoint) {
+            return;
+        }
         let request = HostRedisMutationRequest {
             connection_id,
             endpoint,
@@ -3389,6 +3354,17 @@ impl HostToolsEntity {
                 let text = String::from_utf8_lossy(&output.stdout);
                 match parse_redis_key_mutation(&text) {
                     ResourceRedisStatus::Available => (true, String::new()),
+                    ResourceRedisStatus::Error { message }
+                        if message == REDIS_KEY_EXISTS_SENTINEL =>
+                    {
+                        (
+                            false,
+                            self.messages
+                                .as_ref()
+                                .map(|m| m.redis_create_key_exists.clone())
+                                .unwrap_or_else(|| delivery.request.failure_fallback.clone()),
+                        )
+                    }
                     ResourceRedisStatus::Error { message } => (false, message),
                     _ => (false, delivery.request.failure_fallback.clone()),
                 }
@@ -3582,12 +3558,7 @@ fn validate_redis_set_value(
             if dialog.entries.is_empty() {
                 return Err(RedisSetValueError::EmptyEntries);
             }
-            Ok(dialog
-                .entries
-                .iter()
-                .map(|entry| entry.as_str())
-                .collect::<Vec<_>>()
-                .join("\n"))
+            Ok(String::new())
         }
     }
 }
@@ -3691,13 +3662,15 @@ fn redis_value_copy_is_complete(value: &ResourceRedisValue) -> bool {
         ResourceRedisValueKind::String | ResourceRedisValueKind::Json => {
             // JSON reads report no length; a string is bounded by STRLEN, so a
             // shorter reply means the capture stopped early.
-            return value.length.is_none_or(|length| {
-                let bytes = value
-                    .elements
-                    .first()
-                    .map_or(value.body.len(), |element| element.len());
-                bytes as u64 == length
-            });
+            return value
+                .length
+                .map_or(value.kind == ResourceRedisValueKind::Json, |length| {
+                    let bytes = value
+                        .elements
+                        .first()
+                        .map_or(value.body.len(), |element| element.len());
+                    bytes as u64 == length
+                });
         }
         ResourceRedisValueKind::Hash | ResourceRedisValueKind::SortedSet => {
             let elements = if value.elements.is_empty() {
@@ -3731,25 +3704,6 @@ fn redis_value_copy_text(value: &ResourceRedisValue) -> String {
         ResourceRedisValueKind::Json | ResourceRedisValueKind::String => value.body.clone(),
         _ => redis_value_text(value),
     }
-}
-
-/// Compares what an edit can change. TTL and memory usage move between reads
-/// without the value being touched, so they are ignored.
-fn redis_value_content_matches(left: &ResourceRedisValue, right: &ResourceRedisValue) -> bool {
-    left.status == right.status
-        && left.kind == right.kind
-        && left.body == right.body
-        && left.elements == right.elements
-}
-
-fn redis_set_value_matches_request(
-    dialog: &HostRedisSetValueDialog,
-    request: &HostRedisValueRequest,
-) -> bool {
-    dialog.connection_id == request.connection_id
-        && dialog.endpoint == request.endpoint
-        && dialog.database == request.database
-        && dialog.key == request.key
 }
 
 #[cfg(test)]

@@ -1356,6 +1356,26 @@ fn redis_endpoint(target: &str) -> oxideterm_connection_monitor::ResourceRedisEn
     }
 }
 
+#[gpui::test]
+fn redis_credentials_clear_on_endpoint_and_automatic_host_changes(cx: &mut TestAppContext) {
+    let (tx, rx) = tokio::sync::mpsc::channel(1);
+    let host = cx.new(|cx| HostToolsEntity::new(tx, rx, SshConnectionRegistry::default(), cx));
+    host.update(cx, |host, cx| {
+        host.select_connection("first".into(), None, cx);
+        host.select_redis_endpoint(redis_endpoint("one"), cx);
+        host.ui.host_redis_password.push_str("first-only");
+        host.select_redis_endpoint(redis_endpoint("two"), cx);
+        assert_eq!(host.ui.host_redis_password.as_str(), "");
+        host.ui.host_redis_password.push_str("second-only");
+        assert_eq!(
+            host.ensure_selected_connection(&["next".into()], cx)
+                .as_deref(),
+            Some("next")
+        );
+        assert_eq!(host.ui.host_redis_password.as_str(), "");
+    });
+}
+
 fn redis_keys_request(connection_id: &str, target: &str) -> HostRedisKeysRequest {
     HostRedisKeysRequest {
         connection_id: connection_id.to_string(),
@@ -1458,18 +1478,13 @@ fn redis_value_dialog_only_accepts_the_delivery_for_its_own_target() {
     }
     // Purpose is not part of the target identity: the receiver decides what a
     // copy or verify read may do with the dialog.
-    for purpose in [
+    assert!(dialog.matches_request(&redis_value_request(
+        "conn-a",
+        "127.0.0.1:6379",
+        0,
+        "session:1",
         HostRedisValuePurpose::Copy,
-        HostRedisValuePurpose::VerifyWrite,
-    ] {
-        assert!(dialog.matches_request(&redis_value_request(
-            "conn-a",
-            "127.0.0.1:6379",
-            0,
-            "session:1",
-            purpose,
-        )));
-    }
+    )));
 
     // The mutation identity is the target too: the same key on another
     // endpoint is not the dialog's key.

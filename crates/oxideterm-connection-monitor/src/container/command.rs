@@ -18,7 +18,7 @@ use crate::container::quote::{
 /// Structured options for launching one container from an image. The panel
 /// collects them in the run dialog; every field is validated before it reaches
 /// a command line.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ContainerRunOptions {
     /// `--name`; empty omits the flag.
     pub name: String,
@@ -88,54 +88,34 @@ fn parse_volume_specs(field: &str) -> Result<Vec<String>, String> {
 /// or port ranges. The engine reports anything the CLI rejects, but obvious
 /// typos should fail in the dialog instead of opening a dead terminal.
 fn validated_port_spec(spec: &str) -> Result<String, String> {
-    let (address, protocol) = match spec.split_once('/') {
-        Some((address, protocol)) => {
-            if !matches!(protocol, "tcp" | "udp" | "sctp") {
-                return Err("Invalid port spec.".to_string());
-            }
-            (address, Some(protocol))
-        }
-        None => (spec, None),
+    let address = match spec.split_once('/') {
+        Some((address, "tcp" | "udp" | "sctp")) => address,
+        Some(_) => return Err("Invalid port spec.".to_string()),
+        None => spec,
     };
-    let mut parts: Vec<&str> = address.split(':').collect();
-    // `host:container` or `host:container_start-container_end`; a bare
-    // container port is one part.
-    if parts.len() > 3 {
-        return Err("Invalid port spec.".to_string());
+    let mut ports = address.rsplitn(3, ':');
+    validated_port_range(ports.next().unwrap_or_default())?;
+    if let Some(host_port) = ports.next() {
+        validated_port_range(host_port)?;
     }
-    if parts.len() == 3 {
-        // An IPv6 host needs its own brackets and is rare enough to leave to
-        // the CLI error path; plain IPv4 hosts are accepted here.
-        let host = parts[0];
-        if host.is_empty() || !host.chars().all(|c| c.is_ascii_digit() || c == '.') {
+    if let Some(host) = ports.next() {
+        let valid = match host.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+            Some(ip) => ip.parse::<std::net::Ipv6Addr>().is_ok(),
+            None => host.parse::<std::net::Ipv4Addr>().is_ok(),
+        };
+        if !valid {
             return Err("Invalid port spec.".to_string());
         }
     }
-    let container_parts = if parts.len() == 3 {
-        parts.split_off(2)
-    } else {
-        parts.clone()
-    };
-    for part in &container_parts {
-        validated_port_range(part)?;
-    }
-    if parts.len() >= 2 {
-        validated_port_range(parts[0])?;
-    }
-    let _ = protocol;
     Ok(spec.to_string())
 }
 
 fn validated_port_range(part: &str) -> Result<(), String> {
-    if part.is_empty() || !part.chars().all(|c| c.is_ascii_digit() || c == '-') {
-        return Err("Invalid port spec.".to_string());
+    let (start, end) = part.split_once('-').unwrap_or((part, part));
+    match (start.parse::<u16>(), end.parse::<u16>()) {
+        (Ok(start), Ok(end)) if start > 0 && start <= end => Ok(()),
+        _ => Err("Invalid port spec.".to_string()),
     }
-    if let Some((start, end)) = part.split_once('-') {
-        if start.is_empty() || end.is_empty() {
-            return Err("Invalid port spec.".to_string());
-        }
-    }
-    Ok(())
 }
 
 /// Validates one `-v` spec: at least `source:destination`, optional trailing
@@ -147,12 +127,11 @@ fn validated_volume_spec(spec: &str) -> Result<String, String> {
     Ok(spec.to_string())
 }
 
-/// Builds the raw `run` argument text (flags and specs quoted, image quoted,
-/// command kept as the user typed it) for the `Run` terminal op.
-pub fn run_arguments(
+pub(super) fn run_arguments(
     os_type: &str,
     image: &str,
     options: &ContainerRunOptions,
+    mut quote: impl FnMut(&str) -> String,
 ) -> Result<String, String> {
     let image = validated_resource_name(image)?;
     let mut args = String::new();
@@ -170,18 +149,18 @@ pub fn run_arguments(
         // `--name --all` would become a `docker` flag, so the name must pass
         // the same identifier rules as every other user-supplied reference.
         let name = validated_resource_name(name)?;
-        args.push_str(&format!("--name {} ", quote_argument(os_type, name)));
+        args.push_str(&format!("--name {} ", quote(name)));
     }
     for port in &options.ports {
-        args.push_str(&format!("-p {} ", quote_argument(os_type, port)));
+        args.push_str(&format!("-p {} ", quote(port)));
     }
     for volume in &options.volumes {
-        args.push_str(&format!("-v {} ", quote_argument(os_type, volume)));
+        args.push_str(&format!("-v {} ", quote(volume)));
     }
-    args.push_str(&quote_argument(os_type, image));
-    for word in split_container_command(&options.command)? {
+    args.push_str(&quote(image));
+    for word in split_container_command(&options.command, os_type)? {
         args.push(' ');
-        args.push_str(&quote_argument(os_type, &word));
+        args.push_str(&quote(&word));
     }
     Ok(args)
 }
@@ -191,7 +170,7 @@ pub fn run_arguments(
 /// The words are appended as separate quoted arguments, so a `;` or `&&` the
 /// user typed ends up inside the container command instead of terminating the
 /// generated host-shell line. Quotes group words the way a shell would.
-fn split_container_command(command: &str) -> Result<Vec<String>, String> {
+pub fn split_container_command(command: &str, os_type: &str) -> Result<Vec<String>, String> {
     let command = command.trim();
     if command.is_empty() {
         return Ok(Vec::new());
@@ -227,7 +206,7 @@ fn split_container_command(command: &str) -> Result<Vec<String>, String> {
             }
             Quote::Double => match character {
                 '"' => quote = Quote::None,
-                '\\' => escaped = true,
+                '\\' if !crate::container::quote::is_windows(os_type) => escaped = true,
                 _ => word.push(character),
             },
             Quote::None => match character {
@@ -239,7 +218,7 @@ fn split_container_command(command: &str) -> Result<Vec<String>, String> {
                     quote = Quote::Double;
                     pending_word = true;
                 }
-                '\\' => {
+                '\\' if !crate::container::quote::is_windows(os_type) => {
                     escaped = true;
                     pending_word = true;
                 }
@@ -466,8 +445,8 @@ pub fn image_action_command(
     let prefix = instance.cli_prefix_for(os_type);
     let command = match action {
         ImageAction::Remove => {
-            let image_id = validated_container_id(image_id.unwrap_or_default())?;
-            format!("{prefix} rmi {image_id}")
+            let reference = validated_resource_name(image_id.unwrap_or_default())?;
+            format!("{prefix} rmi {}", quote_argument(os_type, reference))
         }
         ImageAction::Prune => format!("{prefix} image prune -f"),
     };
@@ -848,9 +827,10 @@ mod tests {
             image_action_command("Linux", &podman, ImageAction::Remove, Some("a1b2c3d4e5f6"))
                 .is_ok()
         );
-        assert!(
+        assert_eq!(
             image_action_command("Linux", &podman, ImageAction::Remove, Some("nginx:latest"))
-                .is_err()
+                .unwrap(),
+            "podman --url 'unix:///var/run/docker.sock' rmi 'nginx:latest' 2>&1"
         );
         assert_eq!(
             image_action_command("Linux", &podman, ImageAction::Prune, None).unwrap(),
@@ -1279,7 +1259,13 @@ mod run_option_tests {
 
     #[test]
     fn run_arguments_compose_flags_specs_and_command() {
-        let args = run_arguments("Linux", "nginx:alpine", &sample_options()).expect("args");
+        let args = run_arguments(
+            "Linux",
+            "nginx:alpine",
+            &sample_options(),
+            shell_quote_single,
+        )
+        .expect("args");
         assert_eq!(
             args,
             "-d -it --name 'web' -p '8080:80' -p '53:53/udp' -v '/srv/data:/data:ro' 'nginx:alpine' '/bin/sh' '-lc' 'env'"
@@ -1295,6 +1281,7 @@ mod run_option_tests {
                 detached: true,
                 ..ContainerRunOptions::default()
             },
+            shell_quote_single,
         )
         .expect("args");
         assert_eq!(args, "-d 'alpine'");
@@ -1302,7 +1289,7 @@ mod run_option_tests {
 
     #[test]
     fn run_option_specs_are_validated() {
-        assert!(parse_run_options("8080:80, 53/udp", "").is_ok());
+        assert!(parse_run_options("127.0.0.1:8080:80, [::1]:5353:53/udp", "").is_ok());
         assert!(parse_run_options("8080:80/icmp", "").is_err());
         assert!(parse_run_options("host:8080:80", "").is_err());
         assert!(parse_run_options("", "no-colon-mount").is_err());
@@ -1310,21 +1297,6 @@ mod run_option_tests {
         assert!(parse_run_options("8080:80', rm -rf /", "").is_err());
         let mut broken = sample_options();
         broken.name = "--all".to_string();
-        assert!(run_arguments("Linux", "alpine", &broken).is_err());
-    }
-
-    #[test]
-    fn windows_run_arguments_use_powershell_quoting() {
-        let mut options = sample_options();
-        options.volumes = vec!["C:\\data with space:/data".to_string()];
-        let args = run_arguments("Windows", "nginx:alpine", &options).expect("args");
-        assert!(args.contains("-v 'C:\\data with space:/data'"), "{args}");
-        // A name is a container identifier: the engine alphabet forbids the
-        // apostrophe PowerShell quoting would need to escape.
-        {
-            let mut options = sample_options();
-            options.name = "o'brien".to_string();
-            assert!(run_arguments("Windows", "nginx:alpine", &options).is_err());
-        }
+        assert!(run_arguments("Linux", "alpine", &broken, shell_quote_single).is_err());
     }
 }

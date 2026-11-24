@@ -10,15 +10,13 @@
 
 use crate::container::engine::ContainerEngine;
 use crate::container::instance::ContainerInstance;
-use crate::container::quote::{
-    is_windows, quote_argument, validated_container_id, validated_resource_name,
-};
+use crate::container::quote::{is_windows, validated_container_id, validated_resource_name};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ContainerTerminalOp {
-    /// Raw `run` arguments authored by the user in the input dialog.
     Run {
-        args: String,
+        image: String,
+        options: super::ContainerRunOptions,
     },
     Attach {
         container_id: String,
@@ -64,19 +62,23 @@ pub fn terminal_command(
 ) -> Result<String, String> {
     let prefix = instance.cli_prefix_for(os_type);
     // Every operation is wrapped in PowerShell on Windows so the line is parsed
-    // in one dialect. `run`/`build` still pass the user's argv through verbatim;
-    // only the wrapper is added.
+    // in one dialect. Build and run arguments are already individually quoted.
     let wrap_for_windows = is_windows(os_type);
-    let quote = |value: &str| quote_argument(os_type, value);
+    let mut bindings = Vec::new();
+    let mut quote = |value: &str| crate::shell::script_arg(wrap_for_windows, &mut bindings, value);
     let command = match op {
-        ContainerTerminalOp::Run { args } => {
-            let args = raw_arguments(&args, "run")?;
-            ensure_wrapper_safe(os_type, args)?;
+        ContainerTerminalOp::Run { image, options } => {
+            let args = super::command::run_arguments(os_type, &image, &options, &mut quote)?;
             format!("{prefix} run {args}")
         }
         ContainerTerminalOp::Build { args } => {
             let args = raw_arguments(&args, "build")?;
-            ensure_wrapper_safe(os_type, args)?;
+            let words = super::split_container_command(args, os_type)?;
+            let args = words
+                .iter()
+                .map(|word| quote(word))
+                .collect::<Vec<_>>()
+                .join(" ");
             format!("{prefix} build {args}")
         }
         ContainerTerminalOp::Attach { container_id } => {
@@ -124,7 +126,7 @@ pub fn terminal_command(
         }
     };
     Ok(if wrap_for_windows {
-        crate::container::windows::powershell_command(&command)
+        crate::shell::windows_encoded_command(&crate::shell::powershell_script(&bindings, &command))
     } else {
         command
     })
@@ -160,16 +162,6 @@ fn validated_path(path: &str) -> Result<&str, String> {
     Ok(path)
 }
 
-/// The cmd.exe wrapper delimits the PowerShell line with double quotes, so a
-/// user-authored `"` would end the script early. PowerShell literals only need
-/// single quotes, so the value is rejected instead of escaped.
-fn ensure_wrapper_safe(os_type: &str, args: &str) -> Result<(), String> {
-    if is_windows(os_type) && args.contains('"') {
-        return Err("Double quotes are not supported in Windows terminal arguments.".to_string());
-    }
-    Ok(())
-}
-
 #[allow(dead_code)]
 fn engine_supports_attach(engine: ContainerEngine) -> bool {
     // Attach is available on every engine, including `wslc`.
@@ -196,22 +188,39 @@ mod tests {
 
     #[test]
     fn run_and_build_keep_user_arguments_and_prefix() {
+        let build = terminal_command(
+            "Linux",
+            &podman(),
+            ContainerTerminalOp::Build {
+                args: "-f 'my files/Dockerfile' .".into(),
+            },
+        )
+        .unwrap();
+        assert!(build.ends_with(" build '-f' 'my files/Dockerfile' '.'"));
         assert_eq!(
             terminal_command(
                 "Linux",
                 &podman(),
                 ContainerTerminalOp::Run {
-                    args: "-d --name web nginx:alpine".into()
+                    image: "nginx:alpine".into(),
+                    options: super::super::ContainerRunOptions {
+                        detached: true,
+                        name: "web".into(),
+                        ..Default::default()
+                    }
                 }
             )
             .unwrap(),
-            "podman --url 'unix:///run/user/1000/podman/podman.sock' run -d --name web nginx:alpine"
+            "podman --url 'unix:///run/user/1000/podman/podman.sock' run -d --name 'web' 'nginx:alpine'"
         );
         assert!(
             terminal_command(
                 "Linux",
                 &podman(),
-                ContainerTerminalOp::Run { args: "  ".into() }
+                ContainerTerminalOp::Run {
+                    image: String::new(),
+                    options: Default::default()
+                }
             )
             .is_err()
         );
@@ -288,37 +297,30 @@ mod tests {
             },
         )
         .expect("windows save command");
-        // cmd.exe only sees the wrapper; the path keeps PowerShell's `''` escape.
-        assert!(save.starts_with("powershell -NoProfile -NonInteractive -Command \""));
-        assert!(save.ends_with('"'));
-        assert!(save.contains(r"'C:\Users\O''Brien\image.tar'"), "{save}");
-        // Raw user argv stays verbatim but now runs inside the same wrapper.
+        crate::shell::assert_inert_windows_line(&save);
+        let script = crate::shell::decoded_windows_script(&save);
+        assert_eq!(
+            crate::shell::decoded_powershell_data(&script),
+            [r"C:\Users\O'Brien\image.tar", "alpine:latest"]
+        );
         let run = terminal_command(
             "Windows",
             &wslc,
             ContainerTerminalOp::Run {
-                args: "-d nginx".into(),
+                image: "nginx".into(),
+                options: super::super::ContainerRunOptions {
+                    detached: true,
+                    volumes: vec![r"C:\data with space:/data".into()],
+                    ..Default::default()
+                },
             },
         )
-        .expect("windows run command");
+        .unwrap();
+        let script = crate::shell::decoded_windows_script(&run);
         assert_eq!(
-            run,
-            "powershell -NoProfile -NonInteractive -Command \"wslc run -d nginx\""
+            crate::shell::decoded_powershell_data(&script),
+            [r"C:\data with space:/data", "nginx"]
         );
-        // A double quote would close the cmd.exe wrapper, so argv carrying one
-        // is rejected rather than spliced into the script.
-        assert!(
-            terminal_command(
-                "Windows",
-                &wslc,
-                ContainerTerminalOp::Run {
-                    args: "-e \"A=b\" nginx".into(),
-                }
-            )
-            .is_err()
-        );
-        // Win32 paths cannot contain a double quote; accepting one would let
-        // the path close the PowerShell argument.
         assert!(
             terminal_command(
                 "Windows",

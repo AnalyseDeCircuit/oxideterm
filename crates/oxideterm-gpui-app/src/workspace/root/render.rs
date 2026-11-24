@@ -1355,25 +1355,11 @@ impl WorkspaceApp {
                 self.render_host_container_confirm_dialog(cx),
                 |root, dialog| root.child(dialog),
             )
-            .when_some(
-                self.render_host_container_text_dialog(cx),
-                |root, dialog| root.child(dialog),
-            )
-            .when_some(
-                self.render_host_container_input_dialog(cx),
-                |root, dialog| root.child(dialog),
-            )
-            .when_some(
-                self.render_host_redis_value_dialog(window, cx),
-                |root, dialog| root.child(dialog),
-            )
-            .when_some(self.render_host_redis_delete_dialog(cx), |root, dialog| {
-                root.child(dialog)
+            .when(oxideterm_gpui_host_tools::HostToolsDialogs::visible(self.host_tools.read(cx)), |root| {
+                let focus = self.standard_confirm_focus();
+                self.host_tool_dialogs.update(cx, |view,_| view.sync_window(self.tokens, &self.i18n, settings_mono_font_family(self.settings_store.settings()), focus));
+                root.child(self.host_tool_dialogs.clone())
             })
-            .when_some(
-                self.render_host_redis_create_key_dialog(cx),
-                |root, dialog| root.child(dialog),
-            )
             .when_some(
                 self.render_host_service_confirm_dialog(cx),
                 |root, dialog| root.child(dialog),

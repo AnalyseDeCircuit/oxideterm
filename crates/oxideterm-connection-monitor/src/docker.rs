@@ -69,7 +69,7 @@ pub fn docker_action_availability(state: &str) -> DockerActionAvailability {
     let is_live = matches!(state.as_str(), "running" | "restarting" | "paused");
     DockerActionAvailability {
         can_start: !is_live,
-        can_stop: matches!(state.as_str(), "running" | "paused"),
+        can_stop: is_live,
         can_restart: matches!(state.as_str(), "running" | "paused"),
         can_pause: state == "running",
         can_unpause: state == "paused",
@@ -824,7 +824,7 @@ mod tests {
                 docker_action_availability(&snapshot.containers[0].state),
                 DockerActionAvailability {
                     can_start: !live,
-                    can_stop: matches!(state, "running" | "paused"),
+                    can_stop: live,
                     can_restart: matches!(state, "running" | "paused"),
                     can_pause: state == "running",
                     can_unpause: state == "paused",
@@ -953,10 +953,9 @@ mod tests {
         assert!(paused.can_stop && paused.can_restart);
         assert!(!paused.can_exec && !paused.can_pause && !paused.can_remove);
 
-        // Docker rejects `pause` while a restart is in flight, and the state
-        // also blocks stop/restart until the container settles.
+        // Docker rejects `pause` while a restart is in flight, but stopping must remain available during a restart loop.
         let restarting = docker_action_availability("restarting");
-        assert!(!restarting.can_pause && !restarting.can_stop && !restarting.can_restart);
+        assert!(!restarting.can_pause && restarting.can_stop && !restarting.can_restart);
         // Docker refuses `exec` while the container restarts.
         assert!(!restarting.can_unpause && restarting.can_use_live_tools && !restarting.can_exec);
 

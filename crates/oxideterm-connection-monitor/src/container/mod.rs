@@ -16,7 +16,7 @@ mod engine;
 mod instance;
 mod model;
 mod parse;
-mod quote;
+pub(crate) mod quote;
 mod registries;
 mod snapshot;
 mod stats;
@@ -31,7 +31,7 @@ pub use command::{
     create_network_command, create_pod_command, create_volume_command, exec_shell_command,
     follow_logs_command, healthcheck_command, image_action_command, logout_command,
     network_action_command, parse_run_options, pod_action_availability, pod_action_command,
-    prune_images_command, rename_container_command, run_arguments, tag_image_command,
+    prune_images_command, rename_container_command, split_container_command, tag_image_command,
     volume_action_command,
 };
 pub use discovery::{

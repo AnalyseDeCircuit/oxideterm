@@ -1,6 +1,8 @@
 //! Host Tools panels and page-owned operations. The app owns window input and the shared SSH nodes.
 
 mod delivery;
+mod dialogs;
+pub use dialogs::{HostToolDialogWindow, HostToolsDialogs};
 mod entity;
 mod events;
 mod exec;
@@ -29,8 +31,8 @@ use oxideterm_connection_monitor::container::{
     healthcheck_command, image_action_command, logout_command, network_action_command,
     parse_discovery, parse_registries, parse_run_options, parse_snapshot, parse_stats,
     pod_action_availability, pod_action_command, prune_images_command, registries_command,
-    rename_container_command, run_arguments, snapshot_command, stats_command, tag_image_command,
-    terminal_command, volume_action_command,
+    rename_container_command, snapshot_command, stats_command, tag_image_command, terminal_command,
+    volume_action_command,
 };
 use oxideterm_connection_monitor::{
     ConnectionPoolEntrySummary, ConnectionPoolMonitorStats, DockerActionKind,

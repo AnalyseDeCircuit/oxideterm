@@ -574,13 +574,9 @@ impl HostToolsEntity {
         // The password travels on the exec channel's stdin: never in argv, the
         // command text, an audit record, or a Debug formatter.
         let pattern = request.pattern.clone().unwrap_or_default();
-        let mut payload = zeroize::Zeroizing::new(Vec::with_capacity(
-            request.password.len() + pattern.len() + 2,
-        ));
-        payload.extend_from_slice(request.password.as_bytes());
-        payload.push(b'\n');
-        payload.extend_from_slice(pattern.as_bytes());
-        payload.push(b'\n');
+        let Some(payload) = redis_stdin_payload(&request.password, &[&pattern]) else {
+            return false;
+        };
         let delivery_tx = self.reliable_delivery_tx.clone();
         // Browse output stays inside the Entity and is parsed before render.
         runtime.spawn(async move {
@@ -1259,6 +1255,7 @@ impl HostToolsEntity {
     }
 
     pub fn take_selected_connection(&mut self, cx: &mut Context<Self>) -> Option<String> {
+        self.ui.host_redis_password = zeroize::Zeroizing::default();
         let selected = self.selected_connection_id.take();
         self.close_selector(true, cx);
         selected
@@ -1287,7 +1284,9 @@ impl HostToolsEntity {
             // away; keeping it open would let that value be submitted against
             // the fallback connection.
             self.dismiss_mux_input_dialog(cx);
-            self.selected_connection_id = live_connection_ids.first().cloned();
+            if let Some(next) = live_connection_ids.first() {
+                self.select_connection(next.clone(), None, cx);
+            }
             cx.notify();
         }
         self.selected_connection_id.clone()

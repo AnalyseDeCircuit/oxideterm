@@ -700,6 +700,7 @@ pub(crate) struct WorkspaceApp {
     graphics_surface: Entity<graphics::GraphicsSurfaceView>,
     _graphics_subscription: Subscription,
     host_tools: Entity<HostToolsEntity>,
+    host_tool_dialogs: Entity<oxideterm_gpui_host_tools::HostToolsDialogs>,
     _host_tools_subscription: Subscription,
     cloud_sync: Entity<cloud_sync::CloudSyncWorkspaceEntity>,
     cloud_sync_panel: Entity<oxideterm_gpui_cloud_sync::panel::CloudSyncPanelView>,

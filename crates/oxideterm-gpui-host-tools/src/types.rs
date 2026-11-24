@@ -538,9 +538,6 @@ pub enum HostRedisValuePurpose {
     Open,
     /// The row menu copies the value without opening the dialog.
     Copy,
-    /// A save re-reads the key first, so an edit is only written when the
-    /// server copy still matches the value the editor opened with.
-    VerifyWrite,
 }
 
 #[derive(Clone)]
@@ -731,8 +728,7 @@ pub struct HostRedisSetValueDialog {
     pub key: String,
     /// Shape being edited, taken from the fetched value.
     pub kind: RedisValueWriteKind,
-    /// Value the editor opened with. Saving re-reads the key and refuses to
-    /// overwrite when the server copy no longer matches this baseline.
+    /// The server compares these bytes with the live key before publishing a replacement.
     pub base: Option<oxideterm_connection_monitor::ResourceRedisValue>,
     /// Replacement value for string/JSON, or the pending element.
     pub value: zeroize::Zeroizing<String>,

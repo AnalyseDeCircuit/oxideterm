@@ -2320,8 +2320,15 @@ impl HostToolsEntity {
                     );
                 }
                 {
-                    let target = image.id.clone();
-                    let label = reference.clone();
+                    let target = if image.repository.is_empty()
+                        || image.repository == "<none>"
+                        || image.tag == "<none>"
+                    {
+                        image.id.clone()
+                    } else {
+                        reference.clone()
+                    };
+                    let label = target.clone();
                     let instance = instance.clone();
                     let connection_id = connection_id_owned.clone();
                     self.render_row_action(
@@ -3985,19 +3992,13 @@ impl HostToolsEntity {
                         return;
                     }
                 };
-                let args = match oxideterm_connection_monitor::container::run_arguments(
-                    &os_type, &value, &options,
-                ) {
-                    Ok(args) => args,
-                    Err(_) => {
-                        failed(cx);
-                        return;
-                    }
-                };
                 match oxideterm_connection_monitor::container::terminal_command(
                     &os_type,
                     &instance,
-                    oxideterm_connection_monitor::container::ContainerTerminalOp::Run { args },
+                    oxideterm_connection_monitor::container::ContainerTerminalOp::Run {
+                        image: value,
+                        options,
+                    },
                 ) {
                     Ok(command) => dispatch_terminal(self, command, "run".to_string(), cx),
                     Err(_) => failed(cx),
@@ -4070,9 +4071,14 @@ impl HostToolsEntity {
                 }
             }
             HostContainerInputKind::Import => {
-                let mut parts = value.split_whitespace();
-                let path = parts.next().unwrap_or_default().to_string();
-                let reference = parts.next().unwrap_or_default().to_string();
+                let Ok(parts) = oxideterm_connection_monitor::container::split_container_command(
+                    &value, &os_type,
+                ) else {
+                    return failed(cx);
+                };
+                let Ok([path, reference]) = <[String; 2]>::try_from(parts) else {
+                    return failed(cx);
+                };
                 match oxideterm_connection_monitor::container::terminal_command(
                     &os_type,
                     &instance,
@@ -4112,9 +4118,14 @@ impl HostToolsEntity {
                 }
             }
             HostContainerInputKind::Copy { container_id } => {
-                let mut parts = value.split_whitespace();
-                let source = parts.next().unwrap_or_default().to_string();
-                let destination = parts.next().unwrap_or_default().to_string();
+                let Ok(parts) = oxideterm_connection_monitor::container::split_container_command(
+                    &value, &os_type,
+                ) else {
+                    return failed(cx);
+                };
+                let Ok([source, destination]) = <[String; 2]>::try_from(parts) else {
+                    return failed(cx);
+                };
                 match oxideterm_connection_monitor::container::terminal_command(
                     &os_type,
                     &instance,
