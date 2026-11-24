@@ -26,10 +26,10 @@ impl WorkspaceApp {
             })
             .collect();
         let settings = self.settings_store.settings();
-        let mut horizontal_chrome_width = self.context_sidebar_occupied_width(cx);
+        let mut horizontal_chrome_width = self.context_sidebar_occupied_width();
         if !settings.sidebar_ui.zen_mode {
             horizontal_chrome_width += self.tokens.metrics.activity_bar_width;
-            if !self.sidebar_collapsed {
+            if !self.rails.left.collapsed() {
                 horizontal_chrome_width += self.sidebar_panel_width();
             }
         }

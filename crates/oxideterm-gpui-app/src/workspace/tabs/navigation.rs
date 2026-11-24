@@ -1137,8 +1137,7 @@ impl WorkspaceApp {
         if tab.kind == TabKind::NotificationCenter {
             self.audit.update(cx, |audit, cx| audit.hide_audit_page(cx));
         }
-        if tab.kind == TabKind::SessionManager
-            && self.active_sidebar_section == SidebarSection::Connections
+        if tab.kind == TabKind::SessionManager && self.rails.section == SidebarSection::Connections
         {
             if self.session_manager_handoff_to_sidebar {
                 // The tabbar's "show in sidebar" handoff closes this tab while
@@ -1475,9 +1474,9 @@ impl WorkspaceApp {
         }
     }
 
-    fn tabbar_outer_width(&self, window: &Window, cx: &App) -> f32 {
+    fn tabbar_outer_width(&self, window: &Window) -> f32 {
         let window_width = f32::from(window.inner_window_bounds().get_bounds().size.width);
-        let context_sidebar_width = self.context_sidebar_occupied_width(cx);
+        let context_sidebar_width = self.context_sidebar_occupied_width();
         (window_width
             - self.tabbar_left_x(window)
             - context_sidebar_width
@@ -1485,16 +1484,12 @@ impl WorkspaceApp {
         .max(0.0)
     }
 
-    pub(in crate::workspace) fn tabbar_scroll_viewport_width(
-        &self,
-        window: &Window,
-        cx: &App,
-    ) -> f32 {
+    pub(in crate::workspace) fn tabbar_scroll_viewport_width(&self, window: &Window) -> f32 {
         let measured_width = f32::from(self.main_window_tabs.scroll_handle.bounds().size.width);
         if measured_width > 1.0 {
             return measured_width;
         }
-        self.tabbar_outer_width(window, cx)
+        self.tabbar_outer_width(window)
     }
 
     pub(in crate::workspace) fn tabbar_left_x(&self, window: &Window) -> f32 {
@@ -1505,16 +1500,16 @@ impl WorkspaceApp {
             } else {
                 0.0
             }
-        } else if self.sidebar_collapsed {
+        } else if self.rails.left.collapsed() {
             self.tokens.metrics.activity_bar_width
         } else {
-            self.sidebar_width
+            self.rails.left.width()
         }
     }
 
     pub(in crate::workspace) fn tabbar_max_scroll(&self, window: &Window, cx: &App) -> f32 {
         (self.tab_strip_layout(window, cx).content_width()
-            - self.tabbar_scroll_viewport_width(window, cx))
+            - self.tabbar_scroll_viewport_width(window))
         .max(0.0)
     }
 
@@ -1607,7 +1602,7 @@ impl WorkspaceApp {
         };
         let tab_left = bounds.start;
         let tab_right = bounds.end;
-        let viewport_width = self.tabbar_scroll_viewport_width(window, cx);
+        let viewport_width = self.tabbar_scroll_viewport_width(window);
 
         let current_scroll_x = self.tabbar_effective_scroll_x(window, cx);
         let mut next_scroll_x = current_scroll_x;

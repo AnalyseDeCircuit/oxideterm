@@ -163,17 +163,6 @@ impl WorkspaceApp {
         if !self.tokens.motion.enabled {
             self.disclosure_motions.clear();
         }
-        self.sidebar_collapsed = settings.sidebar_ui.collapsed;
-        self.sidebar_motion_generation = self.sidebar_motion_generation.wrapping_add(1);
-        self.context_sidebar_motion_generation =
-            self.context_sidebar_motion_generation.wrapping_add(1);
-        self.sidebar_rendered = !settings.sidebar_ui.collapsed;
-        self.context_sidebar_rendered = crate::workspace::sidebar::context_sidebar_panel_visible(
-            settings.sidebar_ui.ai_sidebar_collapsed,
-            settings.sidebar_ui.zen_mode,
-            settings.ai.enabled,
-            self.active_context_sidebar_panel,
-        );
         let viewport_width = self
             .ai
             .state
@@ -184,7 +173,7 @@ impl WorkspaceApp {
             .unwrap_or(self.tokens.metrics.window_min_width);
         // External settings reloads use the same responsive limits as pointer
         // resizing, so persisted pixel widths cannot bypass the live viewport.
-        self.sidebar_width = crate::workspace::sidebar::clamp_responsive_sidebar_width(
+        let primary_width = crate::workspace::sidebar::clamp_responsive_sidebar_width(
             settings.sidebar_ui.width as f32,
             viewport_width,
             self.tokens.metrics.sidebar_min_width,
@@ -196,20 +185,21 @@ impl WorkspaceApp {
             AI_SIDEBAR_ABSOLUTE_MIN_WIDTH,
             AI_SIDEBAR_ABSOLUTE_MAX_WIDTH,
         );
-        self.ai.state.update(cx, |ai, _cx| {
-            ai.set_chat_sidebar_width(ai_sidebar_width);
-        });
-        self.sidebar_motion.settle(if self.sidebar_rendered {
-            self.sidebar_panel_width()
-        } else {
-            0.0
-        });
-        self.context_sidebar_motion
-            .settle(if self.context_sidebar_rendered {
-                ai_sidebar_width
-            } else {
-                0.0
-            });
+        let right_visible = !settings.sidebar_ui.ai_sidebar_collapsed
+            && !settings.sidebar_ui.zen_mode
+            && (settings.ai.enabled || self.rails.context_panel == ContextSidebarPanel::HostTools);
+        self.rails.left.restore(
+            primary_width,
+            settings.sidebar_ui.collapsed,
+            !settings.sidebar_ui.collapsed && !settings.sidebar_ui.zen_mode,
+            &self.tokens,
+        );
+        self.rails.right.restore(
+            ai_sidebar_width,
+            settings.sidebar_ui.ai_sidebar_collapsed,
+            right_visible,
+            &self.tokens,
+        );
         self.apply_terminal_preferences_to_panes(cx);
         // Toolbar chips are pane render state outside the preference snapshot;
         // a locale switch changes their labels, so re-push them here.

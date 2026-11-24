@@ -12,7 +12,7 @@ impl WorkspaceApp {
         let search_ime = self
             .host_tools_plain_text_ime_frame(HostToolsTextInput::TmuxSearch, cx)
             .expect("tmux search is a non-secret Host Tools input");
-        let sidebar_width = self.ai.state.read(cx).chat_ui().sidebar_width;
+        let sidebar_width = self.rails.right.width();
         // Attach buttons need a terminal target; the Entity cannot see the
         // workspace-owned node router, so the view resolves it once here.
         let terminal_available = self

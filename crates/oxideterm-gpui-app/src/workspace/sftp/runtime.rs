@@ -734,7 +734,7 @@ impl WorkspaceApp {
         // request exactly once. Keep the Session Manager panel when it is the
         // visible one instead of jumping to Active Sessions.
         if self.sidebar_hosts_embedded_sftp() {
-            if self.sidebar_collapsed {
+            if self.rails.left.collapsed() {
                 self.set_sidebar_collapsed_with_motion(false, cx);
             }
             self.activate_embedded_sftp_sidebar_if_visible(cx);
@@ -802,7 +802,7 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn sftp_sidebar_can_mount_dialog(&self, cx: &App) -> bool {
         let sftp = self.sftp_view.read(cx);
-        !self.sidebar_collapsed
+        !self.rails.left.collapsed()
             && !self.settings_store.settings().sidebar_ui.zen_mode
             && self.sidebar_hosts_embedded_sftp()
             && self.embedded_sftp_node_id.is_some()
@@ -817,7 +817,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let _scope = self.enter_sftp_surface(SftpSurfaceId::Sidebar);
-        if self.sidebar_collapsed
+        if self.rails.left.collapsed()
             || !self.sidebar_hosts_embedded_sftp()
             || self
                 .active_tab(cx)
@@ -1165,7 +1165,7 @@ impl WorkspaceApp {
                 let Some(node_id) = remote_id.node_id() else {
                     return false;
                 };
-                !self.sidebar_collapsed
+                !self.rails.left.collapsed()
                     && self.sidebar_hosts_embedded_sftp()
                     && !self
                         .active_tab(cx)

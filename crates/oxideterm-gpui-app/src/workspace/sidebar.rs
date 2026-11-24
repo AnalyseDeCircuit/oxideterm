@@ -55,33 +55,8 @@ pub(super) fn context_rail_icon_button_options(
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum SidebarSection {
-    Sessions,
-    Connections,
-    Forwards,
-    Runtime,
-    Terminal,
-    Network,
-    Extensions,
-    CloudSync,
-    Knowledge,
-    Assistant,
-    HostTools,
-    Automation,
-    Workspace,
-    Files,
-    Notifications,
-    Settings,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum ContextSidebarPanel {
-    Assistant,
-    HostTools,
-}
-
 pub(super) use oxideterm_gpui_host_tools::ContextSidebarTool;
+pub(super) use oxideterm_gpui_shell::{ContextSidebarPanel, SidebarSection};
 
 #[derive(Clone, Copy)]
 pub(in crate::workspace) struct SessionStatusStyle {
@@ -101,88 +76,9 @@ pub(super) enum ActiveSessionSidebarViewMode {
     Host,
 }
 
-impl SidebarSection {
-    pub(super) fn from_settings_key(key: &str) -> Self {
-        match key {
-            // The retired saved-connections sidebar now restores the active
-            // session navigator while the full manager remains a workspace tab.
-            "connections" | "saved" => Self::Sessions,
-            // The session manager sidebar body persists under its own key.
-            "session_manager" => Self::Connections,
-            // Embedded SFTP now shares the active-sessions panel. Preserve the
-            // old persisted key as a migration path instead of reopening a
-            // retired standalone sidebar.
-            "sftp" => Self::Sessions,
-            "forwards" => Self::Forwards,
-            "runtime" => Self::Runtime,
-            "connection_pool" | "terminal" => Self::Terminal,
-            // Retired health-page keys now restore the Host Tools replacement.
-            "connection_monitor" | "activity" => Self::HostTools,
-            "network" | "topology" => Self::Network,
-            "extensions" => Self::Extensions,
-            "cloud_sync" => Self::CloudSync,
-            "knowledge" => Self::Knowledge,
-            "ai" | "assistant" => Self::Assistant,
-            "host_tools" => Self::HostTools,
-            "automation" => Self::Automation,
-            "workspace" => Self::Workspace,
-            "files" => Self::Files,
-            // The standalone monitor activity button was retired after Host Tools
-            // became the cross-platform owner of connection monitoring.
-            "monitor" => Self::HostTools,
-            "notifications" => Self::Notifications,
-            "settings" => Self::Settings,
-            _ => Self::Sessions,
-        }
-    }
-
-    pub(super) fn as_settings_key(self) -> &'static str {
-        match self {
-            Self::Sessions => "sessions",
-            // The session manager sidebar renders the saved-connections tree
-            // inline in the sidebar body; persist under a stable key so the
-            // retired "saved"/"connections" migrations stay distinct.
-            Self::Connections => "session_manager",
-            Self::Forwards => "forwards",
-            Self::Runtime => "runtime",
-            Self::Terminal => "connection_pool",
-            Self::Network => "topology",
-            Self::Extensions => "extensions",
-            Self::CloudSync => "cloud_sync",
-            Self::Knowledge => "knowledge",
-            Self::Assistant => "ai",
-            Self::HostTools => "host_tools",
-            Self::Automation => "automation",
-            Self::Workspace => "workspace",
-            Self::Files => "files",
-            Self::Notifications => "notifications",
-            Self::Settings => "settings",
-        }
-    }
-}
-
 impl WorkspaceApp {
     pub(in crate::workspace) fn effective_sidebar_panel_section(&self) -> SidebarSection {
-        match self.active_sidebar_section {
-            SidebarSection::Sessions
-            | SidebarSection::Connections
-            | SidebarSection::Forwards
-            | SidebarSection::Extensions
-            | SidebarSection::CloudSync => self.active_sidebar_section,
-            // Tauri separates activity-bar tab buttons from sidebar sections.
-            // Keep tab-only entries from replacing the Sessions sidebar body.
-            SidebarSection::Terminal
-            | SidebarSection::Runtime
-            | SidebarSection::Network
-            | SidebarSection::Knowledge
-            | SidebarSection::Assistant
-            | SidebarSection::HostTools
-            | SidebarSection::Automation
-            | SidebarSection::Workspace
-            | SidebarSection::Files
-            | SidebarSection::Notifications
-            | SidebarSection::Settings => SidebarSection::Sessions,
-        }
+        self.rails.section.panel()
     }
 }
 
@@ -209,9 +105,7 @@ pub(in crate::workspace) use ai::{
     ai_input_line_index_for_offset, ai_input_visual_lines,
 };
 use helpers::*;
-pub(in crate::workspace) use state::{
-    clamp_responsive_sidebar_width, context_sidebar_panel_visible,
-};
+pub(in crate::workspace) use oxideterm_gpui_shell::clamp_responsive_sidebar_width;
 
 #[cfg(test)]
 mod sidebar_persistence_tests {

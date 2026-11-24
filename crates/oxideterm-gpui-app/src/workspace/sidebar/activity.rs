@@ -8,94 +8,10 @@ use std::{
 impl WorkspaceApp {
     pub(in crate::workspace) fn render_activity_bar(
         &mut self,
+        env: &ShellEnvironment,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let top_items = [
-            (SidebarSection::Sessions, LucideIcon::Link2),
-            (SidebarSection::Connections, LucideIcon::LayoutList),
-            (SidebarSection::Runtime, LucideIcon::Gauge),
-            (SidebarSection::Extensions, LucideIcon::Puzzle),
-            (SidebarSection::CloudSync, LucideIcon::Cloud),
-            (SidebarSection::Knowledge, LucideIcon::BookOpen),
-        ];
-        let bottom_items = [
-            (SidebarSection::Workspace, LucideIcon::Square),
-            (SidebarSection::Files, LucideIcon::FolderOpen),
-            (SidebarSection::Notifications, LucideIcon::Bell),
-            (SidebarSection::Settings, LucideIcon::Settings),
-        ];
-        let mut bar = div()
-            .w(px(self.tokens.metrics.activity_bar_width))
-            .h_full()
-            .flex()
-            .flex_col()
-            .items_center();
-
-        bar = bar.child(
-            div()
-                .relative()
-                .flex_none()
-                .w_full()
-                .h(px(self.tokens.metrics.tabbar_height))
-                .flex()
-                .items_center()
-                .justify_center()
-                // Paint top chrome directly over the window background so it
-                // matches the adjacent sidebar and workspace tab bars exactly.
-                .bg(self.workspace_chrome_background(theme.shell_bg()))
-                .border_b_1()
-                .border_color(self.workspace_chrome_divider())
-                .child(
-                    div()
-                        .id("activity-sidebar-toggle")
-                        .size(px(self.tokens.metrics.activity_icon_size))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .rounded(px(self.tokens.radii.md))
-                        .cursor_pointer()
-                        // Keep the primary-sidebar toggle feedback aligned with its context-sidebar counterpart.
-                        .hover(move |button| button.bg(rgb(theme.bg_hover)))
-                        .child(Self::render_lucide_icon(
-                            if self.sidebar_collapsed {
-                                LucideIcon::PanelLeft
-                            } else {
-                                LucideIcon::PanelLeftClose
-                            },
-                            self.tokens.metrics.sidebar_collapse_icon_size,
-                            rgb(theme.text_muted),
-                        ))
-                        .on_mouse_move(cx.listener({
-                            let label = self.i18n.t(if self.sidebar_collapsed {
-                                "sidebar.actions.expand"
-                            } else {
-                                "sidebar.actions.collapse"
-                            });
-                            move |this, event: &MouseMoveEvent, _window, cx| {
-                                this.queue_workspace_tooltip(
-                                    "activity-sidebar-toggle",
-                                    label.clone(),
-                                    f32::from(event.position.x) + 12.0,
-                                    f32::from(event.position.y) + 16.0,
-                                    cx,
-                                );
-                            }
-                        }))
-                        .on_hover(cx.listener(|this, hovered: &bool, _window, cx| {
-                            if !*hovered {
-                                this.clear_workspace_tooltip("activity-sidebar-toggle", cx);
-                            }
-                        }))
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _event, _window, cx| {
-                                this.toggle_sidebar(cx);
-                            }),
-                        ),
-                ),
-        );
-
         let mut primary_items = div()
             .id("activity-primary-items")
             .min_h_0()
@@ -106,7 +22,7 @@ impl WorkspaceApp {
             .flex()
             .flex_col()
             .items_center();
-        for (index, (section, icon)) in top_items.into_iter().enumerate() {
+        for (index, (section, icon)) in SidebarSection::PRIMARY_ITEMS.into_iter().enumerate() {
             if index == 3 {
                 primary_items = primary_items.child(
                     div()
@@ -192,7 +108,7 @@ impl WorkspaceApp {
             bottom = bottom.child(self.render_plugin_activity_action_icon(item, cx));
         }
         bottom = bottom.children(
-            bottom_items
+            SidebarSection::FOOTER_ITEMS
                 .into_iter()
                 .map(|(section, icon)| self.render_activity_icon(section, icon, cx)),
         );
@@ -200,134 +116,62 @@ impl WorkspaceApp {
             bottom = bottom.child(popover);
         }
 
-        bar.child(
-            div()
-                .flex_1()
-                .min_h_0()
-                .w_full()
-                .pb_2()
-                .flex()
-                .flex_col()
-                .items_center()
-                // The content column keeps the lighter sidebar tint without
-                // placing another translucent layer beneath the top chrome.
-                .bg(self.workspace_sidebar_background(theme.shell_bg()))
-                .child(primary_items)
-                .child(bottom),
+        let body = div()
+            .flex_1()
+            .min_h_0()
+            .w_full()
+            .pb_2()
+            .flex()
+            .flex_col()
+            .items_center()
+            // The content column keeps the lighter sidebar tint without
+            // placing another translucent layer beneath the top chrome.
+            .bg(self.workspace_sidebar_background(theme.shell_bg()))
+            .child(primary_items)
+            .child(bottom);
+        oxideterm_gpui_shell::activity_rail(
+            RailSide::Left,
+            !self.rails.left.collapsed(),
+            body,
+            env,
+            cx,
         )
-        .into_any_element()
     }
 
     pub(in crate::workspace) fn render_context_activity_bar(
         &self,
         window: &Window,
+        env: &ShellEnvironment,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let panel_visible = self.context_sidebar_visible();
-        let toggle_label = self.i18n.t(if panel_visible {
-            "sidebar.actions.collapse"
-        } else {
-            "sidebar.actions.expand"
-        });
-        div()
-            .id("context-activity-bar")
-            .flex_none()
-            .w(px(self.tokens.metrics.activity_bar_width))
-            .h_full()
+        let body = div()
+            .flex_1()
+            .min_h_0()
+            .w_full()
             .flex()
             .flex_col()
             .items_center()
-            .child(
-                div()
-                    .flex_none()
-                    .w_full()
-                    .h(px(self.tokens.metrics.tabbar_height))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .bg(self.workspace_chrome_background(theme.shell_bg()))
-                    .border_b_1()
-                    .border_color(self.workspace_chrome_divider())
-                    .child(
-                        oxideterm_gpui_ui::button::icon_button(
-                            &self.tokens,
-                            Self::render_lucide_icon(
-                                if panel_visible {
-                                    LucideIcon::PanelRightClose
-                                } else {
-                                    LucideIcon::PanelRight
-                                },
-                                self.tokens.metrics.sidebar_collapse_icon_size,
-                                rgb(theme.text_muted),
-                            ),
-                            oxideterm_gpui_ui::button::IconButtonOptions {
-                                radius: oxideterm_gpui_ui::button::ButtonRadius::Md,
-                                hover_background: Some(rgb(theme.bg_hover)),
-                                idle_opacity: 1.0,
-                                ..oxideterm_gpui_ui::button::IconButtonOptions::compact(
-                                    self.tokens.metrics.activity_icon_size,
-                                )
-                            },
-                        )
-                        .id("context-sidebar-toggle")
-                        .on_mouse_move(cx.listener(
-                            move |this, event: &MouseMoveEvent, _window, cx| {
-                                this.queue_workspace_tooltip(
-                                    "context-sidebar-toggle",
-                                    toggle_label.clone(),
-                                    f32::from(event.position.x) + 12.0,
-                                    f32::from(event.position.y) + 16.0,
-                                    cx,
-                                );
-                            },
-                        ))
-                        .on_hover(cx.listener(|this, hovered: &bool, _window, cx| {
-                            if !*hovered {
-                                this.clear_workspace_tooltip("context-sidebar-toggle", cx);
-                            }
-                        }))
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _event, _window, cx| {
-                                this.clear_workspace_tooltip("context-sidebar-toggle", cx);
-                                let _ = this.toggle_context_sidebar_panel(
-                                    this.active_context_sidebar_panel,
-                                    cx,
-                                );
-                                cx.stop_propagation();
-                            }),
-                        ),
-                    ),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_h_0()
-                    .w_full()
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .bg(self.workspace_sidebar_background(theme.shell_bg()))
-                    .child(self.render_context_tool_buttons(window, cx))
-                    .when(
-                        self.settings_store.settings().sidebar_ui.show_app_lock_icon,
-                        |body| {
-                            body.child(
-                                div()
-                                    .flex_none()
-                                    .pt(px(self.tokens.spacing.two))
-                                    .pb(px(self.tokens.spacing.two))
-                                    .mb(px(self.tokens.metrics.activity_icon_gap))
-                                    .child(self.render_app_lock_button(
-                                        self.tokens.metrics.activity_icon_size,
-                                        cx,
-                                    )),
-                            )
-                        },
-                    ),
-            )
-            .into_any_element()
+            .bg(self.workspace_sidebar_background(theme.shell_bg()))
+            .child(self.render_context_tool_buttons(window, cx))
+            .when(
+                self.settings_store.settings().sidebar_ui.show_app_lock_icon,
+                |body| {
+                    body.child(
+                        div()
+                            .flex_none()
+                            .pt(px(self.tokens.spacing.two))
+                            .pb(px(self.tokens.spacing.two))
+                            .mb(px(self.tokens.metrics.activity_icon_gap))
+                            .child(self.render_app_lock_button(
+                                self.tokens.metrics.activity_icon_size,
+                                cx,
+                            )),
+                    )
+                },
+            );
+        oxideterm_gpui_shell::activity_rail(RailSide::Right, panel_visible, body, env, cx)
     }
 
     pub(in crate::workspace) fn render_activity_icon(
@@ -369,9 +213,9 @@ impl WorkspaceApp {
             SidebarSection::Assistant => self.ai_sidebar_visible(),
             SidebarSection::HostTools => {
                 self.context_sidebar_visible()
-                    && self.active_context_sidebar_panel == ContextSidebarPanel::HostTools
+                    && self.rails.context_panel == ContextSidebarPanel::HostTools
             }
-            _ => self.active_sidebar_section == section,
+            _ => self.rails.section == section,
         };
         let tooltip = self.activity_icon_tooltip(section);
         let tooltip_id = format!("activity-icon-{}", section.as_settings_key());
@@ -479,62 +323,7 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, window, cx| {
-                    if section == SidebarSection::Settings {
-                        this.open_settings(window, cx);
-                    } else if section == SidebarSection::Terminal {
-                        this.open_connection_runtime_tab(
-                            ConnectionRuntimeSection::Overview,
-                            window,
-                            cx,
-                        );
-                    } else if section == SidebarSection::Runtime {
-                        this.open_connection_runtime_tab(
-                            ConnectionRuntimeSection::Overview,
-                            window,
-                            cx,
-                        );
-                    } else if section == SidebarSection::Network {
-                        this.open_topology_tab(window, cx);
-                    } else if section == SidebarSection::Workspace {
-                        // Tauri treats the bottom square as a local-terminal action.
-                        if !this.detached_local_terminals.is_empty() {
-                            this.detached_local_terminals_popover_open =
-                                !this.detached_local_terminals_popover_open;
-                            cx.notify();
-                        } else {
-                            let _ = this.create_local_terminal_tab(window, cx);
-                        }
-                    } else if section == SidebarSection::Files {
-                        this.open_file_manager_tab(window, cx);
-                    } else if section == SidebarSection::Notifications {
-                        this.open_notification_center_tab(window, cx);
-                    } else if section == SidebarSection::Assistant {
-                        let _ = this.toggle_ai_sidebar(cx);
-                    } else if section == SidebarSection::Knowledge {
-                        this.open_knowledge_workspace_tab(window, cx);
-                    } else if section == SidebarSection::HostTools {
-                        let _ =
-                            this.toggle_context_sidebar_panel(ContextSidebarPanel::HostTools, cx);
-                    } else if section == SidebarSection::CloudSync {
-                        this.open_cloud_sync_tab(window, cx);
-                    } else if section == SidebarSection::Extensions {
-                        this.open_plugin_manager_tab(window, cx);
-                    } else if section == SidebarSection::Connections {
-                        // While the Session Manager already lives in a tab the
-                        // icon is inert; the tab's context menu owns switching
-                        // back to the sidebar form.
-                        if !this
-                            .tabs(cx)
-                            .iter()
-                            .any(|tab| tab.kind == TabKind::SessionManager)
-                        {
-                            this.active_surface = ActiveSurface::Terminal;
-                            this.toggle_sidebar_section(section, cx);
-                        }
-                    } else {
-                        this.active_surface = ActiveSurface::Terminal;
-                        this.toggle_sidebar_section(section, cx);
-                    }
+                    this.request(ShellRequest::Select(section), window, cx);
                 }),
             )
             .into_any_element()
@@ -577,7 +366,7 @@ impl WorkspaceApp {
             plugin_id: panel.plugin_id.clone(),
             panel_id: panel.panel_id.clone(),
         };
-        let active = self.active_sidebar_section == SidebarSection::Extensions
+        let active = self.rails.section == SidebarSection::Extensions
             && self
                 .plugin_manager_state(cx)
                 .active_sidebar_panel
@@ -640,8 +429,8 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    let requested_panel_is_visible = !this.sidebar_collapsed
-                        && this.active_sidebar_section == SidebarSection::Extensions
+                    let requested_panel_is_visible = !this.rails.left.collapsed()
+                        && this.rails.section == SidebarSection::Extensions
                         && this
                             .plugin_manager_state(cx)
                             .active_sidebar_panel
@@ -790,6 +579,87 @@ pub(in crate::workspace) fn native_plugin_sidebar_activity_id(
     panel.plugin_id.hash(&mut hasher);
     panel.panel_id.hash(&mut hasher);
     hasher.finish()
+}
+
+impl ShellHost for WorkspaceApp {
+    fn request(&mut self, request: ShellRequest, window: &mut Window, cx: &mut Context<Self>) {
+        match request {
+            ShellRequest::ExitZen => self.toggle_zen_mode(cx),
+            ShellRequest::HoverZenStrip(hovered) => self.set_zen_exit_hot_zone_hovered(hovered, cx),
+            ShellRequest::HoverZenPill(hovered) => self.set_zen_exit_pill_hovered(hovered, cx),
+            ShellRequest::DragResize(x) => self.drag_rail_resize(x, window, cx),
+            ShellRequest::EndResize => self.finish_rail_resize(cx),
+            ShellRequest::Select(section) => {
+                if section == SidebarSection::Settings {
+                    self.open_settings(window, cx);
+                } else if matches!(section, SidebarSection::Terminal | SidebarSection::Runtime) {
+                    self.open_connection_runtime_tab(
+                        ConnectionRuntimeSection::Overview,
+                        window,
+                        cx,
+                    );
+                } else if section == SidebarSection::Network {
+                    self.open_topology_tab(window, cx);
+                } else if section == SidebarSection::Workspace {
+                    // Tauri treats the bottom square as a local-terminal action.
+                    if !self.detached_local_terminals.is_empty() {
+                        self.detached_local_terminals_popover_open =
+                            !self.detached_local_terminals_popover_open;
+                        cx.notify();
+                    } else {
+                        let _ = self.create_local_terminal_tab(window, cx);
+                    }
+                } else if section == SidebarSection::Files {
+                    self.open_file_manager_tab(window, cx);
+                } else if section == SidebarSection::Notifications {
+                    self.open_notification_center_tab(window, cx);
+                } else if section == SidebarSection::Assistant {
+                    let _ = self.toggle_ai_sidebar(cx);
+                } else if section == SidebarSection::Knowledge {
+                    self.open_knowledge_workspace_tab(window, cx);
+                } else if section == SidebarSection::HostTools {
+                    let _ = self.toggle_context_sidebar_panel(ContextSidebarPanel::HostTools, cx);
+                } else if section == SidebarSection::CloudSync {
+                    self.open_cloud_sync_tab(window, cx);
+                } else if section == SidebarSection::Extensions {
+                    self.open_plugin_manager_tab(window, cx);
+                } else if section == SidebarSection::Connections {
+                    // While the Session Manager already lives in a tab the
+                    // icon is inert; the tab's context menu owns switching
+                    // back to the sidebar form.
+                    if !self
+                        .tabs(cx)
+                        .iter()
+                        .any(|tab| tab.kind == TabKind::SessionManager)
+                    {
+                        self.active_surface = ActiveSurface::Terminal;
+                        self.toggle_sidebar_section(section, cx);
+                    }
+                } else {
+                    self.active_surface = ActiveSurface::Terminal;
+                    self.toggle_sidebar_section(section, cx);
+                }
+            }
+            ShellRequest::Toggle(RailSide::Left) => self.toggle_sidebar(cx),
+            ShellRequest::Toggle(RailSide::Right) => {
+                self.clear_workspace_tooltip(RailSide::Right.toggle_id(), cx);
+                self.toggle_context_sidebar_panel(self.rails.context_panel, cx);
+            }
+            ShellRequest::BeginResize(side, x) => self.start_rail_resize(side, x, window, cx),
+            ShellRequest::ShowToggleHint(side, label, position) => {
+                self.queue_workspace_tooltip(
+                    side.toggle_id(),
+                    label,
+                    f32::from(position.x) + 12.0,
+                    f32::from(position.y) + 16.0,
+                    cx,
+                );
+            }
+            ShellRequest::HideToggleHint(side) => {
+                self.clear_workspace_tooltip(side.toggle_id(), cx)
+            }
+        }
+    }
 }
 
 pub(in crate::workspace) fn native_plugin_activity_bar_item_id(

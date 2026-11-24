@@ -150,32 +150,6 @@ impl WorkspaceApp {
         self.onboarding_view.clone().into_any_element()
     }
 
-    pub(in crate::workspace) fn lock_workspace_chrome_when_onboarding_locked(
-        &self,
-        element: AnyElement,
-        locked: bool,
-    ) -> AnyElement {
-        if !locked {
-            return element;
-        }
-        div()
-            .relative()
-            .h_full()
-            .flex_none()
-            .child(div().h_full().opacity(0.42).child(element))
-            .child(
-                div()
-                    .absolute()
-                    .inset_0()
-                    .cursor(CursorStyle::OperationNotAllowed)
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
-                    .on_mouse_down(MouseButton::Middle, |_, _, cx| cx.stop_propagation())
-                    .on_scroll(|_, _, cx| cx.stop_propagation()),
-            )
-            .into_any_element()
-    }
-
     fn onboarding_frame(&self, cx: &App) -> OnboardingFrame {
         let settings = self.settings_store.settings().clone();
         let edit_scheme = self.settings_workspace.read(cx).appearance_edit_dark;
@@ -237,10 +211,10 @@ impl WorkspaceApp {
             })
             .collect();
 
-        let sidebar_occupied_width = if self.sidebar_collapsed {
+        let sidebar_occupied_width = if self.rails.left.collapsed() {
             self.tokens.metrics.activity_bar_width
         } else {
-            self.sidebar_width
+            self.rails.left.width()
         };
 
         OnboardingFrame {

@@ -7468,6 +7468,7 @@ dependencies = [
  "oxideterm-gpui-remote-desktop",
  "oxideterm-gpui-settings-view",
  "oxideterm-gpui-sftp",
+ "oxideterm-gpui-shell",
  "oxideterm-gpui-terminal",
  "oxideterm-gpui-ui",
  "oxideterm-i18n",
@@ -7897,6 +7898,16 @@ dependencies = [
  "windows 0.61.3",
  "windows-core 0.61.2",
  "x11-dl",
+]
+
+[[package]]
+name = "oxideterm-gpui-shell"
+version = "2.4.1"
+dependencies = [
+ "gpui-pre",
+ "oxideterm-gpui-ui",
+ "oxideterm-i18n",
+ "oxideterm-theme",
 ]
 
 [[package]]

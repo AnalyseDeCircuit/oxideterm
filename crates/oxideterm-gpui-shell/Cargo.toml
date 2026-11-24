@@ -1,0 +1,14 @@
+[lints]
+workspace = true
+
+[package]
+name = "oxideterm-gpui-shell"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+gpui.workspace = true
+oxideterm-gpui-ui = { path = "../oxideterm-gpui-ui" }
+oxideterm-theme = { path = "../oxideterm-theme" }
+oxideterm-i18n = { path = "../oxideterm-i18n" }

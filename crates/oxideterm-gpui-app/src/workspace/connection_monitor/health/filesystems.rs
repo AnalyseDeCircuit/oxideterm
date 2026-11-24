@@ -7,7 +7,7 @@ impl WorkspaceApp {
         let mono_font_family = settings_mono_font_family(self.settings_store.settings());
         let selectable_text = self.host_tools_selectable_text(cx);
         let search = self.host_filesystem_search_frame(cx);
-        let sidebar_width = self.ai.state.read(cx).chat_ui().sidebar_width;
+        let sidebar_width = self.rails.right.width();
 
         self.host_tools.update(cx, |host_tools, cx| {
             host_tools.render_filesystems_panel(

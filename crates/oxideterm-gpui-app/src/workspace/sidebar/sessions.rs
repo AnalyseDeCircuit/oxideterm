@@ -874,7 +874,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         if !self.session_sort_menu_open
-            || self.sidebar_collapsed
+            || self.rails.left.collapsed()
             || self.effective_sidebar_panel_section() != SidebarSection::Sessions
         {
             return None;
@@ -1185,7 +1185,7 @@ impl WorkspaceApp {
     ) -> Option<AnyElement> {
         let (pointer_x, pointer_y) = self.active_session_context_menu?;
         if self.active_session_selection.is_empty()
-            || self.sidebar_collapsed
+            || self.rails.left.collapsed()
             || self.effective_sidebar_panel_section() != SidebarSection::Sessions
         {
             return None;

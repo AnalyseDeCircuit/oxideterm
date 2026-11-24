@@ -1,8 +1,4 @@
 use super::super::*;
-use crate::workspace::zen_exit::HOT_ZONE_HEIGHT;
-use gpui::StatefulInteractiveElement;
-
-const ZEN_EXIT_GAP: f32 = 4.0;
 
 impl Focusable for WorkspaceApp {
     fn focus_handle(&self, _: &App) -> FocusHandle {
@@ -145,12 +141,24 @@ impl WorkspaceApp {
 }
 
 impl WorkspaceApp {
+    pub(in crate::workspace) fn shell_environment(&self) -> ShellEnvironment {
+        ShellEnvironment {
+            tokens: self.tokens,
+            i18n: self.i18n.clone(),
+            zen_mode: self.settings_store.settings().sidebar_ui.zen_mode,
+            chrome_locked: self.onboarding_disclaimer_locked(),
+            chrome_background: self.workspace_chrome_background(self.tokens.ui.shell_bg()),
+            divider: self.workspace_chrome_divider(),
+            left_divider: self.workspace_divider_color(self.tokens.ui.border, 0x40),
+        }
+    }
+
     pub(in crate::workspace) fn render_main_window(
         &mut self,
         window_background: &Entity<window_shell::WorkspaceWindowBackgroundEntity>,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> AnyElement {
+    ) -> ShellContent {
         self.advance_theme_transition(window, cx);
         let window_id = window.window_handle().window_id();
         let previous_tab = self.active_tab_id(cx);
@@ -172,7 +180,7 @@ impl WorkspaceApp {
             window.set_window_title(&SharedString::from(
                 self.i18n.t("settings_view.general.app_lock_window_title"),
             ));
-            return self.render_app_lock_screen(window, cx);
+            return ShellContent::Exclusive(self.render_app_lock_screen(window, cx));
         }
         // Confirmation snapshots are immutable frame inputs. Sampling each
         // owner once avoids repeatedly cloning typed payloads during render.
@@ -350,15 +358,16 @@ impl WorkspaceApp {
                 )
             })
         };
+        let environment = self.shell_environment();
         let settings = self.settings_store.settings();
-        let zen_mode = settings.sidebar_ui.zen_mode;
+        let zen_mode = environment.zen_mode;
         let tabbar_visible = !zen_mode || settings.appearance.zen_mode_keep_tabbar;
         let titlebar_visible = self.window_titlebar_visible(window);
         let effective_titlebar_height = self.window_titlebar_height(window);
         let sidebar_resize_cursor_active =
-            self.sidebar_resizing || self.ai.state.read(cx).chat_ui().sidebar_resizing;
+            self.rails.left.resizing() || self.rails.right.resizing();
         let embedded_sftp_resize_cursor_active = self.embedded_sftp_sidebar_resizing;
-        let disclaimer_locked = self.onboarding_disclaimer_locked();
+        let disclaimer_locked = environment.chrome_locked;
         let read_only_selection_workspace = cx.entity();
         self.update_main_window_tabbar_drop_bounds(window, titlebar_visible, tabbar_visible, cx);
 
@@ -379,12 +388,8 @@ impl WorkspaceApp {
             key_context.add(oxideterm_gpui_ui::modal::MODAL_KEY_CONTEXT);
         }
 
-        div()
+        let root = div()
             .id("workspace-root")
-            .size_full()
-            .relative()
-            .flex()
-            .flex_col()
             .bg(workspace_background(
                 &self.tokens,
                 vibrancy_mode,
@@ -717,7 +722,11 @@ impl WorkspaceApp {
                 } else if this
                     .active_content_tab(cx)
                     .is_some_and(|tab| tab.kind == TabKind::Forwards)
-                    && this.forwarding.read(cx).current_page(cx).is_some_and(|page| page.focused_input().is_some())
+                    && this
+                        .forwarding
+                        .read(cx)
+                        .current_page(cx)
+                        .is_some_and(|page| page.focused_input().is_some())
                 {
                     let _ = this.handle_forwards_key(event, cx);
                     window.prevent_default();
@@ -752,7 +761,11 @@ impl WorkspaceApp {
                         .read(cx)
                         .settings_entity_focused_input()
                         .is_some()
-                    || this.knowledge_page(cx).read(cx).focused_settings_input().is_some()
+                    || this
+                        .knowledge_page(cx)
+                        .read(cx)
+                        .focused_settings_input()
+                        .is_some()
                 {
                     let _ = this.handle_settings_input_key(event, cx);
                     window.prevent_default();
@@ -779,10 +792,9 @@ impl WorkspaceApp {
                 },
             ))
             .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
-                this.update_sidebar_resize(event, window, cx);
+                this.update_rail_resize(event, window, cx);
                 this.update_file_manager_bookmarks_resize(event, window, cx);
                 this.update_embedded_sftp_sidebar_resize(event, window, cx);
-                this.update_ai_sidebar_resize(event, window, cx);
                 this.update_sftp_resize(event, window, cx);
                 this.update_terminal_command_sender_resize(event, window, cx);
                 this.update_terminal_quick_commands_resize(event, cx);
@@ -849,8 +861,7 @@ impl WorkspaceApp {
                         // The hit-tested capture listener below cannot receive a
                         // sidebar release outside the workspace root.
                         if !hitbox.is_hovered(window) {
-                            this.finish_sidebar_resize(cx);
-                            this.finish_ai_sidebar_resize(cx);
+                            this.finish_rail_resize(cx);
                         }
                         if this.read_only_selection_drag_active() {
                             // This listener deliberately ignores hit testing: a
@@ -1139,94 +1150,35 @@ impl WorkspaceApp {
                 .on_action(cx.listener(|this, _: &GoToTab9, window, cx| {
                     this.go_to_tab(8, window, cx);
                 }))
-            })
-            .when_some(window_background_layer, |root, background| {
-                // Window scope paints exactly one absolute image behind all persistent chrome.
-                root.child(background)
-            })
-            .when(titlebar_visible, |root| {
-                root.child(self.render_title_bar(window, cx))
-            })
-            .child(
-                div()
-                    .flex_1()
-                    .flex()
-                    .flex_row()
-                    .overflow_hidden()
-                    .when(!zen_mode, |layout| {
-                        let activity = self.render_activity_bar(cx);
-                        layout.child(self.lock_workspace_chrome_when_onboarding_locked(
-                            activity,
-                            disclaimer_locked,
-                        ))
-                    })
-                    .when(!zen_mode && self.sidebar_rendered, |layout| {
-                        let sidebar = self.render_animated_sidebar_region(window, cx);
-                        layout.child(self.lock_workspace_chrome_when_onboarding_locked(
-                            sidebar,
-                            disclaimer_locked,
-                        ))
-                    })
-                    .child(
-                        div()
-                            .flex_1()
-                            .flex()
-                            .flex_col()
-                            .min_w(px(self.tokens.metrics.min_main_width))
-                            .overflow_hidden()
-                            .when(tabbar_visible, |main| {
-                                main.child(self.render_tab_bar(window, cx))
-                            })
-                            .child(
-                                div().flex_1().relative().overflow_hidden().child(
-                                    div()
-                                        .absolute()
-                                        .top_0()
-                                        .left_0()
-                                        .right_0()
-                                        .bottom_0()
-                                        .child(content),
-                                ),
-                            ),
-                    )
-                    .when(!zen_mode && self.context_sidebar_rendered, |layout| {
-                        // Keep the right sidebar as one root child. Splitting
-                        // the gutter and content here makes resize hit-testing
-                        // easy to regress on scroll-heavy Host Tools pages.
-                        let sidebar = self.render_animated_context_sidebar_frame(cx);
-                        layout.child(self.lock_workspace_chrome_when_onboarding_locked(
-                            sidebar,
-                            disclaimer_locked,
-                        ))
-                    })
-                    .when(!zen_mode, |layout| {
-                        layout.child(self.lock_workspace_chrome_when_onboarding_locked(
-                            self.render_context_activity_bar(window, cx),
-                            disclaimer_locked,
-                        ))
-                    }),
-            )
-            .when(!zen_mode && !self.sidebar_collapsed && !disclaimer_locked, |root| {
-                root.child(self.render_left_sidebar_resize_hotzone(effective_titlebar_height, cx))
-            })
-            .when(!zen_mode && self.context_sidebar_visible() && !disclaimer_locked, |root| {
-                root.child(
-                    self.render_context_right_sidebar_resize_hotzone(effective_titlebar_height, cx),
-                )
-            })
-            .when(sidebar_resize_cursor_active, |root| {
-                root.child(
-                    canvas(
-                        |_, _, _| (),
-                        |_, _, window, _| {
-                            // A window-level override keeps the resize cursor active above
-                            // blocking terminal and virtual-list hitboxes.
-                            window.set_window_cursor_style(CursorStyle::ResizeColumn);
-                        },
-                    )
-                    .absolute(),
-                )
-            })
+            });
+        let title_row = titlebar_visible.then(|| self.render_title_bar(window, cx));
+        let left_rail = (!zen_mode).then(|| self.render_activity_bar(&environment, cx));
+        let left_body = (!zen_mode && self.rails.left.mounted())
+            .then(|| self.render_sidebar_region(window, cx));
+        let left_panel = self.rails.left.present(
+            left_body,
+            !self.rails.left.collapsed(),
+            &environment,
+            effective_titlebar_height,
+            cx,
+        );
+        let tab_bar = tabbar_visible.then(|| self.render_tab_bar(window, cx));
+        let right_body = (!zen_mode && self.rails.right.mounted())
+            .then(|| self.render_context_right_sidebar_frame(cx));
+        let right_visible = self.context_sidebar_visible();
+        let right_panel = self.rails.right.present(
+            right_body,
+            right_visible,
+            &environment,
+            effective_titlebar_height,
+            cx,
+        );
+        let right_rail =
+            (!zen_mode).then(|| self.render_context_activity_bar(window, &environment, cx));
+        let frame = ShellFrameSlots {
+            root, environment, background: window_background_layer, title_row, left_rail, left_panel,
+            tab_bar, center: content, right_panel, right_rail, overlays: Vec::new(),
+        }
             .when(embedded_sftp_resize_cursor_active, |root| {
                 root.child(
                     canvas(
@@ -1242,9 +1194,11 @@ impl WorkspaceApp {
             })
             .when(zen_mode && !tabbar_visible, |root| {
                 let top = window_shell::client_window_top_resize_inset(window);
-                root.child(self.render_zen_exit_hot_zone(top, cx))
+                root.child(self.zen_exit.hot_zone(top, cx))
                     .when(self.zen_exit.visible(), |root| {
-                        root.child(self.render_zen_exit_affordance(top, cx))
+                        let shortcut = tabs::effective_shortcut_label("app.zenMode", &self.settings_store.settings().keybindings.overrides).unwrap_or_default();
+                        let pill = self.zen_exit.pill(top, &root.environment, shortcut, cx);
+                        root.child(pill)
                     })
             })
             .when(
@@ -1530,102 +1484,21 @@ impl WorkspaceApp {
                 self.focus_handle.clone(),
                 window.window_handle().window_id(),
             ))
-            .into_any_element()
+            ;
+        ShellContent::Frame(frame)
     }
 }
 
 impl WorkspaceApp {
-    /// The top strip provides a pointer exit when zen mode hides the title bar.
-    fn render_zen_exit_hot_zone(&self, top: Pixels, cx: &mut Context<Self>) -> AnyElement {
-        // Once revealed, keep hovering across the visual gap without capturing clicks there.
-        let height = HOT_ZONE_HEIGHT
-            + if self.zen_exit.visible() {
-                ZEN_EXIT_GAP
-            } else {
-                0.0
-            };
-        div()
-            .id("zen-exit-hot-zone")
-            .debug_selector(|| "zen-exit-hot-zone".into())
-            .absolute()
-            .top(top)
-            .left_0()
-            .right_0()
-            .h(px(height))
-            .on_hover(cx.listener(|this, hovered: &bool, _window, cx| {
-                // Leaving the strip without ever reaching the pill must still
-                // retire it; a hover on either region keeps `apply_hide` from
-                // firing.
-                this.set_zen_exit_hot_zone_hovered(*hovered, cx);
-            }))
-            .into_any_element()
-    }
-
-    fn render_zen_exit_affordance(&self, top: Pixels, cx: &mut Context<Self>) -> AnyElement {
-        let tokens = &self.tokens;
-        let shortcut = crate::workspace::tabs::effective_shortcut_label(
-            "app.zenMode",
-            &self.settings_store.settings().keybindings.overrides,
-        )
-        .unwrap_or_default();
-        let label = self.i18n.t("zen_mode.exit");
-        let pill = div()
-            .id("zen-exit-affordance-pill")
-            .debug_selector(|| "zen-exit-affordance-pill".into())
-            .flex()
-            .items_center()
-            .gap(px(8.0))
-            .rounded(px(tokens.radii.md))
-            .border_1()
-            .border_color(rgb(tokens.ui.border))
-            .bg(rgba((tokens.ui.bg_elevated << 8) | 0xe6))
-            .px(px(14.0))
-            .py(px(6.0))
-            .text_size(px(13.0))
-            .line_height(px(18.0))
-            .text_color(rgb(tokens.ui.text))
-            .shadow_lg()
-            .cursor_pointer()
-            .block_mouse_except_scroll()
-            .on_click(cx.listener(|this, _, _window, cx| this.toggle_zen_mode(cx)))
-            .on_hover(cx.listener(|this, hovered: &bool, _window, cx| {
-                this.set_zen_exit_pill_hovered(*hovered, cx);
-            }))
-            .child(label)
-            .when(!shortcut.is_empty(), |pill| {
-                pill.child(
-                    div()
-                        .rounded(px(tokens.radii.sm))
-                        .bg(rgba((tokens.ui.bg_hover << 8) | 0xff))
-                        .px(px(6.0))
-                        .py(px(1.0))
-                        .text_size(px(11.0))
-                        .text_color(rgb(tokens.ui.text_muted))
-                        .child(shortcut),
-                )
-            });
-        div()
-            .absolute()
-            .top(top + px(HOT_ZONE_HEIGHT + ZEN_EXIT_GAP))
-            .left_0()
-            .right_0()
-            .flex()
-            .justify_center()
-            .child(oxideterm_gpui_ui::motion::fade_in(
-                tokens,
-                "zen-exit-affordance",
-                pill,
-                oxideterm_gpui_ui::motion::MotionDuration::Control,
-            ))
-            .into_any_element()
-    }
-
     pub(in crate::workspace) fn render_workspace_pointer_capture_overlay(
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         if self.main_window_tabs.drag.is_some() {
             return self.render_tab_drag_capture(None, cx);
+        }
+        if self.rails.resizing_side().is_some() {
+            return oxideterm_gpui_shell::rail_resize_capture(cx);
         }
         let cursor = match self.browser_pointer_capture_owner(cx) {
             Some(browser_behavior::BrowserPointerCaptureOwner::TabDrag) => CursorStyle::ClosedHand,
@@ -1651,10 +1524,8 @@ impl WorkspaceApp {
             .bg(rgba(0x00000000))
             .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
                 this.update_tab_drag(event, window, cx);
-                this.update_sidebar_resize(event, window, cx);
                 this.update_file_manager_bookmarks_resize(event, window, cx);
                 this.update_embedded_sftp_sidebar_resize(event, window, cx);
-                this.update_ai_sidebar_resize(event, window, cx);
                 this.update_sftp_resize(event, window, cx);
                 this.update_terminal_command_sender_resize(event, window, cx);
                 this.update_terminal_quick_commands_resize(event, cx);
@@ -1680,9 +1551,8 @@ impl WorkspaceApp {
         let resized_bookmarks =
             self.finish_file_manager_bookmarks_resize(window.window_handle().window_id(), cx);
         let was_read_only_dragging = self.read_only_selection_drag_active();
-        self.finish_sidebar_resize(cx);
+        self.finish_rail_resize(cx);
         self.finish_embedded_sftp_sidebar_resize(cx);
-        self.finish_ai_sidebar_resize(cx);
         self.finish_sftp_resize(cx);
         self.finish_terminal_command_sender_resize(cx);
         self.finish_terminal_quick_commands_resize(cx);

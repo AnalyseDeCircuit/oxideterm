@@ -28,7 +28,7 @@ impl WorkspaceApp {
             .iter()
             .any(|tab| is_host_tools_tab_kind(&tab.kind) && tab_host.is_detached(tab.id));
         let sidebar_visible = self.context_sidebar_visible()
-            && self.active_context_sidebar_panel == ContextSidebarPanel::HostTools;
+            && self.rails.context_panel == ContextSidebarPanel::HostTools;
 
         host_tools_visibility(main_tab_visible, detached_tab_visible, sidebar_visible)
     }

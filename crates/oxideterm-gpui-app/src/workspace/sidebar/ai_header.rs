@@ -91,7 +91,7 @@ impl WorkspaceApp {
                     tokens: app.tokens,
                     i18n: app.i18n.clone(),
                     font: tauri_ui_font_family(&settings.appearance.ui_font_family),
-                    width: app.ai_editor_text_width(target, cx),
+                    width: app.ai_editor_text_width(target),
                     anchor: target.anchor_id(),
                     model_selected: AiEditorView::model_selected(&settings.ai),
                     marked_range: app.ime_marked_virtual_range_for_target(target, cx),

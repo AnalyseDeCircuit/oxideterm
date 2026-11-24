@@ -179,9 +179,8 @@ impl WorkspaceApp {
         // Locking releases forwarded input before sensitive surfaces stop rendering,
         // preventing a held key or mouse button from remaining active remotely.
         self.release_active_remote_desktop_inputs(cx);
-        self.finish_sidebar_resize(cx);
+        self.finish_rail_resize(cx);
         self.finish_embedded_sftp_sidebar_resize(cx);
-        self.finish_ai_sidebar_resize(cx);
         self.finish_sftp_resize(cx);
         self.finish_terminal_command_sender_resize(cx);
         // A locked workspace must not keep sending unattended terminal input.

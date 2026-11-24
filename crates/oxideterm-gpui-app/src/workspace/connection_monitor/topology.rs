@@ -525,7 +525,7 @@ impl WorkspaceApp {
                     if let Some(node_id) = node_id.clone() {
                         this.active_ssh_node_id = Some(node_id);
                         this.close_session_manager_sidebar_search(cx);
-                        this.active_sidebar_section = SidebarSection::Sessions;
+                        this.rails.section = SidebarSection::Sessions;
                     }
                 }
             },

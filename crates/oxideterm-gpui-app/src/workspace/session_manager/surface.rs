@@ -114,7 +114,7 @@ impl WorkspaceApp {
         // the sidebar still shows the session-manager panel (welcome link,
         // command palette, plugin lifecycle), so the tab owns moving the
         // sidebar off it, mirroring finish_tab_removal's close path.
-        if self.active_sidebar_section == SidebarSection::Connections {
+        if self.rails.section == SidebarSection::Connections {
             self.set_sidebar_section(SidebarSection::Sessions, cx);
         }
         self.refresh_session_manager_ssh_config_hosts(cx);

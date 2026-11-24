@@ -511,10 +511,7 @@ impl WorkspaceApp {
         let ai_entity = cx.new(|cx| {
             let mut entity =
                 ai_state::AiWorkspaceEntity::new(forwarding_runtime.clone(), ai_key_store, cx);
-            entity.configure_chat_surface(
-                initial_context_sidebar_width,
-                Some(current_window_size(window)),
-            );
+            entity.replace_overlay_window_size(current_window_size(window));
             entity
         });
         let knowledge_page = ai_entity.read(cx).knowledge_page().clone();
@@ -920,36 +917,28 @@ impl WorkspaceApp {
             _plugin_entity_subscription: plugin_entity_subscription,
             split_drag: None,
             disclosure_motions: disclosure_motion::DisclosureMotions::default(),
-            sidebar_resizing: false,
+            rails: WorkspaceRails::new(
+                RailState::new(
+                    RailSide::Left,
+                    initial_sidebar_width,
+                    settings.sidebar_ui.collapsed,
+                    !settings.sidebar_ui.collapsed,
+                    &tokens,
+                ),
+                RailState::new(
+                    RailSide::Right,
+                    initial_context_sidebar_width,
+                    settings.sidebar_ui.ai_sidebar_collapsed,
+                    !settings.sidebar_ui.ai_sidebar_collapsed
+                        && !settings.sidebar_ui.zen_mode
+                        && settings.ai.enabled,
+                    &tokens,
+                ),
+                SidebarSection::from_settings_key(&settings.sidebar_ui.active_section),
+                ContextSidebarPanel::Assistant,
+            ),
             embedded_sftp_sidebar_resizing: false,
             zen_exit: zen_exit::ZenExitAffordance::default(),
-            sidebar_collapsed: settings.sidebar_ui.collapsed,
-            sidebar_rendered: !settings.sidebar_ui.collapsed,
-            sidebar_motion_generation: 0,
-            sidebar_section_motion_generation: 0,
-            sidebar_section_transition: None,
-            sidebar_motion: oxideterm_gpui_ui::motion::SidebarMotion::new(
-                if settings.sidebar_ui.collapsed {
-                    0.0
-                } else {
-                    initial_sidebar_width - tokens.metrics.activity_bar_width
-                },
-            ),
-            sidebar_width: initial_sidebar_width,
-            context_sidebar_rendered: !settings.sidebar_ui.ai_sidebar_collapsed
-                && !settings.sidebar_ui.zen_mode
-                && settings.ai.enabled,
-            context_sidebar_motion_generation: 0,
-            context_sidebar_motion: oxideterm_gpui_ui::motion::SidebarMotion::new(
-                if settings.sidebar_ui.ai_sidebar_collapsed
-                    || settings.sidebar_ui.zen_mode
-                    || !settings.ai.enabled
-                {
-                    0.0
-                } else {
-                    initial_context_sidebar_width
-                },
-            ),
             ai: AiWorkspaceViews {
                 conversations: oxideterm_gpui_ai::conversation::AiConversationController::new(
                     ai_entity.clone(),
@@ -972,11 +961,7 @@ impl WorkspaceApp {
             plugin_overlay_members: HashMap::new(),
             plugin_overlay_generation: 0,
             plugin_toolbar_states: HashMap::new(),
-            active_context_sidebar_panel: ContextSidebarPanel::Assistant,
             needs_active_pane_focus: false,
-            active_sidebar_section: SidebarSection::from_settings_key(
-                &settings.sidebar_ui.active_section,
-            ),
             active_surface: ActiveSurface::Terminal,
             active_session_sidebar_view_mode: ActiveSessionSidebarViewMode::Tree,
             session_sort_menu_open: false,
@@ -1143,8 +1128,7 @@ impl WorkspaceApp {
                     this.knowledge_sync_external_edit(false, cx);
                 } else {
                     // A release in another window need not reach this workspace.
-                    this.finish_sidebar_resize(cx);
-                    this.finish_ai_sidebar_resize(cx);
+                    this.finish_rail_resize(cx);
                 }
             });
         workspace.ai.state.update(cx, |ai, _cx| {
@@ -1164,8 +1148,8 @@ impl WorkspaceApp {
         workspace.bootstrap_cloud_sync_controller(cx);
         workspace.start_public_mcp_delivery(cx);
         workspace.sync_ssh_config_sync_service();
-        if workspace.active_sidebar_section == SidebarSection::Connections
-            && !workspace.sidebar_collapsed
+        if workspace.rails.section == SidebarSection::Connections
+            && !workspace.rails.left.collapsed()
         {
             workspace.refresh_session_manager_ssh_config_hosts(cx);
         }

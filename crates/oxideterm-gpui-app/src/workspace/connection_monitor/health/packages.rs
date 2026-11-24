@@ -9,7 +9,7 @@ impl WorkspaceApp {
         let search_ime = self
             .host_tools_plain_text_ime_frame(HostToolsTextInput::PackageSearch, cx)
             .expect("package search is a non-secret Host Tools input");
-        let sidebar_width = self.ai.state.read(cx).chat_ui().sidebar_width;
+        let sidebar_width = self.rails.right.width();
         self.host_tools.update(cx, |host_tools, cx| {
             host_tools.render_host_packages_panel(
                 search_ime,

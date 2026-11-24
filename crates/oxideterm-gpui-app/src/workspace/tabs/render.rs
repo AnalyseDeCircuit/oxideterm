@@ -603,7 +603,7 @@ impl WorkspaceApp {
         let viewport_width = if measured_width > 1.0 {
             measured_width
         } else {
-            self.tabbar_scroll_viewport_width(window, cx)
+            self.tabbar_scroll_viewport_width(window)
         };
         let viewport_left = if measured_width > 1.0 {
             f32::from(viewport_bounds.origin.x)
@@ -1093,19 +1093,15 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(in crate::workspace) fn welcome_main_content_width(
-        &self,
-        window: &Window,
-        cx: &App,
-    ) -> f32 {
+    pub(in crate::workspace) fn welcome_main_content_width(&self, window: &Window, _: &App) -> f32 {
         let settings = self.settings_store.settings();
         let mut available_width = f32::from(window.viewport_size().width);
         if !settings.sidebar_ui.zen_mode {
             available_width -= self.tokens.metrics.activity_bar_width;
-            if !self.sidebar_collapsed {
+            if !self.rails.left.collapsed() {
                 available_width -= self.sidebar_panel_width();
             }
-            available_width -= self.context_sidebar_occupied_width(cx);
+            available_width -= self.context_sidebar_occupied_width();
         }
         available_width.max(self.tokens.metrics.min_main_width)
     }

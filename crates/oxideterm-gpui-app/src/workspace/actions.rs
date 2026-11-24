@@ -1291,15 +1291,11 @@ impl WorkspaceApp {
         // The exit affordance belongs to zen mode only; both directions reset it
         // so a pending hover hide can never resurrect it after leaving.
         self.zen_exit.reset();
+        let right_available =
+            self.rails.context_panel == ContextSidebarPanel::HostTools || settings.ai.enabled;
+        self.rails
+            .set_zen_mode(entering, right_available, &self.tokens);
         if entering {
-            // Zen mode hides chrome without changing the user's sidebar visibility choices.
-            self.sidebar_motion.settle(0.0);
-            self.context_sidebar_motion.settle(0.0);
-            self.sidebar_motion_generation = self.sidebar_motion_generation.wrapping_add(1);
-            self.context_sidebar_motion_generation =
-                self.context_sidebar_motion_generation.wrapping_add(1);
-            self.sidebar_rendered = false;
-            self.context_sidebar_rendered = false;
             self.clear_ai_sidebar_keyboard_focus(cx);
             const ZEN_HINT_TTL: Duration = Duration::from_millis(2500);
             let label = tabs::effective_shortcut_label(
@@ -1322,11 +1318,6 @@ impl WorkspaceApp {
                 cx,
             );
         } else {
-            self.sidebar_motion_generation = self.sidebar_motion_generation.wrapping_add(1);
-            self.context_sidebar_motion_generation =
-                self.context_sidebar_motion_generation.wrapping_add(1);
-            self.sidebar_rendered = !self.sidebar_collapsed;
-            self.context_sidebar_rendered = self.context_sidebar_visible();
             self.apply_workspace_overlay_intent(WorkspaceOverlayIntent::ClearZenHint, cx);
         }
         cx.notify();
@@ -1848,7 +1839,7 @@ impl WorkspaceApp {
         }
 
         let connection_monitor_keys_visible = self.context_sidebar_visible()
-            && self.active_context_sidebar_panel == ContextSidebarPanel::HostTools
+            && self.rails.context_panel == ContextSidebarPanel::HostTools
             && matches!(
                 self.host_tools.read(cx).active_tool(),
                 ContextSidebarTool::Monitor
@@ -1993,7 +1984,7 @@ impl WorkspaceApp {
         if self.sftp_view().read(cx).focused_input().is_some()
             || (self.sftp_focused_surface == sftp::SftpSurfaceId::Sidebar
                 && self.focus_handle.is_focused(window)
-                && !self.sidebar_collapsed
+                && !self.rails.left.collapsed()
                 && self.sidebar_hosts_embedded_sftp()
                 && self.embedded_sftp_target(cx).is_some())
             || self

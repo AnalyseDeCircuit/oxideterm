@@ -222,7 +222,7 @@ pub(crate) struct WorkspaceWindowShell {
     session: Entity<WorkspaceApp>,
     focus_handle: FocusHandle,
     native_style: WorkspaceWindowNativeStyle,
-    background: Entity<WorkspaceWindowBackgroundEntity>,
+    frame: Entity<WorkspaceShell>,
     _session_observation: Subscription,
     _background_observation: Subscription,
     _close_subscription: Subscription,
@@ -262,11 +262,19 @@ impl WorkspaceWindowShell {
                 session.release_workspace_window(window_registration, window_id, cx);
             });
         });
+        let frame = cx.new(|_| {
+            let session = session.clone();
+            WorkspaceShell::new(focus_handle.clone(), move |window, cx| {
+                session.update(cx, |session, cx| {
+                    session.render_main_window(&background, window, cx)
+                })
+            })
+        });
         Self {
             session,
             focus_handle,
             native_style,
-            background,
+            frame,
             _session_observation: session_observation,
             _background_observation: background_observation,
             _close_subscription: close_subscription,
@@ -296,10 +304,7 @@ impl Focusable for WorkspaceWindowShell {
 impl Render for WorkspaceWindowShell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.native_style.apply(&self.session, window, cx);
-        let content = self.session.update(cx, |session, cx| {
-            session.render_main_window(&self.background, window, cx)
-        });
-        render_resizable_window_content(content, window)
+        render_resizable_window_content(self.frame.clone().into_any_element(), window)
     }
 }
 

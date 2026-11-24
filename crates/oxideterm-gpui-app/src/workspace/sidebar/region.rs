@@ -1,8 +1,9 @@
 use super::*;
 
-pub(in crate::workspace) use oxideterm_gpui_ui::separator::{
-    SIDEBAR_RESIZE_HOTZONE_WIDTH, sidebar_resize_hotzone_chrome,
-};
+#[cfg(test)]
+use oxideterm_gpui_shell::{sidebar_resize_hotzone_origin, workspace_sidebar_resize_cursor};
+#[cfg(test)]
+use oxideterm_gpui_ui::separator::{SIDEBAR_RESIZE_HOTZONE_WIDTH, sidebar_resize_hotzone_chrome};
 const EMBEDDED_SFTP_SPLIT_HANDLE_SIZE: f32 = 7.0;
 const EMBEDDED_SFTP_SPLIT_LINE_SIZE: f32 = 1.0;
 const EMBEDDED_SFTP_SPLIT_HOVER_ALPHA: u32 = 0x1f;
@@ -31,76 +32,7 @@ pub(in crate::workspace) fn context_sidebar_region_chrome() -> gpui::Div {
     div().relative().flex_1().min_w(px(0.0)).h_full().min_h_0()
 }
 
-pub(in crate::workspace) fn sidebar_resize_hotzone_origin(seam: f32) -> f32 {
-    seam - SIDEBAR_RESIZE_HOTZONE_WIDTH
-}
-
-fn workspace_sidebar_resize_cursor() -> impl IntoElement {
-    // The handle is above terminal cursors, but its override must end at the
-    // hitbox rather than depend on a mouse-leave arriving during capture.
-    gpui::canvas(
-        |bounds, window, _| window.insert_hitbox(bounds, gpui::HitboxBehavior::Normal),
-        |_, hitbox, window, _| {
-            window.set_cursor_style_override(gpui::CursorStyle::ResizeColumn, &hitbox);
-        },
-    )
-    .absolute()
-    .top_0()
-    .left_0()
-    .size_full()
-}
-
 impl WorkspaceApp {
-    pub(in crate::workspace) fn render_animated_sidebar_region(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let expanded_width = self.sidebar_panel_width();
-        self.sidebar_motion.retarget(if self.sidebar_collapsed {
-            0.0
-        } else {
-            expanded_width
-        });
-        let content = div()
-            .flex_none()
-            .w(px(expanded_width))
-            .h_full()
-            .child(self.render_sidebar_region(window, cx));
-        self.sidebar_motion.animate_drawer(
-            &self.tokens,
-            "workspace-left-sidebar-motion",
-            expanded_width,
-            oxideterm_gpui_ui::motion::DrawerEdge::Left,
-            content.into_any_element(),
-        )
-    }
-
-    pub(in crate::workspace) fn render_animated_context_sidebar_frame(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let expanded_width = self.ai.state.read(cx).chat_ui().sidebar_width;
-        self.context_sidebar_motion
-            .retarget(if self.context_sidebar_visible() {
-                expanded_width
-            } else {
-                0.0
-            });
-        let content = div()
-            .flex_none()
-            .w(px(expanded_width))
-            .h_full()
-            .child(self.render_context_right_sidebar_frame(cx));
-        self.context_sidebar_motion.animate_drawer(
-            &self.tokens,
-            "workspace-right-sidebar-motion",
-            expanded_width,
-            oxideterm_gpui_ui::motion::DrawerEdge::Right,
-            content.into_any_element(),
-        )
-    }
-
     pub(in crate::workspace) fn render_sidebar_region(
         &mut self,
         window: &mut Window,
@@ -118,7 +50,7 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        context_sidebar_frame_chrome(self.ai.state.read(cx).chat_ui().sidebar_width)
+        context_sidebar_frame_chrome(self.rails.right.width())
             .child(self.render_context_right_sidebar_region(cx))
             .child(oxideterm_gpui_ui::surface::panel_edge_highlight(
                 &self.tokens,
@@ -134,7 +66,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let (title_key, title_role, icon) = match self.active_context_sidebar_panel {
+        let (title_key, title_role, icon) = match self.rails.context_panel {
             ContextSidebarPanel::Assistant => {
                 ("sidebar.panels.ai", "assistant", LucideIcon::Sparkles)
             }
@@ -181,7 +113,7 @@ impl WorkspaceApp {
                                 title_key, title_role, icon, cx,
                             ))
                             .when(
-                                self.active_context_sidebar_panel == ContextSidebarPanel::HostTools,
+                                self.rails.context_panel == ContextSidebarPanel::HostTools,
                                 |header| {
                                     // The Container tool has no persisted probe
                                     // to switch off, so it renders no toggle.
@@ -208,7 +140,7 @@ impl WorkspaceApp {
                             // translucent chrome is composited exactly once.
                             .bg(self.workspace_sidebar_background(theme.shell_bg()))
                             .child({
-                                let content = match self.active_context_sidebar_panel {
+                                let content = match self.rails.context_panel {
                                     ContextSidebarPanel::Assistant => {
                                         self.ai.transcript.clone().into_any_element()
                                     }
@@ -228,78 +160,6 @@ impl WorkspaceApp {
         } else {
             region
         }
-    }
-
-    pub(in crate::workspace) fn render_left_sidebar_resize_hotzone(
-        &mut self,
-        top_offset: f32,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let theme = self.tokens.ui;
-        let activity_width = self.tokens.metrics.activity_bar_width;
-        let hotzone = sidebar_resize_hotzone_chrome(
-            "workspace-left-sidebar-resize-hotzone",
-            if self.sidebar_resizing {
-                rgb(theme.accent)
-            } else {
-                self.workspace_divider_color(theme.border, 0x40)
-            },
-            true,
-        )
-        .top(px(top_offset))
-        .bottom_0()
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(|this, event: &gpui::MouseDownEvent, window, cx| {
-                this.start_sidebar_resize(event, window, cx);
-                window.prevent_default();
-                cx.stop_propagation();
-            }),
-        )
-        .child(workspace_sidebar_resize_cursor());
-        self.sidebar_motion.animate(
-            &self.tokens,
-            "left-sidebar-edge-motion",
-            hotzone,
-            move |edge, width| edge.left(px(sidebar_resize_hotzone_origin(activity_width + width))),
-        )
-    }
-
-    pub(in crate::workspace) fn render_context_right_sidebar_resize_hotzone(
-        &mut self,
-        top_offset: f32,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let theme = self.tokens.ui;
-        let activity_width = self.tokens.metrics.activity_bar_width;
-        let hotzone = sidebar_resize_hotzone_chrome(
-            "context-right-sidebar-resize-hotzone",
-            if self.ai.state.read(cx).chat_ui().sidebar_resizing {
-                rgb(theme.accent)
-            } else {
-                self.workspace_chrome_divider()
-            },
-            false,
-        )
-        .top(px(top_offset))
-        .bottom_0()
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(|this, event: &gpui::MouseDownEvent, window, cx| {
-                this.start_ai_sidebar_resize(event, window, cx);
-                window.prevent_default();
-                cx.stop_propagation();
-            }),
-        )
-        .child(workspace_sidebar_resize_cursor());
-        self.context_sidebar_motion.animate(
-            &self.tokens,
-            "right-sidebar-edge-motion",
-            hotzone,
-            move |edge, width| {
-                edge.right(px(sidebar_resize_hotzone_origin(activity_width + width)))
-            },
-        )
     }
 
     pub(in crate::workspace) fn render_context_sidebar_panel_title(
@@ -353,10 +213,7 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let panel_section = self.effective_sidebar_panel_section();
-        let transition_gen = self
-            .sidebar_section_transition
-            .filter(|(section, _)| *section == panel_section)
-            .map(|(_, generation)| generation);
+        let transition_gen = self.rails.section_transition(panel_section);
         let sidebar_content = self.render_sidebar_content(window, cx);
         let body_content = {
             let body = div()
@@ -484,10 +341,7 @@ impl WorkspaceApp {
             _ => "sidebar.panels.sessions_header",
         };
         let title = plugin_panel_title.unwrap_or_else(|| self.i18n.t(title_key));
-        let transition_gen = self
-            .sidebar_section_transition
-            .filter(|(section, _)| *section == panel_section)
-            .map(|(_, generation)| generation);
+        let transition_gen = self.rails.section_transition(panel_section);
         let title_inner = div()
             .flex()
             .items_center()
@@ -1378,10 +1232,11 @@ mod sidebar_resize_region_tests {
     impl Render for SidebarSurfaceView {
         fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
             self.0.update(cx, |workspace, cx| {
+                let env = workspace.shell_environment();
                 div()
                     .size_full()
                     .flex()
-                    .child(workspace.render_activity_bar(cx))
+                    .child(workspace.render_activity_bar(&env, cx))
                     .child(workspace.render_sidebar_region(window, cx))
             })
         }
@@ -1438,7 +1293,10 @@ mod sidebar_resize_region_tests {
                 workspace.tokens.ui.bg = 0x050607;
                 workspace.tokens.ui.bg_panel = 0x102030;
                 workspace.tokens.metrics.sidebar_vibrancy_alpha = 0.5;
-                workspace.sidebar_width = 300.0;
+                workspace
+                    .rails
+                    .left
+                    .set_width(300.0, true, &workspace.tokens);
                 workspace
             }))
         });
@@ -1499,13 +1357,13 @@ mod sidebar_resize_region_tests {
 
         for right in [false, true] {
             let seam = |cx: &gpui::VisualTestContext| {
-                workspace.read_with(cx, |workspace, cx| {
+                workspace.read_with(cx, |workspace, _| {
                     if right {
                         viewport_width
                             - workspace.tokens.metrics.activity_bar_width
-                            - workspace.ai.state.read(cx).chat_ui().sidebar_width
+                            - workspace.rails.right.width()
                     } else {
-                        workspace.sidebar_width
+                        workspace.rails.left.width()
                     }
                 })
             };
@@ -1570,9 +1428,8 @@ mod sidebar_resize_region_tests {
             cx.simulate_mouse_move(grip, None, modifiers);
             cx.simulate_mouse_down(grip, MouseButton::Left, modifiers);
             let resizing = |cx: &gpui::VisualTestContext| {
-                workspace.read_with(cx, |workspace, cx| {
-                    workspace.sidebar_resizing
-                        || workspace.ai.state.read(cx).chat_ui().sidebar_resizing
+                workspace.read_with(cx, |workspace, _| {
+                    workspace.rails.left.resizing() || workspace.rails.right.resizing()
                 })
             };
             assert!(resizing(cx));

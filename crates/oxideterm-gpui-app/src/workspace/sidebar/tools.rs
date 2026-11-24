@@ -126,7 +126,7 @@ impl WorkspaceApp {
 
     fn context_tool_active(&self, tool: ContextSidebarTool, cx: &App) -> bool {
         self.context_sidebar_visible()
-            && self.active_context_sidebar_panel == ContextSidebarPanel::HostTools
+            && self.rails.context_panel == ContextSidebarPanel::HostTools
             && self.host_tools.read(cx).active_tool() == tool
     }
 
@@ -141,7 +141,7 @@ impl WorkspaceApp {
         // requested by selection and that request is gated on the sidebar being
         // visible, so selecting first would leave the panel loading forever.
         if !self.context_sidebar_visible()
-            || self.active_context_sidebar_panel != ContextSidebarPanel::HostTools
+            || self.rails.context_panel != ContextSidebarPanel::HostTools
         {
             self.open_context_sidebar_panel(ContextSidebarPanel::HostTools, cx);
         }
@@ -160,7 +160,7 @@ impl WorkspaceApp {
 
     fn context_host_tools_dimmed(&self, cx: &App) -> bool {
         let host_tools_sidebar_open = self.context_sidebar_visible()
-            && self.active_context_sidebar_panel == ContextSidebarPanel::HostTools;
+            && self.rails.context_panel == ContextSidebarPanel::HostTools;
         let active_tab_kind = self.active_content_tab(cx).map(|tab| &tab.kind);
         !context_host_tools_in_focus(
             self.active_surface,

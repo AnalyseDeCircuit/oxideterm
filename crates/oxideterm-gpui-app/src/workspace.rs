@@ -133,6 +133,10 @@ use oxideterm_gpui_platform::{
     vibrancy::{NativeVibrancyMode, VibrancySupport, apply_window_vibrancy},
     window_opacity::{apply_window_opacity, normalized_window_opacity},
 };
+use oxideterm_gpui_shell::{
+    RailSide, RailState, ShellContent, ShellEnvironment, ShellFrameSlots, ShellHost, ShellRequest,
+    WorkspaceRails, WorkspaceShell,
+};
 use oxideterm_gpui_terminal::{
     BackgroundImageRenderCache, PrivilegePromptMatch, SemanticShellDialect,
     SharedTerminalCommandHistory, SharedTerminalSession, TerminalAutosuggestLabels,
@@ -552,19 +556,9 @@ pub(crate) struct WorkspaceApp {
     _plugin_entity_subscription: Subscription,
     split_drag: Option<SplitDrag>,
     disclosure_motions: disclosure_motion::DisclosureMotions,
-    sidebar_resizing: bool,
+    rails: WorkspaceRails,
     embedded_sftp_sidebar_resizing: bool,
     zen_exit: zen_exit::ZenExitAffordance,
-    sidebar_collapsed: bool,
-    sidebar_rendered: bool,
-    sidebar_motion_generation: u64,
-    sidebar_section_motion_generation: u64,
-    sidebar_section_transition: Option<(SidebarSection, u64)>,
-    sidebar_motion: oxideterm_gpui_ui::motion::SidebarMotion,
-    sidebar_width: f32,
-    context_sidebar_rendered: bool,
-    context_sidebar_motion_generation: u64,
-    context_sidebar_motion: oxideterm_gpui_ui::motion::SidebarMotion,
     ai: AiWorkspaceViews,
     mosh_plugin_sessions: Arc<oxideterm_mosh::MoshPluginSessions>,
     // Panes whose plugin toolbar state currently declares `overlay`; one
@@ -582,9 +576,7 @@ pub(crate) struct WorkspaceApp {
     // action's declared default state; the pane's toolbar specs are only a
     // render mirror pushed from here. Entries exist for open panes only.
     plugin_toolbar_states: HashMap<(String, String, PaneId), String>,
-    active_context_sidebar_panel: ContextSidebarPanel,
     needs_active_pane_focus: bool,
-    active_sidebar_section: SidebarSection,
     active_surface: ActiveSurface,
     active_session_sidebar_view_mode: ActiveSessionSidebarViewMode,
     session_sort_menu_open: bool,

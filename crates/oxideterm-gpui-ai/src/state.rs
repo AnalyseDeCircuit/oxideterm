@@ -515,15 +515,6 @@ impl AiWorkspaceEntity {
             || self.model_ui.selector_search_focused
     }
 
-    pub fn configure_chat_surface(
-        &mut self,
-        sidebar_width: f32,
-        overlay_window_size: Option<(f32, f32)>,
-    ) {
-        self.chat_ui.sidebar_width = sidebar_width;
-        self.chat_ui.overlay_window_size = overlay_window_size;
-    }
-
     pub fn set_chat_draft(&mut self, draft: String) {
         self.chat_ui.draft = draft;
     }
@@ -1014,19 +1005,6 @@ impl AiWorkspaceEntity {
         true
     }
 
-    pub fn set_chat_sidebar_width(&mut self, width: f32) {
-        self.chat_ui.sidebar_width = width;
-    }
-
-    pub fn set_chat_sidebar_resizing(&mut self, resizing: bool) {
-        self.chat_ui.sidebar_resizing = resizing;
-    }
-
-    pub fn finish_chat_sidebar_resize(&mut self) -> f32 {
-        self.chat_ui.sidebar_resizing = false;
-        self.chat_ui.sidebar_width
-    }
-
     pub fn replace_overlay_window_size(&mut self, size: (f32, f32)) -> Option<(f32, f32)> {
         self.chat_ui.overlay_window_size.replace(size)
     }
@@ -1316,7 +1294,7 @@ impl AiWorkspaceEntity {
             desktop,
             loaded_skill_versions: HashMap::new(),
             model_ui: AiModelWorkspaceState::new(),
-            chat_ui: AiChatWorkspaceState::new(360.0, None),
+            chat_ui: AiChatWorkspaceState::new(None),
             knowledge_window_activation_subscription: None,
             visibility: AiWorkspaceVisibility::default(),
             provider_key_operation_tasks: HashMap::new(),
@@ -4209,8 +4187,6 @@ pub struct AiToolCandidateSelectionState {
 
 /// Owns AI chat presentation, conversation persistence, streaming, and compaction state.
 pub struct AiChatWorkspaceState {
-    pub sidebar_resizing: bool,
-    pub sidebar_width: f32,
     pub overlay_window_size: Option<(f32, f32)>,
     pub overlay_window_bounds_subscription: Option<Subscription>,
     pub message_list_state: ListState,
@@ -4274,10 +4250,8 @@ pub struct AiModelWorkspaceState {
 }
 
 impl AiChatWorkspaceState {
-    fn new(sidebar_width: f32, overlay_window_size: Option<(f32, f32)>) -> Self {
+    fn new(overlay_window_size: Option<(f32, f32)>) -> Self {
         Self {
-            sidebar_resizing: false,
-            sidebar_width,
             overlay_window_size,
             overlay_window_bounds_subscription: None,
             message_list_state: tauri_virtual_list_state(

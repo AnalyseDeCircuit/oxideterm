@@ -13,12 +13,8 @@ impl WorkspaceApp {
         (enabled, active_tool_count)
     }
 
-    pub(in crate::workspace) fn ai_editor_text_width(
-        &self,
-        target: WorkspaceImeTarget,
-        cx: &App,
-    ) -> f32 {
-        let sidebar_width = self.ai.state.read(cx).chat_ui().sidebar_width;
+    pub(in crate::workspace) fn ai_editor_text_width(&self, target: WorkspaceImeTarget) -> f32 {
+        let sidebar_width = self.rails.right.width();
         let text_width = if target == WorkspaceImeTarget::AiMessageEdit {
             self.text_input_anchors
                 .bounds(target.anchor_id())
@@ -36,7 +32,7 @@ impl WorkspaceApp {
         text: &'a str,
         cx: &App,
     ) -> Vec<AiInputVisualLine<'a>> {
-        let width = self.ai_editor_text_width(target, cx);
+        let width = self.ai_editor_text_width(target);
         if target == WorkspaceImeTarget::AiMessageEdit {
             ai_input_measured_visual_lines(
                 text,
@@ -54,8 +50,12 @@ impl WorkspaceApp {
         }
     }
 
-    pub(in crate::workspace) fn ai_context_token_breakdown(&self, cx: &App) -> AiContextTokenBreakdown {
-        self.ai_conversation_prompt(cx).ai_context_token_breakdown(self.resolve_ai_stream_config(cx).ok().as_ref())
+    pub(in crate::workspace) fn ai_context_token_breakdown(
+        &self,
+        cx: &App,
+    ) -> AiContextTokenBreakdown {
+        self.ai_conversation_prompt(cx)
+            .ai_context_token_breakdown(self.resolve_ai_stream_config(cx).ok().as_ref())
     }
 
     pub(in crate::workspace) fn ai_chat_autocomplete_items(
@@ -69,7 +69,8 @@ impl WorkspaceApp {
             .chat_autocomplete_items(settings.active_backend, || {
                 if settings.skills.enabled {
                     self.ai
-                        .skills.read()
+                        .skills
+                        .read()
                         .catalog()
                         .into_iter()
                         .map(|skill| (skill.id, skill.description))
@@ -105,6 +106,7 @@ impl WorkspaceApp {
         &self,
         cx: &App,
     ) -> Option<(usize, usize)> {
-        self.ai_conversation_prompt(cx).context_usage_counts(|| self.resolve_ai_stream_config(cx).ok())
+        self.ai_conversation_prompt(cx)
+            .context_usage_counts(|| self.resolve_ai_stream_config(cx).ok())
     }
 }

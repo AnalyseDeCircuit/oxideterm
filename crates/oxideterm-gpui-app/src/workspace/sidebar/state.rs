@@ -1,41 +1,5 @@
 use super::*;
 
-const SIDEBAR_VIEWPORT_MIN_WIDTH_RATIO: f32 = 0.16;
-const SIDEBAR_VIEWPORT_MAX_WIDTH_RATIO: f32 = 0.45;
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(in crate::workspace) struct ResponsiveSidebarWidthBounds {
-    pub min: f32,
-    pub max: f32,
-}
-
-pub(in crate::workspace) fn responsive_sidebar_width_bounds(
-    viewport_width: f32,
-    absolute_min_width: f32,
-    absolute_max_width: f32,
-) -> ResponsiveSidebarWidthBounds {
-    // Relative limits let wide windows use their available space, while the
-    // absolute limits preserve usable controls on ordinary and compact windows.
-    let viewport_width = viewport_width.max(0.0);
-    let min = absolute_min_width.max(viewport_width * SIDEBAR_VIEWPORT_MIN_WIDTH_RATIO);
-    let max = absolute_max_width
-        .max(viewport_width * SIDEBAR_VIEWPORT_MAX_WIDTH_RATIO)
-        .min(viewport_width.max(min))
-        .max(min);
-    ResponsiveSidebarWidthBounds { min, max }
-}
-
-pub(in crate::workspace) fn clamp_responsive_sidebar_width(
-    width: f32,
-    viewport_width: f32,
-    absolute_min_width: f32,
-    absolute_max_width: f32,
-) -> f32 {
-    let bounds =
-        responsive_sidebar_width_bounds(viewport_width, absolute_min_width, absolute_max_width);
-    width.clamp(bounds.min, bounds.max)
-}
-
 fn should_collapse_context_sidebar_panel(
     sidebar_visible: bool,
     active_panel: ContextSidebarPanel,
@@ -76,17 +40,9 @@ impl WorkspaceApp {
         collapsed: bool,
         cx: &mut Context<Self>,
     ) {
-        let was_collapsed = self.sidebar_collapsed;
-        self.sidebar_motion.retarget(if collapsed {
-            0.0
-        } else {
-            self.sidebar_panel_width()
-        });
-        self.sidebar_collapsed = collapsed;
-        self.sidebar_motion_generation = self.sidebar_motion_generation.wrapping_add(1);
-        let generation = self.sidebar_motion_generation;
+        let was_collapsed = self.rails.left.collapsed();
+        let generation = self.rails.left.set_collapsed(collapsed, &self.tokens);
         if !collapsed {
-            self.sidebar_rendered = true;
             if was_collapsed && self.session_manager_sidebar_visible() {
                 // Defer SSH config scan until the drawer expand spring settles so disk scans never drop frames.
                 let settle_delay = oxideterm_gpui_ui::motion::settle_duration(
@@ -98,8 +54,8 @@ impl WorkspaceApp {
                         Timer::after(settle_delay).await;
                     }
                     let _ = weak.update(cx, |this, cx| {
-                        if !this.sidebar_collapsed
-                            && this.sidebar_motion_generation == generation
+                        if !this.rails.left.collapsed()
+                            && this.rails.left.generation() == generation
                             && this.session_manager_sidebar_visible()
                         {
                             this.refresh_session_manager_ssh_config_hosts(cx);
@@ -113,58 +69,21 @@ impl WorkspaceApp {
         if self.effective_sidebar_panel_section() == SidebarSection::Connections {
             self.close_session_manager_sidebar_search(cx);
         }
-        if !self.tokens.motion.enabled || !self.tokens.motion.spatial_enabled {
-            self.sidebar_motion.settle(0.0);
-            self.sidebar_rendered = false;
-            return;
-        }
-        let delay = oxideterm_gpui_ui::motion::exit_settle_duration(
-            &self.tokens,
-            oxideterm_gpui_ui::motion::MotionDuration::Control,
-        );
-        // Keep the panel mounted until its closing transition completes.
-        cx.spawn(async move |weak, cx| {
-            Timer::after(delay).await;
-            let _ = weak.update(cx, |this, cx| {
-                if this.sidebar_collapsed && this.sidebar_motion_generation == generation {
-                    this.sidebar_rendered = false;
-                    cx.notify();
-                }
-            });
-        })
-        .detach();
+        self.schedule_rail_unmount(RailSide::Left, generation, cx);
     }
 
-    fn set_context_sidebar_rendered_with_motion(&mut self, visible: bool, cx: &mut Context<Self>) {
-        self.context_sidebar_motion.retarget(if visible {
-            self.ai.state.read(cx).chat_ui().sidebar_width
-        } else {
-            0.0
-        });
-        self.context_sidebar_motion_generation =
-            self.context_sidebar_motion_generation.wrapping_add(1);
-        let generation = self.context_sidebar_motion_generation;
-        if visible {
-            self.context_sidebar_rendered = true;
-            return;
-        }
-        if !self.tokens.motion.enabled || !self.tokens.motion.spatial_enabled {
-            self.context_sidebar_motion.settle(0.0);
-            self.context_sidebar_rendered = false;
+    fn schedule_rail_unmount(&mut self, side: RailSide, generation: u64, cx: &mut Context<Self>) {
+        if !self.rails.rail_mut(side).mounted() {
             return;
         }
         let delay = oxideterm_gpui_ui::motion::exit_settle_duration(
             &self.tokens,
             oxideterm_gpui_ui::motion::MotionDuration::Control,
         );
-        // Delayed unmount makes the right sidebar's collapse animation observable.
         cx.spawn(async move |weak, cx| {
             Timer::after(delay).await;
             let _ = weak.update(cx, |this, cx| {
-                if !this.context_sidebar_visible()
-                    && this.context_sidebar_motion_generation == generation
-                {
-                    this.context_sidebar_rendered = false;
+                if this.rails.rail_mut(side).finish_collapse(generation) {
                     cx.notify();
                 }
             });
@@ -173,8 +92,9 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn persist_sidebar_settings(&mut self, cx: &mut Context<Self>) {
-        self.settings_store.settings_mut().sidebar_ui.collapsed = self.sidebar_collapsed;
-        self.settings_store.settings_mut().sidebar_ui.width = self.sidebar_width.round() as i64;
+        self.settings_store.settings_mut().sidebar_ui.collapsed = self.rails.left.collapsed();
+        self.settings_store.settings_mut().sidebar_ui.width =
+            self.rails.left.width().round() as i64;
         self.settings_store.settings_mut().sidebar_ui.active_section = self
             .effective_sidebar_panel_section()
             .as_settings_key()
@@ -193,27 +113,27 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn ai_sidebar_visible(&self) -> bool {
         self.context_sidebar_visible()
-            && self.active_context_sidebar_panel == ContextSidebarPanel::Assistant
+            && self.rails.context_panel == ContextSidebarPanel::Assistant
             && self.settings_store.settings().ai.enabled
     }
 
     pub(in crate::workspace) fn context_sidebar_visible(&self) -> bool {
         let settings = self.settings_store.settings();
         context_sidebar_panel_visible(
-            settings.sidebar_ui.ai_sidebar_collapsed,
+            self.rails.right.collapsed(),
             settings.sidebar_ui.zen_mode,
             settings.ai.enabled,
-            self.active_context_sidebar_panel,
+            self.rails.context_panel,
         )
     }
 
-    pub(in crate::workspace) fn context_sidebar_occupied_width(&self, cx: &App) -> f32 {
+    pub(in crate::workspace) fn context_sidebar_occupied_width(&self) -> f32 {
         if self.settings_store.settings().sidebar_ui.zen_mode {
             return 0.0;
         }
         self.tokens.metrics.activity_bar_width
             + if self.context_sidebar_visible() {
-                self.ai.state.read(cx).chat_ui().sidebar_width
+                self.rails.right.width()
             } else {
                 0.0
             }
@@ -229,7 +149,7 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn session_manager_sidebar_visible(&self) -> bool {
-        !self.sidebar_collapsed
+        !self.rails.left.collapsed()
             && !self.settings_store.settings().sidebar_ui.zen_mode
             && self.effective_sidebar_panel_section() == SidebarSection::Connections
     }
@@ -241,15 +161,8 @@ impl WorkspaceApp {
     ) {
         self.clear_ai_sidebar_keyboard_focus(cx);
         let was_visible = self.session_manager_sidebar_visible();
-        let was_collapsed = self.sidebar_collapsed;
-        let previous_panel = self.effective_sidebar_panel_section();
-        self.active_sidebar_section = section;
-        let next_panel = self.effective_sidebar_panel_section();
-        if !was_collapsed && previous_panel != next_panel && self.tokens.motion.enabled {
-            self.sidebar_section_motion_generation =
-                self.sidebar_section_motion_generation.wrapping_add(1);
-            let transition_gen = self.sidebar_section_motion_generation;
-            self.sidebar_section_transition = Some((next_panel, transition_gen));
+        let was_collapsed = self.rails.left.collapsed();
+        if let Some(transition_gen) = self.rails.select_section(section, &self.tokens) {
             let settle_delay = oxideterm_gpui_ui::motion::settle_duration(
                 &self.tokens,
                 oxideterm_gpui_ui::motion::MotionDuration::Micro,
@@ -257,20 +170,17 @@ impl WorkspaceApp {
             cx.spawn(async move |weak, cx| {
                 Timer::after(settle_delay).await;
                 let _ = weak.update(cx, |this, cx| {
-                    if this.sidebar_section_transition == Some((next_panel, transition_gen)) {
-                        this.sidebar_section_transition = None;
+                    if this.rails.finish_section_transition(transition_gen) {
                         cx.notify();
                     }
                 });
             })
             .detach();
-        } else {
-            self.sidebar_section_transition = None;
         }
         if section == SidebarSection::Extensions {
             self.bootstrap_native_plugin_runtime(cx);
         }
-        if self.sidebar_collapsed {
+        if self.rails.left.collapsed() {
             self.set_sidebar_collapsed_with_motion(false, cx);
         }
         // Reopening a collapsed panel already refreshes in the expand path.
@@ -278,7 +188,7 @@ impl WorkspaceApp {
             self.refresh_session_manager_ssh_config_hosts(cx);
         }
         if matches!(
-            self.active_sidebar_section,
+            self.rails.section,
             SidebarSection::Sessions | SidebarSection::Connections
         ) {
             self.activate_embedded_sftp_sidebar_if_visible(cx);
@@ -301,7 +211,7 @@ impl WorkspaceApp {
         // Activity-bar panel buttons are symmetric toggles: selecting another
         // panel opens it, while selecting the visible panel hides the sidebar.
         if should_collapse_primary_sidebar_section(
-            self.sidebar_collapsed,
+            self.rails.left.collapsed(),
             self.effective_sidebar_panel_section(),
             section,
         ) {
@@ -315,90 +225,93 @@ impl WorkspaceApp {
         if self.onboarding_disclaimer_locked() {
             return;
         }
-        self.set_sidebar_collapsed_with_motion(!self.sidebar_collapsed, cx);
-        self.sidebar_resizing = false;
+        self.set_sidebar_collapsed_with_motion(!self.rails.left.collapsed(), cx);
+        self.rails.left.end_resize();
         self.persist_sidebar_settings(cx);
         cx.notify();
     }
 
     pub(in crate::workspace) fn sidebar_panel_width(&self) -> f32 {
-        (self.sidebar_width - self.tokens.metrics.activity_bar_width).max(0.0)
+        self.rails.left.panel_width(&self.tokens)
     }
 
-    pub(in crate::workspace) fn set_sidebar_width(
-        &mut self,
-        width: f32,
-        viewport_width: f32,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        let next_width = clamp_responsive_sidebar_width(
-            width,
-            viewport_width,
-            self.tokens.metrics.sidebar_min_width,
-            self.tokens.metrics.sidebar_max_width,
-        );
-        if (next_width - self.sidebar_width).abs() < f32::EPSILON {
-            return false;
+    fn rail_cursor_width(&self, side: RailSide, x: Pixels, window: &Window) -> f32 {
+        let viewport = f32::from(window.viewport_size().width);
+        let activity = self.tokens.metrics.activity_bar_width;
+        match side {
+            RailSide::Left => clamp_responsive_sidebar_width(
+                side.width_at(f32::from(x), viewport, activity),
+                viewport,
+                self.tokens.metrics.sidebar_min_width,
+                self.tokens.metrics.sidebar_max_width,
+            ),
+            RailSide::Right => ai_sidebar_width_from_cursor_value(f32::from(x), viewport, activity),
         }
-        // Resize mousemove is a high-frequency root-capture path. Repaint only
-        // when the clamped browser-style sidebar width actually changes.
-        self.sidebar_width = next_width;
-        self.sidebar_motion.settle(self.sidebar_panel_width());
-        cx.notify();
-        true
     }
 
-    pub(in crate::workspace) fn start_sidebar_resize(
+    pub(in crate::workspace) fn start_rail_resize(
         &mut self,
-        event: &MouseDownEvent,
+        side: RailSide,
+        x: Pixels,
         window: &Window,
         cx: &mut Context<Self>,
     ) {
-        let was_resizing = self.sidebar_resizing;
-        self.sidebar_motion_generation = self.sidebar_motion_generation.wrapping_add(1);
-        self.sidebar_resizing = true;
-        let viewport_width = f32::from(window.viewport_size().width);
-        let width_changed = self.set_sidebar_width(
-            self.sidebar_width_from_cursor(event.position.x, window),
-            viewport_width,
-            cx,
-        );
-        self.sidebar_motion.settle(self.sidebar_panel_width());
-        if !was_resizing && !width_changed {
-            cx.notify();
-        }
+        let width = self.rail_cursor_width(side, x, window);
+        self.rails.rail_mut(side).begin_resize(width, &self.tokens);
+        cx.notify();
     }
 
-    pub(in crate::workspace) fn update_sidebar_resize(
+    pub(in crate::workspace) fn update_rail_resize(
         &mut self,
         event: &MouseMoveEvent,
         window: &Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.sidebar_resizing {
+        if self.rails.resizing_side().is_none() {
             return;
         }
         if !event.dragging() {
-            // Browser resize handles release as soon as the platform reports
-            // the button is no longer down, even if GPUI missed mouse-up.
-            self.finish_sidebar_resize(cx);
+            self.finish_rail_resize(cx);
             return;
         }
-        // Match the AI sidebar: root-level movement owns the captured drag,
-        // and the visible width is derived from the current window cursor.
-        self.set_sidebar_width(
-            self.sidebar_width_from_cursor(event.position.x, window),
-            f32::from(window.viewport_size().width),
-            cx,
-        );
+        self.drag_rail_resize(event.position.x, window, cx);
     }
 
-    pub(in crate::workspace) fn finish_sidebar_resize(&mut self, cx: &mut Context<Self>) {
-        if self.sidebar_resizing {
-            self.sidebar_resizing = false;
-            self.persist_sidebar_settings(cx);
+    pub(in crate::workspace) fn drag_rail_resize(
+        &mut self,
+        x: Pixels,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(side) = self.rails.resizing_side() else {
+            return;
+        };
+        let width = self.rail_cursor_width(side, x, window);
+        if self
+            .rails
+            .rail_mut(side)
+            .set_width(width, true, &self.tokens)
+        {
             cx.notify();
         }
+    }
+
+    pub(in crate::workspace) fn finish_rail_resize(&mut self, cx: &mut Context<Self>) {
+        let Some(side) = self.rails.resizing_side() else {
+            return;
+        };
+        self.rails.rail_mut(side).end_resize();
+        match side {
+            RailSide::Left => self.persist_sidebar_settings(cx),
+            RailSide::Right => {
+                self.settings_store
+                    .settings_mut()
+                    .sidebar_ui
+                    .ai_sidebar_width = self.rails.right.width().round() as i64;
+                self.persist_sidebar_settings_store(cx);
+            }
+        }
+        cx.notify();
     }
 
     pub(in crate::workspace) fn start_embedded_sftp_sidebar_resize(
@@ -466,20 +379,6 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    pub(in crate::workspace) fn sidebar_width_from_cursor(
-        &self,
-        cursor_x: Pixels,
-        window: &Window,
-    ) -> f32 {
-        let viewport_width = f32::from(window.viewport_size().width);
-        clamp_responsive_sidebar_width(
-            f32::from(cursor_x),
-            viewport_width,
-            self.tokens.metrics.sidebar_min_width,
-            self.tokens.metrics.sidebar_max_width,
-        )
-    }
-
     pub(in crate::workspace) fn toggle_ai_sidebar(&mut self, cx: &mut Context<Self>) -> bool {
         self.toggle_context_sidebar_panel(ContextSidebarPanel::Assistant, cx)
     }
@@ -492,7 +391,7 @@ impl WorkspaceApp {
         // Clicking the currently visible context panel mirrors an ordinary toggle.
         if should_collapse_context_sidebar_panel(
             self.context_sidebar_visible(),
-            self.active_context_sidebar_panel,
+            self.rails.context_panel,
             panel,
         ) {
             self.collapse_context_sidebar(cx);
@@ -516,12 +415,12 @@ impl WorkspaceApp {
             return false;
         }
 
-        self.active_context_sidebar_panel = panel;
+        self.rails.context_panel = panel;
         self.settings_store
             .settings_mut()
             .sidebar_ui
             .ai_sidebar_collapsed = false;
-        self.set_context_sidebar_rendered_with_motion(true, cx);
+        self.rails.right.set_collapsed(false, &self.tokens);
         if panel == ContextSidebarPanel::Assistant {
             self.ensure_ai_chat_initialized(cx);
             self.bootstrap_ai_mcp_registry(cx);
@@ -542,121 +441,14 @@ impl WorkspaceApp {
             .settings_mut()
             .sidebar_ui
             .ai_sidebar_collapsed = true;
-        self.set_context_sidebar_rendered_with_motion(false, cx);
-        self.ai.state.update(cx, |ai, _cx| {
-            ai.set_chat_sidebar_resizing(false);
-        });
+        let generation = self.rails.right.set_collapsed(true, &self.tokens);
+        self.schedule_rail_unmount(RailSide::Right, generation, cx);
+        self.rails.right.end_resize();
         self.sync_host_tools_lifecycle(false, cx);
         self.clear_ai_sidebar_keyboard_focus(cx);
         self.close_ai_sidebar_popovers(cx);
         self.persist_sidebar_settings_store(cx);
         cx.notify();
-    }
-
-    pub(in crate::workspace) fn set_ai_sidebar_width(
-        &mut self,
-        width: f32,
-        viewport_width: f32,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        let next_width = clamp_responsive_sidebar_width(
-            width,
-            viewport_width,
-            AI_SIDEBAR_ABSOLUTE_MIN_WIDTH,
-            AI_SIDEBAR_ABSOLUTE_MAX_WIDTH,
-        );
-        if (next_width - self.ai.state.read(cx).chat_ui().sidebar_width).abs() < f32::EPSILON {
-            return false;
-        }
-        // Same repaint contract as the main sidebar: pointer capture may keep
-        // sending moves after the width is clamped at a boundary.
-        self.ai.state.update(cx, |ai, _cx| {
-            ai.set_chat_sidebar_width(next_width);
-        });
-        self.context_sidebar_motion.settle(next_width);
-        cx.notify();
-        true
-    }
-
-    pub(in crate::workspace) fn start_ai_sidebar_resize(
-        &mut self,
-        event: &MouseDownEvent,
-        window: &Window,
-        cx: &mut Context<Self>,
-    ) {
-        let was_resizing = self.ai.state.read(cx).chat_ui().sidebar_resizing;
-        self.context_sidebar_motion_generation =
-            self.context_sidebar_motion_generation.wrapping_add(1);
-        self.ai.state.update(cx, |ai, _cx| {
-            ai.set_chat_sidebar_resizing(true);
-        });
-        // Mirror the browser sidebar: the first press updates the width from
-        // the pointer position so a resize drag is visible before the next move.
-        let width_changed = self.set_ai_sidebar_width(
-            self.ai_sidebar_width_from_cursor(event.position.x, window),
-            f32::from(window.viewport_size().width),
-            cx,
-        );
-        self.context_sidebar_motion
-            .settle(self.ai.state.read(cx).chat_ui().sidebar_width);
-        if !was_resizing && !width_changed {
-            cx.notify();
-        }
-    }
-
-    pub(in crate::workspace) fn update_ai_sidebar_resize(
-        &mut self,
-        event: &MouseMoveEvent,
-        window: &Window,
-        cx: &mut Context<Self>,
-    ) {
-        if !self.ai.state.read(cx).chat_ui().sidebar_resizing {
-            return;
-        }
-        if !event.dragging() {
-            // Keep both sidebars on the same release contract: a missed
-            // mouse-up cannot leave the resize state latched.
-            self.finish_ai_sidebar_resize(cx);
-            return;
-        }
-        // Continue from the root capture even after the pointer leaves the AI
-        // sidebar edge, matching browser resize handles.
-        self.set_ai_sidebar_width(
-            self.ai_sidebar_width_from_cursor(event.position.x, window),
-            f32::from(window.viewport_size().width),
-            cx,
-        );
-    }
-
-    pub(in crate::workspace) fn finish_ai_sidebar_resize(&mut self, cx: &mut Context<Self>) {
-        if self.ai.state.read(cx).chat_ui().sidebar_resizing {
-            let sidebar_width = self
-                .ai
-                .state
-                .update(cx, |ai, _cx| ai.finish_chat_sidebar_resize());
-            self.settings_store
-                .settings_mut()
-                .sidebar_ui
-                .ai_sidebar_width = sidebar_width.round() as i64;
-            self.persist_sidebar_settings_store(cx);
-            cx.notify();
-        }
-    }
-
-    pub(in crate::workspace) fn ai_sidebar_width_from_cursor(
-        &self,
-        cursor_x: Pixels,
-        window: &Window,
-    ) -> f32 {
-        // Pointer events use the current drawable area's coordinate space.
-        // On Windows, inner_window_bounds() reports the restore bounds while
-        // maximized, which would clamp every resize update to the same limit.
-        let viewport_width = f32::from(window.viewport_size().width);
-        ai_sidebar_width_from_cursor_value(
-            f32::from(cursor_x),
-            viewport_width,
-            self.tokens.metrics.activity_bar_width,
-        )
     }
 
     pub(in crate::workspace) fn clamp_sidebar_widths_to_viewport(
@@ -665,45 +457,30 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let primary_width = clamp_responsive_sidebar_width(
-            self.sidebar_width,
+            self.rails.left.width(),
             viewport_width,
             self.tokens.metrics.sidebar_min_width,
             self.tokens.metrics.sidebar_max_width,
         );
         let context_width = clamp_responsive_sidebar_width(
-            self.ai.state.read(cx).chat_ui().sidebar_width,
+            self.rails.right.width(),
             viewport_width,
             AI_SIDEBAR_ABSOLUTE_MIN_WIDTH,
             AI_SIDEBAR_ABSOLUTE_MAX_WIDTH,
         );
-        let primary_changed = (primary_width - self.sidebar_width).abs() >= f32::EPSILON;
-        let context_changed =
-            (context_width - self.ai.state.read(cx).chat_ui().sidebar_width).abs() >= f32::EPSILON;
-        if !primary_changed && !context_changed {
-            return;
+        let left_visible = !self.rails.left.collapsed();
+        let right_visible = self.context_sidebar_visible();
+        let left_changed = self
+            .rails
+            .left
+            .set_width(primary_width, left_visible, &self.tokens);
+        let right_changed = self
+            .rails
+            .right
+            .set_width(context_width, right_visible, &self.tokens);
+        if left_changed || right_changed {
+            cx.notify();
         }
-        // Window resizes update effective widths without persisting a synthetic
-        // user resize; persistence remains owned by completed drag gestures.
-        self.sidebar_width = primary_width;
-        if primary_changed {
-            self.sidebar_motion.settle(if self.sidebar_collapsed {
-                0.0
-            } else {
-                self.sidebar_panel_width()
-            });
-        }
-        if context_changed {
-            self.ai.state.update(cx, |ai, _cx| {
-                ai.set_chat_sidebar_width(context_width);
-            });
-            self.context_sidebar_motion
-                .settle(if self.context_sidebar_visible() {
-                    context_width
-                } else {
-                    0.0
-                });
-        }
-        cx.notify();
     }
 }
 
@@ -716,7 +493,7 @@ pub(in crate::workspace) fn ai_sidebar_width_from_cursor_value(
     // increase width and dragging right must decrease width. Keep this math in
     // a pure helper so regressions do not require constructing a GPUI Window.
     clamp_responsive_sidebar_width(
-        viewport_width - activity_bar_width - cursor_x,
+        RailSide::Right.width_at(cursor_x, viewport_width, activity_bar_width),
         viewport_width,
         AI_SIDEBAR_ABSOLUTE_MIN_WIDTH,
         AI_SIDEBAR_ABSOLUTE_MAX_WIDTH,
