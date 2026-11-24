@@ -321,6 +321,25 @@ pub fn configurable_key_escape_sequence(
     delete_sequence: TerminalDeleteSequence,
     event_type: KittyKeyEventType,
 ) -> Option<Cow<'static, str>> {
+    key_escape_sequence(
+        keystroke,
+        mode,
+        !cfg!(target_os = "macos") || option_as_meta,
+        backspace_sequence,
+        delete_sequence,
+        event_type,
+    )
+}
+
+// The browser's host OS is known at runtime, not from the WASM target triple.
+pub(crate) fn key_escape_sequence(
+    keystroke: &gpui::Keystroke,
+    mode: &TermMode,
+    alt_sends_escape: bool,
+    backspace_sequence: TerminalBackspaceSequence,
+    delete_sequence: TerminalDeleteSequence,
+    event_type: KittyKeyEventType,
+) -> Option<Cow<'static, str>> {
     let modifiers = TerminalKeyModifiers::from_keystroke(keystroke);
 
     // ConPTY translates these events into the inner application's input mode.
@@ -376,9 +395,7 @@ pub fn configurable_key_escape_sequence(
         return Some(sequence);
     }
 
-    if (!cfg!(target_os = "macos") || option_as_meta)
-        && is_meta_printable_ascii(keystroke, modifiers)
-    {
+    if alt_sends_escape && is_meta_printable_ascii(keystroke, modifiers) {
         let key = if modifiers.shift {
             keystroke.key.to_ascii_uppercase()
         } else {

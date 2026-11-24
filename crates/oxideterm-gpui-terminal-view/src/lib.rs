@@ -1,4 +1,5 @@
-//! GPUI terminal canvas, visual annotations, and input geometry for emulator snapshots.
+//! Mount a [`TerminalView`], feed it output, and subscribe to [`TerminalViewEvent`]
+//! to route input and terminal replies back to the same peer.
 
 mod annotations;
 pub mod element;
@@ -12,6 +13,7 @@ pub mod semantic;
 pub mod style;
 pub mod theme;
 pub mod timestamps;
+mod view;
 
 pub use annotations::{
     CommandMarkAnnotation, ImagePlayback, TerminalRenderedImage, TransientCommandHighlight,
@@ -21,6 +23,7 @@ pub use host::{TerminalCanvasHost, TerminalElementInput};
 pub use metrics::TerminalMetrics;
 pub use theme::TerminalUiTheme;
 pub use timestamps::TerminalRowTimestampStore;
+pub use view::{TerminalView, TerminalViewEvent};
 
 #[cfg(test)]
 mod tests;

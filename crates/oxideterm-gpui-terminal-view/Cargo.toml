@@ -16,6 +16,7 @@ gpui.workspace = true
 oxideterm-gpui-ui = { path = "../oxideterm-gpui-ui" }
 oxideterm-settings = { path = "../oxideterm-settings" }
 oxideterm-terminal-emulator = { path = "../oxideterm-terminal-emulator" }
+oxideterm-terminal-encoding = { path = "../oxideterm-terminal-encoding" }
 oxideterm-terminal-semantic = { path = "../oxideterm-terminal-semantic", default-features = false }
 oxideterm-terminal-unicode = { path = "../oxideterm-terminal-unicode" }
 oxideterm-theme = { path = "../oxideterm-theme" }
@@ -26,3 +27,6 @@ zeroize.workspace = true
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 url.workspace = true
+
+[target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }

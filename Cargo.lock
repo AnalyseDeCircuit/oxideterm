@@ -7945,6 +7945,7 @@ dependencies = [
  "oxideterm-gpui-ui",
  "oxideterm-settings",
  "oxideterm-terminal-emulator",
+ "oxideterm-terminal-encoding",
  "oxideterm-terminal-semantic",
  "oxideterm-terminal-unicode",
  "oxideterm-theme",
