@@ -19,6 +19,7 @@ pub use select::{NewConnectionSelect, select_anchor_id};
 /// Render a host-key label (true) or its value (false) with the host's text selection.
 pub type ConnectionsSelectableText = Rc<dyn Fn(&str, &str, bool, u32, &mut App) -> AnyElement>;
 
+#[derive(Clone)]
 pub struct ConnectionsEnvironment {
     pub tokens: ThemeTokens,
     pub i18n: I18n,
@@ -26,12 +27,14 @@ pub struct ConnectionsEnvironment {
 
 #[cfg(not(target_family = "wasm"))]
 mod desktop;
-#[cfg(not(target_family = "wasm"))]
-pub(crate) use desktop::bind_connection_input;
+mod form_input;
 #[cfg(not(target_family = "wasm"))]
 pub use desktop::*;
+pub use form_input::{
+    ConnectionImeFrame, ConnectionImeSource, ConnectionsEnvironmentSource, ConnectionsInput,
+};
+use form_input::{FormAction, FormDispatch, bind_connection_input, form_text_input};
 
-#[cfg(not(target_family = "wasm"))]
 pub mod algorithms;
 #[cfg(not(target_family = "wasm"))]
 mod authentication;
@@ -39,12 +42,15 @@ mod authentication;
 mod delivery;
 #[cfg(not(target_family = "wasm"))]
 pub use delivery::{SftpConnected, SftpConnectedEndpoint};
-#[cfg(not(target_family = "wasm"))]
 mod form;
-#[cfg(not(target_family = "wasm"))]
+pub mod portable_form;
 pub use form::{
     ConnectionFormEnvironment, FormKeyAction, FormPluginType, FormTotpCredential,
     NEW_CONNECTION_TYPE_SIDEBAR_WIDTH, TunnelFormEnvironment, TunnelKind,
+};
+pub use portable_form::{
+    PortableConnectionDraft, PortableConnectionFormEnvironment, PortableConnectionFormEvent,
+    PortableConnectionFormView,
 };
 #[cfg(not(target_family = "wasm"))]
 mod ftp;

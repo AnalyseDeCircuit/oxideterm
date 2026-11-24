@@ -2,10 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use std::{
-    cell::RefCell,
     collections::{HashMap, VecDeque},
     ops::Range,
-    rc::Rc,
     time::Duration,
 };
 
@@ -18,7 +16,6 @@ use crate::launch::PendingStandaloneSftpPairLaunch;
 use gpui::{Context, EventEmitter, Task};
 use oxideterm_connections::{SaveConnectionRequest, SecretString};
 use oxideterm_editor_core::utf16::replace_utf16;
-use oxideterm_gpui_ui::select::{OverlayAnchor, SelectAnchorId};
 use oxideterm_ssh::{
     HostKeyStatus, KeyboardInteractivePromptRequest, NativeSessionTreeConnectAction,
     NativeSessionTreeConnectPlan, SshConfig, SshPromptError, UpstreamProxyConfig,
@@ -52,29 +49,7 @@ pub struct HostKeyDialogSnapshot {
     pub status: HostKeyStatus,
 }
 
-/// Shares layout-only select anchors without routing every prepaint through WorkspaceApp.
-#[derive(Clone, Default)]
-pub struct ConnectionSelectAnchorStore {
-    anchors: Rc<RefCell<HashMap<SelectAnchorId, OverlayAnchor>>>,
-}
-
-impl ConnectionSelectAnchorStore {
-    pub fn get(&self, id: SelectAnchorId) -> Option<OverlayAnchor> {
-        self.anchors.borrow().get(&id).copied()
-    }
-
-    pub fn update(&self, anchor: OverlayAnchor) -> bool {
-        if self.get(anchor.id) == Some(anchor) {
-            return false;
-        }
-        self.anchors.borrow_mut().insert(anchor.id, anchor);
-        true
-    }
-
-    pub fn clear(&self) {
-        self.anchors.borrow_mut().clear();
-    }
-}
+pub use crate::form_entity::ConnectionSelectAnchorStore;
 
 /// Owns connection-flow state that must survive independently of root rendering.
 pub struct ConnectionFlowEntity {
@@ -462,6 +437,11 @@ impl ConnectionFlowEntity {
         if !crate::input::replace_text(&mut self.form, field, replacement_range, text) {
             return false;
         }
+        if field == NewConnectionField::IdentityAgent
+            && let Some(form) = self.form.form.as_mut()
+        {
+            crate::form_state::refresh_identity_agent_availability(form);
+        }
         cx.notify();
         true
     }
@@ -751,37 +731,7 @@ impl ConnectionFlowEntity {
         }
         self.jump_server_exit_task = None;
         let commit = std::mem::take(&mut self.form.jump_server_exit_commits);
-        if let Some(form) = self.form.form.as_mut() {
-            if let Some(jump_server) = form.jump_server_form.take() {
-                let edit_index = form.jump_server_edit_index.take();
-                let proxy_hops = match form.jump_server_target {
-                    super::ConnectionRouteTarget::Primary => {
-                        form.proxy_chain_expanded = true;
-                        &mut form.proxy_hops
-                    }
-                    super::ConnectionRouteTarget::StandaloneSftpSecondary => {
-                        form.standalone_sftp_secondary.proxy_chain_expanded = true;
-                        &mut form.standalone_sftp_secondary.proxy_hops
-                    }
-                };
-                if let Some(index) = edit_index {
-                    // The existing hop is moved into the modal, so both save and cancel
-                    // restore it at its original position without duplicating secrets.
-                    proxy_hops.insert(index.min(proxy_hops.len()), jump_server);
-                } else if commit {
-                    proxy_hops.push(jump_server);
-                }
-                if commit {
-                    if form.auth_tab == super::SshAuthTab::TwoFactor {
-                        form.auth_tab = super::SshAuthTab::Password;
-                        form.focused_field = super::NewConnectionField::Password;
-                    }
-                    form.field_focused = false;
-                    form.selected_field = None;
-                    form.error = None;
-                }
-            }
-        }
+        self.form.finish_jump_edit(commit);
         self.form.jump_server_presence.reopen();
         cx.notify();
         true

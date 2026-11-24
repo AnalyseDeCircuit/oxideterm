@@ -1,13 +1,16 @@
-use gpui::{AnyElement, App, Div, Entity, IntoElement, MouseButton, prelude::*};
+use gpui::{AnyElement, App, Div, IntoElement, MouseButton, prelude::*};
 use oxideterm_gpui_ui::form_field;
 use oxideterm_gpui_ui::select::{BrowserFocusOrigin, select_anchor_probe};
 use oxideterm_theme::ThemeTokens;
 
-use crate::views::{ConnectionsDispatch, ConnectionsViews, ConnectionsWindowRequest};
-use crate::{ConnectionFormState, NewConnectionSelect, entity::ConnectionFlowEntity};
+#[cfg(not(target_family = "wasm"))]
+use crate::views::ConnectionsViews;
+use crate::views::{FormAction, FormDispatch, form::FormOwner};
+use crate::{ConnectionFormState, NewConnectionSelect};
 
 use super::select_anchor_id;
 
+#[cfg(not(target_family = "wasm"))]
 impl ConnectionsViews {
     pub fn group_select(
         &self,
@@ -17,7 +20,15 @@ impl ConnectionsViews {
         group: &str,
         cx: &App,
     ) -> AnyElement {
-        group_select(&self.flow, &self.dispatch, tokens, i18n, label, group, cx)
+        group_select(
+            &FormOwner::Desktop(self.flow.clone()),
+            &super::super::desktop::form_dispatch(&self.dispatch),
+            tokens,
+            i18n,
+            label,
+            group,
+            cx,
+        )
     }
 
     pub fn labelled_select(
@@ -31,8 +42,8 @@ impl ConnectionsViews {
         cx: &App,
     ) -> AnyElement {
         labelled_select(
-            &self.flow,
-            &self.dispatch,
+            &FormOwner::Desktop(self.flow.clone()),
+            &super::super::desktop::form_dispatch(&self.dispatch),
             tokens,
             select,
             label,
@@ -68,20 +79,20 @@ impl ConnectionsViews {
         trigger: impl IntoElement,
         cx: &App,
     ) -> AnyElement {
-        track_select_anchor(&self.flow, select, trigger, cx)
+        track_select_anchor(&FormOwner::Desktop(self.flow.clone()), select, trigger, cx)
     }
 }
 
 pub(in crate::views) fn group_select(
-    flow: &Entity<ConnectionFlowEntity>,
-    dispatch: &ConnectionsDispatch,
+    flow: &FormOwner,
+    dispatch: &FormDispatch,
     tokens: &ThemeTokens,
     i18n: &oxideterm_i18n::I18n,
     label: String,
     group: &str,
     cx: &App,
 ) -> AnyElement {
-    let value = if crate::conversion::connection_group_is_ungrouped(group, i18n) {
+    let value = if crate::form_state::connection_group_is_ungrouped(group, i18n) {
         i18n.t("ssh.form.ungrouped")
     } else {
         group.trim().to_owned()
@@ -100,8 +111,8 @@ pub(in crate::views) fn group_select(
 }
 
 pub(in crate::views) fn labelled_select(
-    flow: &Entity<ConnectionFlowEntity>,
-    dispatch: &ConnectionsDispatch,
+    flow: &FormOwner,
+    dispatch: &FormDispatch,
     tokens: &ThemeTokens,
     select: NewConnectionSelect,
     label: String,
@@ -111,34 +122,26 @@ pub(in crate::views) fn labelled_select(
     cx: &App,
 ) -> AnyElement {
     let dispatch = dispatch.clone();
-    let owner = flow.downgrade();
-    let trigger = select_trigger(
-        &flow.read(cx).form,
-        tokens,
-        select,
-        value,
-        placeholder,
-        disabled,
-    )
-    .on_mouse_down(MouseButton::Left, move |_, window, cx| {
-        if !disabled {
-            let _ = owner.update(cx, |flow, cx| {
-                if let Some(form) = flow.form.form.as_mut() {
-                    form.field_focused = false;
-                    form.selected_field = None;
-                }
-                if flow.form.open_select == Some(select) {
-                    flow.form.close_select();
-                } else {
-                    flow.form.open_select = Some(select);
-                    flow.form.select_focus_origin = Some(BrowserFocusOrigin::Pointer);
-                }
-                cx.notify();
-            });
-            dispatch(ConnectionsWindowRequest::FocusFormSelect, Some(window), cx);
-        }
-        cx.stop_propagation();
-    });
+    let owner = flow.clone();
+    let trigger = select_trigger(flow.state(cx), tokens, select, value, placeholder, disabled)
+        .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+            if !disabled {
+                owner.update(cx, |state| {
+                    if let Some(form) = state.form.as_mut() {
+                        form.field_focused = false;
+                        form.selected_field = None;
+                    }
+                    if state.open_select == Some(select) {
+                        state.close_select();
+                    } else {
+                        state.open_select = Some(select);
+                        state.select_focus_origin = Some(BrowserFocusOrigin::Pointer);
+                    }
+                });
+                dispatch(FormAction::FocusFormSelect, Some(window), cx);
+            }
+            cx.stop_propagation();
+        });
     form_field(
         tokens,
         label,
@@ -165,19 +168,18 @@ pub(in crate::views) fn select_trigger(
 }
 
 pub(in crate::views) fn track_select_anchor(
-    flow_entity: &gpui::Entity<ConnectionFlowEntity>,
+    flow_entity: &FormOwner,
     select: NewConnectionSelect,
     trigger: impl IntoElement,
     cx: &App,
 ) -> AnyElement {
-    let flow = flow_entity.read(cx);
-    let anchors = flow.select_anchor_store();
-    let notify_on_change = flow.form.open_select == Some(select);
-    let entity = flow_entity.downgrade();
+    let anchors = flow_entity.anchors(cx);
+    let notify_on_change = flow_entity.state(cx).open_select == Some(select);
+    let entity = flow_entity.clone();
     select_anchor_probe(select_anchor_id(select), trigger, move |anchor, _, cx| {
         // An open menu needs a repaint after scrolling changes its anchor.
         if anchors.update(anchor) && notify_on_change {
-            let _ = entity.update(cx, |_, cx| cx.notify());
+            entity.update(cx, |_| ());
         }
     })
     .into_any_element()

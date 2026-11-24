@@ -67,11 +67,13 @@ pub fn identity_agent_from_form(value: &str) -> Option<String> {
 }
 
 /// Refreshes the main connection's status only after its endpoint draft changes.
+#[cfg(not(target_family = "wasm"))]
 pub fn refresh_identity_agent_availability(form: &mut NewConnectionForm) {
     form.agent_available =
         oxideterm_ssh::ssh_agent_available(identity_agent_selector(&form.identity_agent));
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn refresh_focused_identity_agent_availability(form: &mut NewConnectionForm) {
     if form.focused_field == NewConnectionField::IdentityAgent {
         refresh_identity_agent_availability(form);
@@ -466,6 +468,7 @@ pub fn insert_text_into_current_connection_field(form: &mut NewConnectionForm, t
     current_connection_field_mut(form).push_str(text);
     form.selected_field = None;
     refresh_connection_timeout_seconds(form, focused_field);
+    #[cfg(not(target_family = "wasm"))]
     refresh_focused_identity_agent_availability(form);
 }
 
@@ -481,6 +484,7 @@ pub fn backspace_current_connection_field(form: &mut NewConnectionForm) -> bool 
         form.selected_field = None;
         if text_changed {
             refresh_connection_timeout_seconds(form, focused_field);
+            #[cfg(not(target_family = "wasm"))]
             refresh_focused_identity_agent_availability(form);
         }
         text_changed || selection_was_visible
@@ -489,6 +493,7 @@ pub fn backspace_current_connection_field(form: &mut NewConnectionForm) -> bool 
         form.selected_field = None;
         if text_changed {
             refresh_connection_timeout_seconds(form, focused_field);
+            #[cfg(not(target_family = "wasm"))]
             refresh_focused_identity_agent_availability(form);
         }
         text_changed || selection_was_visible
@@ -500,6 +505,7 @@ pub fn clear_current_connection_field(form: &mut NewConnectionForm) {
     current_connection_field_mut(form).clear();
     form.selected_field = None;
     refresh_connection_timeout_seconds(form, focused_field);
+    #[cfg(not(target_family = "wasm"))]
     refresh_focused_identity_agent_availability(form);
 }
 
@@ -557,4 +563,27 @@ pub fn text_from_keystroke(keystroke: &gpui::Keystroke) -> Option<&str> {
         return None;
     }
     Some(text)
+}
+
+pub fn restore_saved_password_placeholder_if_empty(
+    form: &mut NewConnectionForm,
+    editing_saved_connection: bool,
+) {
+    if editing_saved_connection
+        && form.focused_field == NewConnectionField::Password
+        && form.saved_password_keychain_id.is_some()
+        && form.password.is_empty()
+    {
+        form.password_loaded = false;
+        form.password_visible = false;
+    }
+}
+
+pub fn connection_group_is_ungrouped(group: &str, i18n: &oxideterm_i18n::I18n) -> bool {
+    let group = group.trim();
+    group.is_empty()
+        || group == "Ungrouped"
+        || group == "未分组"
+        || group == i18n.t("ssh.form.ungrouped")
+        || group == i18n.t("sessionManager.edit_properties.ungrouped")
 }

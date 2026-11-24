@@ -20,6 +20,7 @@ pub enum TunnelKind {
     Dynamic,
 }
 
+#[derive(Clone)]
 pub struct TunnelFormEnvironment {
     pub host_id: Option<String>,
     pub editing: bool,
@@ -525,7 +526,7 @@ impl ConnectionFormView {
                         MouseButton::Left,
                         cx.listener(move |this, _, _, cx| {
                             this.close_new_connection_select(cx);
-                            this.request(ConnectionsWindowRequest::SetTunnelKind(kind), None, cx);
+                            this.request(FormAction::SetTunnelKind(kind), None, cx);
                             this.update_connection_form_state(cx, |state| {
                                 if let Some(form) = state.form.as_mut() {
                                     form.field_focused = false;
@@ -534,7 +535,7 @@ impl ConnectionFormView {
                                     form.error = None;
                                 }
                             });
-                            this.request(ConnectionsWindowRequest::ClearComposition, None, cx);
+                            this.request(FormAction::ClearComposition, None, cx);
                             cx.stop_propagation();
                             cx.notify();
                         }),
@@ -658,7 +659,7 @@ impl ConnectionFormView {
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(|this, _, _, cx| {
-                        this.request(ConnectionsWindowRequest::ToggleTunnelStartup, None, cx);
+                        this.request(FormAction::ToggleTunnelStartup, None, cx);
                         cx.stop_propagation();
                         cx.notify();
                     }),
@@ -738,11 +739,7 @@ impl ConnectionFormView {
                         .on_mouse_down(
                             MouseButton::Left,
                             cx.listener(|this, _, window, cx| {
-                                this.request(
-                                    ConnectionsWindowRequest::CloseTunnel,
-                                    Some(window),
-                                    cx,
-                                )
+                                this.request(FormAction::CloseTunnel, Some(window), cx)
                             }),
                         ),
                     )
@@ -760,7 +757,7 @@ impl ConnectionFormView {
                             cx.listener(move |this, _, window, cx| {
                                 if can_save {
                                     this.request(
-                                        ConnectionsWindowRequest::SaveTunnel { start: false },
+                                        FormAction::SaveTunnel { start: false },
                                         Some(window),
                                         cx,
                                     );
@@ -783,7 +780,7 @@ impl ConnectionFormView {
                             cx.listener(move |this, _, window, cx| {
                                 if can_save {
                                     this.request(
-                                        ConnectionsWindowRequest::SaveTunnel { start: true },
+                                        FormAction::SaveTunnel { start: true },
                                         Some(window),
                                         cx,
                                     );
@@ -797,7 +794,7 @@ impl ConnectionFormView {
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(|this, _, window, cx| {
-                        this.request(ConnectionsWindowRequest::CloseTunnel, Some(window), cx);
+                        this.request(FormAction::CloseTunnel, Some(window), cx);
                         cx.stop_propagation();
                     }),
                 )

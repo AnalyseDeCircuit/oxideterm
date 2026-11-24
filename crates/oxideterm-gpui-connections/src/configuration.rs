@@ -874,16 +874,4 @@ fn group_label_for_form(group: Option<&str>) -> String {
     group.unwrap_or_default().to_string()
 }
 
-pub fn restore_saved_password_placeholder_if_empty(
-    form: &mut NewConnectionForm,
-    editing_saved_connection: bool,
-) {
-    if editing_saved_connection
-        && form.focused_field == NewConnectionField::Password
-        && form.saved_password_keychain_id.is_some()
-        && form.password.is_empty()
-    {
-        form.password_loaded = false;
-        form.password_visible = false;
-    }
-}
+pub use crate::form_state::restore_saved_password_placeholder_if_empty;

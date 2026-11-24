@@ -2,10 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use oxideterm_connections::{
-    ConnectionStore, MoshUdpPortSelection as SavedMoshUdpPortSelection, SaveConnectionRequest,
-    SavedAuth, SavedConnection, SavedMoshProfileRuntimeSecrets, SavedProxyCommand, SavedProxyHop,
-    SavedUpstreamProxyAuth, SavedUpstreamProxyConfig, SavedUpstreamProxyPolicy, SecretString,
-    StandaloneSftpEndpoint,
+    ConnectionStore, SaveConnectionRequest, SavedAuth, SavedConnection,
+    SavedMoshProfileRuntimeSecrets, SavedProxyCommand, SavedProxyHop, SavedUpstreamProxyAuth,
+    SavedUpstreamProxyConfig, SavedUpstreamProxyPolicy, SecretString, StandaloneSftpEndpoint,
 };
 use oxideterm_ssh::{AuthMethod, ProxyHopConfig, SshConfig};
 use zeroize::Zeroize;
@@ -52,25 +51,7 @@ fn runtime_authentication_plan(
     )
 }
 
-pub fn parse_mosh_udp_port(value: &str) -> anyhow::Result<SavedMoshUdpPortSelection> {
-    let value = value.trim();
-    if value.is_empty() {
-        return Ok(SavedMoshUdpPortSelection::Automatic);
-    }
-    if let Some((start, end)) = value.split_once(':') {
-        let start = start.trim().parse::<u16>()?;
-        let end = end.trim().parse::<u16>()?;
-        if start == 0 || end == 0 || start > end {
-            anyhow::bail!("invalid Mosh UDP port range");
-        }
-        return Ok(SavedMoshUdpPortSelection::Range { start, end });
-    }
-    let port = value.parse::<u16>()?;
-    if port == 0 {
-        anyhow::bail!("invalid Mosh UDP port");
-    }
-    Ok(SavedMoshUdpPortSelection::Fixed { port })
-}
+pub use crate::form_state::parse_mosh_udp_port;
 
 pub fn mosh_password_draft_is_persistent(form: &NewConnectionForm) -> bool {
     form.save_password || (form.mosh_profile_id.is_some() && !form.password.is_empty())

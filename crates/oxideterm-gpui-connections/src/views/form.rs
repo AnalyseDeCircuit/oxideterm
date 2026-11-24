@@ -1,6 +1,11 @@
+#[cfg(not(target_family = "wasm"))]
+use super::ConnectionsViewBindings;
+use super::algorithms::{FormAlgorithmCapabilities, SshAlgorithmEditor};
+use crate::form_state::restore_saved_password_placeholder_if_empty;
+use crate::icons::{DISTRO_ICONS, SESSION_ICON_CHOICES, SessionIcon, session_icon_from_id};
 use gpui::{
-    AnchoredPositionMode, AnyElement, App, ClipboardItem, Context, Corner, Entity, KeyDownEvent,
-    MouseButton, MouseMoveEvent, ParentElement, PathPromptOptions, Render, Rgba, ScrollHandle,
+    AnchoredPositionMode, AnyElement, App, ClipboardItem, Context, Corner, Div, Entity,
+    KeyDownEvent, MouseButton, MouseMoveEvent, ParentElement, Render, Rgba, ScrollHandle,
     SharedString, Styled, Subscription, Window, anchored, deferred, div, point, prelude::*, px,
     rgb, rgba,
 };
@@ -28,20 +33,15 @@ use crate::{
         select_current_connection_field, text_from_keystroke,
         toggle_connection_secret_field_visibility, toggle_remote_desktop_feature,
     },
-    launch::SshConnectionIntent,
 };
 
 use super::{
-    ConnectionImeFrame, ConnectionsDispatch, ConnectionsEnvironment, ConnectionsInput,
-    ConnectionsViewBindings, ConnectionsWindowRequest, algorithms::SshAlgorithmEditor,
-    connection_text_input,
+    ConnectionImeFrame, ConnectionsEnvironment, ConnectionsInput, FormAction, FormDispatch,
+    form_text_input,
 };
-use crate::icons::{DISTRO_ICONS, SESSION_ICON_CHOICES, SessionIcon, session_icon_from_id};
-use crate::{
-    configuration::restore_saved_password_placeholder_if_empty, entity::ConnectionFlowEntity,
-};
-use gpui::Div;
-use oxideterm_connections::{
+#[cfg(not(target_family = "wasm"))]
+use crate::entity::ConnectionFlowEntity;
+use crate::form_model::{
     ConnectionTerminalBackspaceSequence, ConnectionTerminalDeleteSequence,
     ConnectionTerminalEncoding, ConnectionX11ForwardingMode, MoshIpFamily, MoshPredictionMode,
     SavedUpstreamProxyProtocol, StandaloneSftpTransferMode,
@@ -76,7 +76,12 @@ use oxideterm_remote_desktop::{
 use oxideterm_settings_model::{settings_multiline_line_ranges, settings_multiline_line_selection};
 // Keep the modal, proxy-chain, and field-control implementations in explicit
 // submodules so their dependencies and visibility remain locally auditable.
+#[cfg(not(target_family = "wasm"))]
 mod ble_fields;
+#[cfg(not(target_family = "wasm"))]
+mod desktop;
+mod owner;
+pub(super) use owner::FormOwner;
 mod composer;
 mod field_controls;
 mod form_modal;
@@ -143,10 +148,9 @@ enum ConnectionButtonAction {
     SaveAndConnect,
 }
 
-use oxideterm_connections::{ConnectionInfo, ManagedSshKeyInfo};
+use crate::form_model::{ConnectionInfo, ManagedSshKeyInfo};
+use crate::form_model::{NodeId, ShellInfo};
 use oxideterm_i18n::I18n;
-use oxideterm_ssh::NodeId;
-use oxideterm_terminal::ShellInfo;
 use oxideterm_theme::ThemeTokens;
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
@@ -157,12 +161,13 @@ pub struct FormPluginType {
     pub icon: String,
 }
 
+#[derive(Clone)]
 pub struct FormTotpCredential {
     pub id: String,
     pub name: String,
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct ConnectionFormEnvironment {
     pub connections: Vec<ConnectionInfo>,
     pub groups: Vec<String>,
@@ -183,6 +188,7 @@ pub struct ConnectionFormEnvironment {
 }
 
 impl ConnectionFormEnvironment {
+    #[cfg(not(target_family = "wasm"))]
     pub fn from_store(
         store: &oxideterm_connections::ConnectionStore,
         settings: &oxideterm_settings::PersistedSettings,
@@ -215,22 +221,27 @@ pub(super) enum FormMount {
 
 pub(super) struct ConnectionFormView {
     mount: FormMount,
-    flow: Entity<ConnectionFlowEntity>,
+    capabilities: Rc<FormAlgorithmCapabilities>,
+    flow: FormOwner,
     _flow_changed: Subscription,
     tokens: ThemeTokens,
     i18n: I18n,
     theme: super::ConnectionsEnvironmentSource,
-    environment_source: Rc<dyn Fn(&App) -> Option<ConnectionFormEnvironment>>,
-    environment: ConnectionFormEnvironment,
-    runtime: tokio::runtime::Handle,
+    environment_source: Rc<dyn Fn(&App) -> Option<Rc<ConnectionFormEnvironment>>>,
+    environment: Rc<ConnectionFormEnvironment>,
+    #[cfg(not(target_family = "wasm"))]
+    runtime: Option<tokio::runtime::Handle>,
     ime: super::ConnectionImeSource,
-    dispatch: ConnectionsDispatch,
+    dispatch: FormDispatch,
     selectable_text: Rc<dyn Fn(&str, (&str, &str), String, u32, &mut App) -> AnyElement>,
+    pick_path: Rc<dyn Fn(NewConnectionField, &I18n, &mut App)>,
+    serial_ports: Rc<dyn Fn() -> Result<Vec<crate::form_model::SerialPortInfo>, String>>,
     scroll_handles: RefCell<HashMap<String, ScrollHandle>>,
     user_motion: oxideterm_gpui_ui::motion::UserSegmentedControlMotionState,
 }
 
 impl ConnectionFormView {
+    #[cfg(not(target_family = "wasm"))]
     pub(super) fn new(
         flow: Entity<ConnectionFlowEntity>,
         bindings: &ConnectionsViewBindings,
@@ -242,33 +253,82 @@ impl ConnectionFormView {
         let flow_changed = cx.observe(&flow, |_, _, cx| cx.notify());
         Self {
             mount,
-            flow,
+            capabilities: Rc::new(FormAlgorithmCapabilities::desktop()),
+            pick_path: Rc::new({
+                let flow = flow.clone();
+                move |field, i18n, cx| desktop::pick_path(&flow, field, i18n, cx)
+            }),
+            serial_ports: Rc::new(desktop::serial_ports),
+            flow: FormOwner::Desktop(flow),
             _flow_changed: flow_changed,
             tokens: theme.tokens,
             i18n: theme.i18n.clone(),
             theme: bindings.environment.clone(),
-            environment_source: bindings.form_environment.clone(),
-            environment: ConnectionFormEnvironment::default(),
-            runtime,
+            environment_source: {
+                let source = bindings.form_environment.clone();
+                Rc::new(move |cx| source(cx).map(Rc::new))
+            },
+            environment: Default::default(),
+            runtime: Some(runtime),
             ime: bindings.ime.clone(),
-            dispatch: bindings.dispatch.clone(),
+            dispatch: super::desktop::form_dispatch(&bindings.dispatch),
             selectable_text: bindings.form_selectable_text.clone(),
             scroll_handles: RefCell::new(HashMap::new()),
             user_motion: Default::default(),
         }
     }
 
-    fn request(
-        &self,
-        request: ConnectionsWindowRequest,
-        window: Option<&mut Window>,
-        cx: &mut App,
-    ) {
+    pub(super) fn portable(
+        state: Entity<ConnectionFormState>,
+        anchors: crate::form_entity::ConnectionSelectAnchorStore,
+        mount: FormMount,
+        theme: ConnectionsEnvironment,
+        environment: Rc<RefCell<Rc<ConnectionFormEnvironment>>>,
+        capabilities: Rc<FormAlgorithmCapabilities>,
+        serial_ports: Vec<crate::form_model::SerialPortInfo>,
+        ime: super::ConnectionImeSource,
+        dispatch: FormDispatch,
+        picker: Rc<dyn Fn(NewConnectionField, &I18n, &mut App)>,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let changed = cx.observe(&state, |_, _, cx| cx.notify());
+        let tokens = theme.tokens;
+        let i18n = theme.i18n.clone();
+        Self {
+            mount,
+            flow: FormOwner::Portable(state, anchors),
+            _flow_changed: changed,
+            tokens,
+            i18n,
+            capabilities,
+            theme: Rc::new(move |_| {
+                Some(ConnectionsEnvironment {
+                    tokens: theme.tokens,
+                    i18n: theme.i18n.clone(),
+                })
+            }),
+            environment_source: Rc::new(move |_| Some(environment.borrow().clone())),
+            environment: Default::default(),
+            #[cfg(not(target_family = "wasm"))]
+            runtime: None,
+            ime,
+            dispatch,
+            pick_path: picker,
+            serial_ports: Rc::new(move || Ok(serial_ports.clone())),
+            selectable_text: Rc::new(|_, _, text, color, _| {
+                div().text_color(rgb(color)).child(text).into_any_element()
+            }),
+            scroll_handles: Default::default(),
+            user_motion: Default::default(),
+        }
+    }
+
+    fn request(&self, request: FormAction, window: Option<&mut Window>, cx: &mut App) {
         (self.dispatch)(request, window, cx);
     }
 
     fn connection_form_state<'a>(&self, cx: &'a App) -> &'a ConnectionFormState {
-        &self.flow.read(cx).form
+        self.flow.state(cx)
     }
 
     fn update_connection_form_state<R>(
@@ -276,11 +336,7 @@ impl ConnectionFormView {
         cx: &mut App,
         update: impl FnOnce(&mut ConnectionFormState) -> R,
     ) -> R {
-        self.flow.update(cx, |flow, cx| {
-            let result = update(&mut flow.form);
-            cx.notify();
-            result
-        })
+        self.flow.update(cx, update)
     }
 
     pub(super) fn selectable_text_scroll_handle(&self, key: impl Into<String>) -> ScrollHandle {
@@ -398,9 +454,14 @@ impl ConnectionFormView {
     }
 
     fn algorithms(&self) -> SshAlgorithmEditor<'_> {
-        SshAlgorithmEditor::new(&self.flow, &self.tokens, &self.i18n, &self.dispatch)
+        SshAlgorithmEditor::new(
+            self.flow.clone(),
+            self.capabilities.clone(),
+            &self.tokens,
+            &self.i18n,
+            self.dispatch.clone(),
+        )
     }
-
     fn render_ssh_algorithms_page(&self, cx: &App) -> AnyElement {
         self.algorithms().render_ssh_algorithms_page(cx)
     }
@@ -408,7 +469,7 @@ impl ConnectionFormView {
 
 impl Render for ConnectionFormView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        if self.flow.read(cx).form.form.is_none() {
+        if self.flow.state(cx).form.is_none() {
             return div().into_any_element();
         }
         let Some(theme) = (self.theme)(cx) else {
@@ -458,11 +519,11 @@ const JUMP_CONNECTION_AUTH_SELECTOR_ID: &str = "jump-connection-auth-selector";
 
 impl ConnectionFormView {
     fn close_new_connection_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.request(ConnectionsWindowRequest::CloseForm, Some(window), cx);
+        self.request(FormAction::CloseForm, Some(window), cx);
     }
 
     fn show_active_input_caret(&self, cx: &mut Context<Self>) {
-        self.request(ConnectionsWindowRequest::ShowCaret, None, cx);
+        self.request(FormAction::ShowCaret, None, cx);
     }
 
     fn submit_new_connection_form_with_action(
@@ -471,27 +532,25 @@ impl ConnectionFormView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.request(
-            ConnectionsWindowRequest::SubmitForm(action),
-            Some(window),
-            cx,
-        );
+        self.request(FormAction::SubmitForm(action), Some(window), cx);
     }
 
     fn start_new_connection_flow(
         &self,
-        intent: SshConnectionIntent,
+        standalone_sftp: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.request(ConnectionsWindowRequest::TestForm(intent), Some(window), cx);
+        self.request(FormAction::TestForm { standalone_sftp }, Some(window), cx);
     }
 
-    fn ensure_kerberos_credentials_availability(&self, cx: &mut Context<Self>) {
-        let runtime = self.runtime.clone();
-        self.flow.update(cx, |flow, cx| {
-            flow.ensure_kerberos_credentials_availability(runtime, cx)
-        });
+    fn ensure_kerberos_credentials_availability(&self, _cx: &mut Context<Self>) {
+        #[cfg(not(target_family = "wasm"))]
+        if let (FormOwner::Desktop(flow), Some(runtime)) = (&self.flow, &self.runtime) {
+            flow.update(_cx, |flow, cx| {
+                flow.ensure_kerberos_credentials_availability(runtime.clone(), cx)
+            });
+        }
     }
 
     fn queue_workspace_tooltip(
@@ -503,7 +562,7 @@ impl ConnectionFormView {
         cx: &mut Context<Self>,
     ) {
         self.request(
-            ConnectionsWindowRequest::QueueTooltip {
+            FormAction::QueueTooltip {
                 id: id.to_owned(),
                 label,
                 x,
@@ -515,11 +574,7 @@ impl ConnectionFormView {
     }
 
     fn clear_workspace_tooltip(&self, id: &str, cx: &mut Context<Self>) {
-        self.request(
-            ConnectionsWindowRequest::ClearTooltip(id.to_owned()),
-            None,
-            cx,
-        );
+        self.request(FormAction::ClearTooltip(id.to_owned()), None, cx);
     }
 
     fn settings_multiline_input_viewport(

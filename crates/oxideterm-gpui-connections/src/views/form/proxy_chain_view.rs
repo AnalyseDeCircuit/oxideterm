@@ -1,6 +1,6 @@
 use super::*;
+use crate::form_model::{ConnectionTerminalBellPolicy, ConnectionTerminalSessionLogPolicy};
 use gpui::AnimationExt;
-use oxideterm_connections::{ConnectionTerminalBellPolicy, ConnectionTerminalSessionLogPolicy};
 
 struct JumpServerRenderSnapshot {
     totp_credential_id: Option<String>,
@@ -67,7 +67,7 @@ impl ConnectionFormView {
         // no render-only payload is retained for an exit transition.
         let select_id = self.connection_form_state(cx).open_select?;
         let anchor_id = Self::new_connection_select_anchor_id(select_id);
-        let anchor = self.flow.read(cx).select_anchor_store().get(anchor_id)?;
+        let anchor = self.flow.anchors(cx).get(anchor_id)?;
         let width =
             f32::from(anchor.bounds.size.width).max(self.tokens.metrics.ui_select_min_width);
         let viewport_height = f32::from(window.viewport_size().height);
@@ -208,11 +208,7 @@ impl ConnectionFormView {
                         false,
                         cx.listener(move |this, _, _, cx| {
                             this.close_new_connection_select(cx);
-                            this.request(
-                                ConnectionsWindowRequest::SelectTunnelHost(host.id.clone()),
-                                None,
-                                cx,
-                            );
+                            this.request(FormAction::SelectTunnelHost(host.id.clone()), None, cx);
                             cx.stop_propagation();
                             cx.notify();
                         }),
@@ -930,6 +926,9 @@ impl ConnectionFormView {
                     ));
                 }
             }
+            #[cfg(target_family = "wasm")]
+            NewConnectionSelect::BleAdapter => return None,
+            #[cfg(not(target_family = "wasm"))]
             NewConnectionSelect::BleAdapter => {
                 let selected_index = self
                     .connection_form_state(cx)
@@ -1036,11 +1035,11 @@ impl ConnectionFormView {
                     .form
                     .as_ref()
                     .map(|form| form.serial_parity)
-                    .unwrap_or(oxideterm_terminal::SerialParity::None);
+                    .unwrap_or(crate::form_model::SerialParity::None);
                 for parity in [
-                    oxideterm_terminal::SerialParity::None,
-                    oxideterm_terminal::SerialParity::Odd,
-                    oxideterm_terminal::SerialParity::Even,
+                    crate::form_model::SerialParity::None,
+                    crate::form_model::SerialParity::Odd,
+                    crate::form_model::SerialParity::Even,
                 ] {
                     popup = popup.child(select_option_action(
                         select_option(
@@ -1062,7 +1061,7 @@ impl ConnectionFormView {
             | NewConnectionSelect::TelnetOutputLineEnding
             | NewConnectionSelect::BleInputLineEnding
             | NewConnectionSelect::BleOutputLineEnding => {
-                use oxideterm_connections::SerialLineEnding;
+                use crate::form_model::SerialLineEnding;
                 // Telnet and BLE share one line-ending popup: the select id
                 // alone picks the form family and the edited direction.
                 let output = matches!(
@@ -1119,7 +1118,7 @@ impl ConnectionFormView {
                 }
             }
             NewConnectionSelect::BleSendMode => {
-                use oxideterm_connections::SerialSendMode;
+                use crate::form_model::SerialSendMode;
                 let selected = self
                     .connection_form_state(cx)
                     .form
@@ -1149,7 +1148,7 @@ impl ConnectionFormView {
                 }
             }
             NewConnectionSelect::BleDisplayMode => {
-                use oxideterm_connections::SerialDisplayMode;
+                use crate::form_model::SerialDisplayMode;
                 let selected = self
                     .connection_form_state(cx)
                     .form
@@ -1188,11 +1187,11 @@ impl ConnectionFormView {
                     .form
                     .as_ref()
                     .map(|form| form.serial_flow_control)
-                    .unwrap_or(oxideterm_terminal::SerialFlowControl::None);
+                    .unwrap_or(crate::form_model::SerialFlowControl::None);
                 for flow in [
-                    oxideterm_terminal::SerialFlowControl::None,
-                    oxideterm_terminal::SerialFlowControl::Software,
-                    oxideterm_terminal::SerialFlowControl::Hardware,
+                    crate::form_model::SerialFlowControl::None,
+                    crate::form_model::SerialFlowControl::Software,
+                    crate::form_model::SerialFlowControl::Hardware,
                 ] {
                     popup = popup.child(select_option_action(
                         select_option(
@@ -1903,7 +1902,7 @@ impl ConnectionFormView {
             .into_any_element()
     }
 
-    pub(super) fn begin_jump_server_form_exit(&mut self, cx: &mut Context<Self>) -> bool {
+    pub(in crate::views) fn begin_jump_server_form_exit(&mut self, cx: &mut Context<Self>) -> bool {
         self.begin_jump_server_form_exit_with_commit(false, cx)
     }
 
@@ -1912,17 +1911,26 @@ impl ConnectionFormView {
         commit: bool,
         cx: &mut Context<Self>,
     ) -> bool {
-        let delay = oxideterm_gpui_ui::motion::duration(
-            &self.tokens,
-            oxideterm_gpui_ui::motion::MotionDuration::Overlay,
-        );
-        let began_exit = self.flow.update(cx, |connection_flow, cx| {
-            connection_flow.begin_jump_server_form_exit(commit, delay, cx)
-        });
+        let began_exit = match &self.flow {
+            #[cfg(not(target_family = "wasm"))]
+            FormOwner::Desktop(flow) => {
+                let delay = oxideterm_gpui_ui::motion::duration(
+                    &self.tokens,
+                    oxideterm_gpui_ui::motion::MotionDuration::Overlay,
+                );
+                flow.update(cx, |flow, cx| {
+                    flow.begin_jump_server_form_exit(commit, delay, cx)
+                })
+            }
+            FormOwner::Portable(_, _) => {
+                self.flow.update(cx, |state| state.finish_jump_edit(commit));
+                true
+            }
+        };
         if !began_exit {
             return false;
         }
-        self.request(ConnectionsWindowRequest::ClearComposition, None, cx);
+        self.request(FormAction::ClearComposition, None, cx);
         cx.notify();
         true
     }
@@ -2225,7 +2233,7 @@ impl ConnectionFormView {
                 });
                 this.close_new_connection_select(cx);
                 this.show_active_input_caret(cx);
-                this.request(ConnectionsWindowRequest::FocusForm, Some(window), cx);
+                this.request(FormAction::FocusForm, Some(window), cx);
                 cx.stop_propagation();
                 cx.notify();
             }),
@@ -2619,7 +2627,7 @@ impl ConnectionFormView {
                 });
                 this.close_new_connection_select(cx);
                 this.show_active_input_caret(cx);
-                this.request(ConnectionsWindowRequest::FocusForm, Some(window), cx);
+                this.request(FormAction::FocusForm, Some(window), cx);
                 cx.stop_propagation();
                 cx.notify();
             },
@@ -2628,7 +2636,7 @@ impl ConnectionFormView {
         .into_any_element()
     }
 
-    pub(super) fn add_pending_jump_server(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::views) fn add_pending_jump_server(&mut self, cx: &mut Context<Self>) {
         let Some(jump_form) = self
             .connection_form_state(cx)
             .form

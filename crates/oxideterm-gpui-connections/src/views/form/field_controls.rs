@@ -1,8 +1,8 @@
 use super::*;
-use gpui::{App, CursorStyle, InteractiveElement};
-use oxideterm_connections::{
+use crate::form_model::{
     ConnectionTerminalBellPolicy, ConnectionTerminalSessionLogPolicy, SshChannelStrategy,
 };
+use gpui::{App, CursorStyle, InteractiveElement};
 use oxideterm_remote_desktop::RemoteDesktopRdpNetworkProfile;
 use oxideterm_settings_model::parse_rgb24_hex;
 
@@ -240,7 +240,7 @@ impl ConnectionFormView {
         cx: &App,
     ) -> Div {
         super::super::select::select_trigger(
-            &self.flow.read(cx).form,
+            self.flow.state(cx),
             &self.tokens,
             select,
             value,
@@ -283,7 +283,7 @@ impl ConnectionFormView {
     pub(in crate::views) fn clear_new_connection_select_anchor(&mut self, cx: &App) {
         // Every entry in this store belongs to the moving form viewport, so a
         // scroll can invalidate the entire set without enumerating anchor IDs.
-        self.flow.read(cx).select_anchor_store().clear();
+        self.flow.anchors(cx).clear();
     }
 
     pub(super) fn render_connection_hint(&self, text: String) -> AnyElement {
@@ -726,7 +726,7 @@ impl ConnectionFormView {
     }
 
     fn reveal_edit_saved_password(&mut self, cx: &mut Context<Self>) {
-        self.request(ConnectionsWindowRequest::RevealSavedPassword, None, cx);
+        self.request(FormAction::RevealSavedPassword, None, cx);
     }
 
     pub(super) fn render_connection_field_with_browse(
@@ -801,7 +801,7 @@ impl ConnectionFormView {
                 form.error = None;
             }
         });
-        self.request(ConnectionsWindowRequest::ClearComposition, None, cx);
+        self.request(FormAction::ClearComposition, None, cx);
         cx.notify();
     }
 
@@ -873,7 +873,7 @@ impl ConnectionFormView {
                         }
                     });
                     this.open_new_connection_select_from_pointer(select, cx);
-                    this.request(ConnectionsWindowRequest::FocusForm, Some(window), cx);
+                    this.request(FormAction::FocusForm, Some(window), cx);
                     cx.stop_propagation();
                 }),
             );
@@ -942,9 +942,9 @@ impl ConnectionFormView {
                             form.selected_field = None;
                         }
                     });
-                    this.request(ConnectionsWindowRequest::ClearComposition, None, cx);
+                    this.request(FormAction::ClearComposition, None, cx);
                     this.open_new_connection_select_from_pointer(select_id, cx);
-                    this.request(ConnectionsWindowRequest::FocusForm, Some(window), cx);
+                    this.request(FormAction::FocusForm, Some(window), cx);
                     cx.stop_propagation();
                     cx.notify();
                 }),
@@ -996,12 +996,12 @@ impl ConnectionFormView {
                             form.selected_field = None;
                         }
                     });
-                    this.request(ConnectionsWindowRequest::ClearComposition, None, cx);
+                    this.request(FormAction::ClearComposition, None, cx);
                     this.open_new_connection_select_from_pointer(
                         NewConnectionSelect::JumpSavedConnection,
                         cx,
                     );
-                    this.request(ConnectionsWindowRequest::FocusForm, Some(window), cx);
+                    this.request(FormAction::FocusForm, Some(window), cx);
                     cx.stop_propagation();
                     cx.notify();
                 }),
@@ -1072,12 +1072,12 @@ impl ConnectionFormView {
                             form.selected_field = None;
                         }
                     });
-                    this.request(ConnectionsWindowRequest::ClearComposition, None, cx);
+                    this.request(FormAction::ClearComposition, None, cx);
                     this.open_new_connection_select_from_pointer(
                         NewConnectionSelect::RemoteDesktopSshGateway,
                         cx,
                     );
-                    this.request(ConnectionsWindowRequest::FocusForm, Some(window), cx);
+                    this.request(FormAction::FocusForm, Some(window), cx);
                     cx.stop_propagation();
                     cx.notify();
                 }),
@@ -1160,7 +1160,7 @@ impl ConnectionFormView {
                 form.error = None;
             }
         });
-        self.request(ConnectionsWindowRequest::ClearComposition, None, cx);
+        self.request(FormAction::ClearComposition, None, cx);
         cx.notify();
     }
 
@@ -1175,7 +1175,7 @@ impl ConnectionFormView {
                 form.error = None;
             }
         });
-        self.request(ConnectionsWindowRequest::ClearComposition, None, cx);
+        self.request(FormAction::ClearComposition, None, cx);
         cx.notify();
     }
 
@@ -1203,7 +1203,7 @@ impl ConnectionFormView {
                 form.error = None;
             });
         }
-        self.request(ConnectionsWindowRequest::ClearComposition, None, cx);
+        self.request(FormAction::ClearComposition, None, cx);
         cx.notify();
     }
 
@@ -1222,7 +1222,7 @@ impl ConnectionFormView {
     }
 
     pub(in crate::views) fn connection_form_group_is_ungrouped(&self, group: &str) -> bool {
-        crate::conversion::connection_group_is_ungrouped(group, &self.i18n)
+        crate::form_state::connection_group_is_ungrouped(group, &self.i18n)
     }
 
     pub(super) fn connection_form_ungrouped_label(&self) -> String {
@@ -1291,26 +1291,7 @@ impl ConnectionFormView {
         ) {
             return;
         }
-        let receiver = cx.prompt_for_paths(PathPromptOptions {
-            files: true,
-            directories: false,
-            multiple: false,
-            prompt: Some(SharedString::from(
-                self.i18n.t("sessionManager.edit_properties.browse"),
-            )),
-        });
-        let selection = async move {
-            let Ok(Ok(Some(paths))) = receiver.await else {
-                return None;
-            };
-            let Some(path) = paths.into_iter().next() else {
-                return None;
-            };
-            Some(path.to_string_lossy().to_string())
-        };
-        self.flow.update(cx, |connection_flow, cx| {
-            connection_flow.start_path_picker(field, selection, cx);
-        });
+        (self.pick_path)(field, &self.i18n, cx);
     }
 
     pub(super) fn render_connection_input(
@@ -1326,7 +1307,7 @@ impl ConnectionFormView {
             return div().into_any_element();
         };
         let form = self.connection_form_state(cx).form.as_ref();
-        connection_text_input(
+        form_text_input(
             &self.tokens,
             &self.dispatch,
             target,
@@ -2484,9 +2465,9 @@ impl ConnectionFormView {
                             form.selected_field = None;
                         }
                     });
-                    this.request(ConnectionsWindowRequest::ClearComposition, None, cx);
+                    this.request(FormAction::ClearComposition, None, cx);
                     this.open_new_connection_select_from_pointer(select_id, cx);
-                    this.request(ConnectionsWindowRequest::FocusForm, Some(window), cx);
+                    this.request(FormAction::FocusForm, Some(window), cx);
                     cx.stop_propagation();
                     cx.notify();
                 }),
@@ -2540,7 +2521,7 @@ impl ConnectionFormView {
             }
         });
         self.close_new_connection_select(cx);
-        self.request(ConnectionsWindowRequest::ClearComposition, None, cx);
+        self.request(FormAction::ClearComposition, None, cx);
         cx.notify();
     }
 
@@ -2600,7 +2581,7 @@ impl ConnectionFormView {
                 form.error = None;
             }
         });
-        self.request(ConnectionsWindowRequest::ClearComposition, None, cx);
+        self.request(FormAction::ClearComposition, None, cx);
         cx.notify();
     }
 
@@ -2952,11 +2933,15 @@ impl ConnectionFormView {
                 .cloned()
                 .into_iter()
                 .find(|shell| shell.id == id),
-            None => oxideterm_gpui_settings_view::local_terminal::resolve_local_shell(
-                &self.environment.local_shells,
-                None,
-                self.environment.default_shell_id.as_deref(),
-            ),
+            None => self
+                .environment
+                .local_shells
+                .iter()
+                .find(|shell| {
+                    Some(shell.id.as_str()) == self.environment.default_shell_id.as_deref()
+                })
+                .or_else(|| self.environment.local_shells.first())
+                .cloned(),
         };
         let default_shell_id = self.environment.default_shell_id.as_deref();
         let selected_label = resolved_shell
@@ -3133,7 +3118,7 @@ impl ConnectionFormView {
                     ToolbarButtonOptions::default(),
                     cx.listener(|this, _event, window, cx| {
                         this.close_new_connection_form(window, cx);
-                        this.request(ConnectionsWindowRequest::OpenMoshPlugin, Some(window), cx);
+                        this.request(FormAction::OpenMoshPlugin, Some(window), cx);
                     }),
                 ))
             })
@@ -3662,7 +3647,7 @@ impl ConnectionFormView {
                                 cx.listener(move |this, _event, window, cx| {
                                     this.close_new_connection_form(window, cx);
                                     this.request(
-                                        ConnectionsWindowRequest::OpenRemoteDesktopPlugin(protocol),
+                                        FormAction::OpenRemoteDesktopPlugin(protocol),
                                         Some(window),
                                         cx,
                                     );
@@ -4301,7 +4286,7 @@ impl ConnectionFormView {
         });
         cx.notify();
 
-        let result = oxideterm_terminal::serial_list_ports();
+        let result = (self.serial_ports)();
         self.update_connection_form_state(cx, |state| {
             if let Some(form) = state.form.as_mut() {
                 form.serial_ports_loading = false;
@@ -4530,7 +4515,7 @@ impl ConnectionFormView {
 
     fn render_serial_port_field(
         &self,
-        ports: &[oxideterm_terminal::SerialPortInfo],
+        ports: &[crate::form_model::SerialPortInfo],
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let Some(form) = self.connection_form_state(cx).form.as_ref() else {
@@ -4649,9 +4634,9 @@ impl ConnectionFormView {
                                 form.selected_field = None;
                             }
                         });
-                        this.request(ConnectionsWindowRequest::ClearComposition, None, cx);
+                        this.request(FormAction::ClearComposition, None, cx);
                         this.open_new_connection_select_from_pointer(select_id, cx);
-                        this.request(ConnectionsWindowRequest::FocusForm, Some(window), cx);
+                        this.request(FormAction::FocusForm, Some(window), cx);
                         cx.stop_propagation();
                         cx.notify();
                     }),
@@ -5307,9 +5292,9 @@ impl ConnectionFormView {
                                     form.selected_field = None;
                                 }
                             });
-                            this.request(ConnectionsWindowRequest::ClearComposition, None, cx);
+                            this.request(FormAction::ClearComposition, None, cx);
                             this.open_new_connection_select_from_pointer(select_id, cx);
-                            this.request(ConnectionsWindowRequest::FocusForm, Some(window), cx);
+                            this.request(FormAction::FocusForm, Some(window), cx);
                             cx.stop_propagation();
                             cx.notify();
                         }),
@@ -5351,59 +5336,57 @@ impl ConnectionFormView {
                 }
             };
 
-        let timeout_row =
-            div()
-                .w_full()
-                .min_h(px(44.0))
-                .py(px(6.0))
-                .px(px(2.0))
-                .flex()
-                .flex_row()
-                .items_center()
-                .justify_between()
-                .gap(px(12.0))
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .text_size(px(self.tokens.metrics.ui_text_sm))
-                        .text_color(rgb(theme.text))
-                        .child(self.render_connection_label_with_help(
-                            "new-connection-connect-timeout-help",
-                            "new-connection-connect-timeout",
-                            "ssh.form.connect_timeout",
-                            "ssh.form.connect_timeout_hint",
-                            cx,
-                        )),
-                )
-                .child(
-                    div()
-                        .flex_none()
-                        .flex()
-                        .flex_row()
-                        .items_center()
-                        .gap(px(6.0))
-                        .child(
-                            div().w(px(84.0)).child(
-                                self.render_connection_centered_mono_input(
-                                    &connect_timeout_seconds_text,
-                                    oxideterm_connections::DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS
-                                        .to_string(),
-                                    NewConnectionField::ConnectTimeoutSeconds,
-                                    cx,
-                                ),
-                            ),
-                        )
-                        .child(
-                            div()
-                                .font_family(SharedString::from(
-                                    self.tokens.metrics.markdown_code_font_family,
-                                ))
-                                .text_size(px(self.tokens.metrics.ui_text_xs))
-                                .text_color(rgb(theme.text_muted))
-                                .child("s"),
-                        ),
-                );
+        let timeout_row = div()
+            .w_full()
+            .min_h(px(44.0))
+            .py(px(6.0))
+            .px(px(2.0))
+            .flex()
+            .flex_row()
+            .items_center()
+            .justify_between()
+            .gap(px(12.0))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                    .text_color(rgb(theme.text))
+                    .child(self.render_connection_label_with_help(
+                        "new-connection-connect-timeout-help",
+                        "new-connection-connect-timeout",
+                        "ssh.form.connect_timeout",
+                        "ssh.form.connect_timeout_hint",
+                        cx,
+                    )),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(6.0))
+                    .child(
+                        div()
+                            .w(px(84.0))
+                            .child(self.render_connection_centered_mono_input(
+                                &connect_timeout_seconds_text,
+                                crate::form_model::DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS.to_string(),
+                                NewConnectionField::ConnectTimeoutSeconds,
+                                cx,
+                            )),
+                    )
+                    .child(
+                        div()
+                            .font_family(SharedString::from(
+                                self.tokens.metrics.markdown_code_font_family,
+                            ))
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_color(rgb(theme.text_muted))
+                            .child("s"),
+                    ),
+            );
 
         let algorithms_summary = if ssh_algorithms_custom_count > 0 {
             self.i18n
@@ -5676,15 +5659,15 @@ impl ConnectionFormView {
                         div()
                             .w(px(84.0))
                             .child(self.render_connection_centered_mono_input(
-                            connect_timeout_seconds_text,
-                            oxideterm_connections::DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS.to_string(),
-                            if secondary {
-                                NewConnectionField::StandaloneSftpSecondaryConnectTimeoutSeconds
-                            } else {
-                                NewConnectionField::ConnectTimeoutSeconds
-                            },
-                            cx,
-                        )),
+                                connect_timeout_seconds_text,
+                                crate::form_model::DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS.to_string(),
+                                if secondary {
+                                    NewConnectionField::StandaloneSftpSecondaryConnectTimeoutSeconds
+                                } else {
+                                    NewConnectionField::ConnectTimeoutSeconds
+                                },
+                                cx,
+                            )),
                     )
                     .child(
                         div()
@@ -5720,9 +5703,9 @@ impl ConnectionFormView {
 
     pub(super) fn connection_line_ending_label(
         &self,
-        value: oxideterm_connections::SerialLineEnding,
+        value: crate::form_model::SerialLineEnding,
     ) -> String {
-        use oxideterm_connections::SerialLineEnding;
+        use crate::form_model::SerialLineEnding;
         self.i18n.t(match value {
             SerialLineEnding::None => "terminal.serial_control.line_ending_none",
             SerialLineEnding::Lf => "terminal.serial_control.line_ending_lf",
@@ -5733,9 +5716,9 @@ impl ConnectionFormView {
 
     pub(super) fn connection_send_mode_label(
         &self,
-        value: oxideterm_connections::SerialSendMode,
+        value: crate::form_model::SerialSendMode,
     ) -> String {
-        use oxideterm_connections::SerialSendMode;
+        use crate::form_model::SerialSendMode;
         self.i18n.t(match value {
             SerialSendMode::Text => "terminal.serial_control.text_mode",
             SerialSendMode::Hex => "terminal.serial_control.hex_mode",
@@ -5744,9 +5727,9 @@ impl ConnectionFormView {
 
     pub(super) fn connection_display_mode_label(
         &self,
-        value: oxideterm_connections::SerialDisplayMode,
+        value: crate::form_model::SerialDisplayMode,
     ) -> String {
-        use oxideterm_connections::SerialDisplayMode;
+        use crate::form_model::SerialDisplayMode;
         self.i18n.t(match value {
             SerialDisplayMode::Text => "terminal.serial_control.text_mode",
             SerialDisplayMode::Hex => "terminal.serial_control.hex_mode",
@@ -5767,7 +5750,7 @@ impl ConnectionFormView {
                 form.error = None;
             }
         });
-        self.request(ConnectionsWindowRequest::ClearComposition, None, cx);
+        self.request(FormAction::ClearComposition, None, cx);
         cx.notify();
     }
 
@@ -5784,7 +5767,7 @@ impl ConnectionFormView {
                 form.error = None;
             }
         });
-        self.request(ConnectionsWindowRequest::ClearComposition, None, cx);
+        self.request(FormAction::ClearComposition, None, cx);
         cx.notify();
     }
 
@@ -5801,7 +5784,7 @@ impl ConnectionFormView {
                 form.error = None;
             }
         });
-        self.request(ConnectionsWindowRequest::ClearComposition, None, cx);
+        self.request(FormAction::ClearComposition, None, cx);
         cx.notify();
     }
 
@@ -5818,7 +5801,7 @@ impl ConnectionFormView {
                 form.error = None;
             }
         });
-        self.request(ConnectionsWindowRequest::ClearComposition, None, cx);
+        self.request(FormAction::ClearComposition, None, cx);
         cx.notify();
     }
 
@@ -5835,7 +5818,7 @@ impl ConnectionFormView {
                 form.error = None;
             }
         });
-        self.request(ConnectionsWindowRequest::ClearComposition, None, cx);
+        self.request(FormAction::ClearComposition, None, cx);
         cx.notify();
     }
 
@@ -5852,7 +5835,7 @@ impl ConnectionFormView {
                 form.error = None;
             }
         });
-        self.request(ConnectionsWindowRequest::ClearComposition, None, cx);
+        self.request(FormAction::ClearComposition, None, cx);
         cx.notify();
     }
 
@@ -5869,7 +5852,7 @@ impl ConnectionFormView {
                 form.error = None;
             }
         });
-        self.request(ConnectionsWindowRequest::ClearComposition, None, cx);
+        self.request(FormAction::ClearComposition, None, cx);
         cx.notify();
     }
 
@@ -5897,7 +5880,7 @@ impl ConnectionFormView {
 
     fn render_serial_parity_select(
         &self,
-        selected: oxideterm_terminal::SerialParity,
+        selected: crate::form_model::SerialParity,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         form_field(
@@ -5916,7 +5899,7 @@ impl ConnectionFormView {
 
     fn render_serial_flow_select(
         &self,
-        selected: oxideterm_terminal::SerialFlowControl,
+        selected: crate::form_model::SerialFlowControl,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         form_field(
@@ -6145,15 +6128,15 @@ impl ConnectionFormView {
             .into_any_element()
     }
 
-    pub(super) fn serial_parity_label(&self, parity: oxideterm_terminal::SerialParity) -> String {
+    pub(super) fn serial_parity_label(&self, parity: crate::form_model::SerialParity) -> String {
         match parity {
-            oxideterm_terminal::SerialParity::None => {
+            crate::form_model::SerialParity::None => {
                 self.i18n.t("modals.new_connection.serial_parity_none")
             }
-            oxideterm_terminal::SerialParity::Odd => {
+            crate::form_model::SerialParity::Odd => {
                 self.i18n.t("modals.new_connection.serial_parity_odd")
             }
-            oxideterm_terminal::SerialParity::Even => {
+            crate::form_model::SerialParity::Even => {
                 self.i18n.t("modals.new_connection.serial_parity_even")
             }
         }
@@ -6161,16 +6144,16 @@ impl ConnectionFormView {
 
     pub(super) fn serial_flow_control_label(
         &self,
-        flow: oxideterm_terminal::SerialFlowControl,
+        flow: crate::form_model::SerialFlowControl,
     ) -> String {
         match flow {
-            oxideterm_terminal::SerialFlowControl::None => {
+            crate::form_model::SerialFlowControl::None => {
                 self.i18n.t("modals.new_connection.serial_flow_none")
             }
-            oxideterm_terminal::SerialFlowControl::Software => {
+            crate::form_model::SerialFlowControl::Software => {
                 self.i18n.t("modals.new_connection.serial_flow_software")
             }
-            oxideterm_terminal::SerialFlowControl::Hardware => {
+            crate::form_model::SerialFlowControl::Hardware => {
                 self.i18n.t("modals.new_connection.serial_flow_hardware")
             }
         }
@@ -6190,7 +6173,7 @@ impl ConnectionFormView {
                 form.error = None;
             }
         });
-        self.request(ConnectionsWindowRequest::ClearComposition, None, cx);
+        self.request(FormAction::ClearComposition, None, cx);
         cx.notify();
     }
 
@@ -6212,13 +6195,13 @@ impl ConnectionFormView {
                 form.error = None;
             }
         });
-        self.request(ConnectionsWindowRequest::ClearComposition, None, cx);
+        self.request(FormAction::ClearComposition, None, cx);
         cx.notify();
     }
 
     pub(super) fn set_new_connection_serial_parity(
         &mut self,
-        parity: oxideterm_terminal::SerialParity,
+        parity: crate::form_model::SerialParity,
         cx: &mut Context<Self>,
     ) {
         self.update_connection_form_state(cx, |state| {
@@ -6229,13 +6212,13 @@ impl ConnectionFormView {
                 form.error = None;
             }
         });
-        self.request(ConnectionsWindowRequest::ClearComposition, None, cx);
+        self.request(FormAction::ClearComposition, None, cx);
         cx.notify();
     }
 
     pub(super) fn set_new_connection_serial_flow_control(
         &mut self,
-        flow: oxideterm_terminal::SerialFlowControl,
+        flow: crate::form_model::SerialFlowControl,
         cx: &mut Context<Self>,
     ) {
         self.update_connection_form_state(cx, |state| {
@@ -6246,7 +6229,7 @@ impl ConnectionFormView {
                 form.error = None;
             }
         });
-        self.request(ConnectionsWindowRequest::ClearComposition, None, cx);
+        self.request(FormAction::ClearComposition, None, cx);
         cx.notify();
     }
 
@@ -6268,7 +6251,7 @@ impl ConnectionFormView {
                 form.error = None;
             }
         });
-        self.request(ConnectionsWindowRequest::ClearComposition, None, cx);
+        self.request(FormAction::ClearComposition, None, cx);
         cx.notify();
     }
 
@@ -6290,7 +6273,7 @@ impl ConnectionFormView {
                 form.error = None;
             }
         });
-        self.request(ConnectionsWindowRequest::ClearComposition, None, cx);
+        self.request(FormAction::ClearComposition, None, cx);
         cx.notify();
     }
 
@@ -6324,7 +6307,7 @@ impl ConnectionFormView {
                 form.error = None;
             }
         });
-        self.request(ConnectionsWindowRequest::ClearComposition, None, cx);
+        self.request(FormAction::ClearComposition, None, cx);
         cx.notify();
     }
 
@@ -6633,20 +6616,14 @@ impl ConnectionFormView {
                     this.close_new_connection_form(window, cx);
                 }
                 ConnectionButtonAction::Test => {
-                    let intent =
-                        if this
-                            .connection_form_state(cx)
+                    let standalone_sftp =
+                        this.connection_form_state(cx)
                             .form
                             .as_ref()
                             .is_some_and(|form| {
                                 form.transport == NewConnectionTransport::StandaloneSftp
-                            })
-                        {
-                            SshConnectionIntent::TestStandaloneSftp
-                        } else {
-                            SshConnectionIntent::Test
-                        };
-                    this.start_new_connection_flow(intent, window, cx);
+                            });
+                    this.start_new_connection_flow(standalone_sftp, window, cx);
                 }
                 ConnectionButtonAction::Connect => {
                     this.submit_new_connection_form_with_action(
@@ -6759,12 +6736,12 @@ impl ConnectionFormView {
                                     form.selected_field = None;
                                 }
                             });
-                            this.request(ConnectionsWindowRequest::ClearComposition, None, cx);
+                            this.request(FormAction::ClearComposition, None, cx);
                             this.open_new_connection_select_from_pointer(
                                 NewConnectionSelect::PrimaryActionMenu,
                                 cx,
                             );
-                            this.request(ConnectionsWindowRequest::FocusForm, Some(window), cx);
+                            this.request(FormAction::FocusForm, Some(window), cx);
                             cx.stop_propagation();
                             cx.notify();
                         }),
@@ -6776,7 +6753,7 @@ impl ConnectionFormView {
     }
 }
 
-pub(super) fn serial_port_display_label(port: &oxideterm_terminal::SerialPortInfo) -> String {
+pub(super) fn serial_port_display_label(port: &crate::form_model::SerialPortInfo) -> String {
     if port.display_name.trim().is_empty() {
         port.port_path.clone()
     } else {
@@ -6784,7 +6761,7 @@ pub(super) fn serial_port_display_label(port: &oxideterm_terminal::SerialPortInf
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_family = "wasm")))]
 mod tests {
     use super::*;
 

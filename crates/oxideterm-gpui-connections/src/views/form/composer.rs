@@ -262,10 +262,11 @@ impl ConnectionFormView {
         cx: &mut Context<Self>,
     ) {
         if self.environment.tunnel.is_some() {
-            self.request(ConnectionsWindowRequest::LeaveTunnel, Some(window), cx);
+            self.request(FormAction::LeaveTunnel, Some(window), cx);
         }
         self.reset_studio_form_scroll();
         let mut should_refresh_ports = false;
+        #[cfg(not(target_family = "wasm"))]
         let mut should_refresh_ble_adapters = false;
         self.update_connection_form_state(cx, |state| {
             if let Some(form) = state.form.as_mut() {
@@ -284,6 +285,7 @@ impl ConnectionFormView {
                     form.standalone_connection_id = None;
                     form.active_drawer = None;
                 }
+                #[cfg(not(target_family = "wasm"))]
                 if transport != NewConnectionTransport::Ble {
                     form.ble.scan_generation += 1;
                     form.ble.scanning = false;
@@ -306,9 +308,12 @@ impl ConnectionFormView {
                 should_refresh_ports = transport == NewConnectionTransport::Serial
                     && form.serial_ports.is_empty()
                     && !form.serial_ports_loading;
-                should_refresh_ble_adapters = transport == NewConnectionTransport::Ble
-                    && form.ble.adapters.is_empty()
-                    && !form.ble.adapters_loading;
+                #[cfg(not(target_family = "wasm"))]
+                {
+                    should_refresh_ble_adapters = transport == NewConnectionTransport::Ble
+                        && form.ble.adapters.is_empty()
+                        && !form.ble.adapters_loading;
+                }
             }
         });
         self.user_motion.clear(STUDIO_CATEGORY_SELECTOR_ID);
@@ -318,6 +323,7 @@ impl ConnectionFormView {
         if should_refresh_ports {
             self.refresh_serial_ports(cx);
         }
+        #[cfg(not(target_family = "wasm"))]
         if should_refresh_ble_adapters {
             self.refresh_ble_adapters(cx);
         }
@@ -390,6 +396,20 @@ impl ConnectionFormView {
                 ProtocolEntry::Tunnel,
             ],
         ];
+
+        if matches!(&self.flow, FormOwner::Portable(..)) {
+            for group in &mut groups {
+                group.retain(|entry| {
+                    !matches!(
+                        entry,
+                        ProtocolEntry::BuiltIn(
+                            NewConnectionTransport::Ble | NewConnectionTransport::WslGraphics,
+                            _
+                        )
+                    )
+                });
+            }
+        }
 
         // Scale row hitbox, icon, and rail width with user density and UI font size so
         // 4K/HiDPI or enlarged-font setups stay legible and comfortable to click.
@@ -569,11 +589,7 @@ impl ConnectionFormView {
                                 }
                                 ProtocolEntry::Tunnel => {
                                     if this.environment.tunnel.is_none() {
-                                        this.request(
-                                            ConnectionsWindowRequest::OpenTunnel,
-                                            Some(window),
-                                            cx,
-                                        );
+                                        this.request(FormAction::OpenTunnel, Some(window), cx);
                                     }
                                 }
                             }
@@ -621,7 +637,7 @@ impl ConnectionFormView {
                             cx.listener(move |this, _, window, cx| {
                                 this.close_new_connection_select(cx);
                                 this.request(
-                                    ConnectionsWindowRequest::OpenPluginForm {
+                                    FormAction::OpenPluginForm {
                                         plugin: plugin.clone(),
                                         type_id: definition.id.clone(),
                                     },

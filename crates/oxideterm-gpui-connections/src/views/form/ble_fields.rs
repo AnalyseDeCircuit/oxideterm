@@ -540,14 +540,19 @@ impl ConnectionFormView {
                         // The probe fires every frame; only real geometry
                         // changes may notify, or rendering would loop.
                         let _ = workspace.update(cx, |this, cx| {
-                            let changed = this.flow.update(cx, |flow, _flow_cx| {
-                                if flow.form.ble_scan_table_width != Some(width) {
-                                    flow.form.ble_scan_table_width = Some(width);
-                                    true
-                                } else {
-                                    false
-                                }
-                            });
+                            let changed = {
+                                let FormOwner::Desktop(flow) = &this.flow else {
+                                    return;
+                                };
+                                flow.update(cx, |flow, _flow_cx| {
+                                    if flow.form.ble_scan_table_width != Some(width) {
+                                        flow.form.ble_scan_table_width = Some(width);
+                                        true
+                                    } else {
+                                        false
+                                    }
+                                })
+                            };
                             if changed {
                                 cx.notify();
                             }
@@ -861,6 +866,9 @@ impl ConnectionFormView {
     }
 
     pub(in crate::views) fn refresh_ble_adapters(&mut self, cx: &mut Context<Self>) {
+        let Some(runtime) = self.runtime.clone() else {
+            return;
+        };
         // Bumping the generation invalidates any in-flight adapter listing or
         // scan so their results cannot reach a form that moved on.
         let Some((generation, form_id)) = self.update_connection_form_state(cx, |state| {
@@ -883,7 +891,6 @@ impl ConnectionFormView {
         };
         cx.notify();
 
-        let runtime = self.runtime.clone();
         cx.spawn(async move |weak, cx| {
             // Adapter enumeration goes through platform Bluetooth stacks and
             // must stay off the GPUI thread.
@@ -942,6 +949,9 @@ impl ConnectionFormView {
     }
 
     pub(super) fn start_new_connection_ble_scan(&mut self, cx: &mut Context<Self>) {
+        let Some(runtime) = self.runtime.clone() else {
+            return;
+        };
         let Some((generation, adapter_mac, form_id)) =
             self.update_connection_form_state(cx, |state| {
                 state.form.as_mut().map(|form| {
@@ -972,7 +982,6 @@ impl ConnectionFormView {
         };
         cx.notify();
 
-        let runtime = self.runtime.clone();
         cx.spawn(async move |weak, cx| {
             // Radio scanning blocks for the whole discovery window and must
             // stay off the GPUI thread. A fresh guard opens the adapter and
@@ -1037,6 +1046,9 @@ impl ConnectionFormView {
         device_id: oxideterm_ble::BlePeripheralId,
         cx: &mut Context<Self>,
     ) {
+        let Some(runtime) = self.runtime.clone() else {
+            return;
+        };
         let Some((generation, adapter, form_id)) = self.update_connection_form_state(cx, |state| {
             state.form.as_mut().and_then(|form| {
                 // Inspection reuses the adapter that produced the scan results
@@ -1065,7 +1077,6 @@ impl ConnectionFormView {
         };
         cx.notify();
 
-        let runtime = self.runtime.clone();
         cx.spawn(async move |weak, cx| {
             // The inspection link connects, reads the GATT layout, and
             // disconnects again; keep it off the GPUI thread.
@@ -1130,7 +1141,7 @@ impl ConnectionFormView {
                 form.error = None;
             }
         });
-        self.request(ConnectionsWindowRequest::ClearComposition, None, cx);
+        self.request(FormAction::ClearComposition, None, cx);
         cx.notify();
     }
 

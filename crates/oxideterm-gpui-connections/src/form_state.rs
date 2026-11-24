@@ -1,15 +1,19 @@
-use super::saved_auth::SavedPasswordLoadError;
+use crate::form_model;
+#[cfg(not(target_family = "wasm"))]
+use oxideterm_connections::{
+    MoshProfile, MoshUdpPortSelection, RemoteDesktopProfile, SavedAuth, SavedConnection,
+    SavedProxyHop, SerialProfile, TelnetProfile,
+};
 use std::fmt;
 
-use oxideterm_connections::{
+use crate::form_model::{
     AuthType, ConnectionInfo, ConnectionTerminalOptions, ConnectionX11ForwardingOptions,
-    DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS, MoshIpFamily, MoshPredictionMode, MoshProfile,
-    MoshUdpPortSelection, RemoteDesktopProfile, SavedAuth, SavedConnection, SavedProxyHop,
-    SavedUpstreamProxyProtocol, SerialProfile, SshAlgorithmPreferences, SshChannelStrategy,
-    StandaloneSftpTransferMode, TelnetProfile, TransportUsernameTransition,
-    transport_port_replacement, transport_username_transition,
+    DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS, MoshIpFamily, MoshPredictionMode,
+    SavedUpstreamProxyProtocol, SshAlgorithmPreferences, SshChannelStrategy,
+    StandaloneSftpTransferMode, TransportUsernameTransition, transport_port_replacement,
+    transport_username_transition,
 };
-pub use oxideterm_connections::{
+pub use crate::form_model::{
     ConnectionTransport as NewConnectionTransport, RDP_DEFAULT_PORT_TEXT, SSH_DEFAULT_PORT_TEXT,
     TELNET_DEFAULT_PORT_TEXT, VNC_DEFAULT_PORT_TEXT,
 };
@@ -24,6 +28,10 @@ use oxideterm_remote_desktop::{
     RemoteDesktopVncSessionMode,
 };
 use zeroize::Zeroize;
+#[cfg(not(target_family = "wasm"))]
+pub type FormSecret = String;
+#[cfg(target_family = "wasm")]
+pub type FormSecret = zeroize::Zeroizing<String>;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SshAuthTab {
@@ -146,7 +154,7 @@ pub fn connection_icon_field_visible(
     // Only persisted session assets expose custom icons in this shared form.
     mode != NewConnectionFormMode::SavedConnectionPrompt
         && !drill_down_mode
-        && oxideterm_connections::transport_is_persistable(transport)
+        && form_model::transport_is_persistable(transport)
 }
 
 pub use crate::NewConnectionSelect;
@@ -351,12 +359,12 @@ pub struct NewConnectionProxyHop {
     pub port: String,
     pub username: String,
     pub auth_tab: SshAuthTab,
-    pub password: String,
+    pub password: FormSecret,
     pub empty_password: bool,
     pub key_path: String,
     pub managed_key_id: String,
     pub cert_path: String,
-    pub passphrase: String,
+    pub passphrase: FormSecret,
     pub gssapi_enabled: bool,
     pub gssapi_server_identity: String,
     pub gssapi_delegate_credentials: bool,
@@ -416,12 +424,12 @@ impl NewConnectionProxyHop {
             port: SSH_DEFAULT_PORT_TEXT.to_string(),
             username: String::new(),
             auth_tab: SshAuthTab::SshKey,
-            password: String::new(),
+            password: FormSecret::default(),
             empty_password: false,
             key_path: String::new(),
             managed_key_id: String::new(),
             cert_path: String::new(),
-            passphrase: String::new(),
+            passphrase: FormSecret::default(),
             gssapi_enabled: false,
             gssapi_server_identity: String::new(),
             gssapi_delegate_credentials: false,
@@ -429,10 +437,11 @@ impl NewConnectionProxyHop {
             identity_agent: String::new(),
             agent_forwarding_socket: None,
             legacy_ssh_compatibility: false,
-            ssh_algorithms: oxideterm_connections::SshAlgorithmPreferences::default(),
+            ssh_algorithms: form_model::SshAlgorithmPreferences::default(),
         }
     }
 
+    #[cfg(not(target_family = "wasm"))]
     pub fn from_saved(persisted_proxy_hop_index: usize, hop: &SavedProxyHop) -> Self {
         // Reopen only route metadata; protected credentials stay in their current owner.
         Self {
@@ -444,12 +453,12 @@ impl NewConnectionProxyHop {
             port: hop.port.to_string(),
             username: hop.username.clone(),
             auth_tab: ssh_auth_tab_from_saved_auth(&hop.auth),
-            password: String::new(),
+            password: FormSecret::default(),
             empty_password: hop.auth.uses_empty_password(),
             key_path: hop.auth.key_path().unwrap_or_default().to_string(),
             managed_key_id: hop.auth.managed_key_id().unwrap_or_default().to_string(),
             cert_path: hop.auth.cert_path().unwrap_or_default().to_string(),
-            passphrase: String::new(),
+            passphrase: FormSecret::default(),
             gssapi_enabled: hop.auth.gssapi_options().is_some(),
             gssapi_server_identity: hop
                 .auth
@@ -483,6 +492,7 @@ impl NewConnectionProxyHop {
         }
     }
 
+    #[cfg(not(target_family = "wasm"))]
     pub fn matches_saved_connection(&self, connection: &SavedConnection) -> bool {
         // A saved secret is reusable only while every authentication endpoint field still
         // matches the selected connection, preventing credentials from reaching an edited host.
@@ -541,8 +551,8 @@ impl NewConnectionProxyHop {
         };
         // ConnectionInfo is metadata-only. Keep keychain-backed passwords and
         // passphrases out of the form when reusing a saved connection as a hop.
-        self.password.clear();
-        self.passphrase.clear();
+        self.password.zeroize();
+        self.passphrase.zeroize();
         self.key_path = connection.key_path.clone().unwrap_or_default();
         self.cert_path = connection.cert_path.clone().unwrap_or_default();
         self.managed_key_id = connection.managed_key_id.clone().unwrap_or_default();
@@ -560,6 +570,7 @@ impl NewConnectionProxyHop {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub fn ssh_auth_tab_from_saved_auth(auth: &SavedAuth) -> SshAuthTab {
     match auth.conventional_fallback() {
         SavedAuth::Password { .. } => SshAuthTab::Password,
@@ -585,14 +596,14 @@ pub struct StandaloneSftpSecondaryForm {
     pub port: String,
     pub username: String,
     pub auth_tab: SshAuthTab,
-    pub password: String,
+    pub password: FormSecret,
     pub empty_password: bool,
     pub password_keychain_id: Option<String>,
     pub password_visible: bool,
     pub key_path: String,
     pub managed_key_id: String,
     pub cert_path: String,
-    pub passphrase: String,
+    pub passphrase: FormSecret,
     pub gssapi_enabled: bool,
     pub gssapi_server_identity: String,
     pub gssapi_delegate_credentials: bool,
@@ -609,7 +620,7 @@ pub struct StandaloneSftpSecondaryForm {
     pub proxy_hops: Vec<NewConnectionProxyHop>,
     pub proxy_chain_expanded: bool,
     pub proxy_command_enabled: bool,
-    pub proxy_command: String,
+    pub proxy_command: FormSecret,
     pub proxy_command_keychain_id: Option<String>,
     pub upstream_proxy_policy: NewConnectionUpstreamProxyPolicy,
     pub upstream_proxy_protocol: SavedUpstreamProxyProtocol,
@@ -617,7 +628,7 @@ pub struct StandaloneSftpSecondaryForm {
     pub upstream_proxy_port: String,
     pub upstream_proxy_auth: NewConnectionUpstreamProxyAuth,
     pub upstream_proxy_username: String,
-    pub upstream_proxy_password: String,
+    pub upstream_proxy_password: FormSecret,
     pub upstream_proxy_password_keychain_id: Option<String>,
     pub upstream_proxy_remote_dns: bool,
     pub upstream_proxy_no_proxy: String,
@@ -630,14 +641,14 @@ impl Default for StandaloneSftpSecondaryForm {
             port: SSH_DEFAULT_PORT_TEXT.to_string(),
             username: "root".to_string(),
             auth_tab: SshAuthTab::Password,
-            password: String::new(),
+            password: FormSecret::default(),
             empty_password: false,
             password_keychain_id: None,
             password_visible: false,
             key_path: String::new(),
             managed_key_id: String::new(),
             cert_path: String::new(),
-            passphrase: String::new(),
+            passphrase: FormSecret::default(),
             gssapi_enabled: false,
             gssapi_server_identity: String::new(),
             gssapi_delegate_credentials: false,
@@ -646,14 +657,14 @@ impl Default for StandaloneSftpSecondaryForm {
             identity_agent: String::new(),
             agent_available: None,
             legacy_ssh_compatibility: false,
-            ssh_algorithms: oxideterm_connections::SshAlgorithmPreferences::default(),
+            ssh_algorithms: form_model::SshAlgorithmPreferences::default(),
             connect_timeout_seconds: DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS,
             connect_timeout_seconds_text: DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS.to_string(),
             initial_remote_path: String::new(),
             proxy_hops: Vec::new(),
             proxy_chain_expanded: false,
             proxy_command_enabled: false,
-            proxy_command: String::new(),
+            proxy_command: FormSecret::default(),
             proxy_command_keychain_id: None,
             upstream_proxy_policy: NewConnectionUpstreamProxyPolicy::UseGlobal,
             upstream_proxy_protocol: SavedUpstreamProxyProtocol::Socks5,
@@ -661,7 +672,7 @@ impl Default for StandaloneSftpSecondaryForm {
             upstream_proxy_port: "1080".to_string(),
             upstream_proxy_auth: NewConnectionUpstreamProxyAuth::None,
             upstream_proxy_username: String::new(),
-            upstream_proxy_password: String::new(),
+            upstream_proxy_password: FormSecret::default(),
             upstream_proxy_password_keychain_id: None,
             upstream_proxy_remote_dns: true,
             upstream_proxy_no_proxy: String::new(),
@@ -779,7 +790,7 @@ pub struct NewConnectionForm {
     pub gssapi_delegate_credentials: bool,
     pub gssapi_credentials_available: Option<bool>,
     pub gssapi_credentials_check_pending: bool,
-    pub password: String,
+    pub password: FormSecret,
     pub empty_password: bool,
     pub remote_desktop_session_options: RemoteDesktopSessionOptions,
     /// Identifies an existing RDP/VNC asset without overloading SSH edit state.
@@ -792,10 +803,11 @@ pub struct NewConnectionForm {
     pub serial_profile_id: Option<String>,
     /// Identifies an existing Telnet asset without changing a live Telnet session.
     pub telnet_profile_id: Option<String>,
-    pub telnet_input_line_ending: oxideterm_connections::SerialLineEnding,
-    pub telnet_output_line_ending: oxideterm_connections::SerialLineEnding,
+    pub telnet_input_line_ending: form_model::SerialLineEnding,
+    pub telnet_output_line_ending: form_model::SerialLineEnding,
     pub ftp_profile_id: Option<String>,
     pub ftp_tls: bool,
+    #[cfg(not(target_family = "wasm"))]
     pub ftp_attempt: Option<(uuid::Uuid, tokio_util::sync::CancellationToken)>,
     /// Identifies an independent SFTP asset without creating a NodeRouter node.
     pub standalone_sftp_profile_id: Option<String>,
@@ -813,7 +825,7 @@ pub struct NewConnectionForm {
     pub key_path: String,
     pub managed_key_id: String,
     pub cert_path: String,
-    pub passphrase: String,
+    pub passphrase: FormSecret,
     pub passphrase_visible: bool,
     pub save_password: bool,
     pub group: String,
@@ -822,7 +834,7 @@ pub struct NewConnectionForm {
     pub post_connect_command: String,
     pub pre_connect_command: String,
     pub proxy_command_enabled: bool,
-    pub proxy_command: String,
+    pub proxy_command: FormSecret,
     pub proxy_command_keychain_id: Option<String>,
     pub color: String,
     pub icon_background_color: String,
@@ -867,7 +879,7 @@ pub struct NewConnectionForm {
     pub upstream_proxy_port: String,
     pub upstream_proxy_auth: NewConnectionUpstreamProxyAuth,
     pub upstream_proxy_username: String,
-    pub upstream_proxy_password: String,
+    pub upstream_proxy_password: FormSecret,
     pub upstream_proxy_password_keychain_id: Option<String>,
     pub upstream_proxy_remote_dns: bool,
     pub upstream_proxy_no_proxy: String,
@@ -878,7 +890,7 @@ pub struct NewConnectionForm {
     pub ssh_algorithms: SshAlgorithmPreferences,
     pub ssh_algorithm_selected: Option<String>,
     pub ssh_algorithm_menu: Option<(String, gpui::Point<gpui::Pixels>)>,
-    pub ssh_algorithm_editor_category: oxideterm_ssh::SshAlgorithmCategory,
+    pub ssh_algorithm_editor_category: form_model::SshAlgorithmCategory,
     pub connect_timeout_seconds: u64,
     /// Preserves transient invalid input while the numeric value fails closed at zero.
     pub connect_timeout_seconds_text: String,
@@ -896,14 +908,14 @@ pub struct NewConnectionForm {
     // Success styling remains bound to the exact feedback message that produced it.
     pub success_feedback_message: Option<String>,
     pub pending: bool,
-    pub serial_ports: Vec<oxideterm_terminal::SerialPortInfo>,
+    pub serial_ports: Vec<form_model::SerialPortInfo>,
     pub serial_ports_loading: bool,
     pub serial_port_path: String,
     pub serial_baud_rate: String,
     pub serial_data_bits: u8,
     pub serial_stop_bits: u8,
-    pub serial_parity: oxideterm_terminal::SerialParity,
-    pub serial_flow_control: oxideterm_terminal::SerialFlowControl,
+    pub serial_parity: form_model::SerialParity,
+    pub serial_flow_control: form_model::SerialFlowControl,
     pub serial_profile_name: String,
     pub ble: BleFormState,
     pub telnet_profile_name: String,
@@ -919,17 +931,22 @@ pub struct NewConnectionForm {
 /// Grouped so the shared form draft keeps other transports' fields flat while
 /// the BLE surface stays in one resettable unit; nothing here is persisted —
 /// saving still materializes a `BleProfile` into the connection store.
+#[cfg_attr(target_family = "wasm", derive(Debug))]
 pub struct BleFormState {
+    #[cfg(not(target_family = "wasm"))]
     pub instance_id: uuid::Uuid,
+    #[cfg(not(target_family = "wasm"))]
     pub open_cancel: Option<tokio_util::sync::DropGuard>,
     pub discovery_section_expanded: Option<bool>,
     pub profile_name: String,
     // Set only when the form edits an existing BLE profile; the save request
     // reuses the stored device identity when no live scan selection is made.
     pub profile_id: Option<String>,
+    #[cfg(not(target_family = "wasm"))]
     pub adapters: Vec<oxideterm_ble::BleAdapterInfo>,
     pub adapters_loading: bool,
     pub selected_adapter_index: usize,
+    #[cfg(not(target_family = "wasm"))]
     pub devices: Vec<oxideterm_ble::BleDeviceInfo>,
     pub scanning: bool,
     pub scan_started: bool,
@@ -937,11 +954,14 @@ pub struct BleFormState {
     // terminal session resolve peripherals against the same BlueZ object
     // (Linux) or peripheral cache (macOS/Windows); the scan it owns stays
     // running until the terminal link is up or the form is dismissed.
+    #[cfg(not(target_family = "wasm"))]
     pub adapter_guard: Option<oxideterm_ble::BleAdapterGuard>,
     // Monotonic token: in-flight discovery writes back only when the generation
     // still matches, so stale adapter or scan results never reach the form.
     pub scan_generation: u64,
+    #[cfg(not(target_family = "wasm"))]
     pub selected_device_id: Option<oxideterm_ble::BlePeripheralId>,
+    #[cfg(not(target_family = "wasm"))]
     pub device_details: Option<oxideterm_ble::BleDeviceDetails>,
     pub inspecting: bool,
     // Inspection failure is scoped to the selected device's expanded row, not
@@ -952,10 +972,10 @@ pub struct BleFormState {
     pub selected_service_uuid: Option<uuid::Uuid>,
     // Byte-stream transport options. Shared with SerialRuntimeOptions so the
     // terminal panel and the saved-profile store consume the same shape.
-    pub input_line_ending: oxideterm_connections::SerialLineEnding,
-    pub output_line_ending: oxideterm_connections::SerialLineEnding,
-    pub send_mode: oxideterm_connections::SerialSendMode,
-    pub display_mode: oxideterm_connections::SerialDisplayMode,
+    pub input_line_ending: form_model::SerialLineEnding,
+    pub output_line_ending: form_model::SerialLineEnding,
+    pub send_mode: form_model::SerialSendMode,
+    pub display_mode: form_model::SerialDisplayMode,
     pub local_echo: bool,
     /// Draft text for the optional ATT MTU override; parsed at submit time.
     pub mtu: String,
@@ -969,28 +989,35 @@ pub struct BleFormState {
 impl Default for BleFormState {
     fn default() -> Self {
         Self {
+            #[cfg(not(target_family = "wasm"))]
             instance_id: uuid::Uuid::new_v4(),
+            #[cfg(not(target_family = "wasm"))]
             open_cancel: None,
             discovery_section_expanded: None,
             profile_name: String::new(),
             profile_id: None,
+            #[cfg(not(target_family = "wasm"))]
             adapters: Vec::new(),
             adapters_loading: false,
             selected_adapter_index: 0,
+            #[cfg(not(target_family = "wasm"))]
             devices: Vec::new(),
             scanning: false,
             scan_started: false,
+            #[cfg(not(target_family = "wasm"))]
             adapter_guard: None,
             scan_generation: 0,
+            #[cfg(not(target_family = "wasm"))]
             selected_device_id: None,
+            #[cfg(not(target_family = "wasm"))]
             device_details: None,
             inspecting: false,
             inspect_error: None,
             selected_service_uuid: None,
-            input_line_ending: oxideterm_connections::SerialLineEnding::default(),
-            output_line_ending: oxideterm_connections::SerialLineEnding::default(),
-            send_mode: oxideterm_connections::SerialSendMode::default(),
-            display_mode: oxideterm_connections::SerialDisplayMode::default(),
+            input_line_ending: form_model::SerialLineEnding::default(),
+            output_line_ending: form_model::SerialLineEnding::default(),
+            send_mode: form_model::SerialSendMode::default(),
+            display_mode: form_model::SerialDisplayMode::default(),
             local_echo: false,
             mtu: String::new(),
             write_without_response: true,
@@ -999,6 +1026,7 @@ impl Default for BleFormState {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl fmt::Debug for BleFormState {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -1231,7 +1259,7 @@ impl Default for NewConnectionForm {
             gssapi_delegate_credentials: false,
             gssapi_credentials_available: None,
             gssapi_credentials_check_pending: false,
-            password: String::new(),
+            password: FormSecret::default(),
             empty_password: false,
             remote_desktop_session_options: RemoteDesktopSessionOptions::default(),
             remote_desktop_profile_id: None,
@@ -1243,6 +1271,7 @@ impl Default for NewConnectionForm {
             telnet_output_line_ending: Default::default(),
             ftp_profile_id: None,
             ftp_tls: true,
+            #[cfg(not(target_family = "wasm"))]
             ftp_attempt: None,
             standalone_sftp_profile_id: None,
             standalone_sftp_transfer_mode: StandaloneSftpTransferMode::LocalRemote,
@@ -1256,7 +1285,7 @@ impl Default for NewConnectionForm {
             key_path: String::new(),
             managed_key_id: String::new(),
             cert_path: String::new(),
-            passphrase: String::new(),
+            passphrase: FormSecret::default(),
             passphrase_visible: false,
             save_password: false,
             group: String::new(),
@@ -1265,7 +1294,7 @@ impl Default for NewConnectionForm {
             post_connect_command: String::new(),
             pre_connect_command: String::new(),
             proxy_command_enabled: false,
-            proxy_command: String::new(),
+            proxy_command: FormSecret::default(),
             proxy_command_keychain_id: None,
             color: String::new(),
             icon_background_color: String::new(),
@@ -1302,7 +1331,7 @@ impl Default for NewConnectionForm {
             upstream_proxy_port: "1080".to_string(),
             upstream_proxy_auth: NewConnectionUpstreamProxyAuth::None,
             upstream_proxy_username: String::new(),
-            upstream_proxy_password: String::new(),
+            upstream_proxy_password: FormSecret::default(),
             upstream_proxy_password_keychain_id: None,
             upstream_proxy_remote_dns: true,
             upstream_proxy_no_proxy: String::new(),
@@ -1310,10 +1339,10 @@ impl Default for NewConnectionForm {
             identity_agent: String::new(),
             agent_forwarding_socket: None,
             legacy_ssh_compatibility: false,
-            ssh_algorithms: oxideterm_connections::SshAlgorithmPreferences::default(),
+            ssh_algorithms: form_model::SshAlgorithmPreferences::default(),
             ssh_algorithm_selected: None,
             ssh_algorithm_menu: None,
-            ssh_algorithm_editor_category: oxideterm_ssh::SshAlgorithmCategory::Kex,
+            ssh_algorithm_editor_category: form_model::SshAlgorithmCategory::Kex,
             connect_timeout_seconds: DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS,
             connect_timeout_seconds_text: DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS.to_string(),
             dedicated_new_terminal_connection: false,
@@ -1335,8 +1364,8 @@ impl Default for NewConnectionForm {
             serial_baud_rate: "115200".to_string(),
             serial_data_bits: 8,
             serial_stop_bits: 1,
-            serial_parity: oxideterm_terminal::SerialParity::None,
-            serial_flow_control: oxideterm_terminal::SerialFlowControl::None,
+            serial_parity: form_model::SerialParity::None,
+            serial_flow_control: form_model::SerialFlowControl::None,
             serial_profile_name: String::new(),
             ble: BleFormState::default(),
             telnet_profile_name: String::new(),
@@ -1380,11 +1409,29 @@ impl NewConnectionForm {
 
 impl Drop for NewConnectionForm {
     fn drop(&mut self) {
+        #[cfg(not(target_family = "wasm"))]
         if let Some((_, cancel)) = &self.ftp_attempt {
             cancel.cancel();
         }
         // GPUI inputs require plain String drafts, so scrub them at owner teardown.
         self.zeroize_secret_drafts();
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SavedPasswordLoadError {
+    NotFound,
+    Locked,
+    Unavailable,
+}
+
+impl SavedPasswordLoadError {
+    pub fn message_key(self) -> &'static str {
+        match self {
+            Self::NotFound => "sessionManager.edit_properties.password_not_found",
+            Self::Locked => "sessionManager.edit_properties.password_store_locked",
+            Self::Unavailable => "sessionManager.edit_properties.password_load_failed",
+        }
     }
 }
 
@@ -1396,5 +1443,5 @@ pub use editing::*;
 pub use navigation::*;
 pub use profiles::*;
 
-#[cfg(test)]
+#[cfg(all(test, not(target_family = "wasm")))]
 mod tests;

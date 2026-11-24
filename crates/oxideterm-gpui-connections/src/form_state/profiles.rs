@@ -1,5 +1,6 @@
 use super::*;
 
+#[cfg(not(target_family = "wasm"))]
 pub fn form_from_remote_desktop_profile(
     profile: &RemoteDesktopProfile,
     ungrouped_label: String,
@@ -31,6 +32,7 @@ pub fn form_from_remote_desktop_profile(
     form
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub fn form_from_mosh_profile(profile: &MoshProfile, ungrouped_label: String) -> NewConnectionForm {
     // Editing retains only protected-store references and never loads the secret value.
     let mut form = NewConnectionForm::default();
@@ -101,100 +103,7 @@ pub fn form_from_mosh_profile(profile: &MoshProfile, ungrouped_label: String) ->
     form
 }
 
-pub fn terminal_serial_parity_from_profile(
-    parity: &oxideterm_connections::SerialParity,
-) -> oxideterm_terminal::SerialParity {
-    match parity {
-        oxideterm_connections::SerialParity::None => oxideterm_terminal::SerialParity::None,
-        oxideterm_connections::SerialParity::Odd => oxideterm_terminal::SerialParity::Odd,
-        oxideterm_connections::SerialParity::Even => oxideterm_terminal::SerialParity::Even,
-    }
-}
-
-pub fn terminal_serial_flow_from_profile(
-    flow: &oxideterm_connections::SerialFlowControl,
-) -> oxideterm_terminal::SerialFlowControl {
-    match flow {
-        oxideterm_connections::SerialFlowControl::None => {
-            oxideterm_terminal::SerialFlowControl::None
-        }
-        oxideterm_connections::SerialFlowControl::Software => {
-            oxideterm_terminal::SerialFlowControl::Software
-        }
-        oxideterm_connections::SerialFlowControl::Hardware => {
-            oxideterm_terminal::SerialFlowControl::Hardware
-        }
-    }
-}
-
-pub fn terminal_serial_runtime_options_from_profile(
-    profile: &SerialProfile,
-) -> oxideterm_terminal::SerialRuntimeOptions {
-    oxideterm_terminal::SerialRuntimeOptions {
-        line_ending: terminal_serial_line_ending_from_profile(profile.input_line_ending),
-        output_line_ending: terminal_serial_line_ending_from_profile(profile.output_line_ending),
-        ..Default::default()
-    }
-}
-
-pub fn terminal_serial_line_ending_from_profile(
-    line_ending: oxideterm_connections::SerialLineEnding,
-) -> oxideterm_terminal::SerialLineEnding {
-    match line_ending {
-        oxideterm_connections::SerialLineEnding::Lf => oxideterm_terminal::SerialLineEnding::Lf,
-        oxideterm_connections::SerialLineEnding::CrLf => oxideterm_terminal::SerialLineEnding::CrLf,
-        oxideterm_connections::SerialLineEnding::Cr => oxideterm_terminal::SerialLineEnding::Cr,
-        oxideterm_connections::SerialLineEnding::None => oxideterm_terminal::SerialLineEnding::None,
-    }
-}
-
-pub fn terminal_serial_send_mode_from_profile(
-    mode: oxideterm_connections::SerialSendMode,
-) -> oxideterm_terminal::SerialSendMode {
-    match mode {
-        oxideterm_connections::SerialSendMode::Text => oxideterm_terminal::SerialSendMode::Text,
-        oxideterm_connections::SerialSendMode::Hex => oxideterm_terminal::SerialSendMode::Hex,
-    }
-}
-
-pub fn terminal_serial_display_mode_from_profile(
-    mode: oxideterm_connections::SerialDisplayMode,
-) -> oxideterm_terminal::SerialDisplayMode {
-    match mode {
-        oxideterm_connections::SerialDisplayMode::Text => {
-            oxideterm_terminal::SerialDisplayMode::Text
-        }
-        oxideterm_connections::SerialDisplayMode::Hex => oxideterm_terminal::SerialDisplayMode::Hex,
-        oxideterm_connections::SerialDisplayMode::Mixed => {
-            oxideterm_terminal::SerialDisplayMode::Mixed
-        }
-    }
-}
-
-pub fn terminal_serial_runtime_options_from_ble_profile(
-    profile: &oxideterm_connections::BleProfile,
-) -> oxideterm_terminal::SerialRuntimeOptions {
-    oxideterm_terminal::SerialRuntimeOptions {
-        line_ending: terminal_serial_line_ending_from_profile(profile.input_line_ending),
-        output_line_ending: terminal_serial_line_ending_from_profile(profile.output_line_ending),
-        send_mode: terminal_serial_send_mode_from_profile(profile.send_mode),
-        display_mode: terminal_serial_display_mode_from_profile(profile.display_mode),
-        local_echo: profile.local_echo,
-    }
-}
-
-pub fn terminal_serial_runtime_options_from_ble_form(
-    form: &NewConnectionForm,
-) -> oxideterm_terminal::SerialRuntimeOptions {
-    oxideterm_terminal::SerialRuntimeOptions {
-        line_ending: terminal_serial_line_ending_from_profile(form.ble.input_line_ending),
-        output_line_ending: terminal_serial_line_ending_from_profile(form.ble.output_line_ending),
-        send_mode: terminal_serial_send_mode_from_profile(form.ble.send_mode),
-        display_mode: terminal_serial_display_mode_from_profile(form.ble.display_mode),
-        local_echo: form.ble.local_echo,
-    }
-}
-
+#[cfg(not(target_family = "wasm"))]
 pub fn form_from_serial_profile(
     profile: &SerialProfile,
     ungrouped_label: String,
@@ -221,6 +130,7 @@ pub fn form_from_serial_profile(
     form
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub fn apply_saved_upstream_proxy_to_form(
     form: &mut NewConnectionForm,
     policy: &oxideterm_connections::SavedUpstreamProxyPolicy,
@@ -257,6 +167,7 @@ pub fn apply_saved_upstream_proxy_to_form(
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub fn form_from_telnet_profile(
     profile: &TelnetProfile,
     ungrouped_label: String,
@@ -282,11 +193,48 @@ pub fn form_from_telnet_profile(
     form
 }
 
-pub fn terminal_telnet_line_endings_from_profile(
-    profile: &TelnetProfile,
-) -> oxideterm_terminal::TelnetLineEndings {
-    oxideterm_terminal::TelnetLineEndings {
-        input: terminal_serial_line_ending_from_profile(profile.input_line_ending),
-        output: terminal_serial_line_ending_from_profile(profile.output_line_ending),
+#[cfg(not(target_family = "wasm"))]
+pub use crate::conversion::{
+    terminal_serial_display_mode_from_profile, terminal_serial_flow_from_profile,
+    terminal_serial_line_ending_from_profile, terminal_serial_parity_from_profile,
+    terminal_serial_runtime_options_from_ble_form,
+    terminal_serial_runtime_options_from_ble_profile, terminal_serial_runtime_options_from_profile,
+    terminal_serial_send_mode_from_profile, terminal_telnet_line_endings_from_profile,
+};
+
+pub fn parse_mosh_udp_port(value: &str) -> anyhow::Result<form_model::MoshUdpPortSelection> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Ok(form_model::MoshUdpPortSelection::Automatic);
+    }
+    if let Some((start, end)) = value.split_once(':') {
+        let start = start.trim().parse::<u16>()?;
+        let end = end.trim().parse::<u16>()?;
+        if start == 0 || end == 0 || start > end {
+            anyhow::bail!("invalid Mosh UDP port range");
+        }
+        return Ok(form_model::MoshUdpPortSelection::Range { start, end });
+    }
+    let port = value.parse::<u16>()?;
+    if port == 0 {
+        anyhow::bail!("invalid Mosh UDP port");
+    }
+    Ok(form_model::MoshUdpPortSelection::Fixed { port })
+}
+
+impl NewConnectionForm {
+    pub fn for_transport(transport: NewConnectionTransport) -> Self {
+        let mut form = Self::default();
+        let previous = form.transport;
+        apply_transport_default_port(&mut form, previous, transport);
+        apply_transport_default_username(&mut form, previous, transport);
+        if matches!(
+            transport,
+            NewConnectionTransport::Rdp | NewConnectionTransport::Telnet
+        ) {
+            form.upstream_proxy_policy = NewConnectionUpstreamProxyPolicy::Direct;
+        }
+        form.transport = transport;
+        form
     }
 }

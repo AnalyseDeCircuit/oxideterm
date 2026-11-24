@@ -1,21 +1,22 @@
-use std::{cell::RefCell, ops::Range, rc::Rc};
+use std::{cell::RefCell, rc::Rc};
 
-use gpui::{
-    AnyElement, App, AppContext, CursorStyle, Entity, IntoElement, MouseButton, MouseDownEvent,
-    MouseMoveEvent, Window, prelude::*,
+use super::{ConnectedFtp, SftpConnected, TunnelKind};
+use crate::{
+    form_state::NewConnectionSubmitAction,
+    launch::SshConnectionIntent,
+    session_manager::{BatchWindowAction, CatalogAction, OxideDialogAction},
 };
-use oxideterm_gpui_ui::text_input::{
-    TextInputAnchor, TextInputAnchorId, TextInputView, TextInputViewport, text_input_anchor_probe,
-};
+use gpui::{AnyElement, App, AppContext, Entity, IntoElement};
+use gpui::{MouseDownEvent, MouseMoveEvent, Window};
+use oxideterm_gpui_ui::text_input::TextInputView;
+#[cfg(test)]
+use oxideterm_gpui_ui::text_input::{TextInputAnchorId, TextInputViewport};
 use oxideterm_i18n::I18n;
 use oxideterm_theme::ThemeTokens;
 use zeroize::Zeroizing;
 
-use crate::form_state::NewConnectionSubmitAction;
-use crate::launch::SshConnectionIntent;
 use crate::session_manager::{
-    BatchWindowAction, CatalogAction, OxideDialogAction, SessionManagerInput, SessionManagerState,
-    SessionManagerViewBindings,
+    SessionManagerInput, SessionManagerState, SessionManagerViewBindings,
     catalog_view::{CatalogMount, CatalogView},
     oxide_dialogs::{ManagerOverlay, OxideDialogs},
 };
@@ -25,19 +26,14 @@ use crate::{
 };
 
 use super::{
-    ConnectedFtp, ConnectionsEnvironment, ConnectionsSelectableText, SftpConnected, algorithms,
+    ConnectionsEnvironment, ConnectionsSelectableText, algorithms,
     authentication::AuthenticationView,
-    form::{ConnectionFormEnvironment, ConnectionFormView, FormMount, TunnelKind},
+    form::{ConnectionFormEnvironment, ConnectionFormView, FormMount},
+    form_input::*,
 };
 #[cfg(test)]
 #[path = "layout_tests.rs"]
 mod layout_tests;
-
-#[derive(Clone, Copy)]
-pub enum ConnectionsInput {
-    Form(NewConnectionField),
-    KeyboardInteractive(usize),
-}
 
 pub enum ConnectionsWindowRequest {
     VerifiedSsh {
@@ -136,22 +132,67 @@ pub enum ConnectionsWindowRequest {
     ClearTooltip(String),
 }
 
-pub struct ConnectionImeFrame {
-    pub anchor_id: TextInputAnchorId,
-    pub viewport: TextInputViewport,
-    pub caret_visible: bool,
-    pub selected_range: Option<Range<usize>>,
-    pub active_offset: Option<usize>,
-    // The platform composition may contain a pending secret character.
-    pub marked_text: Option<Zeroizing<String>>,
-    pub marked_range: Option<Range<usize>>,
-    pub notes_with_composition: Option<String>,
-    pub update_anchor: Rc<dyn Fn(TextInputAnchor)>,
+pub type ConnectionsDispatch = Rc<dyn Fn(ConnectionsWindowRequest, Option<&mut Window>, &mut App)>;
+
+pub(super) fn form_dispatch(dispatch: &ConnectionsDispatch) -> FormDispatch {
+    let dispatch = dispatch.clone();
+    Rc::new(move |action, window, cx| {
+        let request = match action {
+            FormAction::FocusForm => ConnectionsWindowRequest::FocusForm,
+            FormAction::FocusFormSelect => ConnectionsWindowRequest::FocusFormSelect,
+            FormAction::FocusInput(a, b) => ConnectionsWindowRequest::FocusInput(a, b),
+            FormAction::DragInputSelection(a) => ConnectionsWindowRequest::DragInputSelection(a),
+            FormAction::ClearComposition => ConnectionsWindowRequest::ClearComposition,
+            FormAction::ShowCaret => ConnectionsWindowRequest::ShowCaret,
+            FormAction::CloseForm => ConnectionsWindowRequest::CloseForm,
+            FormAction::SubmitForm(a) => ConnectionsWindowRequest::SubmitForm(a),
+            FormAction::OpenTunnel => ConnectionsWindowRequest::OpenTunnel,
+            FormAction::LeaveTunnel => ConnectionsWindowRequest::LeaveTunnel,
+            FormAction::CloseTunnel => ConnectionsWindowRequest::CloseTunnel,
+            FormAction::SaveTunnel { start } => ConnectionsWindowRequest::SaveTunnel { start },
+            FormAction::SetTunnelKind(a) => ConnectionsWindowRequest::SetTunnelKind(a),
+            FormAction::ToggleTunnelStartup => ConnectionsWindowRequest::ToggleTunnelStartup,
+            FormAction::SelectTunnelHost(a) => ConnectionsWindowRequest::SelectTunnelHost(a),
+            FormAction::OpenPluginForm { plugin, type_id } => {
+                ConnectionsWindowRequest::OpenPluginForm { plugin, type_id }
+            }
+            FormAction::OpenMoshPlugin => ConnectionsWindowRequest::OpenMoshPlugin,
+            FormAction::OpenRemoteDesktopPlugin(a) => {
+                ConnectionsWindowRequest::OpenRemoteDesktopPlugin(a)
+            }
+            FormAction::ConnectNextHop {
+                parent,
+                connection_id,
+            } => ConnectionsWindowRequest::ConnectNextHop {
+                parent,
+                connection_id,
+            },
+            FormAction::RevealSavedPassword => ConnectionsWindowRequest::RevealSavedPassword,
+            FormAction::QueueTooltip { id, label, x, y } => {
+                ConnectionsWindowRequest::QueueTooltip { id, label, x, y }
+            }
+            FormAction::ClearTooltip(a) => ConnectionsWindowRequest::ClearTooltip(a),
+            FormAction::TestForm { standalone_sftp } => {
+                ConnectionsWindowRequest::TestForm(if standalone_sftp {
+                    SshConnectionIntent::TestStandaloneSftp
+                } else {
+                    SshConnectionIntent::Test
+                })
+            }
+        };
+        dispatch(request, window, cx);
+    })
 }
 
-pub type ConnectionsDispatch = Rc<dyn Fn(ConnectionsWindowRequest, Option<&mut Window>, &mut App)>;
-pub type ConnectionsEnvironmentSource = Rc<dyn Fn(&App) -> Option<ConnectionsEnvironment>>;
-pub type ConnectionImeSource = Rc<dyn Fn(ConnectionsInput, &App) -> Option<ConnectionImeFrame>>;
+pub fn connection_text_input(
+    tokens: &ThemeTokens,
+    dispatch: &ConnectionsDispatch,
+    target: ConnectionsInput,
+    frame: ConnectionImeFrame,
+    view: TextInputView<'_>,
+) -> AnyElement {
+    form_text_input(tokens, &form_dispatch(dispatch), target, frame, view)
+}
 
 #[derive(Clone)]
 pub struct ConnectionsViewBindings {
@@ -162,138 +203,6 @@ pub struct ConnectionsViewBindings {
     pub form_environment: Rc<dyn Fn(&App) -> Option<ConnectionFormEnvironment>>,
     pub form_selectable_text: Rc<dyn Fn(&str, (&str, &str), String, u32, &mut App) -> AnyElement>,
     pub manager: SessionManagerViewBindings,
-}
-
-fn is_mono_connection_field(field: crate::form_state::NewConnectionField) -> bool {
-    use crate::form_state::NewConnectionField as Field;
-    matches!(
-        field,
-        Field::LocalCwd
-            | Field::Host
-            | Field::Port
-            | Field::Username
-            | Field::KeyPath
-            | Field::CertPath
-            | Field::GssapiServerIdentity
-            | Field::IdentityAgent
-            | Field::InitialRemotePath
-            | Field::ConnectTimeoutSeconds
-            | Field::StandaloneSftpSecondaryHost
-            | Field::StandaloneSftpSecondaryPort
-            | Field::StandaloneSftpSecondaryUsername
-            | Field::StandaloneSftpSecondaryKeyPath
-            | Field::StandaloneSftpSecondaryCertPath
-            | Field::StandaloneSftpSecondaryGssapiServerIdentity
-            | Field::StandaloneSftpSecondaryIdentityAgent
-            | Field::StandaloneSftpSecondaryInitialRemotePath
-            | Field::StandaloneSftpSecondaryConnectTimeoutSeconds
-            | Field::StandaloneSftpSecondaryProxyCommand
-            | Field::StandaloneSftpSecondaryUpstreamProxyHost
-            | Field::StandaloneSftpSecondaryUpstreamProxyPort
-            | Field::StandaloneSftpSecondaryUpstreamProxyNoProxy
-            | Field::StandaloneSftpSecondaryUpstreamProxyUsername
-            | Field::PostConnectCommand
-            | Field::PreConnectCommand
-            | Field::ProxyCommand
-            | Field::JumpHost
-            | Field::JumpPort
-            | Field::JumpUsername
-            | Field::JumpKeyPath
-            | Field::JumpCertPath
-            | Field::JumpGssapiServerIdentity
-            | Field::JumpIdentityAgent
-            | Field::UpstreamProxyHost
-            | Field::UpstreamProxyPort
-            | Field::UpstreamProxyNoProxy
-            | Field::UpstreamProxyUsername
-            | Field::SerialPortPath
-            | Field::SerialBaudRate
-            | Field::BleMtu
-            | Field::MoshServerExecutable
-            | Field::MoshUdpHost
-            | Field::MoshUdpPort
-            | Field::MoshLocale
-            | Field::TunnelTargetHost
-            | Field::TunnelTargetPort
-    )
-}
-
-pub fn connection_text_input(
-    tokens: &ThemeTokens,
-    dispatch: &ConnectionsDispatch,
-    target: ConnectionsInput,
-    frame: ConnectionImeFrame,
-    view: TextInputView<'_>,
-) -> AnyElement {
-    let is_mono =
-        matches!(target, ConnectionsInput::Form(field) if is_mono_connection_field(field));
-    let mut input = crate::input::paint_input(
-        tokens,
-        TextInputView {
-            caret_visible: frame.caret_visible,
-            selected_range: frame.selected_range,
-            marked_text: frame.marked_text.as_ref().map(|text| text.as_str()),
-            ..view
-        },
-        &frame.viewport,
-        frame.active_offset,
-    );
-    if is_mono {
-        input = input.font_family(gpui::SharedString::from(
-            tokens.metrics.markdown_code_font_family,
-        ));
-    }
-    bind_connection_input(
-        input,
-        target,
-        frame.anchor_id,
-        frame.update_anchor,
-        dispatch,
-    )
-}
-
-pub(crate) fn bind_connection_input(
-    input: gpui::Div,
-    target: ConnectionsInput,
-    anchor_id: TextInputAnchorId,
-    update_anchor: Rc<dyn Fn(TextInputAnchor)>,
-    dispatch: &ConnectionsDispatch,
-) -> AnyElement {
-    let focus = dispatch.clone();
-    let drag = dispatch.clone();
-    let id = match target {
-        ConnectionsInput::Form(field) => ("connection-field", field as usize),
-        ConnectionsInput::KeyboardInteractive(index) => ("kbi-prompt", index),
-    };
-    let input = match target {
-        ConnectionsInput::Form(_) => input.cursor(CursorStyle::IBeam),
-        ConnectionsInput::KeyboardInteractive(_) => input,
-    };
-    text_input_anchor_probe(
-        anchor_id,
-        input
-            .id(id)
-            .on_mouse_down(
-                MouseButton::Left,
-                move |event: &MouseDownEvent, window, cx| {
-                    focus(
-                        ConnectionsWindowRequest::FocusInput(target, event.clone()),
-                        Some(window),
-                        cx,
-                    );
-                    cx.stop_propagation();
-                },
-            )
-            .on_mouse_move(move |event: &MouseMoveEvent, window, cx| {
-                drag(
-                    ConnectionsWindowRequest::DragInputSelection(event.clone()),
-                    Some(window),
-                    cx,
-                );
-            }),
-        move |anchor, _, _| update_anchor(anchor),
-    )
-    .into_any_element()
 }
 
 pub struct ConnectionsViews {
@@ -524,7 +433,13 @@ impl ConnectionsViews {
         tokens: &'a ThemeTokens,
         i18n: &'a I18n,
     ) -> algorithms::SshAlgorithmEditor<'a> {
-        algorithms::SshAlgorithmEditor::new(&self.flow, tokens, i18n, &self.dispatch)
+        algorithms::SshAlgorithmEditor::new(
+            super::form::FormOwner::Desktop(self.flow.clone()),
+            Rc::new(algorithms::FormAlgorithmCapabilities::desktop()),
+            tokens,
+            i18n,
+            form_dispatch(&self.dispatch),
+        )
     }
 
     pub fn notify_input(&self, cx: &mut App) {

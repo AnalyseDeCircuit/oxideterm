@@ -2,10 +2,8 @@ use gpui::{Div, Styled};
 use oxideterm_gpui_ui::text_input::{TextInputView, TextInputViewport, text_input_with_viewport};
 use oxideterm_theme::ThemeTokens;
 
-#[cfg(not(target_family = "wasm"))]
 mod form;
-#[cfg(not(target_family = "wasm"))]
-pub(crate) use form::{field_value, replace_text};
+pub(crate) use form::{field_value, protected, replace_text};
 
 pub(crate) fn paint_input(
     tokens: &ThemeTokens,

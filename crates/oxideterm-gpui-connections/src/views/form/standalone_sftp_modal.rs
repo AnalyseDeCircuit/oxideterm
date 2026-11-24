@@ -95,7 +95,7 @@ impl StandaloneSftpModalSnapshot {
             connect_timeout_seconds_text: form.connect_timeout_seconds_text.clone(),
             proxy_command_enabled: form.proxy_command_enabled,
             // Rendering owns one bounded zeroizing copy of the protected command draft.
-            proxy_command: zeroize::Zeroizing::new(form.proxy_command.clone()),
+            proxy_command: zeroize::Zeroizing::new(form.proxy_command.as_str().to_owned()),
             proxy_command_configured: form.proxy_command_keychain_id.is_some(),
             route_customized: primary_route_customized || secondary_route_customized,
             secondary_host: form.standalone_sftp_secondary.host.clone(),
@@ -132,7 +132,10 @@ impl StandaloneSftpModalSnapshot {
             secondary_proxy_command_enabled: form.standalone_sftp_secondary.proxy_command_enabled,
             // Each endpoint keeps its protected command draft in a separate zeroizing owner.
             secondary_proxy_command: zeroize::Zeroizing::new(
-                form.standalone_sftp_secondary.proxy_command.clone(),
+                form.standalone_sftp_secondary
+                    .proxy_command
+                    .as_str()
+                    .to_owned(),
             ),
             secondary_proxy_command_configured: form
                 .standalone_sftp_secondary

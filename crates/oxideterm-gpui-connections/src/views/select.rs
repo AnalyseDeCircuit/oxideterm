@@ -4,10 +4,8 @@ use oxideterm_gpui_ui::select::{
 };
 use oxideterm_theme::ThemeTokens;
 
-#[cfg(not(target_family = "wasm"))]
-mod desktop;
-#[cfg(not(target_family = "wasm"))]
-pub(super) use desktop::{group_select, labelled_select, select_trigger, track_select_anchor};
+mod controls;
+pub(super) use controls::{group_select, labelled_select, select_trigger, track_select_anchor};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NewConnectionSelect {

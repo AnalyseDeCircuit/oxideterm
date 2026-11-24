@@ -145,12 +145,7 @@ impl SavedAuthSaveTarget {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum SavedPasswordLoadError {
-    NotFound,
-    Locked,
-    Unavailable,
-}
+pub use crate::form_state::SavedPasswordLoadError;
 
 impl SavedPasswordLoadError {
     pub fn from_store_error(error: &anyhow::Error) -> Self {
@@ -161,14 +156,6 @@ impl SavedPasswordLoadError {
                 Self::NotFound
             }
             _ => Self::Unavailable,
-        }
-    }
-
-    pub fn message_key(self) -> &'static str {
-        match self {
-            Self::NotFound => "sessionManager.edit_properties.password_not_found",
-            Self::Locked => "sessionManager.edit_properties.password_store_locked",
-            Self::Unavailable => "sessionManager.edit_properties.password_load_failed",
         }
     }
 }

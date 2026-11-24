@@ -1,14 +1,28 @@
-use oxideterm_editor_core::utf16::replace_utf16;
+use oxideterm_editor_core::utf16::{byte_index_for_utf16, replace_utf16};
 use zeroize::Zeroize;
 
 use crate::{
     ConnectionFormState, NewConnectionField, NewConnectionForm,
-    configuration::restore_saved_password_placeholder_if_empty,
-    form_state::{
-        password_draft_mut, refresh_connection_timeout_seconds, refresh_identity_agent_availability,
-    },
+    form_state::restore_saved_password_placeholder_if_empty,
+    form_state::{password_draft_mut, refresh_connection_timeout_seconds},
 };
 
+pub(crate) fn protected(f: NewConnectionField) -> bool {
+    use NewConnectionField::*;
+    matches!(
+        f,
+        Password
+            | Passphrase
+            | JumpPassword
+            | JumpPassphrase
+            | UpstreamProxyPassword
+            | ProxyCommand
+            | StandaloneSftpSecondaryPassword
+            | StandaloneSftpSecondaryPassphrase
+            | StandaloneSftpSecondaryUpstreamProxyPassword
+            | StandaloneSftpSecondaryProxyCommand
+    )
+}
 pub(crate) fn replace_text(
     state: &mut ConnectionFormState,
     field: NewConnectionField,
@@ -24,20 +38,35 @@ pub(crate) fn replace_text(
         // A revealed password may own the old allocation; scrub before replacement.
         connection_field_value_mut(form, field).zeroize();
     }
-    replace_utf16(
-        connection_field_value_mut(form, field),
-        replacement_range,
-        text,
-    );
+    let value = connection_field_value_mut(form, field);
+    if protected(field) {
+        // In-place growth can return an allocation containing a password to the allocator.
+        let (start, end) = replacement_range
+            .map(|r| {
+                (
+                    byte_index_for_utf16(value, r.start),
+                    byte_index_for_utf16(value, r.end),
+                )
+            })
+            .unwrap_or((value.len(), value.len()));
+        let mut next = zeroize::Zeroizing::new(String::with_capacity(
+            value.len() - (end - start) + text.len(),
+        ));
+        next.push_str(&value[..start]);
+        next.push_str(text);
+        next.push_str(&value[end..]);
+        std::mem::swap(value, &mut *next);
+    } else {
+        replace_utf16(value, replacement_range, text);
+    }
+
     if field == NewConnectionField::Password {
         restore_saved_password_placeholder_if_empty(form, editing_saved);
     }
     form.selected_field = None;
     form.error = None;
     refresh_connection_timeout_seconds(form, field);
-    if field == NewConnectionField::IdentityAgent {
-        refresh_identity_agent_availability(form);
-    }
+
     true
 }
 

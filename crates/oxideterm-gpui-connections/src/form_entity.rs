@@ -1,7 +1,7 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use oxideterm_ssh::NodeId;
+use crate::form_model::NodeId;
 
 use super::{
     NewConnectionForm, NewConnectionSelect, SavedConnectionPromptAction,
@@ -96,5 +96,67 @@ impl ConnectionFormState {
 
     pub fn close_select(&mut self) {
         close_browser_trigger_select(&mut self.open_select, &mut self.select_focus_origin);
+    }
+}
+
+use oxideterm_gpui_ui::select::{OverlayAnchor, SelectAnchorId};
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
+/// Shares layout-only select anchors without routing every prepaint through WorkspaceApp.
+#[derive(Clone, Default)]
+pub struct ConnectionSelectAnchorStore {
+    anchors: Rc<RefCell<HashMap<SelectAnchorId, OverlayAnchor>>>,
+}
+
+impl ConnectionSelectAnchorStore {
+    pub fn get(&self, id: SelectAnchorId) -> Option<OverlayAnchor> {
+        self.anchors.borrow().get(&id).copied()
+    }
+
+    pub fn update(&self, anchor: OverlayAnchor) -> bool {
+        if self.get(anchor.id) == Some(anchor) {
+            return false;
+        }
+        self.anchors.borrow_mut().insert(anchor.id, anchor);
+        true
+    }
+
+    pub fn clear(&self) {
+        self.anchors.borrow_mut().clear();
+    }
+}
+
+impl ConnectionFormState {
+    pub(crate) fn finish_jump_edit(&mut self, commit: bool) {
+        if let Some(form) = self.form.as_mut() {
+            if let Some(jump_server) = form.jump_server_form.take() {
+                let edit_index = form.jump_server_edit_index.take();
+                let proxy_hops = match form.jump_server_target {
+                    super::ConnectionRouteTarget::Primary => {
+                        form.proxy_chain_expanded = true;
+                        &mut form.proxy_hops
+                    }
+                    super::ConnectionRouteTarget::StandaloneSftpSecondary => {
+                        form.standalone_sftp_secondary.proxy_chain_expanded = true;
+                        &mut form.standalone_sftp_secondary.proxy_hops
+                    }
+                };
+                if let Some(index) = edit_index {
+                    // The existing hop is moved into the modal, so both save and cancel
+                    // restore it at its original position without duplicating secrets.
+                    proxy_hops.insert(index.min(proxy_hops.len()), jump_server);
+                } else if commit {
+                    proxy_hops.push(jump_server);
+                }
+                if commit {
+                    if form.auth_tab == super::SshAuthTab::TwoFactor {
+                        form.auth_tab = super::SshAuthTab::Password;
+                        form.focused_field = super::NewConnectionField::Password;
+                    }
+                    form.field_focused = false;
+                    form.selected_field = None;
+                    form.error = None;
+                }
+            }
+        }
     }
 }

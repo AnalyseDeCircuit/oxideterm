@@ -1014,14 +1014,7 @@ pub fn serial_profile_group_from_form(group: &str, i18n: &oxideterm_i18n::I18n) 
     (!connection_group_is_ungrouped(group, i18n)).then(|| group.trim().to_owned())
 }
 
-pub fn connection_group_is_ungrouped(group: &str, i18n: &oxideterm_i18n::I18n) -> bool {
-    let group = group.trim();
-    group.is_empty()
-        || group == "Ungrouped"
-        || group == "未分组"
-        || group == i18n.t("ssh.form.ungrouped")
-        || group == i18n.t("sessionManager.edit_properties.ungrouped")
-}
+pub use crate::form_state::connection_group_is_ungrouped;
 
 pub fn asset_icon_from_form(icon: &str) -> Option<String> {
     // Empty means the asset should use its transport-specific fallback icon.
@@ -1065,3 +1058,6 @@ pub fn take_zeroizing_secret(value: &mut String) -> zeroize::Zeroizing<String> {
     // Preserve the UI allocation while transferring it to the runtime secret owner.
     zeroize::Zeroizing::new(std::mem::take(value))
 }
+
+mod serial;
+pub use serial::*;

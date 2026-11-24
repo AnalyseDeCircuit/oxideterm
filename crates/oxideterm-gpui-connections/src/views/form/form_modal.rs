@@ -99,7 +99,7 @@ impl ConnectionFormModalSnapshot {
             pre_connect_command: form.pre_connect_command.clone(),
             proxy_command_enabled: form.proxy_command_enabled,
             // Rendering owns one bounded zeroizing copy; persisted forms retain only a keychain id.
-            proxy_command: zeroize::Zeroizing::new(form.proxy_command.clone()),
+            proxy_command: zeroize::Zeroizing::new(form.proxy_command.as_str().to_owned()),
             proxy_command_configured: form.proxy_command_keychain_id.is_some(),
             legacy_ssh_compatibility: form.legacy_ssh_compatibility,
             agent_forwarding: form.agent_forwarding,
@@ -140,6 +140,9 @@ impl ConnectionFormModalSnapshot {
             terminal_customized: form.terminal != Default::default()
                 || !form.pre_connect_command.trim().is_empty()
                 || !form.post_connect_command.trim().is_empty(),
+            #[cfg(target_family = "wasm")]
+            ble_can_open: false,
+            #[cfg(not(target_family = "wasm"))]
             ble_can_open: form
                 .ble
                 .selected_service_uuid
@@ -757,12 +760,15 @@ impl ConnectionFormView {
                                             ))
                                         })
                                         .when(ble_mode, |content| {
-                                            content.child(self.render_ble_form_branch(
+                                            #[cfg(target_family = "wasm")]
+                                            {content}
+                                            #[cfg(not(target_family = "wasm"))]
+                                            {content.child(self.render_ble_form_branch(
                                                 form.active_drawer,
                                                 studio_layout,
                                                 window,
                                                 cx,
-                                            ))
+                                            ))}
                                         })
                                         .when(telnet_mode, |content| {
                                             content.child(self.render_telnet_form_branch(
@@ -2075,6 +2081,12 @@ impl ConnectionFormView {
         .into_any_element()
     }
 
+    #[cfg(target_family = "wasm")]
+    fn render_drill_saved_next_hop_picker(&self, _: &mut Context<Self>) -> AnyElement {
+        div().into_any_element()
+    }
+
+    #[cfg(not(target_family = "wasm"))]
     fn render_drill_saved_next_hop_picker(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
         let Some(parent_node_id) = self
@@ -2153,6 +2165,7 @@ impl ConnectionFormView {
             .into_any_element()
     }
 
+    #[cfg(not(target_family = "wasm"))]
     fn render_drill_saved_next_hop_row(
         &self,
         parent_node_id: oxideterm_ssh::NodeId,
@@ -2227,7 +2240,7 @@ impl ConnectionFormView {
                 MouseButton::Left,
                 cx.listener(move |this, _event, window, cx| {
                     this.request(
-                        ConnectionsWindowRequest::ConnectNextHop {
+                        FormAction::ConnectNextHop {
                             parent: parent_node_id.clone(),
                             connection_id: connection_id.clone(),
                         },

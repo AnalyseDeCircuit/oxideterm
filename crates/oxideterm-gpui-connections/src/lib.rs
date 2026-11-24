@@ -11,9 +11,8 @@ pub mod configuration;
 pub mod conversion;
 #[cfg(not(target_family = "wasm"))]
 pub mod entity;
-#[cfg(not(target_family = "wasm"))]
 mod form_entity;
-#[cfg(not(target_family = "wasm"))]
+pub mod form_model;
 pub mod form_state;
 pub mod icons;
 mod input;
@@ -40,9 +39,7 @@ pub mod workers;
 
 #[cfg(not(target_family = "wasm"))]
 pub use ble::BleConnectionWorkerResult;
-#[cfg(not(target_family = "wasm"))]
 pub use form_entity::ConnectionFormState;
-#[cfg(not(target_family = "wasm"))]
 pub use form_state::{
     ConnectionRouteTarget, NewConnectionField, NewConnectionForm, NewConnectionProxyHop,
     SavedConnectionPromptAction, SshAuthTab,

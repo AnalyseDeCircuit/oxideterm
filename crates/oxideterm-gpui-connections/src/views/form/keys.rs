@@ -11,6 +11,7 @@ pub enum FormKeyAction {
     Paste,
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl ConnectionFlowEntity {
     pub fn handle_form_key(
         &mut self,
@@ -22,17 +23,44 @@ impl ConnectionFlowEntity {
         if self.handle_ssh_algorithm_key(event, cx) {
             return (FormKeyAction::Handled, false);
         }
+        self.form
+            .handle_key(event, caret_was_visible, tunnel_fields, cx)
+    }
+    pub fn paste_form_input(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(text) = cx
+            .read_from_clipboard()
+            .and_then(|item| item.text())
+            .map(zeroize::Zeroizing::new)
+        else {
+            return false;
+        };
+        let pasted = self.form.paste_text(&text);
+        if pasted {
+            cx.notify();
+        }
+        pasted
+    }
+}
+
+impl ConnectionFormState {
+    pub(crate) fn handle_key<T: 'static>(
+        &mut self,
+        event: &KeyDownEvent,
+        caret_was_visible: bool,
+        tunnel_fields: Option<&[NewConnectionField]>,
+        cx: &mut Context<T>,
+    ) -> (FormKeyAction, bool) {
         let saved_connection_form_uses_unloaded_secret =
-            self.form.saved_connection_source_id().is_some()
-                && self.form.saved_connection_prompt_action.is_none();
+            self.saved_connection_source_id().is_some()
+                && self.saved_connection_prompt_action.is_none();
         let key = event.keystroke.key.as_str();
         let modifiers = event.keystroke.modifiers;
         let text_input = text_from_keystroke(&event.keystroke);
-        if self.form.open_select.is_some()
+        if self.open_select.is_some()
             && matches!(key, "escape" | "enter" | "tab")
             && !modifiers.platform
         {
-            self.form.close_select();
+            self.close_select();
             cx.notify();
             return (FormKeyAction::Handled, false);
         }
@@ -41,8 +69,8 @@ impl ConnectionFlowEntity {
         } else {
             modifiers.platform || modifiers.control
         };
-        let is_drill_down = self.form.drill_down_parent_node_id.is_some();
-        let Some(form) = self.form.form.as_mut() else {
+        let is_drill_down = self.drill_down_parent_node_id.is_some();
+        let Some(form) = self.form.as_mut() else {
             return (FormKeyAction::NotHandled, false);
         };
         if !form.field_focused {
@@ -230,18 +258,15 @@ impl ConnectionFlowEntity {
         }
     }
 
-    pub fn paste_form_input(&mut self, cx: &mut Context<Self>) -> bool {
+    #[cfg(not(target_family = "wasm"))]
+    pub(crate) fn paste_text(&mut self, text: &str) -> bool {
         let saved_connection_form_uses_unloaded_secret =
-            self.form.saved_connection_source_id().is_some()
-                && self.form.saved_connection_prompt_action.is_none();
-        let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else {
-            return false;
-        };
-        let text = zeroize::Zeroizing::new(text);
+            self.saved_connection_source_id().is_some()
+                && self.saved_connection_prompt_action.is_none();
         let normalized = zeroize::Zeroizing::new(text.replace("\r\n", "\n"));
         let normalized = zeroize::Zeroizing::new(normalized.replace('\r', "\n"));
-        let pasted = (|| {
-            let state = &mut self.form;
+        (|| {
+            let state = self;
             let Some(form) = state.form.as_mut() else {
                 return false;
             };
@@ -261,37 +286,42 @@ impl ConnectionFlowEntity {
                     // A pasted replacement is owned by the form; the saved value is never loaded.
                     form.password_loaded = true;
                 }
-                if form.focused_field == NewConnectionField::Host
-                    && matches!(
-                        form.transport,
-                        NewConnectionTransport::Ssh
-                            | NewConnectionTransport::Mosh
-                            | NewConnectionTransport::StandaloneSftp
-                    )
-                    && (form.host.trim().is_empty()
-                        || form.selected_field == Some(NewConnectionField::Host))
-                    && let Some(parsed) = parse_ssh_address_paste(&single_line)
-                {
-                    form.host = parsed.host;
-                    if let Some(username) = parsed.username {
-                        form.username = username;
-                    }
-                    if let Some(port) = parsed.port {
-                        form.port = port;
-                    }
-                    clear_connection_selection(form);
-                } else {
+                if !form.apply_address_paste(&single_line) {
                     insert_text_into_current_connection_field(form, &single_line);
                 }
             }
             form.error = None;
             true
-        })();
+        })()
+    }
+}
 
-        if pasted {
-            cx.notify();
+impl NewConnectionForm {
+    pub(crate) fn apply_address_paste(&mut self, text: &str) -> bool {
+        let form = self;
+        if form.focused_field == NewConnectionField::Host
+            && matches!(
+                form.transport,
+                NewConnectionTransport::Ssh
+                    | NewConnectionTransport::Mosh
+                    | NewConnectionTransport::StandaloneSftp
+            )
+            && (form.host.trim().is_empty()
+                || form.selected_field == Some(NewConnectionField::Host))
+            && let Some(parsed) = parse_ssh_address_paste(text)
+        {
+            form.host = parsed.host;
+            if let Some(username) = parsed.username {
+                form.username = username;
+            }
+            if let Some(port) = parsed.port {
+                form.port = port;
+            }
+            clear_connection_selection(form);
+            true
+        } else {
+            false
         }
-        pasted
     }
 }
 

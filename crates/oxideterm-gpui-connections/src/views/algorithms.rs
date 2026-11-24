@@ -1,8 +1,9 @@
+use super::form::FormOwner;
+use crate::form_model::{SshAlgorithmCategory, SshAlgorithmPreferences};
 use gpui::{
-    AnyElement, App, AppContext, Context, Entity, KeyDownEvent, MouseButton, MouseDownEvent,
-    Render, SharedString, Window, div, prelude::*, px, rgb, rgba, svg,
+    AnyElement, App, AppContext, Context, KeyDownEvent, MouseButton, MouseDownEvent, Render,
+    SharedString, Window, div, prelude::*, px, rgb, rgba, svg,
 };
-use oxideterm_connections::SshAlgorithmPreferences;
 use oxideterm_gpui_ui::{
     StatusPillOptions, StatusTone,
     button::{
@@ -12,11 +13,11 @@ use oxideterm_gpui_ui::{
     segmented_tab, segmented_tabs, status_pill,
 };
 use oxideterm_i18n::I18n;
-use oxideterm_ssh::{SshAlgorithmCategory, SshAlgorithmOffer};
 use oxideterm_theme::ThemeTokens;
+use std::rc::Rc;
 
-use super::{ConnectionsDispatch, ConnectionsWindowRequest};
-use crate::{ConnectionFormState, entity::ConnectionFlowEntity, form_state::ConnectionFormDrawer};
+use super::{FormAction, FormDispatch};
+use crate::{ConnectionFormState, form_state::ConnectionFormDrawer};
 
 fn render_lucide_icon(icon_path: &'static str, size: f32, color: gpui::Rgba) -> AnyElement {
     svg()
@@ -33,16 +34,6 @@ fn category_i18n_key(category: SshAlgorithmCategory) -> &'static str {
         SshAlgorithmCategory::Cipher => "ssh.form.ssh_algorithms_category_cipher",
         SshAlgorithmCategory::Mac => "ssh.form.ssh_algorithms_category_mac",
         SshAlgorithmCategory::Compression => "ssh.form.ssh_algorithms_category_compression",
-    }
-}
-
-fn offer_algorithms(offer: &SshAlgorithmOffer, category: SshAlgorithmCategory) -> &[String] {
-    match category {
-        SshAlgorithmCategory::Kex => &offer.kex,
-        SshAlgorithmCategory::HostKey => &offer.host_key_algorithms,
-        SshAlgorithmCategory::Cipher => &offer.ciphers,
-        SshAlgorithmCategory::Mac => &offer.macs,
-        SshAlgorithmCategory::Compression => &offer.compression,
     }
 }
 
@@ -72,25 +63,28 @@ fn preference_algorithms_mut(
     }
 }
 
-fn baseline_algorithms(legacy_compatibility: bool, category: SshAlgorithmCategory) -> Vec<String> {
-    let report = oxideterm_ssh::ssh_capability_report();
+fn baseline_algorithms(
+    report: &FormAlgorithmCapabilities,
+    legacy_compatibility: bool,
+    category: SshAlgorithmCategory,
+) -> Vec<String> {
     let offer = if legacy_compatibility {
         &report.legacy_compatibility_offer
     } else {
         &report.default_offer
     };
-    offer_algorithms(offer, category).to_vec()
+    preference_algorithms(offer, category).to_vec()
 }
 
 fn available_algorithms(
-    report: &oxideterm_ssh::SshCapabilityReport,
+    report: &FormAlgorithmCapabilities,
     category: SshAlgorithmCategory,
     enabled: &[String],
 ) -> Vec<String> {
     let mut available = Vec::new();
-    for algorithm in offer_algorithms(&report.legacy_compatibility_offer, category)
+    for algorithm in preference_algorithms(&report.legacy_compatibility_offer, category)
         .iter()
-        .chain(offer_algorithms(&report.default_offer, category))
+        .chain(preference_algorithms(&report.default_offer, category))
     {
         if !enabled.contains(algorithm) && !available.contains(algorithm) {
             available.push(algorithm.clone());
@@ -137,21 +131,24 @@ fn reorder_algorithm(algorithms: &mut Vec<String>, name: &str, destination: usiz
 }
 
 pub struct SshAlgorithmEditor<'a> {
-    flow: &'a Entity<ConnectionFlowEntity>,
+    flow: FormOwner,
+    report: Rc<FormAlgorithmCapabilities>,
     tokens: &'a ThemeTokens,
     i18n: &'a I18n,
-    dispatch: &'a ConnectionsDispatch,
+    dispatch: FormDispatch,
 }
 
 impl<'a> SshAlgorithmEditor<'a> {
     pub(super) fn new(
-        flow: &'a Entity<ConnectionFlowEntity>,
+        flow: FormOwner,
+        report: Rc<FormAlgorithmCapabilities>,
         tokens: &'a ThemeTokens,
         i18n: &'a I18n,
-        dispatch: &'a ConnectionsDispatch,
+        dispatch: FormDispatch,
     ) -> Self {
         Self {
             flow,
+            report,
             tokens,
             i18n,
             dispatch,
@@ -159,7 +156,7 @@ impl<'a> SshAlgorithmEditor<'a> {
     }
 
     fn form_state<'app>(&self, cx: &'app App) -> &'app ConnectionFormState {
-        &self.flow.read(cx).form
+        self.flow.state(cx)
     }
 
     fn listener<E: 'static, F>(
@@ -167,12 +164,22 @@ impl<'a> SshAlgorithmEditor<'a> {
         update: F,
     ) -> impl Fn(&E, &mut Window, &mut App) + 'static + use<E, F>
     where
-        F: Fn(&mut ConnectionFlowEntity, &E, &mut Window, &mut Context<ConnectionFlowEntity>)
-            + 'static,
+        F: Fn(&mut AlgorithmDraft<'_>, &E, &mut Window, &mut App) + 'static,
     {
-        let flow = self.flow.downgrade();
+        let flow = self.flow.clone();
+        let report = self.report.clone();
         move |event, window, cx| {
-            let _ = flow.update(cx, |flow, cx| update(flow, event, window, cx));
+            flow.update_with(cx, |form, cx| {
+                update(
+                    &mut AlgorithmDraft {
+                        form,
+                        report: &report,
+                    },
+                    event,
+                    window,
+                    cx,
+                )
+            });
         }
     }
 
@@ -181,18 +188,13 @@ impl<'a> SshAlgorithmEditor<'a> {
         update: F,
     ) -> impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static + use<F>
     where
-        F: Fn(
-                &mut ConnectionFlowEntity,
-                &MouseDownEvent,
-                &mut Window,
-                &mut Context<ConnectionFlowEntity>,
-            ) + 'static,
+        F: Fn(&mut AlgorithmDraft<'_>, &MouseDownEvent, &mut Window, &mut App) + 'static,
     {
         let listen = self.listener(update);
         let dispatch = self.dispatch.clone();
         move |event, window, cx| {
             listen(event, window, cx);
-            dispatch(ConnectionsWindowRequest::FocusForm, Some(window), cx);
+            dispatch(FormAction::FocusForm, Some(window), cx);
         }
     }
 
@@ -208,14 +210,14 @@ impl<'a> SshAlgorithmEditor<'a> {
         let custom = preference_algorithms(&preferences, category);
         let inherited = custom.is_empty();
         let enabled = if inherited {
-            baseline_algorithms(legacy_compatibility, category)
+            baseline_algorithms(&self.report, legacy_compatibility, category)
         } else {
             custom.to_vec()
         };
         let selected = form.ssh_algorithm_selected.clone();
-        let report = oxideterm_ssh::ssh_capability_report();
+        let report = &self.report;
         let available = available_algorithms(&report, category, &enabled);
-        let modern = offer_algorithms(&report.default_offer, category);
+        let modern = preference_algorithms(&report.default_offer, category);
         let mono_font = SharedString::from(self.tokens.metrics.markdown_code_font_family);
         let row_divider = rgba((theme.border << 8) | 0x45);
 
@@ -291,7 +293,6 @@ impl<'a> SshAlgorithmEditor<'a> {
                                 form.ssh_algorithm_menu = None;
                             }
                             cx.stop_propagation();
-                            cx.notify();
                         }),
                     ),
             );
@@ -338,8 +339,11 @@ impl<'a> SshAlgorithmEditor<'a> {
                     MouseButton::Left,
                     self.listener(move |this, _, _, cx| {
                         if let Some(form) = this.form.form.as_mut() {
-                            let baseline =
-                                baseline_algorithms(form.legacy_ssh_compatibility, category);
+                            let baseline = baseline_algorithms(
+                                this.report,
+                                form.legacy_ssh_compatibility,
+                                category,
+                            );
                             let algorithms =
                                 preference_algorithms_mut(&mut form.ssh_algorithms, category);
                             if follow {
@@ -351,7 +355,6 @@ impl<'a> SshAlgorithmEditor<'a> {
                             form.ssh_algorithm_menu = None;
                         }
                         cx.stop_propagation();
-                        cx.notify();
                     }),
                 )
             }));
@@ -466,7 +469,6 @@ impl<'a> SshAlgorithmEditor<'a> {
                             }
                         }
                         cx.stop_propagation();
-                        cx.notify();
                     }),
                 )
                 .child(
@@ -591,13 +593,16 @@ impl<'a> SshAlgorithmEditor<'a> {
                             row
                         }
                     })
-                    .on_drop(self.listener(move |this, drag: &AlgorithmDrag, _, cx| {
+                    .on_drop(self.listener(move |this, drag: &AlgorithmDrag, _, _| {
                         if drag.category != category {
                             return;
                         }
                         if let Some(form) = this.form.form.as_mut() {
-                            let baseline =
-                                baseline_algorithms(form.legacy_ssh_compatibility, category);
+                            let baseline = baseline_algorithms(
+                                this.report,
+                                form.legacy_ssh_compatibility,
+                                category,
+                            );
                             let algorithms =
                                 preference_algorithms_mut(&mut form.ssh_algorithms, category);
                             if algorithms.is_empty() {
@@ -610,7 +615,6 @@ impl<'a> SshAlgorithmEditor<'a> {
                             }
                             form.ssh_algorithm_selected = Some(drag.name.clone());
                         }
-                        cx.notify();
                     }))
                     .on_mouse_down(
                         MouseButton::Right,
@@ -623,7 +627,6 @@ impl<'a> SshAlgorithmEditor<'a> {
                                     form.field_focused = false;
                                 }
                                 cx.stop_propagation();
-                                cx.notify();
                             },
                         ),
                     );
@@ -653,7 +656,7 @@ impl<'a> SshAlgorithmEditor<'a> {
         let category = form.ssh_algorithm_editor_category;
         let custom = preference_algorithms(&form.ssh_algorithms, category);
         let algorithms = if custom.is_empty() {
-            baseline_algorithms(form.legacy_ssh_compatibility, category)
+            baseline_algorithms(&self.report, form.legacy_ssh_compatibility, category)
         } else {
             custom.to_vec()
         };
@@ -690,7 +693,6 @@ impl<'a> SshAlgorithmEditor<'a> {
                         form.ssh_algorithm_menu = None;
                     }
                     cx.stop_propagation();
-                    cx.notify();
                 }),
             ));
         }
@@ -704,7 +706,6 @@ impl<'a> SshAlgorithmEditor<'a> {
                                 form.ssh_algorithm_menu = None;
                             }
                             cx.stop_propagation();
-                            cx.notify();
                         }),
                     )
                     .on_mouse_down(
@@ -714,7 +715,6 @@ impl<'a> SshAlgorithmEditor<'a> {
                                 form.ssh_algorithm_menu = None;
                             }
                             cx.stop_propagation();
-                            cx.notify();
                         }),
                     )
                     .child(gpui::anchored().position(position).child(
@@ -766,12 +766,12 @@ impl<'a> SshAlgorithmEditor<'a> {
     }
 }
 
-impl ConnectionFlowEntity {
-    pub fn handle_ssh_algorithm_key(
-        &mut self,
-        event: &KeyDownEvent,
-        cx: &mut Context<Self>,
-    ) -> bool {
+struct AlgorithmDraft<'a> {
+    form: &'a mut ConnectionFormState,
+    report: &'a FormAlgorithmCapabilities,
+}
+impl AlgorithmDraft<'_> {
+    fn handle_ssh_algorithm_key(&mut self, event: &KeyDownEvent, cx: &mut App) -> bool {
         let Some(form) = self.form.form.as_ref() else {
             return false;
         };
@@ -781,11 +781,11 @@ impl ConnectionFlowEntity {
         let category = form.ssh_algorithm_editor_category;
         let inherited = preference_algorithms(&form.ssh_algorithms, category).is_empty();
         let enabled = if inherited {
-            baseline_algorithms(form.legacy_ssh_compatibility, category)
+            baseline_algorithms(self.report, form.legacy_ssh_compatibility, category)
         } else {
             preference_algorithms(&form.ssh_algorithms, category).to_vec()
         };
-        let report = oxideterm_ssh::ssh_capability_report();
+        let report = &self.report;
         let mut names = enabled.clone();
         names.extend(available_algorithms(&report, category, &enabled));
         let index = form
@@ -825,7 +825,6 @@ impl ConnectionFlowEntity {
             }
             _ => return false,
         }
-        cx.notify();
         true
     }
 
@@ -834,13 +833,13 @@ impl ConnectionFlowEntity {
         category: SshAlgorithmCategory,
         algorithm: String,
         offset: isize,
-        cx: &mut Context<Self>,
+        _cx: &mut App,
     ) {
         let baseline = self
             .form
             .form
             .as_ref()
-            .map(|form| baseline_algorithms(form.legacy_ssh_compatibility, category))
+            .map(|form| baseline_algorithms(self.report, form.legacy_ssh_compatibility, category))
             .unwrap_or_default();
         {
             let Some(form) = self.form.form.as_mut() else {
@@ -858,20 +857,19 @@ impl ConnectionFlowEntity {
                 selected.swap(index, target as usize);
             }
         }
-        cx.notify();
     }
 
     fn remove_ssh_algorithm(
         &mut self,
         category: SshAlgorithmCategory,
         algorithm: String,
-        cx: &mut Context<Self>,
+        _cx: &mut App,
     ) {
         let baseline = self
             .form
             .form
             .as_ref()
-            .map(|form| baseline_algorithms(form.legacy_ssh_compatibility, category))
+            .map(|form| baseline_algorithms(self.report, form.legacy_ssh_compatibility, category))
             .unwrap_or_default();
         {
             let Some(form) = self.form.form.as_mut() else {
@@ -885,20 +883,19 @@ impl ConnectionFlowEntity {
                 selected.retain(|name| name != &algorithm);
             }
         }
-        cx.notify();
     }
 
     fn add_ssh_algorithm(
         &mut self,
         category: SshAlgorithmCategory,
         algorithm: String,
-        cx: &mut Context<Self>,
+        _cx: &mut App,
     ) {
         let baseline = self
             .form
             .form
             .as_ref()
-            .map(|form| baseline_algorithms(form.legacy_ssh_compatibility, category))
+            .map(|form| baseline_algorithms(self.report, form.legacy_ssh_compatibility, category))
             .unwrap_or_default();
         {
             let Some(form) = self.form.form.as_mut() else {
@@ -912,6 +909,47 @@ impl ConnectionFlowEntity {
                 selected.push(algorithm);
             }
         }
-        cx.notify();
+    }
+}
+
+#[derive(Clone, Default)]
+pub struct FormAlgorithmCapabilities {
+    pub default_offer: SshAlgorithmPreferences,
+    pub legacy_compatibility_offer: SshAlgorithmPreferences,
+}
+pub(super) fn handle_key(
+    state: &mut ConnectionFormState,
+    report: &FormAlgorithmCapabilities,
+    event: &KeyDownEvent,
+    cx: &mut App,
+) -> bool {
+    AlgorithmDraft {
+        form: state,
+        report,
+    }
+    .handle_ssh_algorithm_key(event, cx)
+}
+#[cfg(not(target_family = "wasm"))]
+impl crate::entity::ConnectionFlowEntity {
+    pub fn handle_ssh_algorithm_key(
+        &mut self,
+        event: &KeyDownEvent,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.form.form.as_ref().is_some_and(|form| {
+            form.active_drawer == Some(ConnectionFormDrawer::SshAlgorithms) && !form.field_focused
+        }) {
+            return false;
+        }
+        let handled = handle_key(
+            &mut self.form,
+            &FormAlgorithmCapabilities::desktop(),
+            event,
+            cx,
+        );
+        if handled {
+            cx.notify();
+        }
+        handled
     }
 }
