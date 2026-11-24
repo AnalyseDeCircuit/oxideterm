@@ -8,6 +8,7 @@ pub struct AiProviderModelChipItem {
     pub model: String,
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub fn ai_provider_model_chip_rows(
     provider: &oxideterm_ai::AiProviderView,
     visible_model_count: usize,

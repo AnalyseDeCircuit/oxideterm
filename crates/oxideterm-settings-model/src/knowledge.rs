@@ -3,7 +3,9 @@
 
 //! Knowledge settings import and dialog models.
 
-use std::{fmt, fs, path::Path, path::PathBuf};
+use std::{fmt, path::PathBuf};
+#[cfg(not(target_family = "wasm"))]
+use std::{fs, path::Path};
 
 pub const KNOWLEDGE_MAX_IMPORT_FILE_SIZE: u64 = 5 * 1024 * 1024;
 pub const KNOWLEDGE_IMPORT_EXTENSIONS: &[&str] = &["md", "txt", "markdown"];
@@ -51,6 +53,7 @@ impl fmt::Debug for KnowledgeExternalEdit {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub fn import_knowledge_file(
     store: &oxideterm_ai::RagStore,
     collection_id: &str,

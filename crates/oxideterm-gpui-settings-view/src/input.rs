@@ -1,13 +1,14 @@
+#[cfg(not(target_family = "wasm"))]
 use gpui::{Context, KeyDownEvent};
 use oxideterm_settings::{BackgroundStyle, PersistedSettings};
-use oxideterm_settings_model::{
-    SettingsInputDraftApply, apply_persisted_settings_input_draft, editor_terminal_theme,
-    editor_ui_colors, theme_tokens_for_system,
-};
 
-use crate::{
-    SettingsInput, entity::SettingsWorkspaceEntity, terminal_triggers::is_terminal_trigger_input,
-};
+use crate::SettingsInput;
+#[cfg(not(target_family = "wasm"))]
+use crate::{entity::SettingsWorkspaceEntity, terminal_triggers::is_terminal_trigger_input};
+
+mod draft;
+#[cfg(target_family = "wasm")]
+pub use draft::prepare_draft_edit;
 
 pub enum SettingsInputKeyEffect {
     Ignored,
@@ -29,6 +30,7 @@ pub enum SettingsDraftEdit {
     Unhandled,
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl SettingsWorkspaceEntity {
     pub fn navigate_to_search_result(
         &mut self,
@@ -111,17 +113,11 @@ impl SettingsWorkspaceEntity {
         &self,
         persisted: &PersistedSettings,
     ) -> PersistedSettings {
-        let mut settings = persisted.clone();
-        let style = self
-            .theme_editor()
-            .map(|editor| editor.background.clone())
-            .unwrap_or_else(|| {
-                persisted
-                    .terminal
-                    .background_for_scheme(Some(self.appearance_edit_dark.unwrap_or(false)))
-            });
-        settings.terminal.apply_background_style(style);
-        settings
+        draft::background_settings_for_controls(
+            persisted,
+            self.theme_editor(),
+            self.appearance_edit_dark.unwrap_or(false),
+        )
     }
 
     pub fn prepare_draft_edit(
@@ -130,39 +126,17 @@ impl SettingsWorkspaceEntity {
         input: SettingsInput,
         draft: &str,
     ) -> SettingsDraftEdit {
-        let mut next = if input.is_background() {
-            self.background_settings_for_controls(settings)
-        } else {
-            settings.clone()
-        };
-        if matches!(input, SettingsInput::BackgroundEffectColor(_))
-            && !draft.trim().is_empty()
-            && let Some(effect) = &mut next.terminal.background_effect
-        {
-            let palette = if let Some(editor) = self.theme_editor() {
-                [
-                    editor_ui_colors(&editor.ui_colors).accent,
-                    editor_terminal_theme(&editor.terminal_colors).cyan,
-                ]
-            } else {
-                let tokens =
-                    theme_tokens_for_system(settings, self.appearance_edit_dark.unwrap_or(false));
-                [tokens.ui.accent, tokens.terminal.cyan]
-            };
-            effect.colors.get_or_insert(palette);
-        }
-        match apply_persisted_settings_input_draft(&mut next, input, draft) {
-            SettingsInputDraftApply::Applied if input.is_background() => {
-                SettingsDraftEdit::Background(next.terminal.background_style())
-            }
-            SettingsInputDraftApply::Applied => SettingsDraftEdit::Settings(next),
-            SettingsInputDraftApply::Invalid => SettingsDraftEdit::Invalid,
-            SettingsInputDraftApply::Unhandled => SettingsDraftEdit::Unhandled,
-        }
+        draft::prepare_draft_edit(
+            settings,
+            input,
+            draft,
+            self.theme_editor(),
+            self.appearance_edit_dark.unwrap_or(false),
+        )
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_family = "wasm")))]
 mod tests {
     use gpui::{AppContext, TestAppContext};
     use oxideterm_i18n::{I18n, Locale};

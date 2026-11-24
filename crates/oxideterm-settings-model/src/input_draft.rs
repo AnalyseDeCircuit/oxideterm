@@ -9,9 +9,8 @@
 
 use std::path::Path;
 
-use oxideterm_ai::{
-    model_context_window_info, provider_id as ai_provider_id, provider_string as ai_provider_string,
-};
+#[cfg(not(target_family = "wasm"))]
+use oxideterm_ai::model_context_window_info;
 use oxideterm_settings::{
     DEFAULT_AI_TOOL_MAX_CALLS_PER_ROUND, DEFAULT_AI_TOOL_MAX_ROUNDS,
     MAX_AI_TOOL_MAX_CALLS_PER_ROUND, MAX_AI_TOOL_MAX_ROUNDS, MAX_TERMINAL_CHARACTER_SPACING,
@@ -266,13 +265,15 @@ pub fn persisted_settings_input_value(
             .ai
             .providers
             .get(index)
-            .and_then(|provider| ai_provider_string(provider, "name"))
+            .and_then(|provider| provider.get("name")?.as_str())
+            .map(str::to_owned)
             .unwrap_or_default(),
         SettingsInput::AiProviderBaseUrl(index) => settings
             .ai
             .providers
             .get(index)
-            .and_then(|provider| ai_provider_string(provider, "baseUrl"))
+            .and_then(|provider| provider.get("baseUrl")?.as_str())
+            .map(str::to_owned)
             .unwrap_or_default(),
         SettingsInput::AiProviderNewModel(_) => String::new(),
         SettingsInput::AiProviderApiKey(_) => String::new(),
@@ -327,20 +328,17 @@ pub fn persisted_settings_input_value(
             .max_calls_per_round
             .unwrap_or(DEFAULT_AI_TOOL_MAX_CALLS_PER_ROUND)
             .to_string(),
-        SettingsInput::AiModelContextWindow(provider_index, model_index) => settings
-            .ai
-            .providers
-            .get(provider_index)
-            .and_then(ai_provider_id)
-            .and_then(|provider_id| {
-                let model = provider_model(settings, provider_index, model_index)?;
-                settings
-                    .ai
-                    .user_context_windows
-                    .get(&provider_id)
-                    .and_then(|windows| windows.get(&model))
-                    .and_then(serde_json::Value::as_i64)
-                    .or_else(|| {
+        SettingsInput::AiModelContextWindow(provider_index, model_index) => {
+            provider_model(settings, provider_index, model_index)
+                .and_then(|(provider_id, model)| {
+                    let value = settings
+                        .ai
+                        .user_context_windows
+                        .get(&provider_id)
+                        .and_then(|windows| windows.get(&model))
+                        .and_then(serde_json::Value::as_i64);
+                    #[cfg(not(target_family = "wasm"))]
+                    let value = value.or_else(|| {
                         Some(
                             model_context_window_info(
                                 &model,
@@ -350,10 +348,12 @@ pub fn persisted_settings_input_value(
                             )
                             .value,
                         )
-                    })
-                    .map(|value| value.to_string())
-            })
-            .unwrap_or_default(),
+                    });
+                    value
+                })
+                .map(|value| value.to_string())
+                .unwrap_or_default()
+        }
         SettingsInput::AiEmbeddingModel => settings
             .ai
             .embedding_config
@@ -805,15 +805,8 @@ pub fn apply_persisted_settings_input_draft(
             })
             .into(),
         SettingsInput::AiModelContextWindow(provider_index, model_index) => {
-            let Some(provider_id) = settings
-                .ai
-                .providers
-                .get(provider_index)
-                .and_then(ai_provider_id)
+            let Some((provider_id, model)) = provider_model(settings, provider_index, model_index)
             else {
-                return SettingsInputDraftApply::Applied;
-            };
-            let Some(model) = provider_model(settings, provider_index, model_index) else {
                 return SettingsInputDraftApply::Applied;
             };
             set_ai_user_context_window(settings, &provider_id, &model, draft.trim().parse().ok());
@@ -840,16 +833,15 @@ fn provider_model(
     settings: &PersistedSettings,
     provider_index: usize,
     model_index: usize,
-) -> Option<String> {
-    settings
-        .ai
-        .providers
-        .get(provider_index)
-        .and_then(|provider| provider.get("models"))
-        .and_then(serde_json::Value::as_array)
-        .and_then(|models| models.get(model_index))
-        .and_then(serde_json::Value::as_str)
-        .map(str::to_string)
+) -> Option<(String, String)> {
+    let provider = settings.ai.providers.get(provider_index)?;
+    let id = provider.get("id")?.as_str()?;
+    let model = provider
+        .get("models")?
+        .as_array()?
+        .get(model_index)?
+        .as_str()?;
+    Some((id.to_owned(), model.to_owned()))
 }
 
 fn set_ai_provider_string(

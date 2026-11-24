@@ -300,10 +300,8 @@ fn persisted_text(dialog: AiTextEditorDialog, text: String) -> crate::components
     Box::new(move |settings| match dialog {
         AiTextEditorDialog::SystemPrompt => settings.ai.custom_system_prompt = text,
         AiTextEditorDialog::Memory => {
-            let now_ms = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|duration| duration.as_millis().min(i64::MAX as u128) as i64)
-                .unwrap_or(0);
+            let now_ms =
+                oxideterm_settings_model::current_time_millis().min(i64::MAX as u128) as i64;
             settings.ai.memory.content.clear();
             if let Some(entry) = settings
                 .ai

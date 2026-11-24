@@ -3,7 +3,7 @@
 
 //! Mutations and interchange helpers for custom terminal semantic schemes.
 
-use std::time::{SystemTime, UNIX_EPOCH};
+use web_time::{SystemTime, UNIX_EPOCH};
 
 use oxideterm_settings::{MAX_CUSTOM_SEMANTIC_SCHEMES, PersistedSettings, TerminalSemanticScheme};
 pub use oxideterm_terminal_semantic::{

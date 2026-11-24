@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use gpui::{Context, Task, Timer};
+use gpui::{Context, Task};
 use oxideterm_gpui_ui::motion::ExitPresence;
 use oxideterm_settings::PersistedSettings;
 use oxideterm_settings_model::{AiMcpServerDraft, ai_mcp_draft_valid};
@@ -115,7 +115,7 @@ impl SettingsWorkspaceEntity {
             self.finish_ai_mcp_exit(submit, generation, cx);
         } else {
             self.ai_mcp.exit = Some(cx.spawn(async move |entity, cx| {
-                Timer::after(wait).await;
+                cx.background_executor().timer(wait).await;
                 let _ = entity.update(cx, |entity, cx| {
                     entity.ai_mcp.exit = None;
                     entity.finish_ai_mcp_exit(submit, generation, cx);

@@ -1,8 +1,8 @@
 use std::time::Duration;
 
 use gpui::{
-    AnyElement, Context, Div, EventEmitter, MouseButton, Render, Task, Timer, Window, div,
-    prelude::*, px, relative, rgb, rgba, svg,
+    AnyElement, Context, Div, EventEmitter, MouseButton, Render, Task, Window, div, prelude::*, px,
+    relative, rgb, rgba, svg,
 };
 use oxideterm_gpui_ui::{
     ConfirmDialogAction,
@@ -114,7 +114,7 @@ impl AiSettingsConfirm {
             self.complete(generation, confirmed, cx);
         } else {
             self.exit_task = Some(cx.spawn(async move |entity, cx| {
-                Timer::after(delay).await;
+                cx.background_executor().timer(delay).await;
                 let _ = entity.update(cx, |entity, cx| {
                     entity.exit_task = None;
                     entity.complete(generation, confirmed, cx);

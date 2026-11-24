@@ -8398,6 +8398,7 @@ dependencies = [
  "oxideterm-terminal-semantic",
  "oxideterm-theme",
  "serde_json",
+ "web-time",
  "zeroize",
 ]
 

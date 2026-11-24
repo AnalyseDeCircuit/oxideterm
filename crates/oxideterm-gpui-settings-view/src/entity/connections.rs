@@ -59,7 +59,7 @@ impl SettingsWorkspaceEntity {
             return;
         }
         self.ssh_config_import_dialog_exit_task = Some(cx.spawn(async move |settings, cx| {
-            gpui::Timer::after(delay).await;
+            cx.background_executor().timer(delay).await;
             let _ = settings.update(cx, |settings, cx| {
                 settings.finish_ssh_config_import_dialog_exit(generation, cx);
             });
@@ -383,7 +383,7 @@ impl SettingsWorkspaceEntity {
             return;
         }
         self.managed_key_dialog_exit_task = Some(cx.spawn(async move |settings, cx| {
-            gpui::Timer::after(delay).await;
+            cx.background_executor().timer(delay).await;
             let _ = settings.update(cx, |settings, cx| {
                 settings.finish_managed_key_dialog_exit(generation, cx);
             });

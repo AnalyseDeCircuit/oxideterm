@@ -61,24 +61,35 @@ pub fn set_middle_click_paste(settings: &mut PersistedSettings, value: bool) {
     settings.terminal.middle_click_paste = value;
 }
 
-pub(crate) const TERMINAL_RIGHT_CLICK_ACTIONS: [TerminalRightClickAction; 3] = [
-    TerminalRightClickAction::Menu,
-    TerminalRightClickAction::PasteWithoutMouseTracking,
-    TerminalRightClickAction::PasteAlways,
-];
+mod right_click {
+    use super::{I18n, TerminalRightClickAction};
 
-pub(crate) fn terminal_right_click_action_label(
-    action: TerminalRightClickAction,
-    i18n: &I18n,
-) -> String {
-    i18n.t(match action {
-        TerminalRightClickAction::Menu => "settings_view.terminal.right_click_menu",
-        TerminalRightClickAction::PasteWithoutMouseTracking => {
-            "settings_view.terminal.right_click_paste_untracked"
-        }
-        TerminalRightClickAction::PasteAlways => "settings_view.terminal.right_click_paste_always",
-    })
+    pub const TERMINAL_RIGHT_CLICK_ACTIONS: [TerminalRightClickAction; 3] = [
+        TerminalRightClickAction::Menu,
+        TerminalRightClickAction::PasteWithoutMouseTracking,
+        TerminalRightClickAction::PasteAlways,
+    ];
+
+    pub fn terminal_right_click_action_label(
+        action: TerminalRightClickAction,
+        i18n: &I18n,
+    ) -> String {
+        i18n.t(match action {
+            TerminalRightClickAction::Menu => "settings_view.terminal.right_click_menu",
+            TerminalRightClickAction::PasteWithoutMouseTracking => {
+                "settings_view.terminal.right_click_paste_untracked"
+            }
+            TerminalRightClickAction::PasteAlways => {
+                "settings_view.terminal.right_click_paste_always"
+            }
+        })
+    }
 }
+
+#[cfg(not(target_family = "wasm"))]
+pub(crate) use right_click::{TERMINAL_RIGHT_CLICK_ACTIONS, terminal_right_click_action_label};
+#[cfg(target_family = "wasm")]
+pub use right_click::{TERMINAL_RIGHT_CLICK_ACTIONS, terminal_right_click_action_label};
 
 pub fn set_open_links_with_modifier(settings: &mut PersistedSettings, value: bool) {
     settings.terminal.open_links_with_modifier = value;

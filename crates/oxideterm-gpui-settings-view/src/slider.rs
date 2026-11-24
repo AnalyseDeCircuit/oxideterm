@@ -1,25 +1,31 @@
-use std::time::Duration;
-
-use gpui::Context;
-use oxideterm_gpui_ui::{select::OverlayAnchor, slider::slider_pointer_percent};
-use oxideterm_settings::{
-    BackgroundStyle, MAX_TERMINAL_BACKGROUND_OPACITY, MIN_TERMINAL_BACKGROUND_OPACITY,
-    PersistedSettings,
+pub(crate) mod control;
+#[cfg(target_family = "wasm")]
+pub use control::{
+    render_appearance_slider, window_opacity_from_slider_position, window_opacity_slider_position,
 };
-use oxideterm_theme::ThemeTokens;
 
-use crate::{
-    SettingsSlider,
-    appearance_page::{
-        APPEARANCE_BORDER_RADIUS_MAX, APPEARANCE_BORDER_RADIUS_MIN, APPEARANCE_UI_FONT_SIZE_MAX,
-        APPEARANCE_UI_FONT_SIZE_MIN, window_opacity_from_slider_position,
+use crate::components::SettingsEdit;
+use oxideterm_settings::BackgroundStyle;
+
+#[cfg(not(target_family = "wasm"))]
+use {
+    crate::{
+        SettingsSlider,
+        appearance_page::{
+            APPEARANCE_BORDER_RADIUS_MAX, APPEARANCE_BORDER_RADIUS_MIN,
+            APPEARANCE_UI_FONT_SIZE_MAX, APPEARANCE_UI_FONT_SIZE_MIN,
+            window_opacity_from_slider_position,
+        },
+        entity::SettingsWorkspaceEntity,
     },
-    components::SettingsEdit,
-    entity::SettingsWorkspaceEntity,
+    gpui::Context,
+    oxideterm_gpui_ui::{select::OverlayAnchor, slider::slider_pointer_percent},
+    oxideterm_settings::{
+        MAX_TERMINAL_BACKGROUND_OPACITY, MIN_TERMINAL_BACKGROUND_OPACITY, PersistedSettings,
+    },
+    oxideterm_theme::ThemeTokens,
+    std::time::Duration,
 };
-
-const BACKGROUND_BLUR_COMMIT_DELAY: Duration = Duration::from_millis(150);
-const SETTINGS_PERCENT_SCALE: f64 = 100.0;
 
 pub enum SliderEdit {
     Settings(SettingsEdit),
@@ -27,6 +33,7 @@ pub enum SliderEdit {
     Background(Box<dyn FnOnce(&mut BackgroundStyle)>),
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl SettingsWorkspaceEntity {
     pub fn set_slider_drag(&mut self, active: Option<SettingsSlider>) {
         self.slider_drag = active;
@@ -56,6 +63,8 @@ impl SettingsWorkspaceEntity {
         cx: &mut Context<Self>,
     ) -> Option<SliderEdit> {
         use SettingsSlider::*;
+        const BACKGROUND_BLUR_COMMIT_DELAY: Duration = Duration::from_millis(150);
+        const SETTINGS_PERCENT_SCALE: f64 = 100.0;
         let width = f32::from(anchor.bounds.size.width).max(1.0);
         let position = slider_pointer_percent(
             x - f32::from(anchor.bounds.left()),

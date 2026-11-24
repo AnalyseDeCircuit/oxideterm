@@ -3,16 +3,17 @@
 
 //! AI settings page model helpers.
 
+#[cfg(not(target_family = "wasm"))]
+use std::fmt;
 use std::{
     collections::{BTreeMap, HashSet, hash_map::DefaultHasher},
-    fmt,
     hash::{Hash, Hasher},
 };
 
+#[cfg(not(target_family = "wasm"))]
 use oxideterm_ai::{
     AiProviderView, ContextWindowSource, McpAuthHeaderMode, McpTransport, ProviderModelRefresh,
     model_context_window_info, provider_views as ai_provider_views_from_values,
-    update_provider as ai_update_provider_values,
 };
 use oxideterm_settings::{
     AI_TOOL_CANCEL_BACKGROUND_TASK, AI_TOOL_CONFIGURE_CLOUD_SYNC, AI_TOOL_CONTROL_HOST_TOOL,
@@ -26,8 +27,10 @@ use oxideterm_settings::{
     AcpAgentAuthState, AcpAgentCapabilityPolicy, AcpAgentConfig, AcpAgentRuntimeStatus,
     PersistedSettings,
 };
+#[cfg(not(target_family = "wasm"))]
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
+#[cfg(not(target_family = "wasm"))]
 pub fn ai_provider_views(settings: &PersistedSettings) -> Vec<AiProviderView> {
     ai_provider_views_from_values(&settings.ai.providers)
 }
@@ -120,6 +123,7 @@ pub struct AiProviderModelPanel {
     pub models: Vec<String>,
 }
 
+#[cfg(not(target_family = "wasm"))]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AiModelContextWindowRow {
     pub has_override: bool,
@@ -469,6 +473,7 @@ pub fn ai_tool_policy_groups(settings: &PersistedSettings) -> Vec<AiToolPolicyGr
     ]
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub fn ai_model_context_window_panels(
     settings: &PersistedSettings,
     providers: &[AiProviderView],
@@ -502,6 +507,7 @@ pub fn ai_model_context_window_panels(
         .collect()
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub fn ai_model_context_window_row(
     settings: &PersistedSettings,
     provider_id: &str,
@@ -542,6 +548,7 @@ pub fn ai_provider_model_row_signature(
     hasher.finish()
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub fn ai_provider_card_signature(
     provider: &AiProviderView,
     expanded: bool,
@@ -569,7 +576,14 @@ pub fn ai_update_provider(
     index: usize,
     update: impl FnOnce(&mut serde_json::Map<String, serde_json::Value>),
 ) {
-    ai_update_provider_values(&mut settings.ai.providers, index, update);
+    if let Some(provider) = settings
+        .ai
+        .providers
+        .get_mut(index)
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        update(provider);
+    }
 }
 
 pub fn toggle_string_set(set: &mut HashSet<String>, value: &str) {
@@ -579,8 +593,8 @@ pub fn toggle_string_set(set: &mut HashSet<String>, value: &str) {
 }
 
 pub fn current_time_millis() -> u128 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    web_time::SystemTime::now()
+        .duration_since(web_time::UNIX_EPOCH)
         .map(|duration| duration.as_millis())
         .unwrap_or_default()
 }
@@ -753,6 +767,7 @@ pub fn set_ai_user_context_window(
 mod tests {
     use super::*;
 
+    #[cfg(not(target_family = "wasm"))]
     #[test]
     fn ai_mcp_draft_validation_rejects_duplicates_and_invalid_names() {
         let mut settings = PersistedSettings::default();
@@ -775,6 +790,7 @@ mod tests {
         assert!(!ai_mcp_draft_valid(&draft, &settings));
     }
 
+    #[cfg(not(target_family = "wasm"))]
     #[test]
     fn ai_mcp_draft_debug_redacts_secret_values() {
         let mut draft = AiMcpServerDraft::default();
@@ -798,6 +814,7 @@ mod tests {
         assert!(!debug.contains("header-secret"));
     }
 
+    #[cfg(not(target_family = "wasm"))]
     #[test]
     fn ai_mcp_draft_zeroize_clears_all_secret_capable_fields() {
         let mut draft = AiMcpServerDraft::default();
@@ -853,6 +870,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(target_family = "wasm"))]
     #[test]
     fn ai_signatures_ignore_mcp_auth_token() {
         let config = oxideterm_ai::McpServerConfig {
@@ -988,6 +1006,7 @@ mod tests {
 
 pub const AI_MODEL_REFRESH_MISSING_API_KEY: &str = "__missing_api_key__";
 
+#[cfg(not(target_family = "wasm"))]
 pub struct AiMcpServerDraft {
     pub name: String,
     pub transport: McpTransport,
@@ -1003,6 +1022,7 @@ pub struct AiMcpServerDraft {
     pub show_auth_token: bool,
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl Zeroize for AiMcpServerDraft {
     fn zeroize(&mut self) {
         // Arguments, environment values, headers, and tokens may all contain
@@ -1028,14 +1048,17 @@ impl Zeroize for AiMcpServerDraft {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl ZeroizeOnDrop for AiMcpServerDraft {}
 
+#[cfg(not(target_family = "wasm"))]
 impl Drop for AiMcpServerDraft {
     fn drop(&mut self) {
         self.zeroize();
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl fmt::Debug for AiMcpServerDraft {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         // MCP drafts may hold auth tokens plus env/header/argument values
@@ -1062,10 +1085,12 @@ impl fmt::Debug for AiMcpServerDraft {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn redacted_if_present(value: &str) -> Option<&'static str> {
     (!value.is_empty()).then_some("<redacted>")
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl Default for AiMcpServerDraft {
     fn default() -> Self {
         Self {
@@ -1085,6 +1110,7 @@ impl Default for AiMcpServerDraft {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub fn ai_mcp_server_signature(
     config: &oxideterm_ai::McpServerConfig,
     snapshot: Option<&oxideterm_ai::McpServerStateSnapshot>,
@@ -1119,6 +1145,7 @@ pub fn ai_mcp_server_signature(
     hasher.finish()
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub fn ai_mcp_configs(settings: &PersistedSettings) -> Vec<oxideterm_ai::McpServerConfig> {
     settings
         .ai
@@ -1128,6 +1155,7 @@ pub fn ai_mcp_configs(settings: &PersistedSettings) -> Vec<oxideterm_ai::McpServ
         .collect()
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub fn ai_mcp_draft_valid(draft: &AiMcpServerDraft, settings: &PersistedSettings) -> bool {
     let configured_names = ai_mcp_configs(settings)
         .into_iter()
@@ -1136,6 +1164,7 @@ pub fn ai_mcp_draft_valid(draft: &AiMcpServerDraft, settings: &PersistedSettings
     ai_mcp_draft_valid_for_names(draft, &configured_names)
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub fn ai_mcp_draft_valid_for_names(
     draft: &AiMcpServerDraft,
     configured_names: &HashSet<String>,
@@ -1148,6 +1177,7 @@ pub fn ai_mcp_draft_valid_for_names(
         && !configured_names.contains(name)
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub fn ai_mcp_transport_label(transport: McpTransport) -> String {
     match transport {
         McpTransport::Stdio => "stdio",
@@ -1157,6 +1187,7 @@ pub fn ai_mcp_transport_label(transport: McpTransport) -> String {
     .to_string()
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub fn ai_mcp_transport_value(transport: McpTransport) -> &'static str {
     match transport {
         McpTransport::Stdio => "stdio",
@@ -1165,6 +1196,7 @@ pub fn ai_mcp_transport_value(transport: McpTransport) -> &'static str {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub fn ai_mcp_auth_mode_value(mode: McpAuthHeaderMode) -> &'static str {
     match mode {
         McpAuthHeaderMode::Bearer => "bearer",
@@ -1178,6 +1210,7 @@ pub struct AiProviderKeyStatusDelivery {
     pub has_key: bool,
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub struct AiModelRefreshDelivery {
     pub index: usize,
     pub provider_id: String,

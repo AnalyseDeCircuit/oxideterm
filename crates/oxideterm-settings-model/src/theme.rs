@@ -927,8 +927,8 @@ pub fn theme_display_name(id: &str) -> String {
 }
 
 fn current_millis() -> u128 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    web_time::SystemTime::now()
+        .duration_since(web_time::UNIX_EPOCH)
         .map(|duration| duration.as_millis())
         .unwrap_or_default()
 }

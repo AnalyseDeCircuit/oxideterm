@@ -7,6 +7,7 @@ use gpui::{
     AnyElement, CursorStyle, IntoElement, ParentElement, Rgba, SharedString, Styled, div,
     prelude::*, px, rgb, rgba,
 };
+#[cfg(not(target_family = "wasm"))]
 use oxideterm_ai::ContextWindowSource;
 use oxideterm_theme::ThemeTokens;
 
@@ -18,12 +19,6 @@ const AI_CONTEXT_USER_OVERRIDE_BG_ALPHA: u32 = 0x0d;
 const AI_CONTEXT_SOURCE_BADGE_TEXT_SIZE: f32 = 9.0;
 const AI_CONTEXT_SOURCE_BADGE_PX: f32 = 6.0;
 const AI_CONTEXT_SOURCE_BADGE_PY: f32 = 2.0;
-const AI_CONTEXT_SOURCE_USER_COLOR: u32 = 0x60a5fa;
-const AI_CONTEXT_SOURCE_API_COLOR: u32 = 0x34d399;
-const AI_CONTEXT_SOURCE_NAME_COLOR: u32 = 0x22d3ee;
-const AI_CONTEXT_SOURCE_BADGE_BG_ALPHA: u32 = 0x1a;
-const AI_CONTEXT_SOURCE_DEFAULT_TEXT_ALPHA: u32 = 0xb3;
-const AI_CONTEXT_SOURCE_DEFAULT_BG_ALPHA: u32 = 0x33;
 const AI_TEXTAREA_PADDING_X: f32 = 12.0;
 const AI_TEXTAREA_PADDING_Y: f32 = 8.0;
 const AI_TEXTAREA_LINE_HEIGHT: f32 = 20.0;
@@ -460,6 +455,7 @@ pub fn settings_ai_context_source_badge(
         .into_any_element()
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub fn settings_ai_context_source_badge_for_source(
     tokens: &ThemeTokens,
     label: String,
@@ -469,10 +465,18 @@ pub fn settings_ai_context_source_badge_for_source(
     settings_ai_context_source_badge(tokens, label, text_color, bg_color)
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn settings_ai_context_source_badge_colors(
     tokens: &ThemeTokens,
     source: ContextWindowSource,
 ) -> (Rgba, Rgba) {
+    const AI_CONTEXT_SOURCE_USER_COLOR: u32 = 0x60a5fa;
+    const AI_CONTEXT_SOURCE_API_COLOR: u32 = 0x34d399;
+    const AI_CONTEXT_SOURCE_NAME_COLOR: u32 = 0x22d3ee;
+    const AI_CONTEXT_SOURCE_BADGE_BG_ALPHA: u32 = 0x1a;
+    const AI_CONTEXT_SOURCE_DEFAULT_TEXT_ALPHA: u32 = 0xb3;
+    const AI_CONTEXT_SOURCE_DEFAULT_BG_ALPHA: u32 = 0x33;
+
     match source {
         ContextWindowSource::User => (
             rgb(AI_CONTEXT_SOURCE_USER_COLOR),
@@ -731,19 +735,31 @@ mod layout_tests {
         }
     }
 }
-pub mod acp;
-pub(crate) mod basic;
 pub mod confirm;
-pub(crate) mod context;
-pub(crate) mod context_windows;
-pub mod mcp;
-pub mod mcp_dialog;
-pub mod mcp_draft;
-pub mod providers;
-pub(crate) mod skills;
-pub mod subagents;
 pub mod text_editor;
 
+#[cfg(not(target_family = "wasm"))]
+pub mod acp;
+#[cfg(not(target_family = "wasm"))]
+pub(crate) mod basic;
+#[cfg(not(target_family = "wasm"))]
+pub(crate) mod context;
+#[cfg(not(target_family = "wasm"))]
+pub(crate) mod context_windows;
+#[cfg(not(target_family = "wasm"))]
+pub mod mcp;
+#[cfg(not(target_family = "wasm"))]
+pub mod mcp_dialog;
+#[cfg(not(target_family = "wasm"))]
+pub mod mcp_draft;
+#[cfg(not(target_family = "wasm"))]
+pub mod providers;
+#[cfg(not(target_family = "wasm"))]
+pub(crate) mod skills;
+#[cfg(not(target_family = "wasm"))]
+pub mod subagents;
+
+#[cfg(not(target_family = "wasm"))]
 pub(crate) fn available(section: AnyElement, enabled: bool) -> AnyElement {
     if enabled {
         section
@@ -758,6 +774,7 @@ pub(crate) fn available(section: AnyElement, enabled: bool) -> AnyElement {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub(crate) fn section(
     tokens: &ThemeTokens,
     header: AnyElement,
@@ -774,16 +791,19 @@ pub(crate) fn section(
         .into_any_element()
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub struct AiSkillData {
     pub records: Vec<oxideterm_skills::SkillRecord>,
     pub diagnostics: Vec<oxideterm_skills::SkillDiagnostic>,
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub enum AiSkillAction {
     Refresh,
     EditAndRefresh(crate::components::SettingsEdit),
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub fn hash_section_layout(
     section: Option<oxideterm_settings_model::SettingsSectionId>,
     state: &crate::entity::SettingsWorkspaceEntity,
@@ -856,6 +876,7 @@ pub fn hash_section_layout(
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub(crate) fn textarea(
     controls: &crate::components::SettingsControls<'_>,
     input: crate::SettingsInput,

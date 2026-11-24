@@ -6,13 +6,19 @@
 //! The GPUI app owns dialogs and async jobs. This module owns the editable form
 //! model and the mapping between `SettingsInput` identities and draft fields.
 
+#[cfg(not(target_family = "wasm"))]
 use std::fmt;
 
+#[cfg(not(target_family = "wasm"))]
 use oxideterm_cloud_sync::{AuthMode, BackendType, CloudSyncSettings, ConflictStrategy};
-use zeroize::{Zeroize, Zeroizing};
+#[cfg(not(target_family = "wasm"))]
+use zeroize::Zeroize;
+use zeroize::Zeroizing;
 
+#[cfg(not(target_family = "wasm"))]
 use crate::SettingsInput;
 
+#[cfg(not(target_family = "wasm"))]
 pub struct CloudSyncFormDraft {
     pub backend_type: BackendType,
     pub auth_mode: AuthMode,
@@ -48,7 +54,7 @@ pub struct CloudSyncFormDraft {
 
 /// Owns secret edits after they cross the UI/backend boundary.
 ///
-/// Values are moved out of [`CloudSyncFormDraft`] and are zeroized when this
+/// Values are moved out of the form and are zeroized when this
 /// handoff is dropped. The backend may return the handoff to the form after a
 /// synchronous persistence failure without cloning any secret.
 pub struct CloudSyncSecretDraftHandoff {
@@ -62,6 +68,7 @@ pub struct CloudSyncSecretDraftHandoff {
     pub sync_password: Option<Zeroizing<String>>,
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl fmt::Debug for CloudSyncFormDraft {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Form drafts keep editable secret text in UI-owned Strings; Debug must
@@ -105,10 +112,12 @@ impl fmt::Debug for CloudSyncFormDraft {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn redacted_if_present(value: &str) -> Option<&'static str> {
     (!value.is_empty()).then_some("<redacted>")
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl CloudSyncFormDraft {
     pub fn from_settings(settings: &CloudSyncSettings) -> Self {
         Self {
@@ -259,6 +268,7 @@ impl CloudSyncFormDraft {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl Drop for CloudSyncFormDraft {
     fn drop(&mut self) {
         // UI drafts are allowed to use Strings, but their backing allocations
@@ -274,6 +284,7 @@ impl Drop for CloudSyncFormDraft {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn take_touched_secret(value: &mut String, touched: &mut bool) -> Option<Zeroizing<String>> {
     if !std::mem::take(touched) {
         return None;
@@ -281,6 +292,7 @@ fn take_touched_secret(value: &mut String, touched: &mut bool) -> Option<Zeroizi
     Some(Zeroizing::new(std::mem::take(value)))
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn restore_touched_secret(
     value: Option<Zeroizing<String>>,
     draft: &mut String,
@@ -293,6 +305,7 @@ fn restore_touched_secret(
     *touched = true;
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub fn cloud_sync_form_input_value_ref(
     form: &CloudSyncFormDraft,
     input: SettingsInput,
@@ -326,6 +339,7 @@ pub fn cloud_sync_form_input_value_ref(
 ///
 /// Secret fields must use this handoff when they receive focus so the form and
 /// the root input adapter never own duplicate credential buffers.
+#[cfg(not(target_family = "wasm"))]
 pub fn take_cloud_sync_form_input_value(
     form: &mut CloudSyncFormDraft,
     input: SettingsInput,
@@ -364,6 +378,7 @@ pub fn take_cloud_sync_form_input_value(
 }
 
 /// Returns an IME-owned value to the Cloud Sync Entity without cloning it.
+#[cfg(not(target_family = "wasm"))]
 pub fn apply_cloud_sync_form_input_owned(
     form: &mut CloudSyncFormDraft,
     input: SettingsInput,
@@ -417,7 +432,7 @@ pub fn apply_cloud_sync_form_input_owned(
     Ok(())
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_family = "wasm")))]
 mod tests {
     use super::*;
 

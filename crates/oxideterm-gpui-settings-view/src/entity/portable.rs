@@ -131,7 +131,7 @@ impl SettingsWorkspaceEntity {
             return;
         }
         self.portable_dialog_exit_task = Some(cx.spawn(async move |settings, cx| {
-            gpui::Timer::after(delay).await;
+            cx.background_executor().timer(delay).await;
             let _ = settings.update(cx, |settings, cx| {
                 settings.finish_portable_password_dialog_exit(generation, cx);
             });
