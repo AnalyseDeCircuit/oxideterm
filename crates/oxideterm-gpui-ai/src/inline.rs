@@ -3,7 +3,7 @@ use std::{rc::Rc, time::Duration};
 use crate::{model_picker::AiModelPickerView, state::AiModelSelectorScope};
 use gpui::{
     AnyElement, App, ClipboardItem, Context, Entity, EventEmitter, MouseButton, MouseDownEvent,
-    Render, Rgba, SharedString, Task, Timer, Window, div, prelude::*, px, rgb, rgba, svg,
+    Render, Rgba, SharedString, Task, Window, div, prelude::*, px, rgb, rgba, svg,
 };
 use oxideterm_gpui_ui::{
     button::{ButtonRadius, IconButtonOptions, icon_button},
@@ -332,7 +332,9 @@ impl AiInlinePanelView {
             panel.generation
         });
         self.copy_reset = Some(cx.spawn(async move |view, cx| {
-            Timer::after(Duration::from_millis(1500)).await;
+            cx.background_executor()
+                .timer(Duration::from_millis(1500))
+                .await;
             let _ = view.update(cx, |view, cx| {
                 let changed = view.state.update(cx, |state, _| {
                     let panel = state.terminal_inline_panel_mut();
@@ -695,7 +697,8 @@ mod tests {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
+pub use crate::conversation::native::pane::apply_inline_command;
 pub use request::AiInlineKey;
-pub use request::apply_inline_command;
 pub use request::{resolve_terminal_ai_inline_config, truncate_ai_inline_context};
 mod request;

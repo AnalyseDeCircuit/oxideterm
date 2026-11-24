@@ -8,7 +8,7 @@ use std::{
 };
 
 use gpui::{
-    Context, Entity, FollowMode, ListAlignment, ListState, ScrollHandle, Subscription, Task, Timer,
+    Context, Entity, FollowMode, ListAlignment, ListState, ScrollHandle, Subscription, Task,
     prelude::*,
 };
 #[cfg(test)]
@@ -62,38 +62,12 @@ pub mod local_command;
 pub use crate::knowledge::page::KNOWLEDGE_DOCUMENT_PAGE_SIZE;
 pub use history::HistoryStatus;
 
-pub struct AiPendingUserQuestion {
-    pub conversation_id: String,
-    pub dispatch: Option<oxideterm_ai::agent::AgentDispatch>,
-    pub sender: tokio::sync::oneshot::Sender<zeroize::Zeroizing<String>>,
-}
-
-impl AiPendingUserQuestion {
-    fn active(&self) -> bool {
-        !self.sender.is_closed()
-            && self
-                .dispatch
-                .as_ref()
-                .is_none_or(|guard| guard.check().is_ok())
-    }
-}
-
-pub struct AiPendingCursorRequest {
-    pub conversation_id: String,
-    pub assistant_id: String,
-    pub request: oxideterm_ai::CursorRequest,
-    pub selections: Vec<Vec<String>>,
-    pub response_tx: Option<oxideterm_ai::CursorResponseSender>,
-}
-
-impl Drop for AiPendingCursorRequest {
-    fn drop(&mut self) {
-        zeroize::Zeroize::zeroize(&mut self.selections);
-        if let Some(sender) = self.response_tx.take() {
-            let _ = sender.send(Ok(oxideterm_ai::CursorRequest::cancelled_response()));
-        }
-    }
-}
+#[cfg(target_family = "wasm")]
+pub use crate::stream::PendingQuestion as AiPendingUserQuestion;
+#[cfg(not(target_family = "wasm"))]
+pub use crate::stream::{AiPendingCursorRequest, AiPendingUserQuestion};
+#[cfg(target_family = "wasm")]
+pub type AiPendingCursorRequest = crate::stream::PendingCursor<crate::stream::CursorReply>;
 
 /// Pending input is owned by this workspace and is never replayed from chat persistence.
 pub struct AiQueuedChatTurn {
@@ -378,13 +352,13 @@ pub struct AiWorkspaceEntity {
     pub pending_image_requests: HashMap<String, AiPendingChatStream>,
     pub pending_user_questions: HashMap<(u64, String), AiPendingUserQuestion>,
     pub pending_cursor_requests: HashMap<(u64, String), AiPendingCursorRequest>,
-    pending_tool_approvals: HashMap<(u64, String), tokio::sync::oneshot::Sender<bool>>,
+    pending_tool_approvals: HashMap<(u64, String), crate::stream::Decision<bool>>,
     // Approval previews are runtime-only; conversation history never owns execution payloads.
     pub tool_approval_previews: HashMap<(u64, String), zeroize::Zeroizing<String>>,
     pending_acp_permission_choices:
         HashMap<(u64, String), tokio::sync::oneshot::Sender<Option<String>>>,
     pending_tool_candidate_selections:
-        HashMap<(u64, String), tokio::sync::oneshot::Sender<Option<usize>>>,
+        HashMap<(u64, String), crate::stream::Decision<Option<usize>>>,
     pending_tool_candidate_counts: HashMap<(u64, String), usize>,
     // Runtime evidence transitions are implemented beside stream application,
     // but these collections remain physically owned by this Entity.
@@ -2140,7 +2114,7 @@ impl AiWorkspaceEntity {
             return (true, effect);
         }
         self.chat_confirm_exit_task = Some(cx.spawn(async move |entity, cx| {
-            Timer::after(delay).await;
+            cx.background_executor().timer(delay).await;
             let _ = entity.update(cx, |entity, cx| {
                 entity.finish_chat_confirm_exit(generation, cx);
             });
@@ -2223,7 +2197,7 @@ impl AiWorkspaceEntity {
             return false;
         }
         self.mcp_status_tick_task = Some(cx.spawn(async move |entity, cx| {
-            Timer::after(delay).await;
+            cx.background_executor().timer(delay).await;
             let _ = entity.update(cx, |entity, cx| {
                 entity.mcp_status_tick_task = None;
                 cx.emit(AiWorkspaceEvent::McpRuntimeChanged);
@@ -3114,7 +3088,7 @@ impl AiWorkspaceEntity {
             .collect();
         for key in approvals {
             if let Some(sender) = self.pending_tool_approvals.remove(&key) {
-                let _ = sender.send(false);
+                sender(false);
             }
         }
         let choices: Vec<_> = self
@@ -3137,7 +3111,7 @@ impl AiWorkspaceEntity {
         for key in candidates {
             self.pending_tool_candidate_counts.remove(&key);
             if let Some(sender) = self.pending_tool_candidate_selections.remove(&key) {
-                let _ = sender.send(None);
+                sender(None);
             }
         }
         if self
@@ -3194,16 +3168,7 @@ impl AiWorkspaceEntity {
             &format!("{generation}:{id}"),
             serde_json::json!({"toolCallId":id,"answer":answer.as_str()}),
         );
-        let (sender, receiver) = tokio::sync::oneshot::channel();
-        self.history_barrier(sender);
-        let task = self.task_runtime.spawn(async move {
-            if receiver.await == Ok(true) && question.active() {
-                let _ = question.sender.send(answer);
-            }
-        });
-        if let Some(previous) = self.history.answers.insert(key, task) {
-            previous.abort();
-        }
+        self.deliver_answer_after_commit(key, move || question.answer_if_current(answer));
         true
     }
 
@@ -3258,9 +3223,7 @@ impl AiWorkspaceEntity {
             .pending_cursor_requests
             .remove(&key)
             .expect("validated pending request");
-        if let Some(sender) = pending.response_tx.take() {
-            let _ = sender.send(Ok(response));
-        }
+        pending.respond(response);
         true
     }
 
@@ -3287,14 +3250,14 @@ impl AiWorkspaceEntity {
         }
     }
 
-    pub fn register_tool_approval(
+    pub(crate) fn register_tool_approval_decision(
         &mut self,
         generation: u64,
         tool_call_id: String,
-        sender: tokio::sync::oneshot::Sender<bool>,
+        sender: crate::stream::Decision<bool>,
     ) -> bool {
         if !self.run_accepts_tools(generation) {
-            let _ = sender.send(false);
+            sender(false);
             return false;
         }
         if let Some(stale_sender) = self
@@ -3303,7 +3266,7 @@ impl AiWorkspaceEntity {
         {
             // A repeated protocol id supersedes the older waiter without
             // allowing two workers to consume one user decision.
-            let _ = stale_sender.send(false);
+            stale_sender(false);
         }
         true
     }
@@ -3322,7 +3285,7 @@ impl AiWorkspaceEntity {
         };
         self.tool_approval_previews
             .remove(&(generation, tool_call_id.to_owned()));
-        let _ = sender.send(approved);
+        sender(approved);
         true
     }
 
@@ -3368,22 +3331,22 @@ impl AiWorkspaceEntity {
         self.pending_user_questions.clear();
         self.pending_cursor_requests.clear();
         for (_, sender) in self.pending_tool_approvals.drain() {
-            let _ = sender.send(false);
+            sender(false);
         }
         for (_, sender) in self.pending_acp_permission_choices.drain() {
             let _ = sender.send(None);
         }
     }
 
-    pub fn register_tool_candidate_selection(
+    pub(crate) fn register_tool_candidate_selection_decision(
         &mut self,
         generation: u64,
         tool_call_id: String,
         candidate_count: usize,
-        sender: tokio::sync::oneshot::Sender<Option<usize>>,
+        sender: crate::stream::Decision<Option<usize>>,
     ) -> bool {
         if !self.run_accepts_tools(generation) || candidate_count == 0 {
-            let _ = sender.send(None);
+            sender(None);
             return false;
         }
         if let Some(stale_sender) = self
@@ -3391,7 +3354,7 @@ impl AiWorkspaceEntity {
             .insert((generation, tool_call_id.clone()), sender)
         {
             // Repeated protocol IDs cancel the older selector before replacing it.
-            let _ = stale_sender.send(None);
+            stale_sender(None);
         }
         self.pending_tool_candidate_counts
             .insert((generation, tool_call_id.clone()), candidate_count);
@@ -3460,14 +3423,14 @@ impl AiWorkspaceEntity {
             self.chat_ui.input_focused = selection.input_was_focused;
             self.chat_ui.footer_focus = selection.footer_focus;
         }
-        let _ = sender.send(selected_index);
+        sender(selected_index);
         true
     }
 
     fn reject_all_tool_candidate_selections(&mut self) {
         self.pending_tool_candidate_counts.clear();
         for (_, sender) in self.pending_tool_candidate_selections.drain() {
-            let _ = sender.send(None);
+            sender(None);
         }
         if let Some(selection) = self.chat_ui.tool_candidate_selection.take() {
             // Stream cancellation and replacement release the selector through
@@ -3592,7 +3555,7 @@ impl AiWorkspaceEntity {
         });
         let conversation_id = conversation_id.to_string();
         cx.spawn(async move |entity, cx| {
-            Timer::after(Duration::from_secs(5)).await;
+            cx.background_executor().timer(Duration::from_secs(5)).await;
             let _ = entity.update(cx, |entity, cx| {
                 let should_clear = entity.compaction_notice.as_ref().is_some_and(|notice| {
                     notice.conversation_id == conversation_id

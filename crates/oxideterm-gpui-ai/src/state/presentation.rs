@@ -1,7 +1,5 @@
-use std::{
-    collections::{HashMap, HashSet},
-    time::SystemTime,
-};
+use std::collections::{HashMap, HashSet};
+use web_time::SystemTime;
 
 use gpui::px;
 use oxideterm_gpui_ui::virtual_list::TauriVirtualListSpec;

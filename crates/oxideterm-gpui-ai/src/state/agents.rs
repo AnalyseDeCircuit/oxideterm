@@ -190,7 +190,9 @@ impl AiWorkspaceEntity {
         let mut updates = self.agents.services.runtime.subscribe();
         self.agents.watch = Some(cx.spawn(async move |weak, cx| {
             while updates.changed().await.is_ok() {
-                Timer::after(Duration::from_millis(50)).await;
+                cx.background_executor()
+                    .timer(Duration::from_millis(50))
+                    .await;
                 if weak
                     .update(cx, |ai, cx| {
                         ai.refresh_agent_records();

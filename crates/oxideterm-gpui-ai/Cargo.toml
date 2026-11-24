@@ -32,6 +32,7 @@ oxideterm-theme = { path = "../oxideterm-theme" }
 tracing.workspace = true
 tokio.workspace = true
 uuid.workspace = true
+web-time.workspace = true
 
 anyhow.workspace = true
 async-trait.workspace = true

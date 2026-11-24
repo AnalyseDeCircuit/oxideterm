@@ -6,7 +6,7 @@ use zeroize::Zeroizing;
 
 use super::{
     AiActionResultLite, AiOrchestratorRuntimeSnapshot, AiOrchestratorTarget,
-    ai_runtime_validation_recovery_message,
+    AiTerminalCommandStatus, ai_runtime_validation_recovery_message,
 };
 use crate::{
     terminal_observation::{
@@ -16,14 +16,6 @@ use crate::{
     },
     tool_result_protocol::{rejected_ai_tool_result, trim_tail_chars},
 };
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum AiTerminalCommandStatus {
-    Running,
-    ShellReady,
-    Completed,
-    Stale,
-}
 
 pub struct AiTerminalCommand<'a> {
     pub id: &'a str,

@@ -1,4 +1,5 @@
 use super::*;
+
 use oxideterm_ai::{
     AiChatMessage, AiConversation, ConversationStore, HistoryCursor, HistoryMutation,
     HistoryWriteState, HistoryWriter,
@@ -13,6 +14,15 @@ type StreamBases = Vec<(
     (String, String),
     Option<oxideterm_ai::HistoryStreamSnapshot>,
 )>;
+
+impl crate::stream::StreamReply<bool> for tokio::sync::oneshot::Sender<bool> {
+    fn active(&self) -> bool {
+        !self.is_closed()
+    }
+    fn resolve(self: Box<Self>, value: bool) {
+        let _ = (*self).send(value);
+    }
+}
 
 struct JournalBatch {
     revision: u64,
@@ -228,7 +238,7 @@ pub struct AiHistoryState {
     generation: u64,
     page_generation: u64,
     committed: u64,
-    waiters: Vec<(u64, tokio::sync::oneshot::Sender<bool>)>,
+    waiters: Vec<(u64, crate::stream::CommitReply)>,
 }
 
 enum Delivery {
@@ -667,8 +677,8 @@ impl AiWorkspaceEntity {
             let mut pending = Vec::new();
             for (version, sender) in self.history.waiters.drain(..) {
                 if version <= self.history.committed {
-                    let _ = sender.send(true);
-                } else if !sender.is_closed() {
+                    sender.resolve(true);
+                } else if sender.active() {
                     pending.push((version, sender));
                 }
             }
@@ -986,15 +996,32 @@ impl AiWorkspaceEntity {
         let _ = self.history.sender.send(Delivery::Save);
         self.history.wake.notify_one();
     }
-    pub fn history_barrier(&mut self, sender: tokio::sync::oneshot::Sender<bool>) {
+    pub(super) fn deliver_answer_after_commit(
+        &mut self,
+        key: (u64, String),
+        deliver: impl FnOnce() + Send + 'static,
+    ) {
+        let (sender, receiver) = tokio::sync::oneshot::channel::<bool>();
+        self.after_history_commit(Box::new(sender));
+        let task = self.task_runtime.spawn(async move {
+            if receiver.await == Ok(true) {
+                deliver();
+            }
+        });
+        if let Some(previous) = self.history.answers.insert(key, task) {
+            previous.abort();
+        }
+    }
+
+    pub(crate) fn after_history_commit(&mut self, sender: crate::stream::CommitReply) {
         let revision = self.history.changes.borrow().revision;
         if self.history.quitting && self.history.writer.is_none() && revision == 0 {
             // Initialization has admitted no work; cancellation preserves the source database.
-            let _ = sender.send(true);
+            sender.resolve(true);
             return;
         }
         if matches!(self.history.status, HistoryStatus::Idle) {
-            let _ = sender.send(true);
+            sender.resolve(true);
             return;
         }
         if self.history.committed >= revision
@@ -1005,7 +1032,7 @@ impl AiWorkspaceEntity {
                 .as_ref()
                 .is_some_and(|writer| *writer.subscribe().borrow() == HistoryWriteState::Ready)
         {
-            let _ = sender.send(true);
+            sender.resolve(true);
         } else {
             self.history.waiters.push((revision, sender));
             self.request_history_save();

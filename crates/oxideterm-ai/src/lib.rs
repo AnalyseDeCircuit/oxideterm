@@ -71,7 +71,7 @@ pub mod web;
 pub use acp::{
     AcpAgentRuntime, AcpClientEvent, AcpClientEventSender, AcpConnectionError,
     AcpConnectionManager, AcpLaunchConfig, AcpLaunchConfigError, AcpManagedEvent,
-    AcpManagedPromptRequest, AcpStdioLauncher, AcpTerminalCreateSpec, acp_auth_methods,
+    AcpManagedPromptRequest, AcpStdioLauncher, acp_auth_methods,
     acp_client_event_to_ai_stream_events, acp_internal_error, acp_kill_terminal_request_id,
     acp_kill_terminal_response, acp_launch_command_available, acp_method_not_found,
     acp_permission_cancelled_response, acp_permission_request_projection,

@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use gpui::{App, Context, Timer};
+use gpui::{App, Context};
 use oxideterm_ai::{
     AiExecutedToolResult,
     agent::AgentResourceRecord,
@@ -86,7 +86,7 @@ impl AiWorkspaceEntity {
         let task = cx.spawn(async move |weak, cx| {
             let mut process = process;
             let mut sender = Some(sender);
-            let started = std::time::Instant::now();
+            let started = web_time::Instant::now();
             loop {
                 if sender.is_some() {
                     cx.update(|cx| report("waiting_condition", Some(serde_json::json!({"waiting":true,"waitDeadline":ai_now_ms() + wait_timeout.as_millis() as i64})), "execute", cx));
@@ -95,7 +95,7 @@ impl AiWorkspaceEntity {
                     biased;
                     _ = async { if let Some(dispatch) = &owner.dispatch { dispatch.cancelled().await; } else { std::future::pending::<()>().await; } } => break,
                     result = &mut process.process => Some(result),
-                    _ = Timer::after(wait_timeout), if sender.is_some() => None,
+                    _ = cx.background_executor().timer(wait_timeout), if sender.is_some() => None,
                     _ = async { if let Some(sender) = &mut sender { sender.closed().await; } else { std::future::pending::<()>().await; } } => break,
                     _ = async { if let Some(dispatch) = &owner.dispatch { dispatch.invalidated().await; } else { std::future::pending::<()>().await; } }, if sender.is_some() => {
                         if let Some(sender) = sender.take() {

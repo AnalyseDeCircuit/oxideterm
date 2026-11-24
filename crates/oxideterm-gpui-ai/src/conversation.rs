@@ -5,6 +5,13 @@ pub mod acp_terminal;
 mod acp_turn;
 pub mod actions;
 pub mod agents;
+#[cfg(not(target_family = "wasm"))]
+pub(crate) mod native {
+    mod acp_terminal;
+    pub(crate) mod pane;
+    pub(super) mod tools;
+    pub(super) mod watch;
+}
 pub mod terminal_tools;
 pub mod terminal_watch;
 pub use acp_turn::{AiAcpChatLaunch, prepare_acp_chat_launch};

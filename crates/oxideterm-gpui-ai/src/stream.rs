@@ -2,9 +2,23 @@ use oxideterm_ai::stream_state::AiCompactionPlan;
 
 use crate::state::AiPendingChatStream;
 
-pub use oxideterm_ai::tool_loop::{
-    AiStreamDelivery, AiStreamDeliveryEvent, AiStreamDeliverySender,
+mod delivery;
+pub use delivery::*;
+#[cfg(not(target_family = "wasm"))]
+mod native;
+#[cfg(not(target_family = "wasm"))]
+pub use native::{
+    AiPendingCursorRequest, AiPendingUserQuestion, AiStreamDelivery, AiStreamDeliveryEvent,
+    AiStreamDeliverySender,
 };
+
+#[cfg(target_family = "wasm")]
+pub use delivery::{
+    PortableStreamDelivery as AiStreamDelivery, PortableStreamEvent as AiStreamDeliveryEvent,
+};
+#[cfg(target_family = "wasm")]
+pub type AiStreamDeliverySender =
+    oxideterm_workspace::delivery::ActiveDeliverySender<AiStreamDelivery>;
 
 pub struct AiCompactionDelivery {
     pub generation: u64,

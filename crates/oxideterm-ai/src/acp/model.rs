@@ -1,3 +1,40 @@
+use std::{collections::HashMap, fmt, path::PathBuf};
+
+use zeroize::Zeroize;
+
+pub struct AcpTerminalCreateSpec {
+    pub command: String,
+    pub args: Vec<String>,
+    pub env: HashMap<String, String>,
+    pub cwd: Option<PathBuf>,
+    pub output_byte_limit: Option<usize>,
+}
+
+impl fmt::Debug for AcpTerminalCreateSpec {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AcpTerminalCreateSpec")
+            .field("command", &"<redacted>")
+            .field("args", &format_args!("<redacted:{}>", self.args.len()))
+            .field("env", &format_args!("<redacted:{}>", self.env.len()))
+            .field("cwd", &self.cwd)
+            .field("output_byte_limit", &self.output_byte_limit)
+            .finish()
+    }
+}
+
+impl Drop for AcpTerminalCreateSpec {
+    fn drop(&mut self) {
+        // Agent-provided commands and environment values may contain secrets.
+        self.command.zeroize();
+        self.args.zeroize();
+        for value in self.env.values_mut() {
+            value.zeroize();
+        }
+        self.env.clear();
+    }
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct AcpHostCapabilityPolicy {
     pub fs_read_text_file: bool,

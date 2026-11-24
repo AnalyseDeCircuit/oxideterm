@@ -2342,11 +2342,7 @@ impl AiAssistantSidebarView {
         let (request, selections) = {
             let ai = self.state.read(cx);
             let pending = ai.pending_cursor_requests.get(&(generation, id.into()))?;
-            if pending
-                .response_tx
-                .as_ref()
-                .is_none_or(|sender| sender.is_closed())
-            {
+            if !pending.active() {
                 return None;
             }
             (pending.request.clone(), pending.selections.clone())

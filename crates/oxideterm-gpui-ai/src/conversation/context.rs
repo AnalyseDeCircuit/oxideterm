@@ -408,7 +408,8 @@ fn limit_terminal_buffer(buffer: &str, max_lines: usize, max_chars: usize) -> (S
     (text, line_count)
 }
 
-use oxideterm_terminal::TerminalCommandMarkDetectionSource;
+#[cfg(not(target_family = "wasm"))]
+pub use super::native::pane::{ai_terminal_environment, capture_command_records};
 
 pub fn ai_local_os_label() -> &'static str {
     if cfg!(target_os = "macos") {
@@ -418,74 +419,4 @@ pub fn ai_local_os_label() -> &'static str {
     } else {
         "Linux"
     }
-}
-
-pub fn ai_terminal_environment(
-    kind: oxideterm_terminal::TerminalSessionKind,
-    local_os: &str,
-) -> String {
-    use oxideterm_terminal::TerminalSessionKind;
-    // Telnet and serial panes share the local tab kind but run on another target.
-    match kind {
-        TerminalSessionKind::LocalPty => format!("Local ({local_os}; shell unverified)"),
-        TerminalSessionKind::SshPty => "SSH (remote OS and shell unverified)".to_string(),
-        TerminalSessionKind::Mosh => "Mosh (remote OS and shell unverified)".to_string(),
-        TerminalSessionKind::Telnet => "Telnet (remote OS and shell unverified)".to_string(),
-        TerminalSessionKind::Serial => {
-            "Serial device (OS and command interface unverified)".to_string()
-        }
-        TerminalSessionKind::Ble => "BLE device (OS and command interface unverified)".to_string(),
-    }
-}
-
-fn ai_ledger_source_from_terminal_source(source: TerminalCommandMarkDetectionSource) -> String {
-    match source {
-        TerminalCommandMarkDetectionSource::Ai => "ai.terminal_input",
-        TerminalCommandMarkDetectionSource::Broadcast => "broadcast",
-        TerminalCommandMarkDetectionSource::ShellIntegration => "shell_integration",
-        TerminalCommandMarkDetectionSource::CommandBar => "command_bar",
-        TerminalCommandMarkDetectionSource::QuickCommand => "quick_command",
-        TerminalCommandMarkDetectionSource::UserInputObserved => "user.terminal_input",
-        TerminalCommandMarkDetectionSource::Heuristic => "user_promoted",
-    }
-    .to_string()
-}
-
-fn ai_ledger_status_from_terminal_status(
-    status: oxideterm_gpui_terminal::TerminalCommandFactStatus,
-) -> String {
-    match status {
-        oxideterm_gpui_terminal::TerminalCommandFactStatus::Open => "running",
-        oxideterm_gpui_terminal::TerminalCommandFactStatus::Closed => "completed",
-        oxideterm_gpui_terminal::TerminalCommandFactStatus::Stale => "stale",
-    }
-    .to_string()
-}
-
-pub fn capture_command_records(
-    input: impl IntoIterator<Item = oxideterm_gpui_terminal::TerminalAiCommandRecord>,
-) -> Vec<AiRuntimeCommandRecord> {
-    // History is captured from the pane, never from secret-capable tool arguments.
-    let mut records = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-    for record in input {
-        if !seen.insert(record.command_id.clone()) {
-            continue;
-        }
-        let source = ai_ledger_source_from_terminal_source(record.source);
-        let status = ai_ledger_status_from_terminal_status(record.status);
-        records.push(AiRuntimeCommandRecord {
-            command_id: record.command_id,
-            command: record.command,
-            cwd: None,
-            source,
-            status,
-            exit_code: record.exit_code.map(i64::from),
-            started_at: record.started_at as i64,
-            finished_at: record.finished_at.map(|value| value as i64),
-            approval_mode: None,
-            risk: "execute".to_string(),
-        });
-    }
-    records
 }

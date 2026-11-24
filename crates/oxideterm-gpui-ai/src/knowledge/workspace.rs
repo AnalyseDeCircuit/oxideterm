@@ -1,9 +1,4 @@
-use std::{
-    ops::Range,
-    rc::Rc,
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{ops::Range, rc::Rc, sync::Arc, time::Duration};
 
 use gpui::{
     AnyElement, AnyWindowHandle, App, Context, Div, Entity, FocusHandle, Focusable, KeyDownEvent,
@@ -25,6 +20,8 @@ use oxideterm_i18n::I18n;
 use oxideterm_settings::KnowledgeEditorUiState;
 use oxideterm_theme::ThemeTokens;
 use oxideterm_workspace::TabId;
+
+use web_time::Instant;
 
 use super::editor::{
     KnowledgeDocumentEditor, KnowledgeDocumentEditorEvent, KnowledgeEditorLabels,

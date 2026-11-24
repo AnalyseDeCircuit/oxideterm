@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 
 use oxideterm_ai::AiStreamEvent;
 
-use super::{AiStreamDelivery, AiStreamDeliveryEvent};
+use super::{AiStreamDelivery, AiStreamDeliveryEvent, CursorResponse, PortableStreamEvent};
 use crate::state::{
     AiContextTokenBreakdown, AiPendingCursorRequest, AiPendingUserQuestion, AiPreparedPromptUsage,
     AiWorkspaceEntity,
@@ -83,10 +83,13 @@ impl AiChatDeliveryBatch {
     /// Apply conversation-owned deliveries up to the next operation that needs
     /// the window or the live runtime. Do not advance further until that
     /// operation has had a chance to cancel or replace its generation.
-    pub(crate) fn next_host_delivery(
+    pub(crate) fn next_window_delivery(
         &mut self,
         ai: &mut AiWorkspaceEntity,
-    ) -> Option<AiStreamDelivery> {
+        i18n: &oxideterm_i18n::I18n,
+        diagnostic: impl Fn(serde_json::Value) -> serde_json::Value,
+        cx: &mut gpui::Context<AiWorkspaceEntity>,
+    ) -> Option<AiChatWindowDelivery> {
         while let Some(delivery) = self.deliveries.pop_front() {
             if !ai.chat_stream_matches(
                 delivery.generation,
@@ -96,34 +99,37 @@ impl AiChatDeliveryBatch {
                 // Dropping a stale request also drops its retained response channel.
                 continue;
             }
-            let AiStreamDelivery {
-                generation,
-                conversation_id,
-                assistant_id,
-                event,
-            } = delivery;
-            match event {
-                AiStreamDeliveryEvent::Stream(AiStreamEvent::Content(text)) => {
+            #[cfg(not(target_family = "wasm"))]
+            let delivery = match super::native::route(delivery, &mut self.deliveries) {
+                super::native::NativeDelivery::Reduce(delivery) => delivery,
+                super::native::NativeDelivery::Host(delivery) => {
+                    self.flush_text(ai);
+                    return Some(AiChatWindowDelivery::Host(delivery));
+                }
+                super::native::NativeDelivery::Expanded => continue,
+            };
+            match delivery.event {
+                PortableStreamEvent::Stream(AiStreamEvent::Content(text)) => {
                     self.push_text(
                         ai,
-                        generation,
-                        conversation_id,
-                        assistant_id,
+                        delivery.generation,
+                        delivery.conversation_id,
+                        delivery.assistant_id,
                         AiStreamTextKind::Content,
                         text,
                     );
                 }
-                AiStreamDeliveryEvent::Stream(AiStreamEvent::Thinking(text)) => {
+                PortableStreamEvent::Stream(AiStreamEvent::Thinking(text)) => {
                     self.push_text(
                         ai,
-                        generation,
-                        conversation_id,
-                        assistant_id,
+                        delivery.generation,
+                        delivery.conversation_id,
+                        delivery.assistant_id,
                         AiStreamTextKind::Thinking,
                         text,
                     );
                 }
-                AiStreamDeliveryEvent::Stream(
+                PortableStreamEvent::Stream(
                     event @ (AiStreamEvent::Usage { .. }
                     | AiStreamEvent::ProviderResponsePart { .. }
                     | AiStreamEvent::ToolCall { .. }
@@ -131,49 +137,57 @@ impl AiChatDeliveryBatch {
                 ) => {
                     self.flush_text(ai);
                     ai.apply_stream_event_state(
-                        generation,
-                        &conversation_id,
-                        &assistant_id,
+                        delivery.generation,
+                        &delivery.conversation_id,
+                        &delivery.assistant_id,
                         event,
                         None,
                     );
                 }
-                AiStreamDeliveryEvent::ToolImages(images) => {
+                PortableStreamEvent::ToolImages(images) => {
                     self.flush_text(ai);
-                    ai.update_chat_message(&conversation_id, &assistant_id, |message| {
-                        let mut attachments = oxideterm_ai::message_images(message).to_vec();
-                        for image in images {
-                            if !attachments.iter().any(|existing| existing.id == image.id) {
-                                attachments.push(image);
+                    ai.update_chat_message(
+                        &delivery.conversation_id,
+                        &delivery.assistant_id,
+                        |message| {
+                            let mut attachments = oxideterm_ai::message_images(message).to_vec();
+                            for image in images {
+                                if !attachments.iter().any(|existing| existing.id == image.id) {
+                                    attachments.push(image);
+                                }
                             }
-                        }
-                        oxideterm_ai::set_message_images(message, attachments);
-                    });
+                            oxideterm_ai::set_message_images(message, attachments);
+                        },
+                    );
                     ai.persist_chat_state();
                 }
-                AiStreamDeliveryEvent::HistoryBarrier(sender) => {
+                PortableStreamEvent::HistoryBarrier(reply) => {
                     self.flush_text(ai);
                     ai.persist_chat_state();
-                    ai.history_barrier(sender);
+                    ai.after_history_commit(reply);
                 }
-                AiStreamDeliveryEvent::Checkpoint(checkpoint) => {
+                PortableStreamEvent::Checkpoint(checkpoint) => {
                     self.flush_text(ai);
-                    ai.update_chat_message(&conversation_id, &assistant_id, |message| {
-                        oxideterm_ai::agent::set_message_checkpoint(message, &checkpoint);
-                    });
+                    ai.update_chat_message(
+                        &delivery.conversation_id,
+                        &delivery.assistant_id,
+                        |message| {
+                            oxideterm_ai::agent::set_message_checkpoint(message, &checkpoint);
+                        },
+                    );
                     ai.persist_chat_state();
                 }
-                AiStreamDeliveryEvent::PromptUsage {
+                PortableStreamEvent::PromptUsage {
                     last_user_message_id,
                     provider_id,
                     model,
                     breakdown,
                     max_tokens,
                 } => {
-                    if !ai.is_child_stream(generation) {
+                    if !ai.is_child_stream(delivery.generation) {
                         self.flush_text(ai);
                         ai.set_prepared_prompt_usage(AiPreparedPromptUsage {
-                            conversation_id,
+                            conversation_id: delivery.conversation_id,
                             last_user_message_id,
                             provider_id,
                             model,
@@ -183,15 +197,15 @@ impl AiChatDeliveryBatch {
                         });
                     }
                 }
-                AiStreamDeliveryEvent::TurnWireReplay {
+                PortableStreamEvent::TurnWireReplay {
                     scope,
                     user_override,
                     messages,
                 } => {
-                    if !ai.is_child_stream(generation) {
+                    if !ai.is_child_stream(delivery.generation) {
                         ai.record_live_turn_replay(
-                            &conversation_id,
-                            &assistant_id,
+                            &delivery.conversation_id,
+                            &delivery.assistant_id,
                             scope,
                             oxideterm_ai::stream_state::AiLiveTurnReplay {
                                 user_override,
@@ -200,30 +214,7 @@ impl AiChatDeliveryBatch {
                         );
                     }
                 }
-                event => {
-                    return Some(AiStreamDelivery {
-                        generation,
-                        conversation_id,
-                        assistant_id,
-                        event,
-                    });
-                }
-            }
-        }
-        self.flush_text(ai);
-        None
-    }
-
-    pub(crate) fn next_window_delivery(
-        &mut self,
-        ai: &mut AiWorkspaceEntity,
-        i18n: &oxideterm_i18n::I18n,
-        diagnostic: impl Fn(serde_json::Value) -> serde_json::Value,
-        cx: &mut gpui::Context<AiWorkspaceEntity>,
-    ) -> Option<AiChatWindowDelivery> {
-        while let Some(delivery) = self.next_host_delivery(ai) {
-            match delivery.event {
-                AiStreamDeliveryEvent::Guardrail {
+                PortableStreamEvent::Guardrail {
                     code,
                     message,
                     raw_text,
@@ -240,7 +231,7 @@ impl AiChatDeliveryBatch {
                         cx,
                     );
                 }
-                AiStreamDeliveryEvent::AssistantRound {
+                PortableStreamEvent::AssistantRound {
                     round_id,
                     round_number,
                     response_length,
@@ -263,7 +254,7 @@ impl AiChatDeliveryBatch {
                         &diagnostic,
                     );
                 }
-                AiStreamDeliveryEvent::RoundSummary {
+                PortableStreamEvent::RoundSummary {
                     round_id,
                     text,
                     metadata,
@@ -279,7 +270,7 @@ impl AiChatDeliveryBatch {
                         cx,
                     );
                 }
-                AiStreamDeliveryEvent::RoundStatefulMarker { round_id, marker } => {
+                PortableStreamEvent::RoundStatefulMarker { round_id, marker } => {
                     self.flush_text(ai);
                     ai.apply_ai_round_stateful_marker(
                         delivery.generation,
@@ -290,7 +281,7 @@ impl AiChatDeliveryBatch {
                         cx,
                     );
                 }
-                AiStreamDeliveryEvent::Diagnostic {
+                PortableStreamEvent::Diagnostic {
                     event_type,
                     round_id,
                     data,
@@ -306,7 +297,7 @@ impl AiChatDeliveryBatch {
                         &diagnostic,
                     );
                 }
-                AiStreamDeliveryEvent::ToolStatus {
+                PortableStreamEvent::ToolStatus {
                     tool_call_id,
                     name,
                     arguments,
@@ -350,13 +341,13 @@ impl AiChatDeliveryBatch {
                     }
                 }
 
-                AiStreamDeliveryEvent::ToolApprovalRequested {
+                PortableStreamEvent::ToolApprovalRequested {
                     tool_call_id,
                     name,
                     arguments,
                     risk,
                     summary,
-                    sender,
+                    reply,
                 } => {
                     self.flush_text(ai);
                     ai.apply_ai_tool_status(
@@ -377,7 +368,7 @@ impl AiChatDeliveryBatch {
                         &diagnostic,
                         cx,
                     );
-                    ai.register_tool_approval(delivery.generation, tool_call_id, sender);
+                    ai.register_tool_approval_decision(delivery.generation, tool_call_id, reply);
                     if ai.is_chat_stream_generation(delivery.generation) {
                         return Some(AiChatWindowDelivery::Attention {
                             generation: delivery.generation,
@@ -387,38 +378,10 @@ impl AiChatDeliveryBatch {
                         });
                     }
                 }
-                AiStreamDeliveryEvent::AcpClientEvent {
-                    event:
-                        event @ (oxideterm_ai::AcpClientEvent::SessionUpdate(_)
-                        | oxideterm_ai::AcpClientEvent::CreateElicitation { .. }
-                        | oxideterm_ai::AcpClientEvent::CompleteElicitation(_)),
-                    ..
-                } => {
-                    // Expand in place so ACP text and provider text share the same batch ordering.
-                    for event in oxideterm_ai::acp_client_event_to_ai_stream_events(event)
-                        .into_iter()
-                        .rev()
-                    {
-                        self.deliveries.push_front(AiStreamDelivery {
-                            generation: delivery.generation,
-                            conversation_id: delivery.conversation_id.clone(),
-                            assistant_id: delivery.assistant_id.clone(),
-                            event: AiStreamDeliveryEvent::Stream(event),
-                        });
-                    }
-                }
-                AiStreamDeliveryEvent::AcpClientEvent {
-                    event:
-                        oxideterm_ai::AcpClientEvent::CursorRequest {
-                            request,
-                            response_tx,
-                        },
-                    ..
-                } => {
+                PortableStreamEvent::CursorRequested { request, reply } => {
                     self.flush_text(ai);
                     if !request.valid() || !ai.is_chat_stream_generation(delivery.generation) {
-                        let _ =
-                            response_tx.send(Ok(oxideterm_ai::CursorRequest::cancelled_response()));
+                        reply.respond(oxideterm_ai::CursorRequest::cancelled_response());
                         continue;
                     }
                     let id = request.tool_call_id().to_owned();
@@ -453,7 +416,7 @@ impl AiChatDeliveryBatch {
                             assistant_id: delivery.assistant_id.clone(),
                             request,
                             selections,
-                            response_tx: Some(response_tx),
+                            response_tx: Some(reply),
                         },
                     );
                     return Some(AiChatWindowDelivery::Attention {
@@ -463,7 +426,7 @@ impl AiChatDeliveryBatch {
                         label: "ai.questions.waiting",
                     });
                 }
-                AiStreamDeliveryEvent::AcpSessionStarted {
+                PortableStreamEvent::AcpSessionStarted {
                     session_id,
                     session_metadata,
                     session_config_options,
@@ -483,16 +446,10 @@ impl AiChatDeliveryBatch {
                         cx.notify();
                     }
                 }
-                AiStreamDeliveryEvent::UserQuestionRequested {
-                    call,
-                    dispatch,
-                    sender,
-                } => {
-                    if sender.is_closed()
-                        || dispatch
-                            .as_ref()
-                            .is_some_and(|guard| guard.check().is_err())
-                    {
+                PortableStreamEvent::UserQuestionRequested { call, reply } => {
+                    let pending =
+                        AiPendingUserQuestion::new(delivery.conversation_id.clone(), reply);
+                    if !pending.active() {
                         continue;
                     }
                     self.flush_text(ai);
@@ -515,14 +472,8 @@ impl AiChatDeliveryBatch {
                         &diagnostic,
                         cx,
                     );
-                    ai.pending_user_questions.insert(
-                        (delivery.generation, call.id),
-                        AiPendingUserQuestion {
-                            conversation_id: delivery.conversation_id.clone(),
-                            dispatch,
-                            sender,
-                        },
-                    );
+                    ai.pending_user_questions
+                        .insert((delivery.generation, call.id), pending);
                     return Some(AiChatWindowDelivery::Attention {
                         generation: delivery.generation,
                         conversation_id: delivery.conversation_id,
@@ -530,12 +481,12 @@ impl AiChatDeliveryBatch {
                         label: "ai.questions.waiting",
                     });
                 }
-                AiStreamDeliveryEvent::ToolCandidateSelectionRequested {
+                PortableStreamEvent::ToolCandidateSelectionRequested {
                     tool_call_id,
                     name,
                     arguments,
                     candidates,
-                    sender,
+                    reply,
                 } => {
                     self.flush_text(ai);
                     let candidate_count = candidates.len();
@@ -564,11 +515,11 @@ impl AiChatDeliveryBatch {
                         &diagnostic,
                         cx,
                     );
-                    ai.register_tool_candidate_selection(
+                    ai.register_tool_candidate_selection_decision(
                         delivery.generation,
                         tool_call_id,
                         candidate_count,
-                        sender,
+                        reply,
                     );
                     cx.notify();
                     if ai.chat_stream_generation() == delivery.generation {
@@ -577,15 +528,18 @@ impl AiChatDeliveryBatch {
                         });
                     }
                 }
-                event => {
+                PortableStreamEvent::Stream(event) => {
                     self.flush_text(ai);
                     return Some(AiChatWindowDelivery::Host(AiStreamDelivery {
-                        event,
-                        ..delivery
+                        generation: delivery.generation,
+                        conversation_id: delivery.conversation_id,
+                        assistant_id: delivery.assistant_id,
+                        event: AiStreamDeliveryEvent::Stream(event),
                     }));
                 }
             }
         }
+        self.flush_text(ai);
         None
     }
 

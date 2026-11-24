@@ -33,6 +33,14 @@ mod snapshot;
 #[cfg(not(target_family = "wasm"))]
 pub use snapshot::*;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum AiTerminalCommandStatus {
+    Running,
+    ShellReady,
+    Completed,
+    Stale,
+}
+
 #[derive(Clone)]
 pub struct AiOrchestratorTarget {
     pub id: String,

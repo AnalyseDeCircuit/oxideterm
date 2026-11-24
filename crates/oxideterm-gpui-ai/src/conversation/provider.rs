@@ -393,7 +393,9 @@ impl<Node: Clone + Eq + Hash + 'static, Terminal: Clone + 'static>
 fn show_trim_notice(ai: &mut AiWorkspaceEntity, count: usize, cx: &mut Context<AiWorkspaceEntity>) {
     let sequence = ai.show_context_trim_notice(count);
     cx.spawn(async move |weak, cx| {
-        gpui::Timer::after(std::time::Duration::from_secs(5)).await;
+        cx.background_executor()
+            .timer(std::time::Duration::from_secs(5))
+            .await;
         let _ = weak.update(cx, |ai, cx| {
             if ai.clear_context_trim_notice(sequence) {
                 cx.notify();

@@ -13,7 +13,7 @@ use crate::state::{
 use base64::Engine as _;
 use gpui::{
     AnyElement, App, Context, Div, Entity, MouseButton, MouseDownEvent, Render, Rgba, ScrollHandle,
-    SharedString, StyledText, TextRun, Timer, Window, div, font, prelude::*, px, rgb, rgba, svg,
+    SharedString, StyledText, TextRun, Window, div, font, prelude::*, px, rgb, rgba, svg,
 };
 use oxideterm_ai::{
     AcpAuthMethod, AiReasoningLevel,
@@ -582,7 +582,7 @@ impl AiAssistantSidebarView {
             oxideterm_gpui_ui::motion::MotionDuration::Micro,
         );
         cx.spawn(async move |weak, cx| {
-            Timer::after(delay).await;
+            cx.background_executor().timer(delay).await;
             let _ = weak.update(cx, |this, cx| {
                 if this.disclosure_motions.finish(&key, generation) {
                     cx.notify();

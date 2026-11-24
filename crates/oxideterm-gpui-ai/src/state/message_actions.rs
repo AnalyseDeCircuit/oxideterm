@@ -469,7 +469,7 @@ impl AiWorkspaceEntity {
             return;
         }
         cx.spawn(async move |weak, cx| {
-            Timer::after(delay).await;
+            cx.background_executor().timer(delay).await;
             let _ = weak.update(cx, |ai, cx| {
                 if ai.finish_standard_chat_confirm_exit(kind, generation) {
                     cx.notify();
