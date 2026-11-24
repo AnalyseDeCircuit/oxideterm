@@ -1,9 +1,8 @@
+use crate::data::{ForwardRule, ForwardStats, ForwardUpdate, NodeId};
 use crate::{ForwardInput, PortDetectionViewState};
 use gpui::{App, MouseDownEvent, MouseMoveEvent, SharedString, Window};
-use oxideterm_forwarding::{ForwardRule, ForwardStats, ForwardUpdate};
 use oxideterm_gpui_ui::text_input::{TextInputAnchor, TextInputAnchorId, TextInputViewport};
 use oxideterm_i18n::I18n;
-use oxideterm_ssh::NodeId;
 use oxideterm_theme::ThemeTokens;
 use oxideterm_workspace::TabId;
 use std::{collections::HashMap, ops::Range, rc::Rc};

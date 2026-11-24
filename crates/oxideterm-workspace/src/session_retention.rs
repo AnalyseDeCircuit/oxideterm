@@ -2,8 +2,9 @@
 use std::{
     collections::{HashMap, HashSet},
     hash::Hash,
-    time::{Duration, Instant},
+    time::Duration,
 };
+use web_time::Instant;
 
 pub struct SessionRetention<K> {
     since: HashMap<K, Instant>,

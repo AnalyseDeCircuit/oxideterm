@@ -330,7 +330,7 @@ impl IdeSurface {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_family = "wasm")))]
 mod markdown_preview_tests {
     use super::*;
     use gpui::TestAppContext;
@@ -838,7 +838,10 @@ mod markdown_preview_tests {
             drop(surface);
             cx.cx.update(|_| {});
             cx.run_until_parked();
-            eprintln!("IDE_TAB_MEMORY markdown={markdown} baseline={baseline} active={active} background={background} restored={restored} closed={} restore_ms={restore_ms:.3}", allocated());
+            eprintln!(
+                "IDE_TAB_MEMORY markdown={markdown} baseline={baseline} active={active} background={background} restored={restored} closed={} restore_ms={restore_ms:.3}",
+                allocated()
+            );
         }
     }
 }

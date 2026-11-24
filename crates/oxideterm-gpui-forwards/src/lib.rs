@@ -1,6 +1,7 @@
 //! Forwarding views and per-tab interaction state. SSH transports and listeners are hosted separately.
 
 mod components;
+pub mod data;
 mod forms;
 mod helpers;
 mod model;
@@ -20,11 +21,11 @@ pub use view::ForwardsViews;
 
 use style::*;
 
+use data::{DetectedPort, ForwardRule, ForwardStats, ForwardStatus, ForwardType, NodeId};
 use gpui::{
     AnyElement, App, ClipboardItem, Context, MouseButton, MouseDownEvent, SharedString, Window,
     div, px, rgb,
 };
-use oxideterm_forwarding::{DetectedPort, ForwardRule, ForwardStats, ForwardStatus, ForwardType};
 use oxideterm_gpui_ui::{
     ConfirmDialogVariant, ConfirmDialogView,
     button::{
@@ -44,7 +45,6 @@ use oxideterm_gpui_ui::{
     },
 };
 use oxideterm_i18n::I18n;
-use oxideterm_ssh::NodeId;
 use oxideterm_workspace::TabId;
 use std::{
     collections::{HashMap, hash_map::DefaultHasher},

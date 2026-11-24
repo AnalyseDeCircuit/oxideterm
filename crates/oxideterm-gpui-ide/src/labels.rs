@@ -268,6 +268,7 @@ impl Default for IdeLabels {
 }
 
 impl IdeLabels {
+    #[cfg(not(target_family = "wasm"))]
     pub fn agent_install_status(
         &self,
         progress: oxideterm_ide_fs::AgentInstallProgress,

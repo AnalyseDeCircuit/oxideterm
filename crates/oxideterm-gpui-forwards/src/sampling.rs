@@ -1,5 +1,5 @@
-use gpui::{Context, EventEmitter, Task};
-use std::time::{Duration, Instant};
+use gpui::{Context, EventEmitter, Instant, Task};
+use std::time::Duration;
 
 pub const FORWARDS_PORT_SCAN_INTERVAL: Duration = Duration::from_secs(12);
 const STATS_REFRESH_INTERVAL: Duration = Duration::from_secs(5);

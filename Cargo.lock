@@ -7676,6 +7676,7 @@ dependencies = [
  "oxideterm-ssh",
  "oxideterm-theme",
  "oxideterm-workspace",
+ "uuid",
 ]
 
 [[package]]
@@ -8707,6 +8708,7 @@ name = "oxideterm-workspace"
 version = "2.4.1"
 dependencies = [
  "tokio",
+ "web-time",
 ]
 
 [[package]]

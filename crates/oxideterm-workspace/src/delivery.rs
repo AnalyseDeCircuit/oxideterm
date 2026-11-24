@@ -9,10 +9,11 @@ use std::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
         mpsc::{Receiver, SendError, Sender, TryRecvError},
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use tokio::sync::Notify;
+use web_time::Instant;
 
 /// Bounds one UI-thread delivery batch by both item count and elapsed time.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

@@ -9,17 +9,19 @@ version.workspace = true
 
 [dependencies]
 gpui.workspace = true
-oxideterm-audit = { path = "../oxideterm-audit" }
 oxideterm-editor-syntax = { path = "../oxideterm-editor-syntax" }
 oxideterm-gpui-editor = { path = "../oxideterm-gpui-editor" }
 oxideterm-gpui-markdown = { path = "../oxideterm-gpui-markdown" }
 oxideterm-gpui-ui = { path = "../oxideterm-gpui-ui" }
 oxideterm-ide-core = { path = "../oxideterm-ide-core" }
+oxideterm-theme = { path = "../oxideterm-theme" }
+unicode-segmentation.workspace = true
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+oxideterm-audit = { path = "../oxideterm-audit" }
 oxideterm-ide-fs = { path = "../oxideterm-ide-fs" }
 oxideterm-ssh = { path = "../oxideterm-ssh" }
-oxideterm-theme = { path = "../oxideterm-theme" }
 tokio.workspace = true
-unicode-segmentation.workspace = true
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }

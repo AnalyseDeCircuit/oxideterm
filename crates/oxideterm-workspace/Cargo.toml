@@ -8,4 +8,5 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
-tokio.workspace = true
+tokio = { version = "1.52", default-features = false, features = ["sync"] }
+web-time.workspace = true

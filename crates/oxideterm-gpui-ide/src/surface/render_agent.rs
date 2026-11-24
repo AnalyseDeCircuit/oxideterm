@@ -1,63 +1,4 @@
-
 impl IdeSurface {
-    fn render_status_bar(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        let dirty_count = self
-            .workspace
-            .tabs()
-            .iter()
-            .filter(|tab| self.is_tab_dirty(tab.id, cx))
-            .count();
-        let active_path = self
-            .workspace
-            .active_tab()
-            .and_then(|tab_id| self.workspace.buffer(tab_id))
-            .map(|buffer| match &buffer.location {
-                IdeLocation::Remote { path, .. } => path.clone(),
-                IdeLocation::Local { path } => path.display().to_string(),
-            })
-            .unwrap_or_default();
-
-        div()
-            .flex_none()
-            .h(px(oxideterm_gpui_ui::WORKSPACE_STATUS_BAR_HEIGHT))
-            .px_2()
-            .flex()
-            .items_center()
-            .justify_between()
-            .border_t_1()
-            .border_color(rgb(self.tokens.ui.border))
-            .bg(if self.runtime_settings.background_active {
-                rgba((self.tokens.ui.bg_panel << 8) | IDE_BG_ACTIVE_THEME_ALPHA)
-            } else {
-                rgb(self.tokens.ui.bg_panel)
-            })
-            .text_size(px(self.tokens.metrics.ui_text_xs))
-            .text_color(rgb(self.tokens.ui.text_muted))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .child(self.render_agent_status_trigger(cx))
-                    .when_some(self.git_branch.clone(), |this, branch| {
-                        this.child(format!("git: {branch}"))
-                    })
-                    .when(dirty_count > 0, |this| {
-                        this.child(format!("{dirty_count} unsaved"))
-                    }),
-            )
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .min_w_0()
-                    .child(div().truncate().child(active_path))
-                    .child(self.render_file_format_triggers(cx)),
-            )
-            .into_any_element()
-    }
-
     fn render_agent_status_trigger(&self, cx: &mut Context<Self>) -> AnyElement {
         if self.fs.is_bound() {
             let label = match self.fs.access() {
@@ -67,7 +8,9 @@ impl IdeSurface {
             };
             let label = if self.fs.uses_ssh_shell() {
                 format!("{} · {label}", self.labels.ssh_shell)
-            } else { label };
+            } else {
+                label
+            };
             return div().child(label).into_any_element();
         }
         let status = self.fs.status_for_node(self.node_id.as_deref());
@@ -90,10 +33,10 @@ impl IdeSurface {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event: &MouseDownEvent, _window, cx| {
-                    let Some(trigger_bounds) = this.agent_status_trigger_bounds else {
+                    let Some(trigger_bounds) = this.desktop.agent_status_trigger_bounds else {
                         return;
                     };
-                    this.agent_status_menu = Some(AgentStatusMenu { trigger_bounds });
+                    this.desktop.agent_status_menu = Some(AgentStatusMenu { trigger_bounds });
                     this.tab_context_menu = None;
                     this.tree_context_menu = None;
                     cx.stop_propagation();
@@ -106,10 +49,10 @@ impl IdeSurface {
             trigger,
             move |anchor, _window, cx| {
                 let _ = entity.update(cx, |this, cx| {
-                    if this.agent_status_trigger_bounds != Some(anchor.bounds) {
-                        this.agent_status_trigger_bounds = Some(anchor.bounds);
-                        if this.agent_status_menu.is_some() {
-                            this.agent_status_menu = Some(AgentStatusMenu {
+                    if this.desktop.agent_status_trigger_bounds != Some(anchor.bounds) {
+                        this.desktop.agent_status_trigger_bounds = Some(anchor.bounds);
+                        if this.desktop.agent_status_menu.is_some() {
+                            this.desktop.agent_status_menu = Some(AgentStatusMenu {
                                 trigger_bounds: anchor.bounds,
                             });
                             cx.notify();
@@ -122,7 +65,7 @@ impl IdeSurface {
     }
 
     fn agent_status_trigger_parts(&self, status: &AgentStatus) -> (&'static str, String, u32, f32) {
-        if self.agent_action == Some(AgentActionKind::Refresh) {
+        if self.desktop.agent_action == Some(AgentActionKind::Refresh) {
             return (
                 "lucide/hard-drive.svg",
                 "...".to_string(),
@@ -207,13 +150,9 @@ impl IdeSurface {
             })
             .child(self.render_agent_status_menu_divider())
             .when(self.agent_can_deploy(&status), |this| {
-                this.child(self.render_agent_status_menu_item(
-                    if self.agent_action == Some(AgentActionKind::Deploy) {
-                        self.spinner_icon(
-                            "ide-agent-deploy-loading",
-                            12.0,
-                            self.tokens.ui.text,
-                        )
+                this.child(self.render_status_menu_item(
+                    if self.desktop.agent_action == Some(AgentActionKind::Deploy) {
+                        self.spinner_icon("ide-agent-deploy-loading", 12.0, self.tokens.ui.text)
                     } else {
                         self.icon("lucide/rocket.svg", 12.0, self.tokens.ui.text)
                     },
@@ -228,28 +167,24 @@ impl IdeSurface {
                     },
                     false,
                     cx.listener(|this, _event, _window, cx| {
-                        this.agent_status_menu = None;
+                        this.desktop.agent_status_menu = None;
                         this.start_deploy_agent(cx);
                         cx.stop_propagation();
                     }),
                 ))
             })
             .when(matches!(status, AgentStatus::Ready { .. }), |this| {
-                this.child(self.render_agent_status_menu_item(
-                    if self.agent_action == Some(AgentActionKind::Remove) {
-                        self.spinner_icon(
-                            "ide-agent-remove-loading",
-                            12.0,
-                            TAILWIND_RED_400,
-                        )
+                this.child(self.render_status_menu_item(
+                    if self.desktop.agent_action == Some(AgentActionKind::Remove) {
+                        self.spinner_icon("ide-agent-remove-loading", 12.0, TAILWIND_RED_400)
                     } else {
                         self.icon("lucide/trash-2.svg", 12.0, TAILWIND_RED_400)
                     },
                     self.labels.agent_remove_btn.clone(),
                     true,
                     cx.listener(|this, _event, _window, cx| {
-                        this.agent_status_menu = None;
-                        this.agent_remove_confirm_open = true;
+                        this.desktop.agent_status_menu = None;
+                        this.desktop.agent_remove_confirm_open = true;
                         cx.stop_propagation();
                         cx.notify();
                     }),
@@ -262,7 +197,7 @@ impl IdeSurface {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event, _window, cx| {
-                    this.agent_status_menu = None;
+                    this.desktop.agent_status_menu = None;
                     cx.stop_propagation();
                     cx.notify();
                 }),
@@ -270,7 +205,7 @@ impl IdeSurface {
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(|this, _event, _window, cx| {
-                    this.agent_status_menu = None;
+                    this.desktop.agent_status_menu = None;
                     cx.stop_propagation();
                     cx.notify();
                 }),
@@ -317,7 +252,7 @@ impl IdeSurface {
     }
 
     fn agent_status_description(&self, status: &AgentStatus) -> String {
-        if self.agent_action == Some(AgentActionKind::Refresh) {
+        if self.desktop.agent_action == Some(AgentActionKind::Refresh) {
             return self.labels.agent_checking.clone();
         }
         match status {
@@ -431,34 +366,6 @@ impl IdeSurface {
             .into_any_element()
     }
 
-    fn render_agent_status_menu_item(
-        &self,
-        icon: AnyElement,
-        label: String,
-        danger: bool,
-        listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
-    ) -> AnyElement {
-        let text_color = if danger {
-            TAILWIND_RED_400
-        } else {
-            self.tokens.ui.text
-        };
-        div()
-            .h(px(IDE_AGENT_MENU_ITEM_HEIGHT))
-            .w_full()
-            .flex()
-            .items_center()
-            .px_2()
-            .gap_2()
-            .cursor_pointer()
-            .text_color(rgb(text_color))
-            .hover(|style| style.bg(rgb(self.tokens.ui.bg_hover)))
-            .child(icon)
-            .child(div().flex_1().truncate().child(label))
-            .on_mouse_down(MouseButton::Left, listener)
-            .into_any_element()
-    }
-
     fn render_agent_status_menu_divider(&self) -> AnyElement {
         div()
             .h(px(1.0))
@@ -497,7 +404,7 @@ impl IdeSurface {
                         .on_mouse_down(
                             MouseButton::Left,
                             cx.listener(|this, _event, _window, cx| {
-                                this.agent_remove_confirm_open = false;
+                                this.desktop.agent_remove_confirm_open = false;
                                 cx.notify();
                             }),
                         ),
@@ -510,7 +417,8 @@ impl IdeSurface {
                                 variant: ButtonVariant::Destructive,
                                 size: ButtonSize::Default,
                                 radius: ButtonRadius::Md,
-                                disabled: self.agent_action == Some(AgentActionKind::Remove),
+                                disabled: self.desktop.agent_action
+                                    == Some(AgentActionKind::Remove),
                             },
                         )
                         .on_mouse_down(
@@ -525,14 +433,14 @@ impl IdeSurface {
     }
 
     fn start_deploy_agent(&mut self, cx: &mut Context<Self>) {
-        if matches!(self.agent_action, Some(AgentActionKind::Deploy)) {
+        if matches!(self.desktop.agent_action, Some(AgentActionKind::Deploy)) {
             return;
         }
         let Some(node_id) = self.node_id.clone() else {
             return;
         };
         self.cancel_agent_sampling();
-        self.agent_action = Some(AgentActionKind::Deploy);
+        self.desktop.agent_action = Some(AgentActionKind::Deploy);
         self.runtime_settings.agent_mode = NodeAgentMode::Enabled;
         self.fs.set_mode(NodeAgentMode::Enabled);
         let fs = self.fs.clone();
@@ -553,7 +461,7 @@ impl IdeSurface {
                 {
                     return;
                 }
-                this.agent_action = None;
+                this.desktop.agent_action = None;
                 let _ = status;
                 if this.mount.is_visible() {
                     this.start_agent_watch_if_ready(cx);
@@ -566,15 +474,15 @@ impl IdeSurface {
     }
 
     fn start_remove_agent(&mut self, cx: &mut Context<Self>) {
-        if matches!(self.agent_action, Some(AgentActionKind::Remove)) {
+        if matches!(self.desktop.agent_action, Some(AgentActionKind::Remove)) {
             return;
         }
         let Some(node_id) = self.node_id.clone() else {
             return;
         };
         self.cancel_agent_sampling();
-        self.agent_action = Some(AgentActionKind::Remove);
-        self.agent_remove_confirm_open = false;
+        self.desktop.agent_action = Some(AgentActionKind::Remove);
+        self.desktop.agent_remove_confirm_open = false;
         let fs = self.fs.clone();
         let backend_runtime = self.backend_runtime.clone();
         let generation = self.generation;
@@ -591,7 +499,7 @@ impl IdeSurface {
                 {
                     return;
                 }
-                this.agent_action = None;
+                this.desktop.agent_action = None;
                 if let Err(error) = result {
                     this.last_error = Some(error.message);
                 }
@@ -614,12 +522,12 @@ impl IdeSurface {
             return;
         }
         self.start_agent_watch_if_ready(cx);
-        if self.agent_refresh_origin == Some(AgentStatusRefreshOrigin::VisibilitySampling)
-            || self.agent_poll_task.is_some()
+        if self.desktop.agent_refresh_origin == Some(AgentStatusRefreshOrigin::VisibilitySampling)
+            || self.desktop.agent_poll_task.is_some()
         {
             return;
         }
-        if self.agent_action.is_none() {
+        if self.desktop.agent_action.is_none() {
             self.refresh_agent_status(AgentStatusRefreshOrigin::VisibilitySampling, cx);
         } else {
             self.schedule_next_agent_status_poll(cx);
@@ -627,18 +535,18 @@ impl IdeSurface {
     }
 
     fn cancel_agent_sampling(&mut self) {
-        self.agent_poll_generation = self.agent_poll_generation.wrapping_add(1);
-        self.agent_poll_task = None;
-        self.agent_sampling_refresh_task = None;
-        if let Some(abort_handle) = self.agent_sampling_backend_abort.take() {
+        self.desktop.agent_poll_generation = self.desktop.agent_poll_generation.wrapping_add(1);
+        self.desktop.agent_poll_task = None;
+        self.desktop.agent_sampling_refresh_task = None;
+        if let Some(abort_handle) = self.desktop.agent_sampling_backend_abort.take() {
             // Hidden surfaces cancel only the page sampler. User-started agent
             // operations use a separate completion path and remain reliable.
             abort_handle.abort();
         }
-        if self.agent_refresh_origin == Some(AgentStatusRefreshOrigin::VisibilitySampling) {
-            self.agent_refresh_origin = None;
-            if self.agent_action == Some(AgentActionKind::Refresh) {
-                self.agent_action = None;
+        if self.desktop.agent_refresh_origin == Some(AgentStatusRefreshOrigin::VisibilitySampling) {
+            self.desktop.agent_refresh_origin = None;
+            if self.desktop.agent_action == Some(AgentActionKind::Refresh) {
+                self.desktop.agent_action = None;
             }
         }
     }
@@ -647,7 +555,7 @@ impl IdeSurface {
         if !matches!(
             self.load_state,
             IdeLoadState::Ready | IdeLoadState::Disconnected
-        ) || self.agent_action.is_some()
+        ) || self.desktop.agent_action.is_some()
             || (origin == AgentStatusRefreshOrigin::VisibilitySampling
                 && (!self.mount.is_visible()
                     || self.runtime_settings.agent_mode == NodeAgentMode::Disabled))
@@ -660,13 +568,13 @@ impl IdeSurface {
         let Some(node_id) = self.node_id.clone() else {
             return;
         };
-        self.agent_action = Some(AgentActionKind::Refresh);
-        self.agent_refresh_origin = Some(origin);
+        self.desktop.agent_action = Some(AgentActionKind::Refresh);
+        self.desktop.agent_refresh_origin = Some(origin);
         let fs = self.fs.clone();
         let backend_runtime = self.backend_runtime.clone();
         let generation = self.generation;
         let expected_node_id = node_id.clone();
-        let sampling_generation = self.agent_poll_generation;
+        let sampling_generation = self.desktop.agent_poll_generation;
         cx.notify();
         let backend_task =
             backend_runtime.spawn(async move { fs.refresh_agent_status(node_id).await });
@@ -676,20 +584,20 @@ impl IdeSurface {
             let _ = weak.update(cx, |this, cx| {
                 if this.generation != generation
                     || this.node_id.as_deref() != Some(expected_node_id.as_str())
-                    || this.agent_refresh_origin != Some(origin)
+                    || this.desktop.agent_refresh_origin != Some(origin)
                     || (origin == AgentStatusRefreshOrigin::VisibilitySampling
-                        && (this.agent_poll_generation != sampling_generation
+                        && (this.desktop.agent_poll_generation != sampling_generation
                             || !this.mount.is_visible()))
                 {
                     return;
                 }
-                if this.agent_action == Some(AgentActionKind::Refresh) {
-                    this.agent_action = None;
+                if this.desktop.agent_action == Some(AgentActionKind::Refresh) {
+                    this.desktop.agent_action = None;
                 }
-                this.agent_refresh_origin = None;
+                this.desktop.agent_refresh_origin = None;
                 if origin == AgentStatusRefreshOrigin::VisibilitySampling {
-                    this.agent_sampling_backend_abort = None;
-                    this.agent_sampling_refresh_task = None;
+                    this.desktop.agent_sampling_backend_abort = None;
+                    this.desktop.agent_sampling_refresh_task = None;
                 }
                 if this.mount.is_visible() {
                     this.start_agent_watch_if_ready(cx);
@@ -699,8 +607,8 @@ impl IdeSurface {
             });
         });
         if origin == AgentStatusRefreshOrigin::VisibilitySampling {
-            self.agent_sampling_backend_abort = Some(backend_abort);
-            self.agent_sampling_refresh_task = Some(refresh_task);
+            self.desktop.agent_sampling_backend_abort = Some(backend_abort);
+            self.desktop.agent_sampling_refresh_task = Some(refresh_task);
         } else {
             refresh_task.detach();
         }
@@ -717,13 +625,13 @@ impl IdeSurface {
         {
             return;
         }
-        self.agent_poll_generation = self.agent_poll_generation.wrapping_add(1);
-        let generation = self.agent_poll_generation;
+        self.desktop.agent_poll_generation = self.desktop.agent_poll_generation.wrapping_add(1);
+        let generation = self.desktop.agent_poll_generation;
         let delay = self.agent_poll_delay();
-        self.agent_poll_task = Some(cx.spawn(async move |weak, cx| {
+        self.desktop.agent_poll_task = Some(cx.spawn(async move |weak, cx| {
             cx.background_executor().timer(delay).await;
             let _ = weak.update(cx, |this, cx| {
-                if this.agent_poll_generation != generation || !this.mount.is_visible() {
+                if this.desktop.agent_poll_generation != generation || !this.mount.is_visible() {
                     return;
                 }
                 this.refresh_agent_status(AgentStatusRefreshOrigin::VisibilitySampling, cx);

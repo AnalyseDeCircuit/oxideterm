@@ -1,11 +1,10 @@
+use crate::data::{ForwardRule, ForwardStatus, NodeId};
 use crate::*;
 use gpui::{
     AppContext, Context, Entity, Render, TestAppContext, VisualTestContext, Window, div,
     prelude::*, px,
 };
-use oxideterm_forwarding::{ForwardRule, ForwardStatus};
 use oxideterm_i18n::{I18n, Locale};
-use oxideterm_ssh::NodeId;
 use oxideterm_workspace::TabId;
 use std::{cell::Cell, rc::Rc};
 

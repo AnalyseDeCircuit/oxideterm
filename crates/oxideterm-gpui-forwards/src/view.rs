@@ -1,3 +1,4 @@
+use crate::data::{DetectedPort, ForwardRule, ForwardType, ForwardUpdate, NodeId};
 use crate::helpers::parse_port;
 use crate::{
     ForwardingRuntimeOperation, ForwardsFrame, ForwardsPageState, ForwardsRequest,
@@ -7,13 +8,11 @@ use gpui::{
     AnyElement, App, Context, Entity, IntoElement, MouseButton, MouseDownEvent, Render, Rgba,
     Subscription, Window, div, prelude::*, px, svg,
 };
-use oxideterm_forwarding::{DetectedPort, ForwardRule, ForwardType, ForwardUpdate};
 use oxideterm_gpui_ui::{
     button::{IconButtonOptions, ToolbarButtonOptions, icon_button, toolbar_action_button},
     icons::LucideIcon,
 };
 use oxideterm_i18n::I18n;
-use oxideterm_ssh::NodeId;
 use oxideterm_theme::ThemeTokens;
 use oxideterm_workspace::TabId;
 

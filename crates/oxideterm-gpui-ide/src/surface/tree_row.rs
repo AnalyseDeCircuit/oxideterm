@@ -106,7 +106,7 @@ fn render_tree_row_virtual(
         .into_any_element()
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_family = "wasm")))]
 mod tree_selection_tests {
     use super::*;
     use gpui::TestAppContext;

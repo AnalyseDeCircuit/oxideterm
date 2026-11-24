@@ -11,6 +11,7 @@ pub(super) enum IdeModal {
     FolderPicker,
     TreeName,
     Delete,
+    #[cfg(not(target_family = "wasm"))]
     AgentRemove,
 }
 
@@ -69,6 +70,7 @@ impl Render for IdeModalLayer {
             IdeModal::FolderPicker => surface.render_folder_picker_dialog(cx),
             IdeModal::TreeName => surface.render_tree_name_input_dialog(cx),
             IdeModal::Delete => surface.render_delete_confirm_dialog(cx),
+            #[cfg(not(target_family = "wasm"))]
             IdeModal::AgentRemove => surface.render_agent_remove_confirm_dialog(cx),
         });
         let tokens = self.surface.read(cx).tokens;
@@ -117,9 +119,11 @@ impl Render for IdeModalLayer {
 
 impl IdeSurface {
     pub(super) fn active_modal(&self) -> Option<IdeModal> {
-        if self.agent_remove_confirm_open {
-            Some(IdeModal::AgentRemove)
-        } else if self.delete_confirm.is_some() {
+        #[cfg(not(target_family = "wasm"))]
+        if self.desktop.agent_remove_confirm_open {
+            return Some(IdeModal::AgentRemove);
+        }
+        if self.delete_confirm.is_some() {
             Some(IdeModal::Delete)
         } else if self.tree_name_input.is_some() {
             Some(IdeModal::TreeName)
@@ -203,7 +207,8 @@ impl IdeSurface {
                     IdeModal::Conflict => self.conflict_state = None,
                     IdeModal::FolderSwitch => self.folder_switch_confirm_open = false,
                     IdeModal::Delete => self.cancel_delete_tree_item(cx),
-                    IdeModal::AgentRemove => self.agent_remove_confirm_open = false,
+                    #[cfg(not(target_family = "wasm"))]
+                    IdeModal::AgentRemove => self.desktop.agent_remove_confirm_open = false,
                     _ => unreachable!(),
                 }
                 cx.notify();

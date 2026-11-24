@@ -99,7 +99,10 @@ impl IdeSurface {
                                 bounds,
                                 action,
                             });
-                            this.agent_status_menu = None;
+                            #[cfg(not(target_family = "wasm"))]
+                            {
+                                this.desktop.agent_status_menu = None;
+                            }
                             this.tab_context_menu = None;
                             this.tree_context_menu = None;
                             cx.stop_propagation();
@@ -174,7 +177,7 @@ impl IdeSurface {
                         FileFormatAction::SaveEncoding,
                     ),
                 ] {
-                    popup = popup.child(self.render_agent_status_menu_item(
+                    popup = popup.child(self.render_status_menu_item(
                         self.icon("lucide/chevron-right.svg", 12.0, self.tokens.ui.text_muted),
                         label,
                         false,
@@ -200,7 +203,7 @@ impl IdeSurface {
                         .workspace
                         .buffer(menu.tab_id)
                         .is_some_and(|b| b.format.line_ending == ending);
-                    popup = popup.child(self.render_agent_status_menu_item(
+                    popup = popup.child(self.render_status_menu_item(
                         self.icon(
                             if selected {
                                 "lucide/check.svg"
@@ -245,7 +248,7 @@ impl IdeSurface {
                             ""
                         }
                     );
-                    popup = popup.child(self.render_agent_status_menu_item(
+                    popup = popup.child(self.render_status_menu_item(
                         self.icon(
                             if selected {
                                 "lucide/check.svg"
@@ -347,14 +350,13 @@ impl IdeSurface {
         let revision = buffer.revision;
         let generation = self.generation;
         let fs = self.fs.clone();
-        let runtime = self.backend_runtime.clone();
+        let jobs = self.file_jobs();
         self.loading_file_tabs.insert(tab_id);
         cx.spawn(async move |weak, cx| {
             let read_location = location.clone();
-            let result = await_ide_backend(
-                runtime.spawn(async move { fs.read_file(&read_location, Some(encoding)).await }),
-            )
-            .await;
+            let result = jobs
+                .run(async move { fs.read_file(&read_location, Some(encoding)).await })
+                .await;
             let _ = weak.update(cx, |this, cx| {
                 if this.generation != generation {
                     return;
@@ -387,7 +389,7 @@ impl IdeSurface {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_family = "wasm")))]
 mod format_tests {
     use super::*;
     use gpui::TestAppContext;

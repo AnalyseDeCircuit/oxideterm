@@ -1,6 +1,7 @@
 impl IdeSurface {
     /// Returns the surface-owned filesystem scope for host-mediated AI actions.
     /// The caller must still validate its own runtime capability before use.
+    #[cfg(not(target_family = "wasm"))]
     pub fn ai_owner_file_system(&self) -> NodeAgentIdeFileSystem {
         self.fs.clone()
     }
@@ -146,7 +147,7 @@ impl IdeSurface {
         };
         self.open_remote_file(
             IdeLocation::remote(node_id, path),
-            Some(oxideterm_audit::AuditSource::Plugin),
+            Some(FileOrigin::Plugin),
             cx,
         );
         true
@@ -175,7 +176,7 @@ impl IdeSurface {
         let Some(tab_id) = self.workspace.active_tab() else {
             return false;
         };
-        self.save_tab_with_source(tab_id, oxideterm_audit::AuditSource::Plugin, cx);
+        self.save_tab_with_source(tab_id, FileOrigin::Plugin, cx);
         true
     }
 
@@ -305,6 +306,7 @@ impl IdeSurface {
         for buffer in buffers {
             self.create_editor(buffer.tab_id, &buffer.location, buffer.text.clone(), cx);
         }
+        #[cfg(not(target_family = "wasm"))]
         self.resume_agent_sampling(cx);
         cx.notify();
     }
@@ -318,6 +320,7 @@ impl IdeSurface {
         self.git_branch = result.git_branch;
         self.load_state = IdeLoadState::Ready;
         self.clear_search_cache();
+        #[cfg(not(target_family = "wasm"))]
         self.resume_agent_sampling(cx);
         cx.emit(IdeSurfaceEvent::ProjectOpened);
         let node_id = self.node_id.clone();
@@ -337,7 +340,7 @@ impl IdeSurface {
     fn load_directory(
         &mut self,
         directory: IdeLocation,
-        source: Option<oxideterm_audit::AuditSource>,
+        source: Option<FileOrigin>,
         cx: &mut Context<Self>,
     ) {
         if !self.ensure_remote_actions_ready(cx) {
@@ -350,29 +353,19 @@ impl IdeSurface {
         self.loading_paths.insert(key.clone());
         let fs = self.fs.clone();
         let generation = self.generation;
-        let backend_runtime = self.backend_runtime.clone();
-        let audit_request = source.and_then(|source| {
-            oxideterm_audit::AuditContext::current_request().or_else(|| {
-                oxideterm_audit::AuditContext::current().map(|mut context| {
-                    context.source = source;
-                    context
-                })
-            })
-        });
+        let jobs = self.file_jobs();
+        let audit_request = FileRequest::capture(source);
         cx.notify();
 
         cx.spawn(async move |weak, cx| {
             let directory_for_task = directory.clone();
-            let result = await_ide_backend(backend_runtime.spawn(async move {
-                let task = fs.list_dir(&directory_for_task);
-                let result = if let Some(context) = audit_request {
-                    context.scope(task).await
-                } else {
-                    task.await
-                };
-                result.map(sort_tree_entries)
-            }))
-            .await;
+            let result = jobs
+                .run(async move {
+                    let task = fs.list_dir(&directory_for_task);
+                    let result = audit_request.run(task).await;
+                    result.map(sort_tree_entries)
+                })
+                .await;
             let _ = weak.update(cx, |this, cx| {
                 if this.generation != generation {
                     return;
@@ -405,179 +398,6 @@ impl IdeSurface {
         // Tauri's restore-ide phase completes after the project tree is open
         // and every captured tab has either reopened or failed individually.
         cx.emit(IdeSurfaceEvent::ReconnectRestoreProjectOpened { reconnect_node_id });
-    }
-
-    fn refresh_tree_for_watch_path(&mut self, path: String, cx: &mut Context<Self>) {
-        if !self.mount.is_visible() {
-            return;
-        }
-        let Some(node_id) = self.node_id.clone() else {
-            return;
-        };
-        let Some(root_path) = self.root_path.clone() else {
-            return;
-        };
-        let path = normalize_remote_path(&path);
-        let root_path = normalize_remote_path(&root_path);
-        if path != root_path && !path.starts_with(&format!("{}/", root_path.trim_end_matches('/')))
-        {
-            return;
-        }
-        self.load_directory(IdeLocation::remote(node_id, path), None, cx);
-    }
-
-    fn start_agent_watch_if_ready(&mut self, cx: &mut Context<Self>) {
-        if !self.fs.supports_watching() {
-            return;
-        }
-        if !self.mount.is_visible() {
-            self.stop_agent_watch(cx);
-            return;
-        }
-        if self.agent_watch_stop_in_flight {
-            // Re-evaluate readiness after the retained stop operation finishes.
-            self.agent_watch_restart_requested = true;
-            return;
-        }
-        if !matches!(
-            self.fs.status_for_node(self.node_id.as_deref()),
-            AgentStatus::Ready { .. }
-        ) {
-            self.stop_agent_watch(cx);
-            return;
-        }
-        let Some(node_id) = self.node_id.clone() else {
-            return;
-        };
-        let Some(root_path) = self.root_path.clone() else {
-            return;
-        };
-        let root_path = normalize_remote_path(&root_path);
-        if self.watched_root_path.as_deref() == Some(root_path.as_str()) {
-            return;
-        }
-        if self.watched_root_path.is_some() {
-            self.stop_agent_watch_with_restart(true, cx);
-            return;
-        }
-        self.agent_watch_generation = self.agent_watch_generation.wrapping_add(1);
-        let generation = self.agent_watch_generation;
-        self.watched_root_path = Some(root_path.clone());
-        let fs = self.fs.clone();
-        let backend_runtime = self.backend_runtime.clone();
-        let watch_backend_task = backend_runtime.spawn({
-            let root_path = root_path.clone();
-            async move { fs.watch_directory(node_id, root_path, Vec::new()).await }
-        });
-        self.agent_watch_backend_abort = Some(watch_backend_task.abort_handle());
-        self.agent_watch_task = Some(cx.spawn(async move |weak, cx| {
-            let watch = await_ide_backend(watch_backend_task).await;
-
-            match watch {
-                Ok(Some(mut subscription)) => {
-                    while let Some(event) = subscription.recv().await {
-                        let refresh_path = watch_refresh_path(&root_path, &event.path);
-                        let should_continue = weak
-                            .update(cx, |this, cx| {
-                                if this.agent_watch_generation != generation
-                                    || !this.mount.is_visible()
-                                {
-                                    return false;
-                                }
-                                this.clear_search_cache();
-                                this.refresh_tree_for_watch_path(refresh_path, cx);
-                                true
-                            })
-                            .unwrap_or(false);
-                        if !should_continue {
-                            return;
-                        }
-                    }
-                }
-                Ok(None) | Err(_) => {}
-            }
-
-            let _ = weak.update(cx, |this, cx| {
-                if this.agent_watch_generation == generation
-                    && this.watched_root_path.as_deref() == Some(root_path.as_str())
-                    && this.mount.is_visible()
-                {
-                    this.agent_watch_backend_abort = None;
-                    this.schedule_agent_watch_retry(cx);
-                }
-            });
-        }));
-    }
-
-    fn schedule_agent_watch_retry(&mut self, cx: &mut Context<Self>) {
-        if !self.mount.is_visible() {
-            return;
-        }
-        let generation = self.agent_watch_generation;
-        self.agent_watch_retry_task = Some(cx.spawn(async move |weak, cx| {
-            cx.background_executor()
-                .timer(Duration::from_secs(IDE_AGENT_WATCH_RETRY_SECS))
-                .await;
-            let _ = weak.update(cx, |this, cx| {
-                if this.agent_watch_generation == generation && this.mount.is_visible() {
-                    this.watched_root_path = None;
-                    this.start_agent_watch_if_ready(cx);
-                }
-            });
-        }));
-    }
-
-    fn stop_agent_watch(&mut self, cx: &mut Context<Self>) {
-        self.stop_agent_watch_with_restart(false, cx);
-    }
-
-    fn stop_agent_watch_with_restart(&mut self, restart_after_stop: bool, cx: &mut Context<Self>) {
-        self.agent_watch_generation = self.agent_watch_generation.wrapping_add(1);
-        self.agent_watch_task = None;
-        self.agent_watch_retry_task = None;
-        if let Some(abort_handle) = self.agent_watch_backend_abort.take() {
-            // The Tokio acquisition can otherwise outlive the cancelled GPUI
-            // listener and register a consumer after the surface is released.
-            abort_handle.abort();
-        }
-        if self.agent_watch_stop_in_flight {
-            self.agent_watch_restart_requested = restart_after_stop;
-            return;
-        }
-        let Some(root_path) = self.watched_root_path.take() else {
-            return;
-        };
-        let Some(node_id) = self.node_id.clone() else {
-            return;
-        };
-        let fs = self.fs.clone();
-        let backend_runtime = self.backend_runtime.clone();
-        let release_queue = Arc::new(IdeWatchStopReleaseQueue::default());
-        self.agent_watch_stop_release_queue = Some(release_queue.clone());
-        self.agent_watch_stop_generation = self.agent_watch_stop_generation.wrapping_add(1);
-        let stop_generation = self.agent_watch_stop_generation;
-        self.agent_watch_stop_in_flight = true;
-        self.agent_watch_restart_requested = restart_after_stop;
-        self.agent_watch_stop_task = Some(cx.spawn(async move |weak, cx| {
-            let _ = backend_runtime
-                .spawn(async move {
-                    let _ = fs.stop_watch_directory(node_id, root_path).await;
-                    // Resource release belongs to this backend completion path,
-                    // not the optional GPUI weak update below.
-                    release_queue.finish_stop(&fs);
-                })
-                .await;
-            let _ = weak.update(cx, |this, cx| {
-                if this.agent_watch_stop_generation != stop_generation {
-                    return;
-                }
-                this.agent_watch_stop_in_flight = false;
-                this.agent_watch_stop_release_queue = None;
-                if std::mem::take(&mut this.agent_watch_restart_requested) {
-                    this.start_agent_watch_if_ready(cx);
-                }
-            });
-        }));
     }
 
     fn open_project_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -681,29 +501,21 @@ impl IdeSurface {
         self.search.generation = self.search.generation.wrapping_add(1);
         let generation = self.search.generation;
         let fs = self.fs.clone();
-        let backend_runtime = self.backend_runtime.clone();
-        let audit_request = oxideterm_audit::AuditContext::current_request().or_else(|| {
-            oxideterm_audit::AuditContext::current().map(|mut context| {
-                context.source = oxideterm_audit::AuditSource::User;
-                context
-            })
-        });
+        let jobs = self.file_jobs();
+        let audit_request = FileRequest::capture(Some(FileOrigin::User));
         cx.notify();
 
         cx.spawn(async move |weak, cx| {
-            let result = await_ide_backend(backend_runtime.spawn({
-                let search_query = search_query.clone();
-                async move {
-                    let task = fs.search_project(node_id, search_query);
-                    let result = if let Some(context) = audit_request {
-                        context.scope(task).await
-                    } else {
-                        task.await
-                    };
-                    result.map(group_search_matches)
-                }
-            }))
-            .await;
+            let result = jobs
+                .run({
+                    let search_query = search_query.clone();
+                    async move {
+                        let task = fs.search_project(node_id, search_query);
+                        let result = audit_request.run(task).await;
+                        result.map(group_search_matches)
+                    }
+                })
+                .await;
             let _ = weak.update(cx, |this, cx| {
                 if this.search.generation != generation {
                     return;
@@ -863,84 +675,7 @@ impl IdeSurface {
             .insert(path.clone(), self.search.query.clone());
         self.open_remote_file(
             IdeLocation::remote(node_id, path),
-            Some(oxideterm_audit::AuditSource::User),
-            cx,
-        );
-    }
-
-    fn go_to_symbol_definition(&mut self, word: String, cx: &mut Context<Self>) {
-        if !self.fs.supports_symbols() {
-            return;
-        }
-        let Some(root_path) = self.root_path.clone() else {
-            return;
-        };
-        let Some(buffer) = self
-            .workspace
-            .active_tab()
-            .and_then(|tab_id| self.workspace.buffer(tab_id))
-            .cloned()
-        else {
-            return;
-        };
-        let IdeLocation::Remote { node_id, .. } = buffer.location else {
-            return;
-        };
-        let fs = self.fs.clone();
-        let backend_runtime = self.backend_runtime.clone();
-        let generation = self.generation;
-
-        cx.spawn(async move |weak, cx| {
-            let result = backend_runtime
-                .spawn(async move {
-                    // Tauri runs symbol lookup as an agent-side best-effort
-                    // RPC. Keep failures non-fatal so modifier-click remains
-                    // a lightweight editor gesture.
-                    fs.node_agent_symbol_definitions(node_id, root_path, word)
-                        .await
-                })
-                .await
-                .map_err(|error| error.to_string())
-                .and_then(|result| result.map_err(|error| error.to_string()));
-            let _ = weak.update(cx, |this, cx| {
-                if this.generation != generation {
-                    return;
-                }
-                match result {
-                    Ok(definitions) => {
-                        if let Some(definition) = definitions.into_iter().next() {
-                            this.open_symbol_definition(definition, cx);
-                        }
-                    }
-                    Err(_error) => {
-                        // Tauri treats modifier-click symbol lookup as a
-                        // best-effort editor gesture, so failed lookups should
-                        // not interrupt normal editing.
-                    }
-                }
-            });
-        })
-        .detach();
-    }
-
-    fn open_symbol_definition(
-        &mut self,
-        definition: oxideterm_ide_fs::NodeAgentSymbolInfo,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(node_id) = self.node_id.clone() else {
-            return;
-        };
-        self.pending_editor_reveals.insert(
-            definition.path.clone(),
-            PendingEditorReveal {
-                line: definition.line,
-                column: definition.column,
-            },
-        );
-        self.open_remote_file(
-            IdeLocation::remote(node_id, definition.path),
-            Some(oxideterm_audit::AuditSource::User),
+            Some(FileOrigin::User),
             cx,
         );
     }
@@ -1044,15 +779,11 @@ impl IdeSurface {
                     let _ = self.workspace.set_tree_expanded(&entry.location, false);
                     cx.notify();
                 } else {
-                    self.load_directory(
-                        entry.location,
-                        Some(oxideterm_audit::AuditSource::User),
-                        cx,
-                    );
+                    self.load_directory(entry.location, Some(FileOrigin::User), cx);
                 }
             }
             FileKind::File | FileKind::Symlink | FileKind::Other => {
-                self.open_remote_file(entry.location, Some(oxideterm_audit::AuditSource::User), cx);
+                self.open_remote_file(entry.location, Some(FileOrigin::User), cx);
             }
         }
     }
@@ -1060,7 +791,7 @@ impl IdeSurface {
     fn open_remote_file(
         &mut self,
         location: IdeLocation,
-        source: Option<oxideterm_audit::AuditSource>,
+        source: Option<FileOrigin>,
         cx: &mut Context<Self>,
     ) {
         if !self.ensure_remote_actions_ready(cx) {
@@ -1103,33 +834,23 @@ impl IdeSurface {
         self.loading_paths.insert(key.clone());
         let fs = self.fs.clone();
         let generation = self.generation;
-        let backend_runtime = self.backend_runtime.clone();
-        let audit_request = source.and_then(|source| {
-            oxideterm_audit::AuditContext::current_request().or_else(|| {
-                oxideterm_audit::AuditContext::current().map(|mut context| {
-                    context.source = source;
-                    context
-                })
-            })
-        });
+        let jobs = self.file_jobs();
+        let audit_request = FileRequest::capture(source);
         cx.notify();
 
         let encoding = remote_path(&location)
             .and_then(|path| self.pending_restore_file_formats.get(path))
             .map(|format| format.encoding.clone());
         cx.spawn(async move |weak, cx| {
-            let result = await_ide_backend(backend_runtime.spawn({
-                let location = location.clone();
-                async move {
-                    let task = open_text_file(fs, location, encoding);
-                    if let Some(context) = audit_request {
-                        context.scope(task).await
-                    } else {
-                        task.await
+            let result = jobs
+                .run({
+                    let location = location.clone();
+                    async move {
+                        let task = open_text_file(fs, location, encoding);
+                        audit_request.run(task).await
                     }
-                }
-            }))
-            .await;
+                })
+                .await;
             let _ = weak.update(cx, |this, cx| {
                 if this.generation != generation {
                     return;
@@ -1201,9 +922,9 @@ impl IdeSurface {
             IdeLocation::Remote { path, .. } => std::path::PathBuf::from(path),
         };
         // The IDE owns this editor; callbacks must not retain the IDE in return.
-        let surface = cx.weak_entity();
-        let save_surface = surface.clone();
-        let symbol_surface = surface;
+        let save_surface = cx.weak_entity();
+        #[cfg(not(target_family = "wasm"))]
+        let symbol_surface = save_surface.clone();
         let cache_active = self.mount.is_visible()
             && self.workspace.active_tab() == Some(tab_id)
             && !self.is_markdown_preview();
@@ -1235,6 +956,7 @@ impl IdeSurface {
                 });
                 Ok(())
             }));
+            #[cfg(not(target_family = "wasm"))]
             editor.set_on_modified_word_click(Box::new(move |word, _window, cx| {
                 let _ = symbol_surface.update(cx, |surface, cx| {
                     surface.go_to_symbol_definition(word, cx);
@@ -1318,7 +1040,7 @@ impl IdeSurface {
             && let Some(previous_tab_id) = previous
             && self.is_tab_dirty(previous_tab_id, cx)
         {
-            self.save_tab_with_source(previous_tab_id, oxideterm_audit::AuditSource::System, cx);
+            self.save_tab_with_source(previous_tab_id, FileOrigin::System, cx);
         }
         let _ = self.workspace.set_active_tab(tab_id);
         self.sync_tab_render_caches(cx);
@@ -1530,44 +1252,45 @@ impl IdeSurface {
         }
 
         let fs = self.fs.clone();
-        let backend_runtime = self.backend_runtime.clone();
+        let file_jobs = self.file_jobs();
         let generation = self.generation;
         let operation = clipboard.operation;
         cx.notify();
 
         cx.spawn(async move |weak, cx| {
-            let delivery = await_ide_backend(backend_runtime.spawn({
-                let node_id = node_id.clone();
-                async move {
-                    let mut completed = Vec::new();
-                    for (location, source_path, target_path) in jobs {
-                        let result = match operation {
-                            TreeClipboardOperation::Copy => {
-                                fs.copy_item(
-                                    node_id.clone(),
-                                    source_path.clone(),
-                                    target_path.clone(),
-                                )
-                                .await
+            let delivery = file_jobs
+                .run({
+                    let node_id = node_id.clone();
+                    async move {
+                        let mut completed = Vec::new();
+                        for (location, source_path, target_path) in jobs {
+                            let result = match operation {
+                                TreeClipboardOperation::Copy => {
+                                    fs.copy_item(
+                                        node_id.clone(),
+                                        source_path.clone(),
+                                        target_path.clone(),
+                                    )
+                                    .await
+                                }
+                                TreeClipboardOperation::Cut => {
+                                    fs.rename_item(
+                                        node_id.clone(),
+                                        source_path.clone(),
+                                        target_path.clone(),
+                                    )
+                                    .await
+                                }
+                            };
+                            if let Err(error) = result {
+                                return Ok((completed, Some(error)));
                             }
-                            TreeClipboardOperation::Cut => {
-                                fs.rename_item(
-                                    node_id.clone(),
-                                    source_path.clone(),
-                                    target_path.clone(),
-                                )
-                                .await
-                            }
-                        };
-                        if let Err(error) = result {
-                            return Ok((completed, Some(error)));
+                            completed.push((location, source_path, target_path));
                         }
-                        completed.push((location, source_path, target_path));
+                        Ok((completed, None))
                     }
-                    Ok((completed, None))
-                }
-            }))
-            .await;
+                })
+                .await;
             let _ = weak.update(cx, |this, cx| {
                 if this.generation != generation {
                     return;
@@ -1611,6 +1334,7 @@ impl IdeSurface {
                                 cx,
                             );
                         }
+                        #[cfg(not(target_family = "wasm"))]
                         this.start_agent_watch_if_ready(cx);
                     }
                     Err(error) => {
@@ -1707,7 +1431,7 @@ impl IdeSurface {
         let parent_path = input.parent_path.clone();
         let fs = self.fs.clone();
         let generation = self.generation;
-        let backend_runtime = self.backend_runtime.clone();
+        let jobs = self.file_jobs();
         input.submitting = true;
         input.error = None;
         self.tree_name_input = Some(input.clone());
@@ -1717,39 +1441,40 @@ impl IdeSurface {
             let node_id_for_task = node_id.clone();
             let new_path_for_task = new_path.clone();
             let old_location_for_task = old_location.clone();
-            let result = await_ide_backend(backend_runtime.spawn({
-                async move {
-                    match input.kind {
-                        TreeNameInputKind::NewFile => fs
-                            .create_file(node_id_for_task, new_path_for_task.clone())
-                            .await
-                            .map(|_| ()),
-                        TreeNameInputKind::NewFolder => {
-                            fs.create_folder(node_id_for_task, new_path_for_task).await
-                        }
-                        TreeNameInputKind::Rename => {
-                            if let IdeLocation::Remote { path: old_path, .. } =
-                                &old_location_for_task
-                            {
-                                if normalize_remote_path(old_path)
-                                    == normalize_remote_path(&new_path_for_task)
-                                {
-                                    return Ok(());
-                                }
-                                fs.rename_item(
-                                    node_id_for_task,
-                                    old_path.clone(),
-                                    new_path_for_task.clone(),
-                                )
+            let result = jobs
+                .run({
+                    async move {
+                        match input.kind {
+                            TreeNameInputKind::NewFile => fs
+                                .create_file(node_id_for_task, new_path_for_task.clone())
                                 .await
-                            } else {
-                                Ok(())
+                                .map(|_| ()),
+                            TreeNameInputKind::NewFolder => {
+                                fs.create_folder(node_id_for_task, new_path_for_task).await
+                            }
+                            TreeNameInputKind::Rename => {
+                                if let IdeLocation::Remote { path: old_path, .. } =
+                                    &old_location_for_task
+                                {
+                                    if normalize_remote_path(old_path)
+                                        == normalize_remote_path(&new_path_for_task)
+                                    {
+                                        return Ok(());
+                                    }
+                                    fs.rename_item(
+                                        node_id_for_task,
+                                        old_path.clone(),
+                                        new_path_for_task.clone(),
+                                    )
+                                    .await
+                                } else {
+                                    Ok(())
+                                }
                             }
                         }
                     }
-                }
-            }))
-            .await;
+                })
+                .await;
             let _ = weak.update(cx, |this, cx| {
                 if this.generation != generation {
                     return;
@@ -1776,6 +1501,7 @@ impl IdeSurface {
                         if input.kind == TreeNameInputKind::NewFile {
                             this.open_remote_file(IdeLocation::remote(node_id, new_path), None, cx);
                         }
+                        #[cfg(not(target_family = "wasm"))]
                         this.start_agent_watch_if_ready(cx);
                     }
                     Err(error) => {
@@ -1957,7 +1683,7 @@ impl IdeSurface {
         confirm.deleting = true;
         self.delete_confirm = Some(confirm.clone());
         let fs = self.fs.clone();
-        let backend_runtime = self.backend_runtime.clone();
+        let jobs = self.file_jobs();
         let parents = confirm
             .entries
             .iter()
@@ -1973,16 +1699,17 @@ impl IdeSurface {
         cx.notify();
 
         cx.spawn(async move |weak, cx| {
-            let result = await_ide_backend(backend_runtime.spawn(async move {
-                for entry in confirm.entries {
-                    if let IdeLocation::Remote { node_id, path } = entry.location {
-                        fs.delete_item(node_id, path, entry.kind == FileKind::Directory)
-                            .await?;
+            let result = jobs
+                .run(async move {
+                    for entry in confirm.entries {
+                        if let IdeLocation::Remote { node_id, path } = entry.location {
+                            fs.delete_item(node_id, path, entry.kind == FileKind::Directory)
+                                .await?;
+                        }
                     }
-                }
-                Ok(())
-            }))
-            .await;
+                    Ok(())
+                })
+                .await;
             let _ = weak.update(cx, |this, cx| {
                 if this.generation != generation {
                     return;
@@ -1997,6 +1724,7 @@ impl IdeSurface {
                 match result {
                     Ok(()) => {
                         if root_path.as_deref() == this.root_path.as_deref() {
+                            #[cfg(not(target_family = "wasm"))]
                             this.start_agent_watch_if_ready(cx);
                         }
                     }
@@ -2103,13 +1831,13 @@ impl IdeSurface {
     }
 
     fn save_tab(&mut self, tab_id: EditorTabId, cx: &mut Context<Self>) {
-        self.save_tab_with_source(tab_id, oxideterm_audit::AuditSource::User, cx);
+        self.save_tab_with_source(tab_id, FileOrigin::User, cx);
     }
 
     fn save_tab_with_source(
         &mut self,
         tab_id: EditorTabId,
-        source: oxideterm_audit::AuditSource,
+        source: FileOrigin,
         cx: &mut Context<Self>,
     ) {
         self.sync_editor_to_workspace(tab_id, cx);
@@ -2123,13 +1851,13 @@ impl IdeSurface {
         cx: &mut Context<Self>,
     ) {
         let _ = self.workspace.replace_buffer_text(tab_id, text);
-        self.save_tab_current(tab_id, oxideterm_audit::AuditSource::User, cx);
+        self.save_tab_current(tab_id, FileOrigin::User, cx);
     }
 
     fn save_tab_current(
         &mut self,
         tab_id: EditorTabId,
-        source: oxideterm_audit::AuditSource,
+        source: FileOrigin,
         cx: &mut Context<Self>,
     ) {
         if let Some(request) = self.prepare_file_save(tab_id, source, cx) {
@@ -2140,7 +1868,7 @@ impl IdeSurface {
     fn prepare_file_save(
         &mut self,
         tab_id: EditorTabId,
-        source: oxideterm_audit::AuditSource,
+        source: FileOrigin,
         cx: &mut Context<Self>,
     ) -> Option<FileSaveRequest> {
         let close_request = self.save_after_close.take();
@@ -2151,12 +1879,7 @@ impl IdeSurface {
             return None;
         }
         let buffer = self.workspace.buffer(tab_id)?.clone();
-        let audit_request = oxideterm_audit::AuditContext::current_request().or_else(|| {
-            oxideterm_audit::AuditContext::current().map(|mut context| {
-                context.source = source;
-                context
-            })
-        });
+        let audit_request = FileRequest::capture(Some(source));
         if self.saving_tabs.contains(&tab_id) {
             self.pending_saves
                 .entry(tab_id)
@@ -2184,7 +1907,7 @@ impl IdeSurface {
 
     fn dispatch_file_save(&mut self, request: FileSaveRequest, cx: &mut Context<Self>) {
         let fs = self.fs.clone();
-        let backend_runtime = self.backend_runtime.clone();
+        let jobs = self.file_jobs();
         let generation = self.generation;
         let buffer = request.buffer.clone();
         let audit_request = request.audit_request.clone();
@@ -2194,8 +1917,8 @@ impl IdeSurface {
             } else {
                 WriteMode::CreateOrReplace
             };
-            let result = backend_runtime
-                .spawn(async move {
+            let result = jobs
+                .run(async move {
                     let task = async {
                         match fs
                             .write_file(
@@ -2219,22 +1942,10 @@ impl IdeSurface {
                             Err(error) => Err((error, None)),
                         }
                     };
-                    if let Some(context) = audit_request {
-                        context.scope(task).await
-                    } else {
-                        task.await
-                    }
+                    Ok(audit_request.run(task).await)
                 })
                 .await
-                .unwrap_or_else(|error| {
-                    Err((
-                        IdeFileError::new(
-                            IdeFileErrorKind::Other,
-                            format!("IDE backend task failed: {error}"),
-                        ),
-                        None,
-                    ))
-                });
+                .unwrap_or_else(|error| Err((error, None)));
             let _ = weak.update(cx, |this, cx| {
                 if this.generation != generation {
                     return;
@@ -2393,11 +2104,12 @@ impl IdeSurface {
     }
 
     fn clear_conflict(&mut self, cx: &mut Context<Self>) {
+        #[cfg(not(target_family = "wasm"))]
         if let Some(conflict) = &self.conflict_state
             && let Some(buffer) = self.workspace.buffer(conflict.tab_id)
             && let Some(mut context) = oxideterm_audit::AuditContext::current()
         {
-            context.source = oxideterm_audit::AuditSource::User;
+            context.source = FileOrigin::User;
             context
                 .operation(
                     oxideterm_audit::AuditCategory::File,
@@ -2446,28 +2158,13 @@ impl IdeSurface {
         }
         self.saving_tabs.insert(conflict.tab_id);
         let fs = self.fs.clone();
-        let backend_runtime = self.backend_runtime.clone();
+        let jobs = self.file_jobs();
         let generation = self.generation;
         let conflict_location = buffer.location.clone();
         let saved_text = buffer.text.clone();
         let saved_revision = buffer.revision;
         let saved_format = buffer.format.clone();
-        let audit_context = oxideterm_audit::AuditContext::current_request().or_else(|| {
-            oxideterm_audit::AuditContext::current().map(|mut context| {
-                context.source = oxideterm_audit::AuditSource::User;
-                context
-            })
-        });
-        let audit = oxideterm_audit::AuditOperation::in_context(
-            audit_context.as_ref(),
-            oxideterm_audit::AuditCategory::File,
-            "file_conflict_overwrite",
-            Some(&buffer.location.stable_key()),
-        );
-        let child_context = audit_context.map(|mut context| {
-            context.parent_id = audit.id().map(str::to_owned);
-            context
-        });
+        let audit = ConflictRequest::new("file_conflict_overwrite", &buffer.location);
         cx.notify();
 
         cx.spawn(async move |weak, cx| {
@@ -2476,27 +2173,18 @@ impl IdeSurface {
             } else {
                 WriteMode::CreateOrReplace
             };
-            let result = await_ide_backend(backend_runtime.spawn(async move {
-                let task =
-                    force_write_conflict(&fs, &buffer.location, &buffer.text, &buffer.format, mode);
-                let result = if let Some(context) = child_context {
-                    context.scope(task).await
-                } else {
-                    task.await
-                };
-                audit.finish(
-                    if result.is_ok() {
-                        oxideterm_audit::AuditOutcome::Succeeded
-                    } else {
-                        oxideterm_audit::AuditOutcome::Failed
-                    },
-                    oxideterm_audit::AuditEvidence::Protocol,
-                    None,
-                    result.as_ref().ok().and_then(|version| version.size_bytes),
-                );
-                result
-            }))
-            .await;
+            let result = jobs
+                .run(async move {
+                    let task = force_write_conflict(
+                        &fs,
+                        &buffer.location,
+                        &buffer.text,
+                        &buffer.format,
+                        mode,
+                    );
+                    audit.run(task, |version| version.size_bytes).await
+                })
+                .await;
             let _ = weak.update(cx, |this, cx| {
                 if this.generation != generation {
                     return;
@@ -2589,51 +2277,19 @@ impl IdeSurface {
             return;
         };
         let fs = self.fs.clone();
-        let backend_runtime = self.backend_runtime.clone();
+        let jobs = self.file_jobs();
         let generation = self.generation;
         let conflict_location = buffer.location.clone();
-        let audit_context = oxideterm_audit::AuditContext::current_request().or_else(|| {
-            oxideterm_audit::AuditContext::current().map(|mut context| {
-                context.source = oxideterm_audit::AuditSource::User;
-                context
-            })
-        });
-        let audit = oxideterm_audit::AuditOperation::in_context(
-            audit_context.as_ref(),
-            oxideterm_audit::AuditCategory::File,
-            "file_conflict_reload",
-            Some(&buffer.location.stable_key()),
-        );
-        let child_context = audit_context.map(|mut context| {
-            context.parent_id = audit.id().map(str::to_owned);
-            context
-        });
+        let audit = ConflictRequest::new("file_conflict_reload", &buffer.location);
         cx.notify();
 
         cx.spawn(async move |weak, cx| {
-            let result = await_ide_backend(backend_runtime.spawn(async move {
-                let task = fs.read_file(&buffer.location, Some(&buffer.format.encoding));
-                let result = if let Some(context) = child_context {
-                    context.scope(task).await
-                } else {
-                    task.await
-                };
-                audit.finish(
-                    if result.is_ok() {
-                        oxideterm_audit::AuditOutcome::Succeeded
-                    } else {
-                        oxideterm_audit::AuditOutcome::Failed
-                    },
-                    oxideterm_audit::AuditEvidence::Protocol,
-                    None,
-                    result
-                        .as_ref()
-                        .ok()
-                        .and_then(|file| file.version.size_bytes),
-                );
-                result
-            }))
-            .await;
+            let result = jobs
+                .run(async move {
+                    let task = fs.read_file(&buffer.location, Some(&buffer.format.encoding));
+                    audit.run(task, |file| file.version.size_bytes).await
+                })
+                .await;
             let _ = weak.update(cx, |this, cx| {
                 if this.generation != generation
                     || this
@@ -2742,7 +2398,8 @@ impl IdeSurface {
 }
 
 async fn force_write_conflict(
-    fs: &impl AsyncIdeFileSystem,
+    #[cfg(not(target_family = "wasm"))] fs: &impl AsyncIdeFileSystem,
+    #[cfg(target_family = "wasm")] fs: &FileHost,
     location: &IdeLocation,
     text: &SharedText,
     format: &oxideterm_ide_core::TextFileFormat,
@@ -3080,7 +2737,7 @@ mod text_input_tests {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_family = "wasm")))]
 mod conflict_overwrite_tests {
     use std::sync::Mutex;
 
@@ -3211,7 +2868,7 @@ fn ide_plugin_file_path(location: &IdeLocation) -> String {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_family = "wasm")))]
 mod shared_text_tests {
     use super::*;
     use gpui::TestAppContext;
@@ -3513,7 +3170,7 @@ mod shared_text_tests {
             assert_eq!(editor.read(cx).buffer().text(), "original");
         });
         surface.update(cx, |surface, cx| {
-            surface.agent_remove_confirm_open = true;
+            surface.desktop.agent_remove_confirm_open = true;
             cx.notify();
         });
         cx.update(|window, cx| {
@@ -3546,7 +3203,9 @@ mod shared_text_tests {
                 let tab = surface.workspace.active_tab().unwrap();
                 match kind {
                     modal::IdeModal::FolderSwitch => surface.folder_switch_confirm_open = true,
-                    modal::IdeModal::AgentRemove => surface.agent_remove_confirm_open = true,
+                    modal::IdeModal::AgentRemove => {
+                        surface.desktop.agent_remove_confirm_open = true
+                    }
                     modal::IdeModal::Delete => surface.request_delete_tree_item(
                         IdeLocation::remote("save-test", "/repo/text.txt"),
                         "text.txt".into(),

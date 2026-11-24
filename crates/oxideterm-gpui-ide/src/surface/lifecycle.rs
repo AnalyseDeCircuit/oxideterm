@@ -1,34 +1,31 @@
 impl IdeSurface {
     pub fn new(
-        fs: NodeAgentIdeFileSystem,
+        #[cfg(not(target_family = "wasm"))] fs: NodeAgentIdeFileSystem,
+        #[cfg(target_family = "wasm")] fs: std::rc::Rc<dyn PortableIdeHost>,
         tokens: ThemeTokens,
         labels: IdeLabels,
         runtime_settings: IdeRuntimeSettings,
-        backend_runtime: Arc<tokio::runtime::Runtime>,
+        #[cfg(not(target_family = "wasm"))] backend_runtime: Arc<tokio::runtime::Runtime>,
         cx: &mut Context<Self>,
     ) -> Self {
         // Node surfaces own independent scopes on the shared transport. A shell
         // surface adopts the exclusive PTY lease owner; later scoped clients
         // cannot shut down that owner's channel when they release themselves.
-        let fs = if fs.is_bound() {
-            fs
-        } else {
-            fs.scoped_owner()
-        };
+        #[cfg(not(target_family = "wasm"))]
+        let fs = if fs.is_bound() { fs } else { fs.scoped_owner() };
         Self {
             workspace: IdeWorkspace::new(),
             shell_return_requested: false,
-            access_request: None,
-            backend_binding_abort: None,
-            agent_install_progress: None,
-            agent_install_task: None,
             fs,
             tokens,
             labels,
             runtime_settings,
             focus_handle: cx.focus_handle(),
             modal_focus_handle: cx.focus_handle(),
+            #[cfg(not(target_family = "wasm"))]
             backend_runtime,
+            #[cfg(not(target_family = "wasm"))]
+            desktop: DesktopSession::default(),
             load_state: IdeLoadState::Empty,
             node_id: None,
             root_path: None,
@@ -68,28 +65,9 @@ impl IdeSurface {
             delete_confirm: None,
             tree_clipboard: None,
             tab_drag: None,
-            agent_status_menu: None,
             file_format_menu: None,
             file_format_bounds: [None; 2],
-            agent_status_trigger_bounds: None,
-            agent_remove_confirm_open: false,
-            agent_action: None,
-            agent_refresh_origin: None,
             mount: IdeSurfaceMount::default(),
-            agent_poll_generation: 0,
-            agent_poll_task: None,
-            agent_sampling_refresh_task: None,
-            agent_sampling_backend_abort: None,
-            agent_watch_generation: 0,
-            watched_root_path: None,
-            agent_watch_task: None,
-            agent_watch_retry_task: None,
-            agent_watch_stop_task: None,
-            agent_watch_backend_abort: None,
-            agent_watch_stop_in_flight: false,
-            agent_watch_restart_requested: false,
-            agent_watch_stop_generation: 0,
-            agent_watch_stop_release_queue: None,
         }
     }
 
@@ -105,10 +83,12 @@ impl IdeSurface {
         if self.mount == mount {
             return;
         }
+        #[cfg(not(target_family = "wasm"))]
         let was_visible = self.mount.is_visible();
         self.finish_tree_resize(cx);
         self.mount = mount;
         self.sync_tab_render_caches(cx);
+        #[cfg(not(target_family = "wasm"))]
         if mount.is_visible() {
             if !was_visible {
                 // Mount visibility controls only page sampling. User operations
@@ -127,20 +107,30 @@ impl IdeSurface {
         runtime_settings: IdeRuntimeSettings,
         cx: &mut Context<Self>,
     ) {
-        let previous_agent_mode = self.runtime_settings.agent_mode;
-        let mut runtime_settings = runtime_settings;
-        if self.fs.is_bound() {
-            runtime_settings.agent_mode = if self.fs.access() == oxideterm_ide_fs::RemoteAccess::Sftp { NodeAgentMode::Disabled } else { NodeAgentMode::Enabled };
-        }
-        let next_agent_mode = runtime_settings.agent_mode;
+        #[cfg(not(target_family = "wasm"))]
+        let (previous_agent_mode, runtime_settings) = {
+            let mut settings = runtime_settings;
+            if self.fs.is_bound() {
+                settings.agent_mode = if self.fs.access() == oxideterm_ide_fs::RemoteAccess::Sftp {
+                    NodeAgentMode::Disabled
+                } else {
+                    NodeAgentMode::Enabled
+                };
+            }
+            (self.runtime_settings.agent_mode, settings)
+        };
         self.tokens = tokens;
         self.runtime_settings = runtime_settings;
-        self.fs.set_mode(next_agent_mode);
-        if next_agent_mode == NodeAgentMode::Disabled {
-            self.cancel_agent_sampling();
-            self.stop_agent_watch(cx);
-        } else if previous_agent_mode == NodeAgentMode::Disabled && self.mount.is_visible() {
-            self.resume_agent_sampling(cx);
+        #[cfg(not(target_family = "wasm"))]
+        {
+            let mode = self.runtime_settings.agent_mode;
+            self.fs.set_mode(mode);
+            if mode == NodeAgentMode::Disabled {
+                self.cancel_agent_sampling();
+                self.stop_agent_watch(cx);
+            } else if previous_agent_mode == NodeAgentMode::Disabled && self.mount.is_visible() {
+                self.resume_agent_sampling(cx);
+            }
         }
         for editor in self.editors.values() {
             apply_editor_runtime_settings(editor, self.tokens, &self.runtime_settings, cx);
@@ -153,6 +143,7 @@ impl IdeSurface {
         self.workspace.snapshot().ok()
     }
 
+    #[cfg(not(target_family = "wasm"))]
     pub fn reconnect_snapshot(&mut self, cx: &mut Context<Self>) -> Option<ReconnectIdeSnapshot> {
         if self.fs.terminal_session_id().is_some() {
             return None;
@@ -218,14 +209,17 @@ impl IdeSurface {
     ) {
         let node_id = node_id.into();
         let root_path = root_path.into();
-        self.cancel_agent_sampling();
-        if let Some(previous_node_id) = self.node_id.clone()
-            && previous_node_id != node_id
+        #[cfg(not(target_family = "wasm"))]
         {
-            self.stop_agent_watch(cx);
-            self.release_ide_node_after_watch_stop(previous_node_id);
-        } else if self.root_path.as_deref() != Some(root_path.as_str()) {
-            self.stop_agent_watch(cx);
+            self.cancel_agent_sampling();
+            if let Some(previous_node_id) = self.node_id.clone()
+                && previous_node_id != node_id
+            {
+                self.stop_agent_watch(cx);
+                self.release_ide_node_after_watch_stop(previous_node_id);
+            } else if self.root_path.as_deref() != Some(root_path.as_str()) {
+                self.stop_agent_watch(cx);
+            }
         }
         if self.pending_restore_files.is_empty() {
             self.pending_restore_dirty_contents.clear();
@@ -247,32 +241,30 @@ impl IdeSurface {
         self.tree_name_input = None;
         self.delete_confirm = None;
         self.tree_clipboard = None;
-        self.agent_action = None;
+        #[cfg(not(target_family = "wasm"))]
+        {
+            self.desktop.agent_action = None;
+        }
         self.editors.clear();
         self.markdown_previews.clear();
         self.workspace = IdeWorkspace::new();
         cx.notify();
 
         let fs = self.fs.clone();
-        let backend_runtime = self.backend_runtime.clone();
-        let audit_request = self.pending_reconnect_restore_node_id.is_none().then(|| {
-            oxideterm_audit::AuditContext::current_request().or_else(|| {
-                oxideterm_audit::AuditContext::current().map(|mut context| {
-                    context.source = oxideterm_audit::AuditSource::User;
-                    context
-                })
-            })
-        }).flatten();
+        let jobs = self.file_jobs();
+        let request = FileRequest::capture(
+            self.pending_reconnect_restore_node_id
+                .is_none()
+                .then_some(FileOrigin::User),
+        );
         cx.spawn(async move |weak, cx| {
-            let result = await_ide_backend(backend_runtime.spawn(async move {
-                let task = open_project_with_root_listing(fs, node_id, root_path);
-                if let Some(context) = audit_request {
-                    context.scope(task).await
-                } else {
-                    task.await
-                }
-            }))
-            .await;
+            let result = jobs
+                .run(async move {
+                    request
+                        .run(open_project_with_root_listing(fs, node_id, root_path))
+                        .await
+                })
+                .await;
             let _ = weak.update(cx, |this, cx| {
                 if this.generation != generation {
                     return;
@@ -314,6 +306,7 @@ impl IdeSurface {
         self.open_remote_project(node_id, root_path, cx);
     }
 
+    #[cfg(not(target_family = "wasm"))]
     pub fn release_remote_session(&mut self, cx: &mut Context<Self>) {
         self.cancel_backend_binding();
         self.cancel_agent_sampling();
@@ -329,11 +322,12 @@ impl IdeSurface {
         }
     }
 
+    #[cfg(not(target_family = "wasm"))]
     fn release_ide_node_after_watch_stop(&mut self, node_id: String) {
-        if self.agent_watch_stop_in_flight {
+        if self.desktop.agent_watch_stop_in_flight {
             // Keep the node consumer until watch/stop has used the existing
             // agent session; releasing first would turn cleanup into a no-op.
-            if let Some(release_queue) = self.agent_watch_stop_release_queue.as_ref() {
+            if let Some(release_queue) = self.desktop.agent_watch_stop_release_queue.as_ref() {
                 release_queue.request_release(&self.fs, node_id);
             } else {
                 self.fs.release_ide_session_for_node(&node_id);
@@ -343,6 +337,7 @@ impl IdeSurface {
         }
     }
 
+    #[cfg(not(target_family = "wasm"))]
     pub fn mark_connection_interrupted(&mut self, cx: &mut Context<Self>) {
         self.cancel_agent_sampling();
         self.stop_agent_watch(cx);
@@ -361,6 +356,7 @@ impl IdeSurface {
         }
     }
 
+    #[cfg(not(target_family = "wasm"))]
     pub fn restore_reconnect_snapshot(
         &mut self,
         snapshot: ReconnectIdeSnapshot,
@@ -373,13 +369,18 @@ impl IdeSurface {
     /// Pending pickers and failed opens do not represent an opened project.
     pub fn has_open_project(&self) -> bool {
         self.root_path.is_some()
-            && matches!(self.load_state, IdeLoadState::Ready | IdeLoadState::Disconnected)
+            && matches!(
+                self.load_state,
+                IdeLoadState::Ready | IdeLoadState::Disconnected
+            )
     }
 
+    #[cfg(not(target_family = "wasm"))]
     pub fn remote_access(&self) -> oxideterm_ide_fs::RemoteAccess {
         self.fs.access()
     }
 
+    #[cfg(not(target_family = "wasm"))]
     pub fn restore_reconnect_with_access(
         &mut self,
         snapshot: ReconnectIdeSnapshot,
@@ -398,20 +399,25 @@ impl IdeSurface {
         let generation = self.generation;
         let progress = self.track_agent_install(access, cx);
         let job = runtime.spawn(async move { fs.bind_node(&node, access, progress).await });
-        self.backend_binding_abort = Some(job.abort_handle());
+        self.desktop.backend_binding_abort = Some(job.abort_handle());
         cx.spawn(async move |weak, cx| {
             let result = await_ide_backend(job).await;
             let _ = weak.update(cx, |this, cx| {
                 if this.generation != generation {
                     return;
                 }
-                this.backend_binding_abort = None;
-                this.agent_install_task = None;
-                this.agent_install_progress = None;
+                this.desktop.backend_binding_abort = None;
+                this.desktop.agent_install_task = None;
+                this.desktop.agent_install_progress = None;
                 match result {
                     Ok(fs) => {
-                        this.runtime_settings.agent_mode = if fs.access() == oxideterm_ide_fs::RemoteAccess::Sftp { NodeAgentMode::Disabled } else { NodeAgentMode::Enabled };
-                    this.fs = fs;
+                        this.runtime_settings.agent_mode =
+                            if fs.access() == oxideterm_ide_fs::RemoteAccess::Sftp {
+                                NodeAgentMode::Disabled
+                            } else {
+                                NodeAgentMode::Enabled
+                            };
+                        this.fs = fs;
                         this.apply_reconnect_snapshot(snapshot, reconnect_node_id, cx);
                     }
                     Err(error) => {
@@ -430,8 +436,12 @@ impl IdeSurface {
         true
     }
 
+    #[cfg(not(target_family = "wasm"))]
     fn apply_reconnect_snapshot(
-        &mut self, snapshot: ReconnectIdeSnapshot, reconnect_node_id: String, cx: &mut Context<Self>,
+        &mut self,
+        snapshot: ReconnectIdeSnapshot,
+        reconnect_node_id: String,
+        cx: &mut Context<Self>,
     ) -> bool {
         self.sync_all_editors(cx);
         let same_project_open = self.root_path.as_deref() == Some(snapshot.project_path.as_str())
@@ -498,20 +508,21 @@ impl IdeSurface {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl Drop for IdeSurface {
     fn drop(&mut self) {
         self.cancel_backend_binding();
-        if let Some(abort_handle) = self.agent_sampling_backend_abort.take() {
+        if let Some(abort_handle) = self.desktop.agent_sampling_backend_abort.take() {
             abort_handle.abort();
         }
-        if let Some(abort_handle) = self.agent_watch_backend_abort.take() {
+        if let Some(abort_handle) = self.desktop.agent_watch_backend_abort.take() {
             abort_handle.abort();
         }
         // GPUI can drop an IDE surface during workspace teardown without a
         // `Context`. Release only this surface's node because the file-system
         // registry is shared with other IDE surfaces and AI consumers.
         if let Some(node_id) = self.node_id.take() {
-            if let Some(release_queue) = self.agent_watch_stop_release_queue.as_ref() {
+            if let Some(release_queue) = self.desktop.agent_watch_stop_release_queue.as_ref() {
                 // The detached Tokio stop task owns the final remote cleanup
                 // and consumer release even when no GPUI update can run.
                 release_queue.request_release(&self.fs, node_id);
@@ -522,7 +533,7 @@ impl Drop for IdeSurface {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_family = "wasm")))]
 mod lifecycle_tests {
     use super::*;
     use gpui::TestAppContext;
@@ -620,7 +631,7 @@ mod lifecycle_tests {
             let shown = surface.update(cx, |surface, _| {
                 surface
                     .labels
-                    .agent_install_status(surface.agent_install_progress.unwrap())
+                    .agent_install_status(surface.desktop.agent_install_progress.unwrap())
             });
             assert_eq!(shown, (text.into(), percent));
         }
@@ -628,7 +639,7 @@ mod lifecycle_tests {
         sender.send_replace(AgentInstallProgress::Starting);
         cx.run_until_parked();
         surface.update(cx, |surface, _| {
-            assert!(surface.agent_install_progress.is_none())
+            assert!(surface.desktop.agent_install_progress.is_none())
         });
     }
     #[gpui::test]
@@ -642,7 +653,7 @@ mod lifecycle_tests {
         });
         runtime.block_on(ready).unwrap();
         surface.update(cx, |surface, cx| {
-            surface.backend_binding_abort = Some(job.abort_handle());
+            surface.desktop.backend_binding_abort = Some(job.abort_handle());
             surface.release_remote_session(cx);
         });
         assert!(runtime.block_on(job).unwrap_err().is_cancelled());
@@ -696,19 +707,19 @@ mod lifecycle_tests {
             surface.load_state = IdeLoadState::Ready;
             surface.set_mount(IdeSurfaceMount::MainWindow, cx);
             surface.schedule_next_agent_status_poll(cx);
-            surface.agent_watch_task = Some(cx.spawn(async move |_weak, _cx| {
+            surface.desktop.agent_watch_task = Some(cx.spawn(async move |_weak, _cx| {
                 std::future::pending::<()>().await;
             }));
             surface.schedule_agent_watch_retry(cx);
-            surface.watched_root_path = Some("/srv/app".to_string());
+            surface.desktop.watched_root_path = Some("/srv/app".to_string());
 
             surface.set_mount(IdeSurfaceMount::Hidden, cx);
             surface.refresh_tree_for_watch_path("/srv/app/src/main.rs".to_string(), cx);
 
-            assert!(surface.agent_poll_task.is_none());
-            assert!(surface.agent_sampling_refresh_task.is_none());
-            assert!(surface.agent_watch_task.is_none());
-            assert!(surface.agent_watch_retry_task.is_none());
+            assert!(surface.desktop.agent_poll_task.is_none());
+            assert!(surface.desktop.agent_sampling_refresh_task.is_none());
+            assert!(surface.desktop.agent_watch_task.is_none());
+            assert!(surface.desktop.agent_watch_retry_task.is_none());
             assert!(surface.loading_paths.is_empty());
         });
         assert_eq!(ide_consumer_count(&handle, node_id), 1);
@@ -721,14 +732,14 @@ mod lifecycle_tests {
         surface.update(cx, |surface, cx| {
             configure_ready_surface(surface, cx);
             surface.set_mount(IdeSurfaceMount::Hidden, cx);
-            assert!(surface.agent_sampling_refresh_task.is_none());
+            assert!(surface.desktop.agent_sampling_refresh_task.is_none());
 
             surface.set_mount(IdeSurfaceMount::DetachedWindow, cx);
 
             assert_eq!(surface.mount(), IdeSurfaceMount::DetachedWindow);
-            assert!(surface.agent_sampling_refresh_task.is_some());
+            assert!(surface.desktop.agent_sampling_refresh_task.is_some());
             assert_eq!(
-                surface.agent_refresh_origin,
+                surface.desktop.agent_refresh_origin,
                 Some(AgentStatusRefreshOrigin::VisibilitySampling)
             );
         });
@@ -742,13 +753,13 @@ mod lifecycle_tests {
             configure_ready_surface(surface, cx);
             surface.cancel_agent_sampling();
             surface.schedule_next_agent_status_poll(cx);
-            let poll_generation = surface.agent_poll_generation;
+            let poll_generation = surface.desktop.agent_poll_generation;
 
             surface.set_mount(IdeSurfaceMount::DetachedWindow, cx);
 
-            assert_eq!(surface.agent_poll_generation, poll_generation);
-            assert!(surface.agent_poll_task.is_some());
-            assert!(surface.agent_sampling_refresh_task.is_none());
+            assert_eq!(surface.desktop.agent_poll_generation, poll_generation);
+            assert!(surface.desktop.agent_poll_task.is_some());
+            assert!(surface.desktop.agent_sampling_refresh_task.is_none());
         });
     }
 
@@ -762,13 +773,13 @@ mod lifecycle_tests {
 
             surface.refresh_agent_status(AgentStatusRefreshOrigin::UserAction, cx);
 
-            assert_eq!(surface.agent_action, Some(AgentActionKind::Refresh));
+            assert_eq!(surface.desktop.agent_action, Some(AgentActionKind::Refresh));
             assert_eq!(
-                surface.agent_refresh_origin,
+                surface.desktop.agent_refresh_origin,
                 Some(AgentStatusRefreshOrigin::UserAction)
             );
-            assert!(surface.agent_poll_task.is_none());
-            assert!(surface.agent_sampling_refresh_task.is_none());
+            assert!(surface.desktop.agent_poll_task.is_none());
+            assert!(surface.desktop.agent_sampling_refresh_task.is_none());
         });
     }
 
@@ -792,16 +803,16 @@ mod lifecycle_tests {
             );
 
             assert_eq!(surface.load_state, IdeLoadState::Ready);
-            assert!(surface.agent_poll_task.is_none());
-            assert!(surface.agent_sampling_refresh_task.is_none());
-            assert!(surface.agent_watch_task.is_none());
+            assert!(surface.desktop.agent_poll_task.is_none());
+            assert!(surface.desktop.agent_sampling_refresh_task.is_none());
+            assert!(surface.desktop.agent_watch_task.is_none());
 
             surface.mark_connection_interrupted(cx);
 
             assert_eq!(surface.load_state, IdeLoadState::Disconnected);
             assert_eq!(surface.mount(), IdeSurfaceMount::Hidden);
-            assert!(surface.agent_poll_task.is_none());
-            assert!(surface.agent_watch_task.is_none());
+            assert!(surface.desktop.agent_poll_task.is_none());
+            assert!(surface.desktop.agent_watch_task.is_none());
         });
     }
 
@@ -900,30 +911,30 @@ mod lifecycle_tests {
 
         surface.update(cx, |surface, cx| {
             surface.set_mount(IdeSurfaceMount::MainWindow, cx);
-            surface.agent_watch_task = Some(cx.spawn(async move |_weak, _cx| {
+            surface.desktop.agent_watch_task = Some(cx.spawn(async move |_weak, _cx| {
                 std::future::pending::<()>().await;
             }));
             surface.schedule_agent_watch_retry(cx);
-            surface.watched_root_path = Some("/srv/app".to_string());
+            surface.desktop.watched_root_path = Some("/srv/app".to_string());
             surface.root_path = Some("/srv/app".to_string());
             surface.node_id = Some("node-watch".to_string());
-            assert!(surface.agent_watch_task.is_some());
-            assert!(surface.agent_watch_retry_task.is_some());
+            assert!(surface.desktop.agent_watch_task.is_some());
+            assert!(surface.desktop.agent_watch_retry_task.is_some());
 
             surface.stop_agent_watch(cx);
 
-            assert!(surface.agent_watch_task.is_none());
-            assert!(surface.agent_watch_retry_task.is_none());
-            assert!(surface.watched_root_path.is_none());
-            assert!(surface.agent_watch_stop_task.is_some());
-            assert!(surface.agent_watch_stop_in_flight);
+            assert!(surface.desktop.agent_watch_task.is_none());
+            assert!(surface.desktop.agent_watch_retry_task.is_none());
+            assert!(surface.desktop.watched_root_path.is_none());
+            assert!(surface.desktop.agent_watch_stop_task.is_some());
+            assert!(surface.desktop.agent_watch_stop_in_flight);
             surface.release_ide_node_after_watch_stop("node-watch".to_string());
-            assert!(surface.agent_watch_stop_release_queue.is_some());
+            assert!(surface.desktop.agent_watch_stop_release_queue.is_some());
 
             surface.start_agent_watch_if_ready(cx);
 
-            assert!(surface.agent_watch_restart_requested);
-            assert!(surface.agent_watch_task.is_none());
+            assert!(surface.desktop.agent_watch_restart_requested);
+            assert!(surface.desktop.agent_watch_task.is_none());
         });
     }
 
@@ -1040,7 +1051,14 @@ mod lifecycle_tests {
 
 impl IdeSurface {
     pub fn is_shell_ide(&self) -> bool {
-        self.fs.terminal_session_id().is_some()
+        #[cfg(not(target_family = "wasm"))]
+        {
+            self.fs.terminal_session_id().is_some()
+        }
+        #[cfg(target_family = "wasm")]
+        {
+            false
+        }
     }
 
     pub fn request_shell_return(&mut self, cx: &mut Context<Self>) {
@@ -1071,9 +1089,10 @@ impl IdeSurface {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl IdeSurface {
     fn resume_backend_selection(&mut self, cx: &mut Context<Self>) {
-        if self.access_request.is_some() {
+        if self.desktop.access_request.is_some() {
             self.load_state = IdeLoadState::Empty;
             cx.notify();
         }
@@ -1086,7 +1105,7 @@ impl IdeSurface {
         cx: &mut Context<Self>,
     ) {
         self.node_id = Some(node.clone());
-        self.access_request = Some((node, path));
+        self.desktop.access_request = Some((node, path));
         cx.notify();
     }
 
@@ -1108,7 +1127,7 @@ impl IdeSurface {
         cx.spawn(async move |weak, cx| {
             let choice = prompt.await.unwrap_or(2);
             let _ = weak.update(cx, |this, cx| {
-                if this.generation != generation || this.access_request.is_none() {
+                if this.generation != generation || this.desktop.access_request.is_none() {
                     return;
                 }
                 match choice {
@@ -1117,12 +1136,17 @@ impl IdeSurface {
                     _ => this.resume_backend_selection(cx),
                 }
             });
-        }).detach();
+        })
+        .detach();
         cx.notify();
     }
 
-    pub fn select_access(&mut self, access: oxideterm_ide_fs::RemoteAccess, cx: &mut Context<Self>) {
-        let Some((node, path)) = self.access_request.clone() else {
+    pub fn select_access(
+        &mut self,
+        access: oxideterm_ide_fs::RemoteAccess,
+        cx: &mut Context<Self>,
+    ) {
+        let Some((node, path)) = self.desktop.access_request.clone() else {
             return;
         };
         self.load_state = IdeLoadState::Loading;
@@ -1133,33 +1157,40 @@ impl IdeSurface {
         let node_for_job = node.clone();
         let progress = self.track_agent_install(access, cx);
         let job = runtime.spawn(async move { fs.bind_node(&node_for_job, access, progress).await });
-        self.backend_binding_abort = Some(job.abort_handle());
+        self.desktop.backend_binding_abort = Some(job.abort_handle());
         cx.spawn(async move |weak, cx| {
             let result = await_ide_backend(job).await;
             let _ = weak.update(cx, |this, cx| {
-                if this.generation != generation { return; }
-                this.backend_binding_abort = None;
-                this.agent_install_task = None;
-                this.agent_install_progress = None;
+                if this.generation != generation {
+                    return;
+                }
+                this.desktop.backend_binding_abort = None;
+                this.desktop.agent_install_task = None;
+                this.desktop.agent_install_progress = None;
                 match result {
-                Ok(fs) => {
-                    this.runtime_settings.agent_mode = if fs.access() == oxideterm_ide_fs::RemoteAccess::Sftp { NodeAgentMode::Disabled } else { NodeAgentMode::Enabled };
-                    this.fs = fs;
-                    this.access_request = None;
-                    this.load_state = IdeLoadState::Empty;
-                    this.open_remote_folder_picker_for_node(node, path, cx);
-                }
-                Err(error) => {
-                    this.load_state = IdeLoadState::Empty;
-                    this.last_error = Some(if access == oxideterm_ide_fs::RemoteAccess::Sftp {
-                        this.labels.sftp_unavailable.clone()
-                    } else if error.kind == IdeFileErrorKind::Unsupported {
-                        this.labels.backend_requirements.clone()
-                    } else {
-                        this.labels.ssh_unavailable.clone()
-                    });
-                    cx.notify();
-                }
+                    Ok(fs) => {
+                        this.runtime_settings.agent_mode =
+                            if fs.access() == oxideterm_ide_fs::RemoteAccess::Sftp {
+                                NodeAgentMode::Disabled
+                            } else {
+                                NodeAgentMode::Enabled
+                            };
+                        this.fs = fs;
+                        this.desktop.access_request = None;
+                        this.load_state = IdeLoadState::Empty;
+                        this.open_remote_folder_picker_for_node(node, path, cx);
+                    }
+                    Err(error) => {
+                        this.load_state = IdeLoadState::Empty;
+                        this.last_error = Some(if access == oxideterm_ide_fs::RemoteAccess::Sftp {
+                            this.labels.sftp_unavailable.clone()
+                        } else if error.kind == IdeFileErrorKind::Unsupported {
+                            this.labels.backend_requirements.clone()
+                        } else {
+                            this.labels.ssh_unavailable.clone()
+                        });
+                        cx.notify();
+                    }
                 }
             });
         })
@@ -1168,6 +1199,7 @@ impl IdeSurface {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl IdeSurface {
     fn track_agent_install(
         &mut self,
@@ -1179,17 +1211,17 @@ impl IdeSurface {
         }
         let initial = oxideterm_ide_fs::AgentInstallProgress::Checking;
         let (sender, mut updates) = tokio::sync::watch::channel(initial);
-        self.agent_install_progress = Some(initial);
+        self.desktop.agent_install_progress = Some(initial);
         let generation = self.generation;
         // The binding owner cancels this observer together with its startup job.
-        self.agent_install_task = Some(cx.spawn(async move |weak, cx| {
+        self.desktop.agent_install_task = Some(cx.spawn(async move |weak, cx| {
             while updates.changed().await.is_ok() {
                 let progress = *updates.borrow_and_update();
                 let Ok(current) = weak.update(cx, |this, cx| {
                     if this.generation != generation {
                         return false;
                     }
-                    this.agent_install_progress = Some(progress);
+                    this.desktop.agent_install_progress = Some(progress);
                     cx.notify();
                     true
                 }) else {
@@ -1203,10 +1235,10 @@ impl IdeSurface {
         Some(sender)
     }
     fn cancel_backend_binding(&mut self) {
-        self.agent_install_task = None;
-        self.agent_install_progress = None;
+        self.desktop.agent_install_task = None;
+        self.desktop.agent_install_progress = None;
         self.generation = self.generation.wrapping_add(1);
-        if let Some(abort) = self.backend_binding_abort.take() {
+        if let Some(abort) = self.desktop.backend_binding_abort.take() {
             abort.abort();
         }
     }

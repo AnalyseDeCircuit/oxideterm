@@ -38,16 +38,17 @@ impl IdeSurface {
         self.folder_picker.generation = self.folder_picker.generation.wrapping_add(1);
         let generation = self.folder_picker.generation;
         let fs = self.fs.clone();
-        let backend_runtime = self.backend_runtime.clone();
+        let jobs = self.file_jobs();
         cx.notify();
 
         cx.spawn(async move |weak, cx| {
             let path_for_task = path.clone();
-            let result = await_ide_backend(backend_runtime.spawn(async move {
-                let location = IdeLocation::remote(node_id, path_for_task);
-                fs.list_dir(&location).await.map(folder_picker_dirs)
-            }))
-            .await;
+            let result = jobs
+                .run(async move {
+                    let location = IdeLocation::remote(node_id, path_for_task);
+                    fs.list_dir(&location).await.map(folder_picker_dirs)
+                })
+                .await;
             let _ = weak.update(cx, |this, cx| {
                 // The Tauri dialog resets async state on every path change. The
                 // generation guard gives GPUI the same observable behavior when
@@ -61,10 +62,7 @@ impl IdeSurface {
                         this.folder_picker.error = None;
                         this.folder_picker.current_path = path;
                         let current_path = this.folder_picker.current_path.clone();
-                        set_folder_picker_path_input(
-                            &mut this.folder_picker,
-                            current_path,
-                        );
+                        set_folder_picker_path_input(&mut this.folder_picker, current_path);
                         this.folder_picker.folders = folders;
                         this.folder_picker.selected_folder = None;
                     }
@@ -174,8 +172,8 @@ impl IdeSurface {
             // Printable text and IME composition must reach EntityInputHandler.
             return;
         }
-        let uses_text_modifier = event.keystroke.modifiers.platform
-            || event.keystroke.modifiers.control;
+        let uses_text_modifier =
+            event.keystroke.modifiers.platform || event.keystroke.modifiers.control;
         match key {
             "escape" => self.close_folder_picker(cx),
             "enter" => self.submit_folder_picker_path(cx),
@@ -383,20 +381,13 @@ impl IdeSurface {
         };
         let prefix_width = window
             .text_system()
-            .shape_line(
-                prefix,
-                px(self.tokens.metrics.ui_text_sm),
-                &[run],
-                None,
-            )
+            .shape_line(prefix, px(self.tokens.metrics.ui_text_sm), &[run], None)
             .width;
         // Candidate windows should follow the composing caret, not the field's
         // left edge, so CJK IME remains usable after moving within the path.
         Bounds {
             origin: gpui::point(
-                element_bounds.left()
-                    + px(self.tokens.metrics.ui_control_padding_x)
-                    + prefix_width,
+                element_bounds.left() + px(self.tokens.metrics.ui_control_padding_x) + prefix_width,
                 element_bounds.bottom(),
             ),
             size: gpui::size(px(1.0), element_bounds.size.height),
@@ -464,12 +455,15 @@ fn delete_folder_picker_backward(state: &mut FolderPickerState) {
         return;
     }
     let byte = utf16_offset_to_byte(&state.path_input, selection.start);
-    let previous = state.path_input[..byte]
-        .graphemes(true)
-        .next_back()
-        .map_or(selection.start, |grapheme| {
-            selection.start.saturating_sub(grapheme.encode_utf16().count())
-        });
+    let previous =
+        state.path_input[..byte]
+            .graphemes(true)
+            .next_back()
+            .map_or(selection.start, |grapheme| {
+                selection
+                    .start
+                    .saturating_sub(grapheme.encode_utf16().count())
+            });
     replace_folder_picker_range(state, previous..selection.start, "");
 }
 

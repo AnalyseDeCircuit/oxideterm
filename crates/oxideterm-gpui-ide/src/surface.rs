@@ -1,6 +1,8 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
+mod file_jobs;
+use file_jobs::{ConflictRequest, FileOrigin, FileRequest};
 mod modal;
 pub use modal::IdeModalLayer;
 
@@ -8,10 +10,13 @@ use std::{
     collections::{BTreeMap, HashMap, HashSet},
     ops::Range,
     path::Path,
-    sync::{Arc, Mutex},
-    time::{Duration, Instant},
+    sync::Arc,
+    time::Duration,
 };
 
+#[cfg(target_family = "wasm")]
+use crate::portable::{IdeSearchMatch, PortableIdeHost};
+use gpui::Instant;
 use gpui::{
     Anchor, AnchoredPositionMode, AnyElement, App, AppContext, Bounds, ClipboardItem, Context,
     Entity, EventEmitter, FocusHandle, Focusable, FontWeight, InteractiveElement, IntoElement,
@@ -46,14 +51,24 @@ use oxideterm_gpui_ui::{
     },
 };
 use oxideterm_ide_core::SharedText;
+#[cfg(not(target_family = "wasm"))]
+use oxideterm_ide_core::{AsyncIdeFileSystem, IdeFileCheck};
 use oxideterm_ide_core::{
-    AsyncIdeFileSystem, CloseRequestId, DirtyCloseDecision, EditorTabId, FileKind, FileTreeEntry,
-    IdeFileCheck, IdeFileError, IdeFileErrorKind, IdeLocation, IdePluginFileSnapshot,
-    IdePluginProjectSnapshot, IdePluginSnapshot, IdeSearchQuery, IdeWorkspace, SavedFileVersion,
-    WorkspaceSnapshot, WriteMode,
+    CloseRequestId, DirtyCloseDecision, EditorTabId, FileKind, FileTreeEntry, IdeFileError,
+    IdeFileErrorKind, IdeLocation, IdePluginFileSnapshot, IdePluginProjectSnapshot,
+    IdePluginSnapshot, IdeSearchQuery, IdeWorkspace, SavedFileVersion, WorkspaceSnapshot,
+    WriteMode,
 };
+#[cfg(not(target_family = "wasm"))]
 use oxideterm_ide_fs::{AgentStatus, IdeSearchMatch, NodeAgentIdeFileSystem, NodeAgentMode};
+#[cfg(not(target_family = "wasm"))]
 use oxideterm_ssh::ReconnectIdeSnapshot;
+#[cfg(not(target_family = "wasm"))]
+use std::sync::Mutex;
+#[cfg(not(target_family = "wasm"))]
+type FileHost = NodeAgentIdeFileSystem;
+#[cfg(target_family = "wasm")]
+type FileHost = std::rc::Rc<dyn PortableIdeHost>;
 use oxideterm_theme::ThemeTokens;
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -106,24 +121,14 @@ const IDE_TAB_REORDER_ACTIVATION_PX: f32 = 5.0;
 const IDE_TREE_CONTEXT_MENU_WIDTH: f32 = 196.0;
 const IDE_TREE_CONTEXT_MENU_MAX_HEIGHT: f32 = 280.0;
 const IDE_TREE_CONTEXT_MENU_Z: usize = 100;
-const IDE_AGENT_MENU_WIDTH: f32 = 180.0;
-const IDE_AGENT_MENU_MANUAL_WIDTH: f32 = 300.0;
-const IDE_AGENT_MENU_PADDING_Y: f32 = 4.0;
-const IDE_AGENT_MENU_DESCRIPTION_PADDING_X: f32 = 8.0;
-const IDE_AGENT_MENU_DESCRIPTION_PADDING_Y: f32 = 6.0;
 const IDE_AGENT_MENU_ITEM_HEIGHT: f32 = 28.0;
 const IDE_AGENT_MENU_Z: usize = 110;
-const IDE_AGENT_POLL_READY_SECS: u64 = 5;
-const IDE_AGENT_POLL_DEPLOYING_SECS: u64 = 2;
-const IDE_AGENT_POLL_MANUAL_SECS: u64 = 10;
-const IDE_AGENT_WATCH_RETRY_SECS: u64 = 3;
 const IDE_SEARCH_DEBOUNCE_MS: u64 = 300;
 const IDE_SEARCH_CACHE_TTL_SECS: u64 = 60;
 const IDE_SEARCH_CACHE_MAX_ENTRIES: usize = 50;
 const IDE_SEARCH_MAX_RESULTS: u32 = 200;
 const TAILWIND_RED_400: u32 = 0xf87171;
 const TAILWIND_RED_500: u32 = 0xef4444;
-const TAILWIND_EMERALD_400: u32 = 0x34d399;
 const TAILWIND_AMBER_400: u32 = 0xfbbf24;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -193,6 +198,7 @@ pub struct IdeRuntimeSettings {
     pub editor_line_height: f32,
     pub word_wrap: bool,
     pub background_active: bool,
+    #[cfg(not(target_family = "wasm"))]
     pub agent_mode: NodeAgentMode,
 }
 
@@ -210,6 +216,7 @@ impl Default for IdeRuntimeSettings {
             editor_line_height: 1.2,
             word_wrap: false,
             background_active: false,
+            #[cfg(not(target_family = "wasm"))]
             agent_mode: NodeAgentMode::Ask,
         }
     }
@@ -351,11 +358,6 @@ struct TreeClipboardState {
     entries: Vec<FileTreeEntry>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct AgentStatusMenu {
-    trigger_bounds: Bounds<Pixels>,
-}
-
 #[derive(Clone, Debug, PartialEq)]
 struct ConflictState {
     tab_id: EditorTabId,
@@ -364,19 +366,6 @@ struct ConflictState {
     remote_mtime: Option<i64>,
     close_request: Option<CloseRequestId>,
     error_message: Option<String>,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum AgentActionKind {
-    Deploy,
-    Remove,
-    Refresh,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum AgentStatusRefreshOrigin {
-    VisibilitySampling,
-    UserAction,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -393,85 +382,33 @@ struct PendingEditorReveal {
     column: u32,
 }
 
-#[derive(Default)]
-struct IdeWatchStopReleaseState {
-    stop_complete: bool,
-    node_ids: Vec<String>,
-}
-
-#[derive(Default)]
-struct IdeWatchStopReleaseQueue {
-    state: Mutex<IdeWatchStopReleaseState>,
-}
-
-impl IdeWatchStopReleaseQueue {
-    fn request_release(&self, fs: &NodeAgentIdeFileSystem, node_id: String) {
-        let release_now = {
-            let mut state = self
-                .state
-                .lock()
-                .expect("IDE watch stop release queue poisoned");
-            if state.stop_complete {
-                Some(node_id)
-            } else {
-                if !state.node_ids.contains(&node_id) {
-                    state.node_ids.push(node_id);
-                }
-                None
-            }
-        };
-        if let Some(node_id) = release_now {
-            fs.release_ide_session_for_node(&node_id);
-        }
-    }
-
-    fn finish_stop(&self, fs: &NodeAgentIdeFileSystem) {
-        let node_ids = {
-            let mut state = self
-                .state
-                .lock()
-                .expect("IDE watch stop release queue poisoned");
-            state.stop_complete = true;
-            std::mem::take(&mut state.node_ids)
-        };
-        for node_id in node_ids {
-            fs.release_ide_session_for_node(&node_id);
-        }
-    }
-}
-
 struct PendingFileSave {
-    audit_request: Option<oxideterm_audit::AuditContext>,
-    source: oxideterm_audit::AuditSource,
+    audit_request: FileRequest,
+    source: FileOrigin,
     close_request: Option<CloseRequestId>,
 }
 
 struct FileSaveRequest {
-    audit_request: Option<oxideterm_audit::AuditContext>,
+    audit_request: FileRequest,
     tab_id: EditorTabId,
     buffer: oxideterm_ide_core::EditorBuffer,
     close_request: Option<CloseRequestId>,
 }
 
-/// GPUI IDE owner.
-///
-/// This is the native equivalent of Tauri's `IdeWorkspace` + `ideStore` owner:
-/// project state lives here, while terminal panes remain optional consumers of
-/// the same node. SFTP is acquired through `NodeRouter`, never through an open
-/// terminal tab, so reconnect restore has a real IDE surface to target.
+/// Owns the project and its open editors independently of terminal panes.
+/// On desktop the file adapter acquires SFTP through the node router.
 pub struct IdeSurface {
     workspace: IdeWorkspace,
     shell_return_requested: bool,
-    access_request: Option<(String, String)>,
-    backend_binding_abort: Option<tokio::task::AbortHandle>,
-    agent_install_progress: Option<oxideterm_ide_fs::AgentInstallProgress>,
-    agent_install_task: Option<Task<()>>,
-    fs: NodeAgentIdeFileSystem,
+    fs: FileHost,
+    #[cfg(not(target_family = "wasm"))]
+    desktop: DesktopSession,
     tokens: ThemeTokens,
     labels: IdeLabels,
     runtime_settings: IdeRuntimeSettings,
     focus_handle: FocusHandle,
     modal_focus_handle: FocusHandle,
+    #[cfg(not(target_family = "wasm"))]
     backend_runtime: Arc<tokio::runtime::Runtime>,
     load_state: IdeLoadState,
     node_id: Option<String>,
@@ -512,30 +449,17 @@ pub struct IdeSurface {
     delete_confirm: Option<DeleteConfirmState>,
     tree_clipboard: Option<TreeClipboardState>,
     tab_drag: Option<TabDrag>,
-    agent_status_menu: Option<AgentStatusMenu>,
     file_format_menu: Option<FileFormatMenu>,
     file_format_bounds: [Option<Bounds<Pixels>>; 2],
-    agent_status_trigger_bounds: Option<Bounds<Pixels>>,
-    agent_remove_confirm_open: bool,
-    agent_action: Option<AgentActionKind>,
-    agent_refresh_origin: Option<AgentStatusRefreshOrigin>,
     mount: IdeSurfaceMount,
-    agent_poll_generation: u64,
-    agent_poll_task: Option<Task<()>>,
-    agent_sampling_refresh_task: Option<Task<()>>,
-    agent_sampling_backend_abort: Option<tokio::task::AbortHandle>,
-    agent_watch_generation: u64,
-    watched_root_path: Option<String>,
-    agent_watch_task: Option<Task<()>>,
-    agent_watch_retry_task: Option<Task<()>>,
-    agent_watch_stop_task: Option<Task<()>>,
-    agent_watch_backend_abort: Option<tokio::task::AbortHandle>,
-    agent_watch_stop_in_flight: bool,
-    agent_watch_restart_requested: bool,
-    agent_watch_stop_generation: u64,
-    agent_watch_stop_release_queue: Option<Arc<IdeWatchStopReleaseQueue>>,
 }
 
+#[cfg(not(target_family = "wasm"))]
+include!("surface/desktop_session.rs");
+#[cfg(not(target_family = "wasm"))]
+include!("surface/node_watch.rs");
+#[cfg(not(target_family = "wasm"))]
+include!("surface/node_symbols.rs");
 include!("surface/lifecycle.rs");
 include!("surface/folder_picker.rs");
 include!("surface/editor_actions.rs");
@@ -545,7 +469,9 @@ include!("surface/render_tree.rs");
 include!("surface/render_tabs.rs");
 include!("surface/markdown_preview.rs");
 include!("surface/markdown_selection.rs");
+#[cfg(not(target_family = "wasm"))]
 include!("surface/render_agent.rs");
+include!("surface/status_bar.rs");
 include!("surface/render_dialogs.rs");
 include!("surface/render_helpers.rs");
 include!("surface/tree_row.rs");

@@ -1,12 +1,9 @@
+use crate::data::{DetectedPort, ForwardRule, ForwardType, PortDetectionSnapshot};
 use crate::style::*;
-use gpui::{Context, ListAlignment, ListState, Timer, px};
+use gpui::{Context, Instant, ListAlignment, ListState, px};
 use oxideterm_editor_core::utf16::replace_utf16;
-use oxideterm_forwarding::{DetectedPort, ForwardRule, ForwardType, PortDetectionSnapshot};
 use oxideterm_gpui_ui::virtual_list::{TauriVirtualListSpec, VirtualListSignatureCache};
-use std::{
-    cell::RefCell,
-    time::{Duration, Instant},
-};
+use std::{cell::RefCell, time::Duration};
 
 pub enum ForwardsInputKey {
     Unhandled,
@@ -421,8 +418,9 @@ impl ForwardsPageState {
         cx: &mut Context<Self>,
     ) {
         self.view.copied_forward_id = Some(forward_id.clone());
+        let timer = cx.background_executor().timer(delay);
         cx.spawn(async move |entity, cx| {
-            Timer::after(delay).await;
+            timer.await;
             let _ = entity.update(cx, |entity, cx| {
                 if entity.view.copied_forward_id.as_deref() == Some(&forward_id) {
                     entity.view.copied_forward_id = None;

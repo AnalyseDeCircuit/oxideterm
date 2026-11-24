@@ -13,5 +13,8 @@ serde.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
 
+[target.'cfg(target_family = "wasm")'.dependencies]
+uuid = { workspace = true, features = ["js"] }
+
 [dev-dependencies]
 serde_json.workspace = true

@@ -1,6 +1,7 @@
 impl IdeSurface {
-    fn render_empty_project(&self, cx: &mut Context<Self>) -> AnyElement {
-        if self.access_request.is_some() {
+    fn render_empty_project(&self, _cx: &mut Context<Self>) -> AnyElement {
+        #[cfg(not(target_family = "wasm"))]
+        if self.desktop.access_request.is_some() {
             let mut choices = div()
                 .flex()
                 .flex_col()
@@ -20,7 +21,7 @@ impl IdeSurface {
                     )
                     .on_mouse_down(
                         MouseButton::Left,
-                        cx.listener(move |this, _, window, cx| {
+                        _cx.listener(move |this, _, window, cx| {
                             if index == 1 {
                                 this.select_ssh_access(window, cx);
                             } else {
@@ -53,10 +54,16 @@ impl IdeSurface {
     }
 
     fn render_loading_project(&self, _cx: &mut Context<Self>) -> AnyElement {
-        let (label, percent) = self
+        #[cfg(not(target_family = "wasm"))]
+        let install = self
+            .desktop
             .agent_install_progress
-            .map(|progress| self.labels.agent_install_status(progress))
-            .unwrap_or_else(|| (self.labels.loading_project.clone(), None));
+            .map(|progress| self.labels.agent_install_status(progress));
+        #[cfg(target_family = "wasm")]
+        let install: Option<(String, Option<f32>)> = None;
+        let installing = install.is_some();
+        let (label, percent) =
+            install.unwrap_or_else(|| (self.labels.loading_project.clone(), None));
         div()
             .size_full()
             .flex()
@@ -67,7 +74,7 @@ impl IdeSurface {
             .text_color(rgb(self.tokens.ui.text_muted))
             .child(self.spinner_icon("ide-project-loading", 24.0, self.tokens.ui.accent))
             .child(label)
-            .when(self.agent_install_progress.is_some(), |view| {
+            .when(installing, |view| {
                 view.child(
                     div()
                         .w(px(280.0))
@@ -564,7 +571,7 @@ impl IdeSurface {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_family = "wasm")))]
 mod tree_resize_tests {
     use super::*;
     use gpui::{Modifiers, TestAppContext, point, size};

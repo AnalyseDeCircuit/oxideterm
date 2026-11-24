@@ -60,7 +60,7 @@ fn apply_editor_runtime_settings(
 }
 
 async fn open_project_with_root_listing(
-    fs: NodeAgentIdeFileSystem,
+    fs: FileHost,
     node_id: String,
     root_path: String,
 ) -> Result<ProjectOpenResult, oxideterm_ide_core::IdeFileError> {
@@ -77,44 +77,53 @@ async fn open_project_with_root_listing(
 }
 
 async fn open_text_file(
-    fs: NodeAgentIdeFileSystem,
+    fs: FileHost,
     location: IdeLocation,
     encoding: Option<String>,
 ) -> Result<FileOpenResult, oxideterm_ide_core::IdeFileError> {
-    let (node_id, path) = match &location {
-        IdeLocation::Remote { node_id, path } => (node_id.clone(), path.clone()),
-        IdeLocation::Local { .. } => {
-            return Err(oxideterm_ide_core::IdeFileError::new(
-                oxideterm_ide_core::IdeFileErrorKind::Unsupported,
-                "GPUI IDE node surface only opens node SFTP files",
-            ));
+    #[cfg(not(target_family = "wasm"))]
+    {
+        let (node_id, path) = match &location {
+            IdeLocation::Remote { node_id, path } => (node_id.clone(), path.clone()),
+            IdeLocation::Local { .. } => {
+                return Err(oxideterm_ide_core::IdeFileError::new(
+                    oxideterm_ide_core::IdeFileErrorKind::Unsupported,
+                    "GPUI IDE node surface only opens node SFTP files",
+                ));
+            }
+        };
+        match fs.check_file(node_id, path).await? {
+            IdeFileCheck::Editable { .. } => (),
+            IdeFileCheck::TooLarge { size, limit } => {
+                return Err(oxideterm_ide_core::IdeFileError::new(
+                    oxideterm_ide_core::IdeFileErrorKind::TooLarge,
+                    format!("File is too large to edit ({size} > {limit})"),
+                ));
+            }
+            IdeFileCheck::Binary => {
+                return Err(oxideterm_ide_core::IdeFileError::new(
+                    oxideterm_ide_core::IdeFileErrorKind::Binary,
+                    "File is binary",
+                ));
+            }
+            IdeFileCheck::NotEditable { reason } => {
+                return Err(oxideterm_ide_core::IdeFileError::new(
+                    oxideterm_ide_core::IdeFileErrorKind::Unsupported,
+                    reason,
+                ));
+            }
         }
-    };
-    match fs.check_file(node_id, path).await? {
-        IdeFileCheck::Editable { .. } => {
-            let data = fs.read_file(&location, encoding.as_deref()).await?;
-            Ok(FileOpenResult {
-                location,
-                text: data.text,
-                format: data.format,
-                version: data.version,
-            })
-        }
-        IdeFileCheck::TooLarge { size, limit } => Err(oxideterm_ide_core::IdeFileError::new(
-            oxideterm_ide_core::IdeFileErrorKind::TooLarge,
-            format!("File is too large to edit ({size} > {limit})"),
-        )),
-        IdeFileCheck::Binary => Err(oxideterm_ide_core::IdeFileError::new(
-            oxideterm_ide_core::IdeFileErrorKind::Binary,
-            "File is binary",
-        )),
-        IdeFileCheck::NotEditable { reason } => Err(oxideterm_ide_core::IdeFileError::new(
-            oxideterm_ide_core::IdeFileErrorKind::Unsupported,
-            reason,
-        )),
     }
+    let data = fs.read_file(&location, encoding.as_deref()).await?;
+    Ok(FileOpenResult {
+        location,
+        text: data.text,
+        format: data.format,
+        version: data.version,
+    })
 }
 
+#[cfg(not(target_family = "wasm"))]
 async fn await_ide_backend<T>(
     handle: tokio::task::JoinHandle<Result<T, oxideterm_ide_core::IdeFileError>>,
 ) -> Result<T, oxideterm_ide_core::IdeFileError> {
@@ -288,6 +297,7 @@ fn validate_file_name(name: &str) -> Option<String> {
     None
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn watch_refresh_path(root_path: &str, event_path: &str) -> String {
     let root_path = normalize_remote_path(root_path);
     let event_path = normalize_remote_path(event_path);

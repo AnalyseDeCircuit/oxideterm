@@ -1,5 +1,6 @@
 impl Render for IdeSurface {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        #[cfg(not(target_family = "wasm"))]
         if self.fs.terminal_session_id().is_some()
             && !self.fs.status_for_node(self.node_id.as_deref()).is_ready()
             && matches!(self.load_state, IdeLoadState::Ready)
@@ -11,7 +12,10 @@ impl Render for IdeSurface {
             self.tab_context_menu = None;
             self.tree_context_menu = None;
             self.file_format_menu = None;
-            self.agent_status_menu = None;
+            #[cfg(not(target_family = "wasm"))]
+            {
+                self.desktop.agent_status_menu = None;
+            }
             self.tree_resize = None;
             self.tree_resize_activation = None;
             self.tab_drag = None;
@@ -39,12 +43,10 @@ impl Render for IdeSurface {
                     let closed_tab_menu = this.tab_context_menu.take().is_some();
                     let closed_tree_menu = this.tree_context_menu.take().is_some();
                     let closed_format_menu = this.file_format_menu.take().is_some();
-                    let closed_agent_menu = this.agent_status_menu.take().is_some();
-                    if closed_format_menu
-                        || closed_tab_menu
-                        || closed_tree_menu
-                        || closed_agent_menu
-                    {
+                    let closed = closed_tab_menu || closed_tree_menu || closed_format_menu;
+                    #[cfg(not(target_family = "wasm"))]
+                    let closed = this.desktop.agent_status_menu.take().is_some() || closed;
+                    if closed {
                         cx.notify();
                     }
                 }),
@@ -173,7 +175,8 @@ impl Render for IdeSurface {
         if let Some(menu) = self.file_format_menu {
             root = root.child(self.render_file_format_menu(menu, _window, cx));
         }
-        if let Some(menu) = self.agent_status_menu {
+        #[cfg(not(target_family = "wasm"))]
+        if let Some(menu) = self.desktop.agent_status_menu {
             root = root.child(self.render_agent_status_menu(menu, _window, cx));
         }
         if self.tree_resize.is_some() {

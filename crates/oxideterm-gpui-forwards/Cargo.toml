@@ -10,12 +10,17 @@ version.workspace = true
 [dependencies]
 gpui.workspace = true
 oxideterm-editor-core = { path = "../oxideterm-editor-core" }
-oxideterm-forwarding = { path = "../oxideterm-forwarding" }
 oxideterm-gpui-ui = { path = "../oxideterm-gpui-ui" }
 oxideterm-i18n = { path = "../oxideterm-i18n" }
-oxideterm-ssh = { path = "../oxideterm-ssh" }
 oxideterm-theme = { path = "../oxideterm-theme" }
 oxideterm-workspace = { path = "../oxideterm-workspace" }
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+oxideterm-forwarding = { path = "../oxideterm-forwarding" }
+oxideterm-ssh = { path = "../oxideterm-ssh" }
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+uuid = { workspace = true, features = ["js"] }
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }
