@@ -1,9 +1,9 @@
 use gpui::{Context, FollowMode};
 use oxideterm_ai::{
     AI_IMAGE_REQUEST_BYTES, AiChatRole, AiChatStreamConfig, AiExecutionBackend, AiImageAttachment,
-    AiParsedInput, AiSlashCommand, ai_detected_intent_system_prompt, ai_input_system_prompt,
-    detect_ai_intent, generate_chat_title, parse_ai_user_input, resolve_ai_slash_command,
-    tool_loop::agent_chat_message,
+    AiParsedInput, AiSlashCommand, agent_chat_message, ai_detected_intent_system_prompt,
+    ai_input_system_prompt, detect_ai_intent, generate_chat_title, parse_ai_user_input,
+    resolve_ai_slash_command,
 };
 use oxideterm_i18n::I18n;
 use zeroize::Zeroizing;
@@ -89,11 +89,9 @@ fn chat_context(blocks: impl IntoIterator<Item = Option<String>>) -> Option<Stri
 impl AiWorkspaceEntity {
     pub fn bootstrap_chat_mcp_registry(&self, settings: &oxideterm_settings::AiSettings) {
         // Probe only when the AI surface is in use: MCP may need the OS key store.
-        let registry = self.mcp_registry().clone();
-        let configs = settings.mcp_servers.clone();
-        self.task_runtime().spawn(async move {
-            registry.connect_all_values(&configs).await;
-        });
+        self.host_bridge()
+            .mcp
+            .bootstrap(settings.mcp_servers.clone());
     }
 
     pub fn prepare_draft_submission(
@@ -199,12 +197,14 @@ impl AiWorkspaceEntity {
             input,
             slash,
         } = draft;
+        #[cfg(not(target_family = "wasm"))]
         let sources = [
             context.terminal.as_ref().map(|_| "terminal"),
             context.sidebar.as_ref().map(|_| "sidebar"),
             context.references.as_ref().map(|_| "reference"),
         ];
         let context = chat_context([context.terminal, context.sidebar, context.references]);
+        #[cfg(not(target_family = "wasm"))]
         if let Some(context) = &context
             && let Some(mut audit) = oxideterm_audit::AuditContext::current_request()
                 .or_else(oxideterm_audit::AuditContext::current)
@@ -233,11 +233,10 @@ impl AiWorkspaceEntity {
         if slash.is_none()
             && let Some((catalog, id)) = skills.zip(input.slash_command.as_deref())
         {
-            let registry = catalog.read();
-            if let Some(record) = registry.enabled_record(id)
-                && let Ok(instructions) = registry.load(id)
+            if let Some((hash, instructions)) =
+                super::skills::AiSkillCatalogHost::load_explicit(catalog, id)
             {
-                skill = Some((id.to_owned(), record.content_hash.clone()));
+                skill = Some((id.to_owned(), hash));
                 skill_prompt = Some(format!(
                     "## Explicit Agent Skill\nThe user explicitly selected `{id}`. Follow these instructions for this request, subject to the current tool permissions and safety mode.\n\n<skill_instructions id=\"{id}\">\n{}\n</skill_instructions>",
                     oxideterm_ai::sanitize_for_ai(&instructions)

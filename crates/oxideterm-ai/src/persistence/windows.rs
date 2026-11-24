@@ -1,17 +1,11 @@
 use super::{records::*, *};
+use crate::history_journal::{ToolParts, tool_part_links};
 pub(super) use crate::history_view::{
     HistoryContentCursor, HistoryEventLocation, HistoryMessageView,
 };
 
 const WINDOW_BYTES: usize = CONTENT_CHUNK_BYTES;
 const WINDOW_ITEMS: usize = HISTORY_PAGE_SIZE;
-
-#[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub(super) struct ToolParts {
-    call: Option<u64>,
-    result: Option<u64>,
-    projection: Option<u64>,
-}
 
 pub(super) fn index_tool_parts(
     tx: &redb::WriteTransaction,
@@ -20,40 +14,6 @@ pub(super) fn index_tool_parts(
     message: &AiChatMessage,
 ) -> Result<()> {
     write_tool_parts(tx, conversation, storage_id, tool_part_links(message))
-}
-
-pub(super) fn tool_part_links(
-    message: &AiChatMessage,
-) -> std::collections::BTreeMap<String, ToolParts> {
-    let mut links = std::collections::BTreeMap::<String, ToolParts>::new();
-    for (index, call) in message.tool_calls.iter().enumerate() {
-        if let Some(id) = call.get("id").and_then(Value::as_str) {
-            links.entry(id.into()).or_default().projection = Some(index as u64);
-        }
-    }
-    if let Some(parts) = message
-        .turn
-        .as_ref()
-        .and_then(|turn| turn.get("parts"))
-        .and_then(Value::as_array)
-    {
-        for (index, part) in parts.iter().enumerate() {
-            match part.get("type").and_then(Value::as_str) {
-                Some("tool_call") => {
-                    if let Some(id) = part.get("id").and_then(Value::as_str) {
-                        links.entry(id.into()).or_default().call = Some(index as u64);
-                    }
-                }
-                Some("tool_result") => {
-                    if let Some(id) = part.get("toolCallId").and_then(Value::as_str) {
-                        links.entry(id.into()).or_default().result = Some(index as u64);
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-    links
 }
 
 pub(super) fn write_tool_parts(

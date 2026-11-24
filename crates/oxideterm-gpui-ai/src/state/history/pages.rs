@@ -33,7 +33,7 @@ pub struct HistoryPageState {
     pub body_revisions: HashMap<String, u64>,
     body_tokens: HashMap<String, u64>,
     sections: HashMap<String, u64>,
-    body_tasks: HashMap<String, tokio::task::JoinHandle<()>>,
+    body_tasks: HashMap<String, crate::bridge::HostTask>,
     anchor: Option<(String, gpui::Pixels)>,
 }
 
@@ -149,7 +149,7 @@ impl AiWorkspaceEntity {
         if self.history.quitting {
             return;
         }
-        let Some(store) = self.history.store.clone() else {
+        let Some(store) = self.history_reader() else {
             return;
         };
         let initial = matches!(direction, PageDirection::Initial | PageDirection::Around(_));
@@ -166,14 +166,19 @@ impl AiWorkspaceEntity {
             }
             page.body_errors.clear();
         }
-        let cursor = match direction {
-            PageDirection::Initial | PageDirection::Around(_) => None,
-            PageDirection::Older => page.before.clone(),
-            PageDirection::Newer => page.after.clone(),
+        use crate::bridge::history::MessageWindow;
+        let window = match direction {
+            PageDirection::Initial => MessageWindow::Latest,
+            PageDirection::Around(sequence) => MessageWindow::Around(sequence),
+            PageDirection::Older => match page.before.clone() {
+                Some(cursor) => MessageWindow::Older(cursor),
+                None => return,
+            },
+            PageDirection::Newer => match page.after.clone() {
+                Some(cursor) => MessageWindow::Newer(cursor),
+                None => return,
+            },
         };
-        if !initial && cursor.is_none() {
-            return;
-        }
         page.loading = true;
         page.failed = false;
         if let Some(task) = self.history.load.take() {
@@ -189,52 +194,25 @@ impl AiWorkspaceEntity {
             .unwrap_or_else(|| "main".into());
         let sender = self.history.sender.clone();
         let wake = self.history.wake.clone();
-        self.history.load = Some(self.task_runtime.spawn(async move {
-            let target = id.clone();
-            let result = tokio::task::spawn_blocking(move || {
-                let head = store
-                    .conversation_head(&target)?
-                    .ok_or_else(|| anyhow::anyhow!("History conversation is missing"))?;
-                let branch = head.active_branch;
-                if !initial && branch != expected_branch {
-                    return Err(anyhow::anyhow!("History cursor expired"));
-                }
-                let page = match direction {
-                    PageDirection::Initial | PageDirection::Older => store.message_page(
-                        &target,
-                        &branch,
-                        cursor.as_ref(),
-                        oxideterm_ai::HISTORY_PAGE_SIZE,
-                    )?,
-                    PageDirection::Around(sequence) => store.message_page_at(
-                        &target,
-                        &branch,
-                        sequence.saturating_add(1),
-                        oxideterm_ai::HISTORY_PAGE_SIZE,
-                    )?,
-                    PageDirection::Newer => store.message_page_after(
-                        &target,
-                        &branch,
-                        cursor.as_ref().unwrap(),
-                        oxideterm_ai::HISTORY_PAGE_SIZE,
-                    )?,
+        self.history.load = Some(store.messages(
+            id.clone(),
+            expected_branch,
+            window,
+            Box::new(move |result| {
+                let (branch, result) = match result {
+                    Ok((branch, page)) => (branch, Ok(page)),
+                    Err(_) => (String::new(), Err(())),
                 };
-                Ok::<_, anyhow::Error>((branch, page))
-            })
-            .await;
-            let (branch, result) = match result {
-                Ok(Ok((branch, page))) => (branch, Ok(page)),
-                _ => (String::new(), Err(())),
-            };
-            let _ = sender.send(Delivery::Page(PageDelivery {
-                generation,
-                id,
-                branch,
-                direction,
-                result,
-            }));
-            wake.notify_one();
-        }));
+                let _ = sender.send(Delivery::Page(PageDelivery {
+                    generation,
+                    id,
+                    branch,
+                    direction,
+                    result,
+                }));
+                wake.mark();
+            }),
+        ));
     }
 
     pub(super) fn apply_history_page(&mut self, delivery: PageDelivery) {
@@ -364,14 +342,7 @@ impl AiWorkspaceEntity {
         page.body_errors.retain(|id| retained.contains(id));
         page.body_revisions.retain(|id, _| retained.contains(id));
         page.body_tokens.retain(|id, _| retained.contains(id));
-        page.body_tasks.retain(|id, task| {
-            if retained.contains(id) {
-                true
-            } else {
-                task.abort();
-                false
-            }
-        });
+        page.body_tasks.retain(|id, _| retained.contains(id));
         let changes = self.history.changes.borrow();
         let pending = &changes.messages;
         let mut live = HashMap::new();
@@ -537,13 +508,12 @@ impl AiWorkspaceEntity {
                 .invalidate_message(&message);
             return;
         }
-        let Some(store) = self.history.store.clone() else {
+        let Some(store) = self.history_reader() else {
             return;
         };
         let generation = self.history.generation;
         let sender = self.history.sender.clone();
         let wake = self.history.wake.clone();
-        let runtime = self.task_runtime.clone();
         let Some(page) = self.history_view_mut(&owner) else {
             return;
         };
@@ -568,27 +538,27 @@ impl AiWorkspaceEntity {
         *token += 1;
         let token = *token;
         let key = message.clone();
-        let task = runtime.spawn(async move {
-            let target = owner.conversation().to_owned();
-            let storage_id = description.storage_id.clone();
-            let revision = description.revision;
-            let result = tokio::task::spawn_blocking(move || {
-                store.message_view(&target, &description.storage_id, revision, section)
-            })
-            .await
-            .map_err(|_| ())
-            .and_then(|result| result.map_err(|_| ()));
-            let _ = sender.send(Delivery::Body(BodyDelivery {
-                generation,
-                owner,
-                storage_id,
-                message,
-                revision,
-                token,
-                result,
-            }));
-            wake.notify_one();
-        });
+        let storage_id = description.storage_id;
+        let revision = description.revision;
+        let task = store.body(
+            owner.conversation().to_owned(),
+            storage_id.clone(),
+            revision,
+            section,
+            Box::new(move |result| {
+                let result = result.map_err(|_| ());
+                let _ = sender.send(Delivery::Body(BodyDelivery {
+                    generation,
+                    owner,
+                    storage_id,
+                    message,
+                    revision,
+                    token,
+                    result,
+                }));
+                wake.mark();
+            }),
+        );
         page.body_tasks.insert(key, task);
     }
 

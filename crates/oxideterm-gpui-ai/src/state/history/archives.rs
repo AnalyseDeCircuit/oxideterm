@@ -85,7 +85,7 @@ impl AiWorkspaceEntity {
     }
 
     fn load_history_archive(&mut self, conversation: String, message: String) {
-        let Some(store) = self.history.store.clone() else {
+        let Some(store) = self.history_reader() else {
             return;
         };
         let key = (conversation, message);
@@ -102,20 +102,19 @@ impl AiWorkspaceEntity {
         let sender = self.history.sender.clone();
         let wake = self.history.wake.clone();
         let owner = key.clone();
-        let (commit, committed) = tokio::sync::oneshot::channel();
-        self.history_barrier(commit);
-        let task = self.task_runtime.spawn(async move {
+        let committed = self.committed_history();
+        let Some(ui) = self.history.foreground.as_ref() else {
+            return;
+        };
+        let task = ui.spawn(async move {
             if committed.await != Ok(true) {
                 return;
             }
-            let target = key.0.clone();
-            let query = range.clone();
-            let result = tokio::task::spawn_blocking(move || {
-                store.range_descriptions(&target, &query, before.as_ref(), 50)
+            let result = crate::bridge::history::read_history(|reply| {
+                store.archive(key.0.clone(), range.clone(), before, reply)
             })
             .await
-            .map_err(|_| ())
-            .and_then(|result| result.map_err(|_| ()));
+            .map_err(|_| ());
             let _ = sender.send(Delivery::Archive(ArchiveDelivery {
                 generation,
                 revision,
@@ -123,9 +122,13 @@ impl AiWorkspaceEntity {
                 range,
                 result,
             }));
-            wake.notify_one();
+            wake.mark();
         });
-        if let Some(previous) = self.history.archive_tasks.insert(owner, task) {
+        if let Some(previous) = self
+            .history
+            .archive_tasks
+            .insert(owner, crate::bridge::HostTask::new(move || drop(task)))
+        {
             previous.abort();
         }
     }

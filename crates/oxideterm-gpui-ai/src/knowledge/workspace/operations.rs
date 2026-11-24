@@ -50,9 +50,10 @@ impl KnowledgeWorkspaceView {
         };
         let load_generation = state.load_generation;
         let copy_title = self.i18n.t("settings_view.knowledge.note_copy_title");
-        let store = self.rag_store(cx);
+        let store = self.knowledge_host(cx);
         let operation = clipboard.clone();
         let target_for_result = target.clone();
+        #[cfg(not(target_family = "wasm"))]
         let audit_context = oxideterm_audit::AuditContext::current_request()
             .or_else(oxideterm_audit::AuditContext::current)
             .map(|mut context| {
@@ -62,6 +63,7 @@ impl KnowledgeWorkspaceView {
                 context.target = Some(oxideterm_audit::redact(&clipboard.document_id));
                 context
             });
+        #[cfg(not(target_family = "wasm"))]
         let audit = oxideterm_audit::AuditOperation::in_context(
             audit_context.as_ref(),
             oxideterm_audit::AuditCategory::File,
@@ -76,38 +78,10 @@ impl KnowledgeWorkspaceView {
             let result = cx
                 .background_executor()
                 .spawn(async move {
-                    let source =
-                        store
-                            .get_doc_metadata(&operation.document_id)?
-                            .ok_or_else(|| {
-                                oxideterm_ai::RagError::DocumentNotFound(
-                                    operation.document_id.clone(),
-                                )
-                            })?;
-                    if operation.cut {
-                        let changed = source.collection_id != target;
-                        let moved = if changed {
-                            store.edit_document_metadata(
-                                &source.id,
-                                None,
-                                Some(&target),
-                                source.version,
-                            )?
-                        } else {
-                            source
-                        };
-                        Ok((moved.id, moved.version, changed))
-                    } else {
-                        oxideterm_ai::rag_copy_document(
-                            &store,
-                            &source.id,
-                            target,
-                            copy_title.replace("{{title}}", &source.title),
-                        )
-                        .map(|doc| (doc.id, doc.version, true))
-                    }
+                    store.transfer(&operation.document_id, target, operation.cut, copy_title)
                 })
                 .await;
+            #[cfg(not(target_family = "wasm"))]
             audit.finish(
                 match &result {
                     Ok((_, _, true)) => oxideterm_audit::AuditOutcome::Succeeded,

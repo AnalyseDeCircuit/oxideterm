@@ -1,3 +1,4 @@
+use crate::bridge::knowledge::{AiKnowledgeHost, KnowledgeSaveError};
 use std::{rc::Rc, sync::Arc, time::Duration};
 
 use gpui::{
@@ -226,7 +227,7 @@ pub struct KnowledgeDocumentEditor {
     pub collection_id: String,
     pub title: String,
     pub version: u64,
-    store: Arc<oxideterm_ai::RagStore>,
+    store: Arc<dyn AiKnowledgeHost>,
     tokens: ThemeTokens,
     labels: KnowledgeEditorLabels,
     pub editor: Entity<TextEditorView>,
@@ -321,9 +322,21 @@ impl KnowledgeDocumentEditor {
         self.request_save(content, cx);
     }
 
+    #[cfg(not(target_family = "wasm"))]
     pub fn new(
         loaded: oxideterm_ai::RagDocumentContentResponse,
         store: Arc<oxideterm_ai::RagStore>,
+        tokens: ThemeTokens,
+        labels: KnowledgeEditorLabels,
+        has_background_image: bool,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        Self::with_bridge(loaded, store, tokens, labels, has_background_image, cx)
+    }
+
+    pub fn with_bridge(
+        loaded: oxideterm_ai::RagDocumentContentResponse,
+        store: Arc<dyn AiKnowledgeHost>,
         tokens: ThemeTokens,
         labels: KnowledgeEditorLabels,
         has_background_image: bool,
@@ -337,7 +350,7 @@ impl KnowledgeDocumentEditor {
             .as_ref()
             .map(std::path::PathBuf::from);
         let semantic_index = loaded.semantic_index;
-        let keyword_index = oxideterm_ai::rag_keyword_index_state(&store);
+        let keyword_index = store.keyword_index_state();
         let editor_labels = EditorContextMenuLabels {
             copy: labels.copy.clone(),
             cut: labels.cut.clone(),
@@ -471,8 +484,8 @@ impl KnowledgeDocumentEditor {
                     .background_executor()
                     .spawn(async move {
                         (
-                            oxideterm_ai::rag_keyword_index_state(&store),
-                            oxideterm_ai::rag_document_semantic_index_state(&store, &document_id),
+                            store.keyword_index_state(),
+                            store.document_semantic_index_state(&document_id),
                         )
                     })
                     .await;
@@ -585,17 +598,12 @@ impl KnowledgeDocumentEditor {
         self.save_state = KnowledgeDocumentSaveState::Saving;
         cx.notify();
         cx.spawn(async move |surface, cx| {
-            let result = cx
-                .background_executor()
-                .spawn(async move {
-                    oxideterm_ai::rag_save_document(
-                        &store,
-                        &document_id,
-                        content,
-                        Some(expected_version),
-                    )
-                })
-                .await;
+            let result =
+                cx.background_executor()
+                    .spawn(async move {
+                        store.save_document(&document_id, content, Some(expected_version))
+                    })
+                    .await;
             let _ = surface.update(cx, |surface, cx| {
                 if generation != surface.save_generation {
                     return;
@@ -620,11 +628,11 @@ impl KnowledgeDocumentEditor {
                             surface.schedule_autosave(cx);
                         }
                     }
-                    Err(oxideterm_ai::RagError::VersionConflict { .. }) => {
+                    Err(KnowledgeSaveError::Conflict) => {
                         surface.save_state = KnowledgeDocumentSaveState::Conflict;
                     }
-                    Err(error) => {
-                        surface.save_state = KnowledgeDocumentSaveState::Failed(error.to_string());
+                    Err(KnowledgeSaveError::Failed(error)) => {
+                        surface.save_state = KnowledgeDocumentSaveState::Failed(error);
                     }
                 }
                 cx.notify();
@@ -660,9 +668,7 @@ impl KnowledgeDocumentEditor {
             let load_document_id = document_id.clone();
             let result = cx
                 .background_executor()
-                .spawn(
-                    async move { oxideterm_ai::rag_get_document(&load_store, &load_document_id) },
-                )
+                .spawn(async move { load_store.get_document(&load_document_id) })
                 .await;
             let _ = surface.update(cx, |surface, cx| {
                 if generation != surface.save_generation {
@@ -682,8 +688,7 @@ impl KnowledgeDocumentEditor {
                         });
                         surface.observed_buffer_version =
                             surface.editor.read(cx).buffer().version();
-                        surface.keyword_index =
-                            oxideterm_ai::rag_keyword_index_state(&surface.store);
+                        surface.keyword_index = surface.store.keyword_index_state();
                         surface.start_index_state_poll(cx);
                         surface.save_state = KnowledgeDocumentSaveState::Saved;
                         if surface.mode != KnowledgeEditorMode::Source && surface.is_markdown {

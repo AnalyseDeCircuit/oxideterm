@@ -284,8 +284,8 @@ impl KnowledgeWorkspaceView {
         });
     }
 
-    fn rag_store(&self, cx: &App) -> Arc<oxideterm_ai::RagStore> {
-        self.bindings.page.read(cx).rag_store()
+    fn knowledge_host(&self, cx: &App) -> Arc<dyn crate::bridge::knowledge::AiKnowledgeHost> {
+        self.bindings.page.read(cx).knowledge_host()
     }
 
     pub fn set_cache_visible(&self, visible: bool, cx: &mut App) {
@@ -682,7 +682,7 @@ impl KnowledgeWorkspaceView {
         let Some(generation) = generation else {
             return;
         };
-        let store = self.rag_store(cx);
+        let store = self.knowledge_host(cx);
         let preferred_collection_id = self.status(cx).collection;
         let query = self.state.read(cx).navigator_query.clone();
         let search_query = query.clone();
@@ -691,7 +691,7 @@ impl KnowledgeWorkspaceView {
             let result = cx
                 .background_executor()
                 .spawn(async move {
-                    let collections = oxideterm_ai::rag_list_collections(&store, None)?;
+                    let collections = store.list_collections(None)?;
                     let selected_collection_id = preferred_collection_id
                         .filter(|id| collections.iter().any(|collection| collection.id == *id))
                         .or_else(|| collections.first().map(|collection| collection.id.clone()));
@@ -701,7 +701,7 @@ impl KnowledgeWorkspaceView {
                         .cloned();
                     let mut documents = selected_collection_id
                         .as_deref()
-                        .map(|id| oxideterm_ai::rag_list_documents(&store, id, None, None))
+                        .map(|id| store.list_documents(id, None, None))
                         .transpose()?
                         .map(|page| page.documents)
                         .unwrap_or_default();
@@ -712,8 +712,7 @@ impl KnowledgeWorkspaceView {
                             .collect();
                         let mut matching = Vec::new();
                         for document in documents {
-                            let content =
-                                oxideterm_ai::rag_get_document_content(&store, &document.id)?;
+                            let content = store.get_document_content(&document.id)?;
                             if knowledge_document_matches(&document.title, &content, &terms) {
                                 matching.push(document);
                             }
@@ -787,7 +786,7 @@ impl KnowledgeWorkspaceView {
         let generation = self.state.update(cx, |workspace, _cx| {
             workspace.begin_document_load(document_id.clone())
         });
-        let store = self.rag_store(cx);
+        let store = self.knowledge_host(cx);
         let labels = self.knowledge_editor_labels();
         let tokens = self.tokens;
         let has_background_image = self.has_background;
@@ -796,15 +795,13 @@ impl KnowledgeWorkspaceView {
             let load_store = store.clone();
             let result = cx
                 .background_executor()
-                .spawn(
-                    async move { oxideterm_ai::rag_get_document(&load_store, &load_document_id) },
-                )
+                .spawn(async move { load_store.get_document(&load_document_id) })
                 .await;
             let _ = workspace.update(cx, |workspace, cx| {
                 match result {
                     Ok(loaded) => {
                         let editor = cx.new(|cx| {
-                            KnowledgeDocumentEditor::new(
+                            KnowledgeDocumentEditor::with_bridge(
                                 loaded,
                                 store,
                                 tokens,

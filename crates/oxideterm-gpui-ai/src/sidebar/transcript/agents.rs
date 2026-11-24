@@ -93,8 +93,7 @@ impl AiAssistantSidebarView {
         let changed = self.state.update(cx, |ai, _cx| {
             let changed = ai.agents.records.get(&target).is_some_and(|record| {
                 ai.agents
-                    .services
-                    .runtime
+                    .host
                     .change_queued_model(&record.snapshot.run, model)
                     .is_ok()
             });
@@ -242,7 +241,7 @@ impl AiAssistantSidebarView {
                 move |this, _, cx| {
                     let ai = this.state.read(cx);
                     if let Some(group) = ai.agents.groups.get(&group_id) {
-                        let _ = ai.agents.services.runtime.cancel_group(&group.parent);
+                        let _ = ai.agents.host.cancel_group(&group.parent);
                     }
                     cx.notify();
                 },
@@ -416,10 +415,7 @@ impl AiAssistantSidebarView {
                         format!("agent-row-stop-{}", stop_run.run_id),
                         self.i18n.t("ai.agents.stop"),
                         move |this, _, cx| {
-                            let runtime = &this.state.read(cx).agents.services.runtime;
-                            if let Ok(parent) = runtime.parent_run(&stop_run) {
-                                let _ = runtime.stop(&parent, &stop_run);
-                            }
+                            let _ = this.state.read(cx).agents.host.stop_child(&stop_run);
                             cx.notify();
                         },
                         cx,
@@ -508,10 +504,7 @@ impl AiAssistantSidebarView {
                 "agent-stop-one".into(),
                 self.i18n.t("ai.agents.stop"),
                 move |this, _, cx| {
-                    let runtime = &this.state.read(cx).agents.services.runtime;
-                    if let Ok(parent) = runtime.parent_run(&stop_run) {
-                        let _ = runtime.stop(&parent, &stop_run);
-                    }
+                    let _ = this.state.read(cx).agents.host.stop_child(&stop_run);
                     cx.notify();
                 },
                 cx,

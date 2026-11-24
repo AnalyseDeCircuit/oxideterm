@@ -36,7 +36,7 @@ impl ProtocolFields {
             let fingerprint = format!(
                 "{:x}:{}",
                 Sha256::digest(tool_name.unwrap_or_default().as_bytes()),
-                super::super::tool_payloads::identity(value)
+                super::identity(value)
                     .expect("JSON values serialize to the infallible hash writer")
             );
             if let Some(field) = previous

@@ -179,6 +179,39 @@ pub struct AcpVisibleTerminal<Terminal> {
 
 impl<Terminal: Clone + 'static> EventEmitter<AcpWorkspaceEvent> for AcpWorkspaceEntity<Terminal> {}
 
+impl<Terminal: Clone + 'static> crate::bridge::turns::AiAcpSessionHost
+    for AcpWorkspaceEntity<Terminal>
+{
+    fn session(&self, conversation: &str) -> Option<crate::state::AiAcpSessionState> {
+        let thread = self.threads.get(conversation)?;
+        Some(crate::state::AiAcpSessionState {
+            agent_id: thread.agent_id.clone(),
+            session_id: thread.session_id.clone()?,
+            config_options: thread.config_options.clone(),
+            current_mode_id: thread.current_mode_id.clone(),
+            available_modes: thread.available_modes.clone(),
+            available_commands: thread.available_commands.clone(),
+            plan: thread.plan.clone(),
+            usage: thread.usage.clone(),
+            title: thread.title.clone(),
+            ..Default::default()
+        })
+    }
+    fn select_config(
+        &self,
+        conversation: &str,
+        selection: oxideterm_ai::AcpSessionConfigSelection,
+    ) -> bool {
+        self.set_config_selection(conversation, selection)
+    }
+    fn select_mode(&self, conversation: &str, mode: String) -> bool {
+        self.set_mode(conversation, mode)
+    }
+    fn cancel_prompt(&self, conversation: &str) -> bool {
+        self.cancel_active_turn(conversation).is_ok()
+    }
+}
+
 const ACP_EXTERNAL_MCP_TOOL_PREFIX: &str = "external_mcp";
 const ACP_PROXY_TOOL_STEM_MAX_CHARS: usize = 96;
 

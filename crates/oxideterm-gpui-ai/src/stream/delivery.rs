@@ -83,6 +83,96 @@ impl<C: CursorResponse> PendingCursor<C> {
     }
 }
 
+pub(crate) trait CursorInteraction {
+    fn view(
+        &self,
+    ) -> (
+        &str,
+        &str,
+        &oxideterm_ai::CursorRequest,
+        &[Vec<String>],
+        bool,
+    );
+    fn choices(&mut self) -> (&oxideterm_ai::CursorRequest, &mut [Vec<String>]);
+    fn resolve_choice(&mut self, accepted: bool) -> bool;
+}
+
+impl<C: CursorResponse> CursorInteraction for PendingCursor<C> {
+    fn view(
+        &self,
+    ) -> (
+        &str,
+        &str,
+        &oxideterm_ai::CursorRequest,
+        &[Vec<String>],
+        bool,
+    ) {
+        (
+            &self.conversation_id,
+            &self.assistant_id,
+            &self.request,
+            &self.selections,
+            self.active(),
+        )
+    }
+    fn choices(&mut self) -> (&oxideterm_ai::CursorRequest, &mut [Vec<String>]) {
+        (&self.request, &mut self.selections)
+    }
+    fn resolve_choice(&mut self, accepted: bool) -> bool {
+        let Some(value) = self.request.response(accepted, &self.selections) else {
+            return false;
+        };
+        self.respond(value);
+        true
+    }
+}
+
+pub(crate) trait QueueQuestion: Sized {
+    fn is_live(&self) -> bool;
+    fn install(
+        self,
+        ai: &mut crate::state::AiWorkspaceEntity,
+        key: (u64, String),
+        conversation: String,
+    );
+}
+pub(crate) trait QueueCursor: CursorResponse + Sized {
+    fn install(
+        ai: &mut crate::state::AiWorkspaceEntity,
+        key: (u64, String),
+        cursor: PendingCursor<Self>,
+    );
+}
+impl QueueQuestion for QuestionReply {
+    fn is_live(&self) -> bool {
+        self.as_ref().active()
+    }
+    fn install(
+        self,
+        ai: &mut crate::state::AiWorkspaceEntity,
+        key: (u64, String),
+        conversation: String,
+    ) {
+        let pending = PendingQuestion::new(conversation, self);
+        #[cfg(target_family = "wasm")]
+        ai.pending_user_questions.insert(key, pending);
+        #[cfg(not(target_family = "wasm"))]
+        ai.host_questions.insert(key, pending);
+    }
+}
+impl QueueCursor for CursorReply {
+    fn install(
+        ai: &mut crate::state::AiWorkspaceEntity,
+        key: (u64, String),
+        cursor: PendingCursor<Self>,
+    ) {
+        #[cfg(target_family = "wasm")]
+        ai.pending_cursor_requests.insert(key, cursor);
+        #[cfg(not(target_family = "wasm"))]
+        ai.host_cursors.insert(key, cursor);
+    }
+}
+
 impl<C: CursorResponse> Drop for PendingCursor<C> {
     fn drop(&mut self) {
         zeroize::Zeroize::zeroize(&mut self.selections);
@@ -173,6 +263,11 @@ pub enum PortableStreamEvent<Q = QuestionReply, C = CursorReply> {
         reply: Decision<Option<usize>>,
     },
     HistoryBarrier(CommitReply),
+    AcpSessionUpdated(oxideterm_ai::AcpSessionStateUpdate),
+    AcpPermissionRequested {
+        request: oxideterm_ai::AcpPermissionRequestProjection,
+        reply: Decision<Option<String>>,
+    },
     UserQuestionRequested {
         call: AiToolCall,
         reply: Q,

@@ -1,17 +1,20 @@
 use super::*;
 use oxideterm_ai::AiChatStreamConfig;
+#[cfg(not(target_family = "wasm"))]
 pub use oxideterm_ai::tool_loop::AiModelBackendServices;
 
-use oxideterm_ai::agent::{
-    AgentGroupId, AgentRecord, AgentResourceCoordinator, AgentRunId, AgentRunRef, AgentRuntime,
-    AgentText,
-};
+use oxideterm_ai::agent::{AgentGroupId, AgentRecord, AgentRunId, AgentRunRef, AgentText};
 
+#[cfg(not(target_family = "wasm"))]
+use oxideterm_ai::agent::{AgentResourceCoordinator, AgentRuntime};
+
+#[cfg(not(target_family = "wasm"))]
 #[derive(Clone)]
 pub struct AiAgentServices {
     pub runtime: AgentRuntime,
     pub resources: AgentResourceCoordinator,
 }
+#[cfg(not(target_family = "wasm"))]
 impl Default for AiAgentServices {
     fn default() -> Self {
         Self {
@@ -20,6 +23,7 @@ impl Default for AiAgentServices {
         }
     }
 }
+#[cfg(not(target_family = "wasm"))]
 impl gpui::Global for AiAgentServices {}
 
 pub struct AiAgentGroup {
@@ -27,6 +31,7 @@ pub struct AiAgentGroup {
     pub parent_message_id: String,
     pub parent_base_system_prompt: Option<String>,
     pub config: AiChatStreamConfig,
+    #[cfg(not(target_family = "wasm"))]
     pub services: AiModelBackendServices,
     pub context_window: usize,
 }
@@ -41,10 +46,13 @@ pub struct AgentCommunicationView {
 }
 
 pub struct AiAgentWorkspace {
+    pub host: Rc<dyn crate::bridge::agents::AiAgentHost>,
+    #[cfg(not(target_family = "wasm"))]
     pub tool_leases:
         HashMap<(oxideterm_ai::ToolSessionId, String), Vec<oxideterm_ai::agent::AgentToolLease>>,
     pub local_commands: HashMap<(String, u64, String), Task<()>>,
     pub command_monitors: HashMap<oxideterm_ai::RuntimeOwnerKey, Task<()>>,
+    #[cfg(not(target_family = "wasm"))]
     pub services: AiAgentServices,
     pub groups: HashMap<AgentGroupId, AiAgentGroup>,
     pub records: HashMap<AgentRunId, AgentRecord>,
@@ -65,9 +73,28 @@ pub struct AiAgentWorkspace {
 }
 
 impl AiAgentWorkspace {
+    #[cfg(not(target_family = "wasm"))]
     pub fn new(services: AiAgentServices) -> Self {
+        Self::from_host(Rc::new(services.runtime.clone()), services)
+    }
+
+    pub fn with_bridge(host: Rc<dyn crate::bridge::agents::AiAgentHost>) -> Self {
+        Self::from_host(
+            host,
+            #[cfg(not(target_family = "wasm"))]
+            AiAgentServices::default(),
+        )
+    }
+
+    fn from_host(
+        host: Rc<dyn crate::bridge::agents::AiAgentHost>,
+        #[cfg(not(target_family = "wasm"))] services: AiAgentServices,
+    ) -> Self {
         Self {
+            host,
+            #[cfg(not(target_family = "wasm"))]
             services,
+            #[cfg(not(target_family = "wasm"))]
             tool_leases: HashMap::new(),
             command_monitors: HashMap::new(),
             local_commands: HashMap::new(),
@@ -106,7 +133,7 @@ impl AiWorkspaceEntity {
                     && stream
                         .agent
                         .as_ref()
-                        .is_some_and(|run| self.agents.services.runtime.accepts_messages(run))
+                        .is_some_and(|run| self.agents.host.accepts_messages(run))
                     && Some(&stream.conversation_id)
                         == self.conversation_state.active_conversation_id.as_ref()
             })
@@ -122,13 +149,9 @@ impl AiWorkspaceEntity {
         let run = self
             .agent_run(self.chat_stream_generation())
             .ok_or(oxideterm_ai::agent::AgentError::StaleRun)?;
-        self.agents.services.runtime.send(
-            &run,
-            &run,
-            oxideterm_ai::agent::AgentMessageKind::UserSupplement,
-            oxideterm_ai::agent::AgentText::new(content),
-        )?;
-        Ok(())
+        self.agents
+            .host
+            .supplement(&run, oxideterm_ai::agent::AgentText::new(content))
     }
     pub fn run_accepts_tools(&self, generation: u64) -> bool {
         let Some(stream) = self.chat_stream_runs.get(&generation) else {
@@ -137,7 +160,7 @@ impl AiWorkspaceEntity {
         stream
             .agent
             .as_ref()
-            .is_none_or(|run| self.agents.services.runtime.accepts_messages(run))
+            .is_none_or(|run| self.agents.host.accepts_messages(run))
     }
     pub fn agent_run(&self, generation: u64) -> Option<AgentRunRef> {
         self.chat_stream_runs.get(&generation)?.agent.clone()
@@ -187,9 +210,9 @@ impl AiWorkspaceEntity {
     }
 
     pub(super) fn schedule_agent_updates(&mut self, cx: &mut Context<Self>) {
-        let mut updates = self.agents.services.runtime.subscribe();
+        let mut updates = self.agents.host.subscribe();
         self.agents.watch = Some(cx.spawn(async move |weak, cx| {
-            while updates.changed().await.is_ok() {
+            while updates.changed().await {
                 cx.background_executor()
                     .timer(Duration::from_millis(50))
                     .await;
@@ -216,7 +239,7 @@ impl AiWorkspaceEntity {
             .collect();
         let mut changed_messages = Vec::new();
         for conversation_id in conversation_ids {
-            let snapshots = self.agents.services.runtime.snapshots(&conversation_id);
+            let snapshots = self.agents.host.snapshots(&conversation_id);
             for snapshot in &snapshots {
                 if let Some(record) = self.agents.records.get_mut(&snapshot.run.run_id) {
                     let parent_usage = snapshots
@@ -227,7 +250,7 @@ impl AiWorkspaceEntity {
                         })
                         .map(|parent| parent.usage)
                         .unwrap_or(record.parent_usage);
-                    let communication = self.agents.services.runtime.communication(&snapshot.run);
+                    let communication = self.agents.host.communication(&snapshot.run);
                     if record.parent_usage != parent_usage
                         || record.snapshot.usage != snapshot.usage
                         || record.snapshot.state != snapshot.state
@@ -250,8 +273,7 @@ impl AiWorkspaceEntity {
                         }
                         record.parent_usage = parent_usage;
                         record.communication = communication;
-                        record.revision =
-                            oxideterm_ai::AiChatPersistenceStore::next_projection_persist_at();
+                        record.revision = next_history_timestamp();
                         self.agents
                             .dirty
                             .borrow_mut()
@@ -377,7 +399,7 @@ impl AiWorkspaceEntity {
             return;
         };
         let conversation = record.snapshot.conversation_id.clone();
-        let Some(store) = self.history.store.clone() else {
+        let Some(store) = self.history_reader() else {
             return;
         };
         let view = self
@@ -406,22 +428,18 @@ impl AiWorkspaceEntity {
         let before = view.cursors.last().copied().flatten();
         view.loading = true;
         view.failed = false;
-        let (sender, committed) = tokio::sync::oneshot::channel();
-        self.history_barrier(sender);
+        let committed = self.committed_history();
         let run = id.clone();
-        let task = tokio_util::task::AbortOnDropHandle::new(self.task_runtime.spawn(async move {
-            if committed.await != Ok(true) {
-                return Err(anyhow::anyhow!("History save failed"));
-            }
-            tokio::task::spawn_blocking(move || {
-                store.agent_communication_page(&conversation, &run, before)
-            })
-            .await
-            .map_err(anyhow::Error::from)?
-        }));
         let key = id.clone();
         let task = cx.spawn(async move |weak, cx| {
-            let loaded = task.await;
+            let loaded = if committed.await == Ok(true) {
+                crate::bridge::history::read_history(|reply| {
+                    store.communication(conversation, run, before, reply)
+                })
+                .await
+            } else {
+                Err(crate::bridge::history::HistoryReadFailed)
+            };
             let _ = weak.update(cx, |ai, cx| {
                 if ai.agents.detail.as_ref() != Some(&id) {
                     return;
@@ -432,7 +450,7 @@ impl AiWorkspaceEntity {
                 view.loading = false;
                 view.task.take();
                 match loaded {
-                    Ok(Ok(page)) => view.page = page.map(Arc::new),
+                    Ok(page) => view.page = page.map(Arc::new),
                     _ => view.failed = true,
                 }
                 cx.notify();
@@ -467,7 +485,7 @@ impl AiWorkspaceEntity {
         if older.is_some() && cursor.is_none() {
             return;
         }
-        let Some(store) = self.history.store.clone() else {
+        let Some(store) = self.history_reader() else {
             self.agents.detail_errors.insert(id);
             return;
         };
@@ -475,37 +493,23 @@ impl AiWorkspaceEntity {
         self.agents.detail_errors.remove(&id);
         let branch = oxideterm_ai::agent_history_branch(&id);
         let record_revision = record.revision;
-        let (sender, committed) = tokio::sync::oneshot::channel();
-        self.history_barrier(sender);
-        let task = self.task_runtime.spawn(async move {
-            if committed.await != Ok(true) {
-                return Err(anyhow::anyhow!("History save failed"));
-            }
-            tokio::task::spawn_blocking(move || {
-                let page = if older == Some(false) {
-                    store.message_page_after(
-                        &conversation,
-                        &branch,
-                        cursor.as_ref().unwrap(),
-                        oxideterm_ai::HISTORY_PAGE_SIZE,
-                    )?
-                } else {
-                    store.message_page(
-                        &conversation,
-                        &branch,
-                        cursor.as_ref(),
-                        oxideterm_ai::HISTORY_PAGE_SIZE,
-                    )?
-                };
-                Ok::<_, anyhow::Error>(page)
-            })
-            .await
-            .map_err(anyhow::Error::from)?
-        });
-        let task = tokio_util::task::AbortOnDropHandle::new(task);
+        let committed = self.committed_history();
         let key = id.clone();
         let task = cx.spawn(async move |weak, cx| {
-            let loaded = task.await;
+            let loaded = if committed.await == Ok(true) {
+                crate::bridge::history::read_history(|reply| {
+                    store.branch_descriptions(
+                        conversation,
+                        branch,
+                        cursor,
+                        older == Some(false),
+                        reply,
+                    )
+                })
+                .await
+            } else {
+                Err(crate::bridge::history::HistoryReadFailed)
+            };
             let _ = weak.update(cx, |ai, cx| {
                 ai.agents.detail_tasks.remove(&id);
                 ai.agents.details_loading.remove(&id);
@@ -513,7 +517,7 @@ impl AiWorkspaceEntity {
                     return;
                 }
                 match loaded {
-                    Ok(Ok(page)) => {
+                    Ok(page) => {
                         if ai
                             .agents
                             .records

@@ -2,46 +2,34 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 mod tools;
+pub use tools::AiBackgroundNotice;
+#[cfg(not(target_family = "wasm"))]
 pub use tools::{AiBackgroundRead, AiBackgroundReadPlan};
 
-use std::sync::Arc;
+#[cfg(not(target_family = "wasm"))]
+mod native;
+#[cfg(not(target_family = "wasm"))]
+pub use native::AiBackgroundExecutionRequest;
 
-use async_trait::async_trait;
 use gpui::{Context, EventEmitter};
 use oxideterm_ai_tasks::{
-    BackgroundTaskEvent, BackgroundTaskExecution, BackgroundTaskExecutionResult,
-    BackgroundTaskExecutor, BackgroundTaskId, BackgroundTaskRuntime, BackgroundTaskSnapshot,
-    BackgroundTaskSpec, BackgroundTaskValidationError,
+    BackgroundTaskEvent, BackgroundTaskId, BackgroundTaskSnapshot, BackgroundTaskSpec,
+    BackgroundTaskValidationError,
 };
-
 use oxideterm_workspace::delivery;
 
-pub struct AiBackgroundExecutionRequest {
-    pub execution: BackgroundTaskExecution,
-    pub response: tokio::sync::oneshot::Sender<Result<BackgroundTaskExecutionResult, String>>,
-}
-
-struct ApplicationBackgroundExecutor {
-    request_tx: delivery::ActiveDeliverySender<AiBackgroundExecutionRequest>,
-}
-
-#[async_trait]
-impl BackgroundTaskExecutor for ApplicationBackgroundExecutor {
-    async fn execute(
+pub trait AiBackgroundHost {
+    fn create(
         &self,
-        execution: BackgroundTaskExecution,
-    ) -> Result<BackgroundTaskExecutionResult, String> {
-        let (response, receiver) = tokio::sync::oneshot::channel();
-        self.request_tx
-            .send(AiBackgroundExecutionRequest {
-                execution,
-                response,
-            })
-            .map_err(|_| "The OxideSens background task owner has closed.".to_string())?;
-        receiver
-            .await
-            .map_err(|_| "The OxideSens background task execution was cancelled.".to_string())?
-    }
+        spec: BackgroundTaskSpec,
+    ) -> Result<BackgroundTaskId, BackgroundTaskValidationError>;
+    fn snapshots_for_owner(&self, conversation_id: &str) -> Vec<BackgroundTaskSnapshot>;
+    fn snapshot(&self, id: &BackgroundTaskId) -> Option<BackgroundTaskSnapshot>;
+    fn cancel(&self, id: &BackgroundTaskId) -> bool;
+    fn cancel_owner(&self, conversation_id: &str) -> usize;
+    fn cancel_all(&self) -> usize;
+    /// Stop this workspace's event producer and release its recurring jobs.
+    fn shutdown(&self);
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -50,38 +38,28 @@ pub enum AiBackgroundTaskEvent {
 }
 
 pub struct AiBackgroundTaskEntity {
-    runtime: BackgroundTaskRuntime,
+    runtime: Box<dyn AiBackgroundHost>,
     delivery_wake: delivery::ActiveDeliveryWake,
-    request_rx: std::sync::mpsc::Receiver<AiBackgroundExecutionRequest>,
+    #[cfg(not(target_family = "wasm"))]
+    request_rx: Option<std::sync::mpsc::Receiver<AiBackgroundExecutionRequest>>,
     event_rx: std::sync::mpsc::Receiver<BackgroundTaskEvent>,
-    event_forwarder: tokio::task::AbortHandle,
 }
 
 impl AiBackgroundTaskEntity {
-    pub fn new(task_runtime: Arc<tokio::runtime::Runtime>, cx: &mut Context<Self>) -> Self {
-        let delivery_wake = delivery::ActiveDeliveryWake::default();
-        let (request_tx, request_rx) =
-            delivery::ActiveDeliverySender::channel_with_wake(delivery_wake.clone());
-        let executor = Arc::new(ApplicationBackgroundExecutor { request_tx });
-        let (runtime, mut core_event_rx) =
-            BackgroundTaskRuntime::new(executor, task_runtime.handle().clone());
-        let (event_tx, event_rx) =
-            delivery::ActiveDeliverySender::channel_with_wake(delivery_wake.clone());
-        let event_forwarder = task_runtime
-            .spawn(async move {
-                while let Some(event) = core_event_rx.recv().await {
-                    if event_tx.send(event).is_err() {
-                        break;
-                    }
-                }
-            })
-            .abort_handle();
+    pub fn with_bridge(
+        start: impl FnOnce(
+            delivery::ActiveDeliverySender<BackgroundTaskEvent>,
+        ) -> Box<dyn AiBackgroundHost>,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let (events, event_rx) = delivery::ActiveDeliverySender::channel();
+        let delivery_wake = events.wake();
         let entity = Self {
-            runtime,
+            runtime: start(events),
             delivery_wake,
-            request_rx,
             event_rx,
-            event_forwarder,
+            #[cfg(not(target_family = "wasm"))]
+            request_rx: None,
         };
         entity.schedule_delivery(cx);
         entity
@@ -121,8 +99,12 @@ impl AiBackgroundTaskEntity {
         self.runtime.cancel_all()
     }
 
+    #[cfg(not(target_family = "wasm"))]
     pub fn take_execution_requests(&self) -> Vec<AiBackgroundExecutionRequest> {
-        delivery::drain_channel(&self.request_rx, delivery::USER_ACTION_DELIVERY_BUDGET).items
+        self.request_rx
+            .as_ref()
+            .map(|rx| delivery::drain_channel(rx, delivery::USER_ACTION_DELIVERY_BUDGET).items)
+            .unwrap_or_default()
     }
 
     pub fn take_events(&self) -> Vec<BackgroundTaskEvent> {
@@ -135,7 +117,6 @@ impl AiBackgroundTaskEntity {
         cx.on_release(move |entity, _cx| {
             // The entity is the sole owner of recurring AI work and its UI bridge.
             entity.runtime.shutdown();
-            entity.event_forwarder.abort();
             release_wake.stop();
         })
         .detach();

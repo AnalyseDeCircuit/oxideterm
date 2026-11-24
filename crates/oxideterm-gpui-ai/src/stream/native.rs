@@ -258,6 +258,29 @@ impl AiPendingUserQuestion {
 
 pub type AiPendingCursorRequest = PendingCursor<oxideterm_ai::CursorResponseSender>;
 
+impl super::QueueQuestion for NativeQuestionReply {
+    fn is_live(&self) -> bool {
+        !self.sender.is_closed() && self.dispatch.as_ref().is_none_or(|d| d.check().is_ok())
+    }
+    fn install(self, ai: &mut AiWorkspaceEntity, key: (u64, String), conversation: String) {
+        ai.pending_user_questions
+            .insert(key, AiPendingUserQuestion::new(conversation, self));
+    }
+}
+impl super::StreamReply<zeroize::Zeroizing<String>> for AiPendingUserQuestion {
+    fn active(&self) -> bool {
+        AiPendingUserQuestion::active(self)
+    }
+    fn resolve(self: Box<Self>, value: zeroize::Zeroizing<String>) {
+        self.answer_if_current(value);
+    }
+}
+impl super::QueueCursor for oxideterm_ai::CursorResponseSender {
+    fn install(ai: &mut AiWorkspaceEntity, key: (u64, String), cursor: AiPendingCursorRequest) {
+        ai.pending_cursor_requests.insert(key, cursor);
+    }
+}
+
 impl CursorResponse for oxideterm_ai::CursorResponseSender {
     fn active(&self) -> bool {
         !self.is_closed()
@@ -268,6 +291,15 @@ impl CursorResponse for oxideterm_ai::CursorResponseSender {
 }
 
 impl AiWorkspaceEntity {
+    pub fn register_acp_permission_choice(
+        &mut self,
+        generation: u64,
+        tool_call_id: String,
+        sender: tokio::sync::oneshot::Sender<Option<String>>,
+    ) -> bool {
+        self.register_acp_permission_decision(generation, tool_call_id, decision(sender))
+    }
+
     pub fn history_barrier(&mut self, sender: tokio::sync::oneshot::Sender<bool>) {
         self.after_history_commit(Box::new(sender));
     }

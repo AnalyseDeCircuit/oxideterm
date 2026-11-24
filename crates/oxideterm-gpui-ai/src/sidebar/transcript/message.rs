@@ -2341,11 +2341,12 @@ impl AiAssistantSidebarView {
     ) -> Option<AnyElement> {
         let (request, selections) = {
             let ai = self.state.read(cx);
-            let pending = ai.pending_cursor_requests.get(&(generation, id.into()))?;
-            if !pending.active() {
+            let (_, _, request, selections, active) =
+                ai.cursor_request(&(generation, id.into()))?.view();
+            if !active {
                 return None;
             }
-            (pending.request.clone(), pending.selections.clone())
+            (request.clone(), selections.to_vec())
         };
         let mut body = div()
             .w_full()

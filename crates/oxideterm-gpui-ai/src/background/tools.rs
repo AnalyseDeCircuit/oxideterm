@@ -1,10 +1,14 @@
 use super::AiBackgroundTaskEntity;
+#[cfg(not(target_family = "wasm"))]
 use oxideterm_ai::tool_resources::{
     AiActionResultLite, AiApplicationTool, AiOrchestratorRuntimeSnapshot,
 };
+#[cfg(not(target_family = "wasm"))]
 use oxideterm_ai_tasks::{BackgroundTaskExecution, BackgroundTaskExecutionResult};
+#[cfg(not(target_family = "wasm"))]
 use serde_json::Value;
 
+#[cfg(not(target_family = "wasm"))]
 pub enum AiBackgroundRead {
     State,
     StableResource,
@@ -13,11 +17,13 @@ pub enum AiBackgroundRead {
     Plugins,
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub struct AiBackgroundReadPlan {
     tool_name: String,
     args: Value,
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl AiBackgroundReadPlan {
     pub fn from_execution(execution: BackgroundTaskExecution) -> Result<Self, String> {
         let args = serde_json::from_str::<Value>(execution.arguments_json.as_str())
@@ -65,6 +71,7 @@ impl AiBackgroundReadPlan {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl AiBackgroundRead {
     pub fn result(
         self,
@@ -229,6 +236,7 @@ pub struct AiBackgroundNotice {
 }
 
 impl super::AiBackgroundTaskEntity {
+    #[cfg(not(target_family = "wasm"))]
     pub fn drain_tool_events(
         &self,
         i18n: &oxideterm_i18n::I18n,
@@ -236,10 +244,12 @@ impl super::AiBackgroundTaskEntity {
         Vec<AiBackgroundNotice>,
         Vec<super::AiBackgroundExecutionRequest>,
     ) {
+        (self.take_notices(i18n), self.take_execution_requests())
+    }
+
+    pub fn take_notices(&self, i18n: &oxideterm_i18n::I18n) -> Vec<AiBackgroundNotice> {
         use oxideterm_ai_tasks::{BackgroundTaskEvent, BackgroundTaskState};
-        let events = self.take_events();
-        let requests = self.take_execution_requests();
-        let notices = events
+        self.take_events()
             .into_iter()
             .filter_map(|event| {
                 let BackgroundTaskEvent::Changed(snapshot) = event else {
@@ -259,7 +269,6 @@ impl super::AiBackgroundTaskEntity {
                     key: format!("ai-background-task:{}", snapshot.id.as_str()),
                 })
             })
-            .collect();
-        (notices, requests)
+            .collect()
     }
 }

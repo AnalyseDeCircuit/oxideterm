@@ -8,6 +8,7 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+oxideterm-ai = { path = "../oxideterm-ai" }
 oxideterm-settings = { path = "../oxideterm-settings" }
 oxideterm-terminal-semantic = { path = "../oxideterm-terminal-semantic", default-features = false }
 oxideterm-theme = { path = "../oxideterm-theme" }
@@ -16,5 +17,4 @@ web-time.workspace = true
 zeroize.workspace = true
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
-oxideterm-ai = { path = "../oxideterm-ai" }
 oxideterm-cloud-sync = { path = "../oxideterm-cloud-sync" }

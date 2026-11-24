@@ -59,28 +59,62 @@ pub fn import_knowledge_file(
     collection_id: &str,
     path: &Path,
 ) -> Result<(), String> {
-    let metadata = fs::metadata(path).map_err(|error| error.to_string())?;
-    if metadata.len() > KNOWLEDGE_MAX_IMPORT_FILE_SIZE {
-        let file_name = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("document");
-        return Err(format!(
-            "File \"{file_name}\" exceeds 5 MB limit ({} MB)",
-            (metadata.len() as f64 / 1024.0 / 1024.0).round() as u64
-        ));
-    }
+    oxideterm_ai::rag_add_document(store, read_knowledge_import_file(collection_id, path)?)
+        .map(|_| ())
+}
 
+#[cfg(not(target_family = "wasm"))]
+pub fn read_knowledge_import_file(
+    collection_id: &str,
+    path: &Path,
+) -> Result<oxideterm_ai::RagAddDocumentRequest, String> {
+    let metadata = fs::metadata(path).map_err(|error| error.to_string())?;
     let file_name = path
         .file_name()
         .and_then(|name| name.to_str())
-        .unwrap_or("document")
-        .to_string();
-    let extension = path
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .unwrap_or_default()
-        .to_ascii_lowercase();
+        .unwrap_or("document");
+    let mut request = knowledge_import_request(
+        collection_id,
+        file_name,
+        path.extension().and_then(|ext| ext.to_str()),
+        metadata.len(),
+        || fs::read_to_string(path).map_err(|error| error.to_string()),
+    )?;
+    request.source_path = Some(path.to_string_lossy().into_owned());
+    Ok(request)
+}
+
+pub fn prepare_knowledge_import_text(
+    collection_id: &str,
+    name: &str,
+    content: String,
+) -> Result<oxideterm_ai::RagAddDocumentRequest, String> {
+    knowledge_import_request(
+        collection_id,
+        name,
+        std::path::Path::new(name)
+            .extension()
+            .and_then(|ext| ext.to_str()),
+        content.len() as u64,
+        || Ok(content),
+    )
+}
+
+fn knowledge_import_request(
+    collection_id: &str,
+    file_name: &str,
+    extension: Option<&str>,
+    size: u64,
+    read: impl FnOnce() -> Result<String, String>,
+) -> Result<oxideterm_ai::RagAddDocumentRequest, String> {
+    if size > KNOWLEDGE_MAX_IMPORT_FILE_SIZE {
+        return Err(format!(
+            "File \"{file_name}\" exceeds 5 MB limit ({} MB)",
+            (size as f64 / 1024.0 / 1024.0).round() as u64
+        ));
+    }
+
+    let extension = extension.unwrap_or_default().to_ascii_lowercase();
     if !KNOWLEDGE_IMPORT_EXTENSIONS.contains(&extension.as_str()) {
         return Err(format!("Unsupported document type: {file_name}"));
     }
@@ -89,18 +123,13 @@ pub fn import_knowledge_file(
         "txt" => "plaintext",
         _ => "plaintext",
     };
-    let content = fs::read_to_string(path).map_err(|error| error.to_string())?;
-    oxideterm_ai::rag_add_document(
-        store,
-        oxideterm_ai::RagAddDocumentRequest {
-            collection_id: collection_id.to_string(),
-            title: file_name,
-            content,
-            format: format.to_string(),
-            source_path: Some(path.to_string_lossy().to_string()),
-        },
-    )
-    .map(|_| ())
+    Ok(oxideterm_ai::RagAddDocumentRequest {
+        collection_id: collection_id.to_string(),
+        title: file_name.to_string(),
+        content: read()?,
+        format: format.to_string(),
+        source_path: None,
+    })
 }
 
 #[cfg(test)]

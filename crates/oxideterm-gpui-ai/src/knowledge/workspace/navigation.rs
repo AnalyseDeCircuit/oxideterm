@@ -835,7 +835,7 @@ impl KnowledgeWorkspaceView {
         let Some((notebook, id, version)) = data else {
             return;
         };
-        let store = self.rag_store(cx);
+        let store = self.knowledge_host(cx);
         let task = cx.spawn(async move |workspace, cx| {
             let result = cx
                 .background_executor()
@@ -845,13 +845,12 @@ impl KnowledgeWorkspaceView {
                             .rename_collection(&id, name.as_deref().unwrap_or_default())
                             .map(|_| None)
                     } else {
-                        let doc = store.edit_document_metadata(
+                        let doc = store.edit_metadata(
                             &id,
                             name.as_deref(),
                             target.as_deref(),
                             version,
                         )?;
-                        let _ = store.queue_bm25_rebuild();
                         Ok(Some(doc))
                     }
                 })

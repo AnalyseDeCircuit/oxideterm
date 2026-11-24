@@ -1,3 +1,4 @@
+use crate::bridge::history::read_history;
 use gpui::ClipboardItem;
 
 use super::*;
@@ -12,7 +13,7 @@ impl AiWorkspaceEntity {
         let Some(conversation) = self.conversation_state().active_conversation() else {
             return;
         };
-        let stored = self.history.store.clone().zip(
+        let stored = self.history_reader().zip(
             self.history
                 .pages
                 .get(&conversation.id)
@@ -30,21 +31,20 @@ impl AiWorkspaceEntity {
             return;
         };
         let conversation = conversation.id.clone();
-        let runtime = self.task_runtime.clone();
         let task = cx.spawn(async move |weak, cx| {
-            let result = runtime
-                .spawn_blocking(move || {
-                    store.message_content(
-                        &conversation,
-                        &description.storage_id,
-                        description.revision,
-                    )
-                })
-                .await;
+            let result = read_history(|reply| {
+                store.message_text(
+                    conversation,
+                    description.storage_id,
+                    description.revision,
+                    reply,
+                )
+            })
+            .await;
             let _ = weak.update(cx, |this, cx| {
                 this.history.copy_load.take();
                 match result {
-                    Ok(Ok(content)) => cx.write_to_clipboard(ClipboardItem::new_string(content)),
+                    Ok(content) => cx.write_to_clipboard(ClipboardItem::new_string(content)),
                     _ => on_failure(cx),
                 }
             });
@@ -73,40 +73,23 @@ impl AiWorkspaceEntity {
                 Some((conversation.id.clone(), range))
             });
         if let Some((conversation, range)) = reference {
-            let Some(store) = self.history.store.clone() else {
+            let Some(store) = self.history_reader() else {
                 return;
             };
             let launch = self.next_chat_id(ai_now_ms());
-            let (sender, receiver) = tokio::sync::oneshot::channel();
+
             self.chat_launches
                 .insert(conversation.clone(), launch.clone());
             self.set_conversation_loading(&conversation, true);
-            self.history_barrier(sender);
+            let receiver = self.committed_history();
             cx.notify();
-            let runtime = self.task_runtime.clone();
             let owner = conversation.clone();
             let task = cx.spawn(async move |weak, cx| {
                 if receiver.await != Ok(true) {
                     return;
                 }
                 let id = conversation.clone();
-                let result = runtime
-                    .spawn_blocking(move || {
-                        let mut cursor = None;
-                        let mut pages = Vec::new();
-                        loop {
-                            let page = store.range_messages(&id, &range, cursor.as_ref(), 50)?;
-                            pages.push(page.messages);
-                            cursor = page.before;
-                            if cursor.is_none() {
-                                break;
-                            }
-                        }
-                        Ok::<_, anyhow::Error>(
-                            pages.into_iter().rev().flatten().collect::<Vec<_>>(),
-                        )
-                    })
-                    .await;
+                let result = read_history(|reply| store.branch_tail(id, range, reply)).await;
                 let _ = weak.update(cx, |ai, cx| {
                     if !ai.chat_launch_matches(&conversation, Some(&launch)) {
                         return;
@@ -119,7 +102,7 @@ impl AiWorkspaceEntity {
                     {
                         return;
                     }
-                    if let Ok(Ok(tail)) = result {
+                    if let Ok(tail) = result {
                         if let Some(branches) = ai
                             .conversation_state_mut()
                             .active_conversation_mut()
@@ -179,7 +162,7 @@ impl AiWorkspaceEntity {
         let Some(conversation_id) = self.conversation_state().active_conversation_id.clone() else {
             return;
         };
-        let Some(store) = self.history.store.clone() else {
+        let Some(store) = self.history_reader() else {
             return;
         };
         let branch = self
@@ -188,14 +171,13 @@ impl AiWorkspaceEntity {
             .get(&conversation_id)
             .cloned()
             .unwrap_or_else(|| "main".into());
-        let runtime = self.task_runtime.clone();
-        let (sender, receiver) = tokio::sync::oneshot::channel();
+
         let launch_id = self.next_chat_id(ai_now_ms());
         self.chat_launches
             .insert(conversation_id.clone(), launch_id.clone());
         self.set_conversation_loading(&conversation_id, true);
         self.persist_chat_state();
-        self.history_barrier(sender);
+        let receiver = self.committed_history();
         let target = conversation_id.clone();
         let task = cx.spawn(async move |weak, cx| {
             if receiver.await != Ok(true) {
@@ -203,9 +185,7 @@ impl AiWorkspaceEntity {
             }
             let id = conversation_id.clone();
             let source_branch = branch.clone();
-            let result = runtime
-                .spawn_blocking(move || store.retry_messages(&id, &source_branch))
-                .await;
+            let result = read_history(|reply| store.retry_messages(id, source_branch, reply)).await;
             let launch_owner = weak.clone();
             let _ = weak.update(cx, |ai, cx| {
                 if ai.history.quitting
@@ -220,7 +200,7 @@ impl AiWorkspaceEntity {
                 }
                 ai.history.launches.remove(&conversation_id);
                 ai.set_conversation_loading(&conversation_id, false);
-                let Ok(Ok(messages)) = result else {
+                let Ok(messages) = result else {
                     ai.history_load_failed();
                     cx.notify();
                     return;
@@ -295,7 +275,7 @@ impl AiWorkspaceEntity {
         let Some(conversation_id) = self.conversation_state().active_conversation_id.clone() else {
             return;
         };
-        let Some(store) = self.history.store.clone() else {
+        let Some(store) = self.history_reader() else {
             return;
         };
         let branch = self
@@ -304,11 +284,10 @@ impl AiWorkspaceEntity {
             .get(&conversation_id)
             .cloned()
             .unwrap_or_else(|| "main".into());
-        let runtime = self.task_runtime.clone();
-        let (sender, receiver) = tokio::sync::oneshot::channel();
+
         self.set_conversation_loading(&conversation_id, true);
         self.persist_chat_state();
-        self.history_barrier(sender);
+        let receiver = self.committed_history();
         let task = cx.spawn(async move |weak, cx| {
             if receiver.await != Ok(true) {
                 return;
@@ -316,9 +295,8 @@ impl AiWorkspaceEntity {
             let id = conversation_id.clone();
             let source_branch = branch.clone();
             let message = message_id.clone();
-            let result = runtime
-                .spawn_blocking(move || store.message_by_id(&id, &source_branch, &message))
-                .await;
+            let result =
+                read_history(|reply| store.message_by_id(id, source_branch, message, reply)).await;
             let _ = weak.update(cx, |ai, cx| {
                 ai.history.edit_load.take();
                 ai.set_conversation_loading(&conversation_id, false);
@@ -332,7 +310,7 @@ impl AiWorkspaceEntity {
                         .is_none_or(|current| current == &branch)
                 {
                     match result {
-                        Ok(Ok(message)) if message.role == AiChatRole::User => {
+                        Ok(message) if message.role == AiChatRole::User => {
                             let content = message.content.clone();
                             if let Some(slot) = ai
                                 .conversation_state_mut()

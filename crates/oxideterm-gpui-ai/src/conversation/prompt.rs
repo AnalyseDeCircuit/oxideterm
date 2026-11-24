@@ -8,7 +8,8 @@ use crate::{
     sidebar::transcript::ai_chat_message_base_signature,
     state::{
         AiChatMessageSignatureCache, AiContextTokenBreakdown, AiContextTokenBreakdownKey,
-        AiWorkspaceEntity, skills::AiSkillCatalog,
+        AiWorkspaceEntity,
+        skills::{AiSkillCatalog, AiSkillCatalogHost},
     },
     stream::ai_context_token_breakdown_from_prompt,
 };
@@ -18,11 +19,11 @@ use super::{
     build_ai_turn_context_prompt,
 };
 
-pub struct AiConversationPrompt<'a> {
+pub struct AiConversationPrompt<'a, Skills: AiSkillCatalogHost + ?Sized = AiSkillCatalog> {
     pub state: &'a AiWorkspaceEntity,
     pub settings: &'a AiSettings,
     pub settings_updated_at: u64,
-    pub skills: &'a AiSkillCatalog,
+    pub skills: &'a Skills,
 }
 
 fn append_deduped_context_message(history: &mut Vec<AiChatMessage>, id: &str, content: String) {
@@ -60,7 +61,7 @@ fn insert_transcript_lookup(history: &mut Vec<AiChatMessage>, content: String) {
     append_deduped_context_message(history, "transcript-lookup-reference", content);
 }
 
-impl AiConversationPrompt<'_> {
+impl<Skills: AiSkillCatalogHost + ?Sized> AiConversationPrompt<'_, Skills> {
     fn context_window(&self, config: &AiChatStreamConfig) -> usize {
         ai_model_context_window(self.settings, config.provider_id.as_deref(), &config.model)
     }
@@ -546,11 +547,12 @@ impl AiConversationPrompt<'_> {
         if settings.skills.enabled {
             // Skill content hashes make catalog edits invalidate the prompt
             // without rebuilding the full catalog string on every repaint.
-            for skill in self.skills.read().records().filter(|skill| skill.enabled) {
-                ai_hash_text_shape(&skill.id, &mut hasher);
-                ai_hash_text_shape(&skill.content_hash, &mut hasher);
-                std::hash::Hash::hash(&skill.priority, &mut hasher);
-            }
+            self.skills
+                .visit_enabled_versions(&mut |id, hash, priority| {
+                    ai_hash_text_shape(id, &mut hasher);
+                    ai_hash_text_shape(hash, &mut hasher);
+                    std::hash::Hash::hash(&priority, &mut hasher);
+                });
         }
         std::hash::Hasher::finish(&hasher)
     }

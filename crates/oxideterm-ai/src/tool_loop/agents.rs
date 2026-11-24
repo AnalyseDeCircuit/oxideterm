@@ -1,23 +1,4 @@
-pub fn agent_chat_message(role: AiChatRole, content: String) -> AiChatMessage {
-    AiChatMessage {
-        id: uuid::Uuid::new_v4().to_string(),
-        role,
-        content,
-        timestamp_ms: ai_now_ms(),
-        model: None,
-        context: None,
-        is_streaming: false,
-        thinking_content: None,
-        metadata: None,
-        tool_call_id: None,
-        tool_calls: Vec::new(),
-        turn: None,
-        transcript_ref: None,
-        summary_ref: None,
-        branches: None,
-        suggestions: Vec::new(),
-    }
-}
+pub use crate::chat::agent_chat_message;
 
 async fn configure_ai_child_model(
     agent: &mut AgentExecution,

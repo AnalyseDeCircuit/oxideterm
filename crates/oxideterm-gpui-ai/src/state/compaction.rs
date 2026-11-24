@@ -1,10 +1,7 @@
 use std::rc::Rc;
 
 use gpui::{App, Context};
-use oxideterm_ai::{
-    AiChatStreamConfig, SharedAiProviderKey, provider_chat_requires_key, scope_responses_history,
-    stream_chat_completion, stream_state::*,
-};
+use oxideterm_ai::{AiChatStreamConfig, scope_responses_history, stream_state::*};
 use oxideterm_i18n::I18n;
 
 use super::{AiPendingChatStream, AiWorkspaceEntity, ai_now_ms};
@@ -76,7 +73,7 @@ impl AiWorkspaceEntity {
         {
             return Err(request.resume_after.map(Box::new));
         }
-        let Some(store) = self.history.store.clone() else {
+        let Some(store) = self.history_reader() else {
             return Err(request.resume_after.map(Box::new));
         };
         let profile = match profile {
@@ -97,10 +94,8 @@ impl AiWorkspaceEntity {
         let source_branch = branch.clone();
         let target = id.clone();
         let source_id = target.clone();
-        let runtime = self.task_runtime.clone();
-        let (sender, receiver) = tokio::sync::oneshot::channel();
         self.persist_chat_state();
-        self.history_barrier(sender);
+        let receiver = self.committed_history();
         let task = cx.spawn(async move |weak, cx| {
             if receiver.await != Ok(true) {
                 let _ = weak.update(cx, |ai, _| {
@@ -109,22 +104,22 @@ impl AiWorkspaceEntity {
                 });
                 return;
             }
-            let result = runtime
-                .spawn_blocking(move || {
-                    store.model_context(
-                        &source_id,
-                        &source_branch,
-                        profile.context_window.saturating_mul(2),
-                        &profile.config.provider_type,
-                        &profile.config.model,
-                    )
-                })
-                .await;
+            let result = crate::bridge::history::read_history(|reply| {
+                store.model_context(
+                    source_id,
+                    source_branch,
+                    profile.context_window.saturating_mul(2),
+                    profile.config.provider_type.clone(),
+                    profile.config.model.clone(),
+                    reply,
+                )
+            })
+            .await;
             // Read preferences before entering the AI entity. The history read
             // and summary start are separate stages, as in the provider path.
             if request.silent
                 && !request.force
-                && let Ok(Ok(source)) = &result
+                && let Ok(source) = &result
                 && !cx.update(|cx| (bindings.should_compact)(source, cx))
             {
                 let _ = weak.update(cx, |ai, _| ai.history.compaction_loads.remove(&target));
@@ -142,7 +137,7 @@ impl AiWorkspaceEntity {
                 {
                     return;
                 }
-                let Ok(Ok(source)) = result else {
+                let Ok(source) = result else {
                     ai.set_conversation_loading(&target, false);
                     ai.history_load_failed();
                     cx.notify();
@@ -244,27 +239,17 @@ impl AiWorkspaceEntity {
 
     fn start_compaction_worker(
         &mut self,
-        mut config: AiChatStreamConfig,
+        config: AiChatStreamConfig,
         messages: Vec<oxideterm_ai::AiChatMessage>,
         mut delivery: AiCompactionDelivery,
         bindings: AiCompactionBindings,
         cx: &mut Context<Self>,
     ) {
         let target = delivery.conversation_id.clone();
-        let key_store = self.key_store().clone();
-        let runtime = self.task_runtime.clone();
-        let requires_key = provider_chat_requires_key(&config.provider_type);
+        let prepare = self.host.provider.prepare_summary(config, messages);
         let ui_tx = self.compaction_sender();
         let task = cx.spawn(async move |weak, cx| {
-            let key_result = if let Some(provider_id) = config.provider_id.clone() {
-                runtime
-                    .spawn_blocking(move || key_store.get_provider_key(&provider_id))
-                    .await
-                    .map_err(|_| ())
-                    .and_then(|result| result.map_err(|_| ()))
-            } else {
-                Ok(None)
-            };
+            let prepared = prepare.await;
             let _ = weak.update(cx, |ai, cx| {
                 let id = &delivery.conversation_id;
                 if ai
@@ -282,46 +267,54 @@ impl AiWorkspaceEntity {
                     ai.set_conversation_loading(id, false);
                     return;
                 }
-                let error_key = match key_result {
-                    Ok(key) if key.is_some() || !requires_key => {
-                        config.api_key = key.map(SharedAiProviderKey::new);
-                        None
+                let start = match prepared {
+                    Ok(start) => start,
+                    Err(error) => {
+                        let error_key = match error {
+                            crate::bridge::ProviderKeyError::Missing => {
+                                "ai.model_selector.api_key_not_found"
+                            }
+                            crate::bridge::ProviderKeyError::Unavailable => {
+                                "ai.model_selector.failed_to_get_api_key"
+                            }
+                        };
+                        ai.finish_compaction(id);
+                        ai.history.compaction_sources.remove(id);
+                        ai.set_conversation_loading(id, false);
+                        if delivery.silent {
+                            ai.clear_compaction_notice_for(id, cx);
+                        } else {
+                            bindings.emit(
+                                AiCompactionEffect::ShowError(bindings.i18n.t(error_key)),
+                                cx,
+                            );
+                        }
+                        if let Some(pending) =
+                            ai.valid_compaction_resume(delivery.resume_after.take())
+                        {
+                            bindings.emit(AiCompactionEffect::Resume(pending), cx);
+                        }
+                        cx.notify();
+                        return;
                     }
-                    Ok(_) => Some("ai.model_selector.api_key_not_found"),
-                    Err(_) if requires_key => Some("ai.model_selector.failed_to_get_api_key"),
-                    Err(_) => None,
                 };
-                if let Some(error_key) = error_key {
-                    ai.finish_compaction(id);
-                    ai.history.compaction_sources.remove(id);
-                    ai.set_conversation_loading(id, false);
-                    if delivery.silent {
-                        ai.clear_compaction_notice_for(id, cx);
-                    } else {
-                        bindings.emit(
-                            AiCompactionEffect::ShowError(bindings.i18n.t(error_key)),
-                            cx,
-                        );
-                    }
-                    if let Some(pending) = ai.valid_compaction_resume(delivery.resume_after.take())
-                    {
-                        bindings.emit(AiCompactionEffect::Resume(pending), cx);
-                    }
-                    cx.notify();
-                    return;
-                }
-                let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-                let model = tokio_util::task::AbortOnDropHandle::new(
-                    runtime.spawn(stream_chat_completion(config, messages, tx)),
-                );
                 let owner_id = delivery.conversation_id.clone();
-                let task = runtime.spawn(async move {
-                    let _model = model;
-                    (delivery.summary, delivery.failed) = collect_ai_compaction_summary(rx).await;
+                let task = start(Box::new(move |result| {
+                    (delivery.summary, delivery.failed) = result;
                     let _ = ui_tx.send(delivery);
-                });
+                }));
                 if let Some((_, owner)) = ai.history.compaction_runs.get_mut(&owner_id) {
-                    *owner = Some(task);
+                    #[cfg(target_family = "wasm")]
+                    {
+                        *owner = Some(task);
+                    }
+                    #[cfg(not(target_family = "wasm"))]
+                    match task.into_worker() {
+                        Ok(worker) => *owner = Some(worker),
+                        Err(task) => {
+                            ai.history.hosted_compaction_tasks.insert(owner_id, task);
+                        }
+                    }
                 } else {
                     task.abort();
                 }

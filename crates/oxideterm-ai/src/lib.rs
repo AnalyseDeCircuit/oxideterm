@@ -31,6 +31,8 @@ pub use images::{
     AiImageAttachment, AiImageInput, AiImageTokenEstimate, estimate_image_tokens, message_images,
     model_image_input, prepare_image_history, set_message_images,
 };
+mod history_journal;
+pub use history_journal::{HistoryMutation, HistoryStreamDelta, HistoryStreamSnapshot};
 #[path = "persistence/view.rs"]
 mod history_view;
 #[path = "persistence/live_windows.rs"]
@@ -87,7 +89,10 @@ pub use acp::{
     resolve_acp_write_text_file_target, with_acp_agent_runtime, with_acp_agent_runtime_events,
     write_acp_validated_text_file,
 };
-pub use chat::{ai_conversation_turn_count, apply_chat_request_overrides, generate_chat_title};
+pub use chat::{
+    agent_chat_message, ai_conversation_turn_count, apply_chat_request_overrides,
+    generate_chat_title,
+};
 pub use context_sanitizer::{
     preference_is_safe_to_persist, sanitize_api_messages_for_provider,
     sanitize_chat_state_for_persistence, sanitize_for_ai, sanitize_for_persistence,
@@ -121,8 +126,8 @@ pub use orchestrator::{
 };
 #[cfg(not(target_family = "wasm"))]
 pub use persistence::{
-    AiChatPersistenceStore, ConversationStore, HISTORY_PENDING_BYTES, HistoryMutation,
-    HistoryStreamDelta, HistoryStreamSnapshot, HistoryWriteState, HistoryWriter,
+    AiChatPersistenceStore, ConversationStore, HISTORY_PENDING_BYTES, HistoryWriteState,
+    HistoryWriter,
 };
 pub use policy::{
     AiActionRisk, AiPolicyDecision, AiPolicyDecisionKind, AiPolicySafetyMode, AiToolUsePolicy,

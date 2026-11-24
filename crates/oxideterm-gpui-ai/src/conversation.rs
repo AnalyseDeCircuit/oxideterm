@@ -1,9 +1,13 @@
+#[cfg(not(target_family = "wasm"))]
 use std::hash::Hash;
 
+#[cfg(not(target_family = "wasm"))]
 pub mod acp_file_review;
 pub mod acp_terminal;
+#[cfg(not(target_family = "wasm"))]
 mod acp_turn;
 pub mod actions;
+#[cfg(not(target_family = "wasm"))]
 pub mod agents;
 #[cfg(not(target_family = "wasm"))]
 pub(crate) mod native {
@@ -14,18 +18,21 @@ pub(crate) mod native {
 }
 pub mod terminal_tools;
 pub mod terminal_watch;
+#[cfg(not(target_family = "wasm"))]
 pub use acp_turn::{AiAcpChatLaunch, prepare_acp_chat_launch};
+#[cfg(not(target_family = "wasm"))]
 mod provider;
+#[cfg(not(target_family = "wasm"))]
 pub use provider::{AiProviderSendPlan, AiProviderTurn};
 
+#[cfg(not(target_family = "wasm"))]
 use gpui::{App, Entity};
+#[cfg(not(target_family = "wasm"))]
 use oxideterm_ai::{AiRuntimeAuthority, stream_state::AiStoppedAssistantTurn};
 
-use crate::{
-    acp::AcpWorkspaceEntity,
-    background::AiBackgroundTaskEntity,
-    state::{AiModelSelectorScope, AiWorkspaceEntity},
-};
+use crate::state::{AiModelSelectorScope, AiWorkspaceEntity};
+#[cfg(not(target_family = "wasm"))]
+use crate::{acp::AcpWorkspaceEntity, background::AiBackgroundTaskEntity};
 
 pub enum AiChatCompletion {
     None,
@@ -36,6 +43,7 @@ pub enum AiChatCompletion {
 }
 
 /// Coordinates feature-owned conversations without access to workspace tabs or panes.
+#[cfg(not(target_family = "wasm"))]
 pub struct AiConversationController<Node: 'static, Terminal: Clone + 'static> {
     state: Entity<AiWorkspaceEntity>,
     authority: Entity<AiRuntimeAuthority<Node>>,
@@ -43,6 +51,7 @@ pub struct AiConversationController<Node: 'static, Terminal: Clone + 'static> {
     background: Entity<AiBackgroundTaskEntity>,
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl<Node: Clone + Eq + Hash + 'static, Terminal: Clone + 'static>
     AiConversationController<Node, Terminal>
 {

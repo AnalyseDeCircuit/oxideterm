@@ -263,6 +263,7 @@ pub enum AiTranscriptRequest {
     FocusComposer,
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub struct AiTranscriptBindings {
     pub history_path: std::path::PathBuf,
     pub runtime: Arc<tokio::runtime::Runtime>,
@@ -274,11 +275,64 @@ pub struct AiTranscriptBindings {
     pub text_anchor: Rc<dyn Fn(TextInputAnchor, &mut Window, &mut App)>,
 }
 
+pub struct PortableTranscriptBindings {
+    pub initialize: Rc<dyn Fn(&mut AiWorkspaceEntity, bool, &mut Context<AiWorkspaceEntity>)>,
+    pub image_bytes: Rc<
+        dyn Fn(
+            &AiWorkspaceEntity,
+            Option<String>,
+            AiImageAttachment,
+        ) -> std::pin::Pin<Box<dyn Future<Output = Option<Vec<u8>>>>>,
+    >,
+    pub frame: Rc<dyn Fn(&App) -> Option<AiTranscriptFrame>>,
+    pub request: Rc<dyn Fn(AiTranscriptRequest, Option<&mut Window>, &mut App)>,
+    pub file_preview: Rc<dyn Fn(&str, &App) -> Option<String>>,
+    pub markdown_actions: MarkdownCodeBlockActions,
+    pub select_anchor: Rc<dyn Fn(OverlayAnchor, &mut Window, &mut App)>,
+    pub text_anchor: Rc<dyn Fn(TextInputAnchor, &mut Window, &mut App)>,
+}
+
+#[cfg(not(target_family = "wasm"))]
+impl From<AiTranscriptBindings> for PortableTranscriptBindings {
+    fn from(bindings: AiTranscriptBindings) -> Self {
+        Self {
+            initialize: Rc::new(move |state, retry, cx| {
+                if retry {
+                    state.retry_chat_initialization(bindings.history_path.clone(), cx);
+                } else {
+                    state.ensure_chat_initialized(bindings.history_path.clone(), cx);
+                }
+            }),
+            image_bytes: Rc::new(move |state, conversation, image| {
+                let store = state.history.store.clone();
+                let work = bindings.runtime.spawn_blocking(move || match image.data {
+                    Some(data) => base64::engine::general_purpose::STANDARD
+                        .decode(data.as_bytes())
+                        .ok(),
+                    None => Some(
+                        store?
+                            .image_bytes(conversation.as_deref()?, &image.id)
+                            .ok()?
+                            .to_vec(),
+                    ),
+                });
+                Box::pin(async move { work.await.ok().flatten() })
+            }),
+            frame: bindings.frame,
+            request: bindings.request,
+            file_preview: bindings.file_preview,
+            markdown_actions: bindings.markdown_actions,
+            select_anchor: bindings.select_anchor,
+            text_anchor: bindings.text_anchor,
+        }
+    }
+}
+
 pub struct AiAssistantSidebarView {
     state: Entity<AiWorkspaceEntity>,
     message_editor: Entity<AiEditorView>,
     views: AiSidebarChildren,
-    bindings: AiTranscriptBindings,
+    bindings: PortableTranscriptBindings,
     frame: Option<AiTranscriptFrame>,
     tokens: ThemeTokens,
     i18n: I18n,
@@ -287,11 +341,32 @@ pub struct AiAssistantSidebarView {
 }
 
 impl AiAssistantSidebarView {
+    #[cfg(not(target_family = "wasm"))]
     pub fn new(
         state: Entity<AiWorkspaceEntity>,
         message_editor: Entity<AiEditorView>,
         views: AiSidebarChildren,
         bindings: AiTranscriptBindings,
+        tokens: ThemeTokens,
+        i18n: I18n,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        Self::with_bindings(
+            state,
+            message_editor,
+            views,
+            bindings.into(),
+            tokens,
+            i18n,
+            cx,
+        )
+    }
+
+    pub fn with_bindings(
+        state: Entity<AiWorkspaceEntity>,
+        message_editor: Entity<AiEditorView>,
+        views: AiSidebarChildren,
+        bindings: PortableTranscriptBindings,
         tokens: ThemeTokens,
         i18n: I18n,
         cx: &mut Context<Self>,
@@ -663,13 +738,13 @@ impl AiAssistantSidebarView {
         let frame = self.state.read(cx).chat_stream_environment(cx);
         self.state.update(cx, |state, cx| {
             let Some((conversation, assistant, method)) = state
-                .pending_cursor_requests
-                .get(&(generation, call.into()))
+                .cursor_request(&(generation, call.into()))
                 .map(|pending| {
+                    let (conversation, assistant, request, _, _) = pending.view();
                     (
-                        pending.conversation_id.clone(),
-                        pending.assistant_id.clone(),
-                        pending.request.method(),
+                        conversation.to_owned(),
+                        assistant.to_owned(),
+                        request.method(),
                     )
                 })
             else {
@@ -705,7 +780,7 @@ impl AiAssistantSidebarView {
 
     fn retry_ai_chat_initialization(&self, cx: &mut App) {
         self.state.update(cx, |state, cx| {
-            state.retry_chat_initialization(self.bindings.history_path.clone(), cx);
+            (self.bindings.initialize)(state, true, cx);
         });
     }
 }
@@ -717,7 +792,7 @@ impl Render for AiAssistantSidebarView {
         }
         if self.frame().composer.enabled && !self.state.read(cx).chat_initialized() {
             self.state.update(cx, |state, cx| {
-                state.ensure_chat_initialized(self.bindings.history_path.clone(), cx);
+                (self.bindings.initialize)(state, false, cx);
             });
         }
         self.render_sidebar(cx)

@@ -2,6 +2,30 @@ use crate::{
     AiChatMessage, AiChatRole, AiChatState, AiConversation, current_terminal_context_system_message,
 };
 
+pub fn agent_chat_message(role: AiChatRole, content: String) -> AiChatMessage {
+    AiChatMessage {
+        id: uuid::Uuid::new_v4().to_string(),
+        role,
+        content,
+        timestamp_ms: web_time::SystemTime::now()
+            .duration_since(web_time::SystemTime::UNIX_EPOCH)
+            .map(|d| d.as_millis().min(i64::MAX as u128) as i64)
+            .unwrap_or_default(),
+        model: None,
+        context: None,
+        is_streaming: false,
+        thinking_content: None,
+        metadata: None,
+        tool_call_id: None,
+        tool_calls: Vec::new(),
+        turn: None,
+        transcript_ref: None,
+        summary_ref: None,
+        branches: None,
+        suggestions: Vec::new(),
+    }
+}
+
 pub fn ai_conversation_turn_count(messages: &[AiChatMessage]) -> usize {
     let mut turns = 0usize;
     for message in messages {

@@ -1,12 +1,11 @@
-use std::{rc::Rc, time::Duration};
+use std::rc::Rc;
 
+use crate::bridge::{HostFuture, ProviderKeyError};
 use gpui::{App, Context};
-use oxideterm_ai::{
-    AiExecutionBackend, SharedAiProviderKey, provider_chat_requires_key,
-    tool_loop::AiModelBackendServices,
-};
+#[cfg(not(target_family = "wasm"))]
+use oxideterm_ai::tool_loop::AiModelBackendServices;
+use oxideterm_ai::{AiChatStreamConfig, AiExecutionBackend};
 use oxideterm_i18n::I18n;
-use tokio_util::task::AbortOnDropHandle;
 
 use super::{AiPendingChatStream, AiWorkspaceEntity, ai_now_ms};
 
@@ -15,6 +14,20 @@ pub enum AiLaunchEffect {
     Ready(AiPendingChatStream),
 }
 
+pub type KnowledgeLookup = Box<
+    dyn FnOnce(
+        String,
+        AiChatStreamConfig,
+    ) -> HostFuture<Option<(AiChatStreamConfig, Option<String>)>>,
+>;
+
+pub struct PortableLaunchBindings {
+    pub i18n: I18n,
+    pub knowledge_lookup: Rc<dyn Fn(&App) -> Option<KnowledgeLookup>>,
+    pub dispatch: Rc<dyn Fn(AiLaunchEffect, &mut App)>,
+}
+
+#[cfg(not(target_family = "wasm"))]
 pub struct AiLaunchBindings {
     pub i18n: I18n,
     pub backend_services: Rc<dyn Fn(&App) -> Option<AiModelBackendServices>>,
@@ -22,11 +35,50 @@ pub struct AiLaunchBindings {
 }
 
 impl AiWorkspaceEntity {
+    #[cfg(not(target_family = "wasm"))]
     pub fn prepare_chat_launch(
+        &mut self,
+        pending: AiPendingChatStream,
+        context_window: usize,
+        bindings: AiLaunchBindings,
+        cx: &mut Context<Self>,
+    ) {
+        let runtime = self.task_runtime().clone();
+        self.prepare_hosted_chat_launch(
+            pending,
+            context_window,
+            PortableLaunchBindings {
+                i18n: bindings.i18n,
+                dispatch: bindings.dispatch,
+                knowledge_lookup: Rc::new(move |cx| {
+                    let services = (bindings.backend_services)(cx)?;
+                    let runtime = runtime.clone();
+                    Some(Box::new(move |query, config| {
+                        Box::pin(async move {
+                            tokio_util::task::AbortOnDropHandle::new(runtime.spawn(async move {
+                                let prompt = tokio::time::timeout(
+                                    std::time::Duration::from_secs(3),
+                                    services.build_rag_system_prompt(Some(&query), &config),
+                                )
+                                .await
+                                .ok()
+                                .flatten();
+                                (config, prompt)
+                            }))
+                            .await
+                            .ok()
+                        })
+                    }))
+                }),
+            },
+            cx,
+        );
+    }
+    pub fn prepare_hosted_chat_launch(
         &mut self,
         mut pending: AiPendingChatStream,
         context_window: usize,
-        bindings: AiLaunchBindings,
+        bindings: PortableLaunchBindings,
         cx: &mut Context<Self>,
     ) {
         let target = pending.conversation_id.clone();
@@ -34,18 +86,16 @@ impl AiWorkspaceEntity {
         let launch_id = pending.launch_id.clone().expect("assigned launch");
         self.chat_launches.insert(target.clone(), launch_id);
         self.set_conversation_loading(&target, true);
-        let store = self.history.store.clone();
+        let store = self.history_reader();
         let branch = self
             .history
             .branches
             .get(&target)
             .cloned()
             .unwrap_or_else(|| "main".into());
-        let runtime = self.task_runtime.clone();
-        let key_store = self.key_store().clone();
-        let (sender, receiver) = tokio::sync::oneshot::channel();
+        let provider_host = self.host.provider.clone();
         self.persist_chat_state();
-        self.history_barrier(sender);
+        let receiver = self.committed_history();
         let id = target.clone();
         let task = cx.spawn(async move |weak, cx| {
             if receiver.await != Ok(true) {
@@ -57,11 +107,10 @@ impl AiWorkspaceEntity {
             let provider = pending.config.provider_type.clone();
             let model = pending.config.model.clone();
             let read_id = id.clone();
-            let context = runtime
-                .spawn_blocking(move || {
-                    store.model_context(&read_id, &branch, context_window, &provider, &model)
-                })
-                .await;
+            let context = crate::bridge::history::read_history(|reply| {
+                store.model_context(read_id, branch, context_window, provider, model, reply)
+            })
+            .await;
             let installed = weak
                 .update(cx, |ai, cx| {
                     if !ai.chat_launch_matches(&id, pending.launch_id.as_deref())
@@ -70,7 +119,7 @@ impl AiWorkspaceEntity {
                         return false;
                     }
                     match context {
-                        Ok(Ok(context)) => {
+                        Ok(context) => {
                             ai.history.model_contexts.insert(id.clone(), context);
                             true
                         }
@@ -91,21 +140,15 @@ impl AiWorkspaceEntity {
             }
 
             if pending.config.execution_backend != AiExecutionBackend::Acp {
-                if let Some(provider_id) = pending.config.provider_id.clone() {
-                    let requires_key = provider_chat_requires_key(&pending.config.provider_type);
-                    let key_result = runtime
-                        .spawn_blocking(move || key_store.get_provider_key(&provider_id))
-                        .await;
-                    let error = match key_result {
-                        Ok(Ok(key)) if key.is_some() || !requires_key => {
-                            pending.config.api_key = key.map(SharedAiProviderKey::new);
-                            None
-                        }
-                        Ok(Ok(_)) => Some("ai.model_selector.api_key_not_found"),
-                        _ if requires_key => Some("ai.model_selector.failed_to_get_api_key"),
-                        _ => None,
-                    };
-                    if let Some(key) = error {
+                match provider_host.prepare_chat(pending.config).await {
+                    Ok(config) => pending.config = config,
+                    Err(error) => {
+                        let key = match error {
+                            ProviderKeyError::Missing => "ai.model_selector.api_key_not_found",
+                            ProviderKeyError::Unavailable => {
+                                "ai.model_selector.failed_to_get_api_key"
+                            }
+                        };
                         let _ = weak.update(cx, |ai, cx| {
                             if ai.chat_launch_matches(&id, pending.launch_id.as_deref()) {
                                 ai.history.launches.remove(&id);
@@ -123,22 +166,9 @@ impl AiWorkspaceEntity {
                     .request_content
                     .as_ref()
                     .filter(|query| query.trim().chars().count() >= 4)
-                    && let Some(services) = cx.update(|cx| (bindings.backend_services)(cx))
+                    && let Some(lookup) = cx.update(|cx| (bindings.knowledge_lookup)(cx))
                 {
-                    let query = query.clone();
-                    let config = pending.config;
-                    let lookup = AbortOnDropHandle::new(runtime.spawn(async move {
-                        let prompt = tokio::time::timeout(
-                            Duration::from_millis(3000),
-                            services.build_rag_system_prompt(Some(&query), &config),
-                        )
-                        .await
-                        .ok()
-                        .flatten();
-                        // Return the same configuration so an extra key handle never outlives the request.
-                        (config, prompt)
-                    }));
-                    let Ok((config, prompt)) = lookup.await else {
+                    let Some((config, prompt)) = lookup(query.clone(), pending.config).await else {
                         return;
                     };
                     pending.config = config;
@@ -192,6 +222,7 @@ impl AiWorkspaceEntity {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub fn start_chat_launch(
     state: &gpui::Entity<AiWorkspaceEntity>,
     pending: AiPendingChatStream,

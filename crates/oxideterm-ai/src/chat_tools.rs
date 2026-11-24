@@ -8,6 +8,22 @@ pub fn ai_stream_tool_definitions(
     tool_policy: &crate::AiToolUsePolicy,
     mcp_registry: &crate::McpRegistry,
 ) -> Vec<crate::AiToolDefinition> {
+    ai_stream_tool_definitions_with(
+        tool_use_enabled,
+        skills_enabled,
+        web_enabled,
+        tool_policy,
+        || mcp_registry.tool_definitions(),
+    )
+}
+
+pub fn ai_stream_tool_definitions_with(
+    tool_use_enabled: bool,
+    skills_enabled: bool,
+    web_enabled: bool,
+    tool_policy: &crate::AiToolUsePolicy,
+    mcp: impl FnOnce() -> Vec<crate::AiToolDefinition>,
+) -> Vec<crate::AiToolDefinition> {
     if !tool_use_enabled {
         return Vec::new();
     }
@@ -23,7 +39,7 @@ pub fn ai_stream_tool_definitions(
     // Native does not ship Tauri's autonomous agent path yet. Expose MCP
     // resource/dynamic tools through chat as a native-only bridge so MCP
     // remains usable from the primary AI surface.
-    tools.extend(mcp_registry.tool_definitions().into_iter().filter(|tool| {
+    tools.extend(mcp().into_iter().filter(|tool| {
         !tool_policy
             .disabled_tools
             .iter()

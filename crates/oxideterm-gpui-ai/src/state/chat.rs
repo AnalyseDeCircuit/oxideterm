@@ -19,6 +19,7 @@ impl AiWorkspaceEntity {
         self.stash_active_chat_draft();
         let id = self.create_conversation(id, title, now_ms, None);
         self.persist_chat_state();
+        #[cfg(not(target_family = "wasm"))]
         if let Some(mut context) = oxideterm_audit::AuditContext::current_request()
             .or_else(oxideterm_audit::AuditContext::current)
         {

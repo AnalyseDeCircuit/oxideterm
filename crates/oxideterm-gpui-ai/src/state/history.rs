@@ -1,9 +1,9 @@
 use super::*;
 
-use oxideterm_ai::{
-    AiChatMessage, AiConversation, ConversationStore, HistoryCursor, HistoryMutation,
-    HistoryWriteState, HistoryWriter,
-};
+use crate::bridge::history::{AiHistoryHost, AiHistorySession, AiHistoryWriter};
+use oxideterm_ai::{AiChatMessage, AiConversation, HistoryCursor, HistoryMutation};
+#[cfg(not(target_family = "wasm"))]
+use oxideterm_ai::{ConversationStore, HistoryWriteState, HistoryWriter};
 use std::cell::RefCell;
 mod archives;
 mod conversations;
@@ -15,9 +15,19 @@ type StreamBases = Vec<(
     Option<oxideterm_ai::HistoryStreamSnapshot>,
 )>;
 
+#[cfg(not(target_family = "wasm"))]
 impl crate::stream::StreamReply<bool> for tokio::sync::oneshot::Sender<bool> {
     fn active(&self) -> bool {
         !self.is_closed()
+    }
+    fn resolve(self: Box<Self>, value: bool) {
+        let _ = (*self).send(value);
+    }
+}
+
+impl crate::stream::StreamReply<bool> for futures::channel::oneshot::Sender<bool> {
+    fn active(&self) -> bool {
+        !self.is_canceled()
     }
     fn resolve(self: Box<Self>, value: bool) {
         let _ = (*self).send(value);
@@ -106,7 +116,7 @@ fn clear_history_source(message: &mut AiChatMessage) {
 
 impl JournalBatch {
     /// Sanitization, hashing and delta construction run off the GPUI thread.
-    fn prepare(mut self) -> Self {
+    fn prepare(mut self, sanitize: bool) -> Self {
         for mut pending in std::mem::take(&mut self.pending) {
             let message = pending.message.as_ref().unwrap();
             let key = (pending.conversation.clone(), message.id.clone());
@@ -136,6 +146,11 @@ impl JournalBatch {
                 message: pending.message.take().unwrap(),
                 revision: pending.revision,
             });
+        }
+        if sanitize {
+            for operation in &mut self.operations {
+                operation.sanitize();
+            }
         }
         self
     }
@@ -199,23 +214,51 @@ pub enum HistoryStatus {
     Failed,
 }
 
+type AnswerAction = Box<dyn FnOnce() + Send>;
+type PendingAnswer = Arc<parking_lot::Mutex<Option<AnswerAction>>>;
+struct AnswerCommit(std::sync::Weak<parking_lot::Mutex<Option<AnswerAction>>>);
+impl crate::stream::StreamReply<bool> for AnswerCommit {
+    fn active(&self) -> bool {
+        self.0.strong_count() > 0
+    }
+    fn resolve(self: Box<Self>, value: bool) {
+        if let Some(answer) = self.0.upgrade() {
+            let action = answer.lock().take();
+            if value && let Some(deliver) = action {
+                deliver();
+            }
+        }
+    }
+}
 pub struct AiHistoryState {
+    session: Option<AiHistorySession>,
+    foreground: Option<gpui::ForegroundExecutor>,
+    background: Option<gpui::BackgroundExecutor>,
+    #[cfg(not(target_family = "wasm"))]
     pub store: Option<ConversationStore>,
     conversation_lists: [conversations::ConversationListPage; 2],
     conversation_list_epoch: u64,
     pub(super) deleted_conversations: HashSet<String>,
+    #[cfg(not(target_family = "wasm"))]
     pub writer: Option<HistoryWriter>,
     pub status: HistoryStatus,
     pub quitting: bool,
     pub migration_cancel: Arc<std::sync::atomic::AtomicBool>,
-    retry: Option<tokio::task::JoinHandle<()>>,
+    retry: Option<Task<()>>,
     pub progress: Option<(usize, usize)>,
     pub archives: HashMap<(String, String), archives::ArchiveView>,
-    archive_tasks: HashMap<(String, String), tokio::task::JoinHandle<()>>,
+    archive_tasks: HashMap<(String, String), crate::bridge::HostTask>,
+    #[cfg(not(target_family = "wasm"))]
     pub answers: HashMap<(u64, String), tokio::task::JoinHandle<()>>,
+    pub(super) hosted_answers: HashMap<(u64, String), PendingAnswer>,
     pub model_contexts: HashMap<String, AiConversation>,
     pub compaction_key_loads: HashMap<String, Task<()>>,
+    #[cfg(not(target_family = "wasm"))]
     pub compaction_runs: HashMap<String, (u64, Option<tokio::task::JoinHandle<()>>)>,
+    #[cfg(not(target_family = "wasm"))]
+    pub(super) hosted_compaction_tasks: HashMap<String, crate::bridge::HostTask>,
+    #[cfg(target_family = "wasm")]
+    pub compaction_runs: HashMap<String, (u64, Option<crate::bridge::HostTask>)>,
     pub compaction_generation: u64,
     pub compaction_sources: HashMap<String, (String, AiConversation)>,
     pub compaction_loads: HashMap<String, Task<()>>,
@@ -228,13 +271,14 @@ pub struct AiHistoryState {
     changes: RefCell<Changes>,
     sender: std::sync::mpsc::Sender<Delivery>,
     receiver: std::sync::mpsc::Receiver<Delivery>,
-    wake: Arc<tokio::sync::Notify>,
+    wake: oxideterm_workspace::delivery::ActiveDeliveryWake,
     watch: Option<Task<()>>,
-    write: Option<tokio::task::JoinHandle<()>>,
-    load: Option<tokio::task::JoinHandle<()>>,
-    status_watch: Option<tokio::task::JoinHandle<()>>,
-    agents_load: Option<tokio::task::JoinHandle<()>>,
-    save_timer: RefCell<Option<tokio::task::JoinHandle<()>>>,
+    write: Option<Task<()>>,
+    load: Option<crate::bridge::HostTask>,
+    #[cfg(not(target_family = "wasm"))]
+    status_watch: Option<crate::bridge::HostTask>,
+    agents_load: Option<crate::bridge::HostTask>,
+    save_timer: RefCell<Option<Task<()>>>,
     generation: u64,
     page_generation: u64,
     committed: u64,
@@ -242,6 +286,7 @@ pub struct AiHistoryState {
 }
 
 enum Delivery {
+    #[cfg(not(target_family = "wasm"))]
     Initialized(
         u64,
         Result<(ConversationStore, Vec<oxideterm_ai::ConversationHead>, u64), String>,
@@ -252,10 +297,13 @@ enum Delivery {
         bool,
         Result<Vec<oxideterm_ai::ConversationHead>, ()>,
     ),
+    #[cfg(not(target_family = "wasm"))]
     Progress(u64, usize, usize),
     Written(u64, StreamBases),
     WriteFailed,
-    WriteState(HistoryWriteState),
+    #[cfg(not(target_family = "wasm"))]
+    WriteState(bool),
+    Retried(bool),
     Archive(archives::ArchiveDelivery),
     Save,
     StreamSave,
@@ -272,10 +320,15 @@ impl Default for AiHistoryState {
     fn default() -> Self {
         let (sender, receiver) = std::sync::mpsc::channel();
         Self {
+            session: None,
+            foreground: None,
+            background: None,
+            #[cfg(not(target_family = "wasm"))]
             store: None,
             conversation_lists: Default::default(),
             conversation_list_epoch: 0,
             deleted_conversations: HashSet::new(),
+            #[cfg(not(target_family = "wasm"))]
             writer: None,
             status: HistoryStatus::Idle,
             quitting: false,
@@ -284,10 +337,14 @@ impl Default for AiHistoryState {
             progress: None,
             archives: HashMap::new(),
             archive_tasks: HashMap::new(),
+            #[cfg(not(target_family = "wasm"))]
             answers: HashMap::new(),
+            hosted_answers: HashMap::new(),
             model_contexts: HashMap::new(),
             compaction_key_loads: HashMap::new(),
             compaction_runs: HashMap::new(),
+            #[cfg(not(target_family = "wasm"))]
+            hosted_compaction_tasks: HashMap::new(),
             compaction_generation: 0,
             compaction_sources: HashMap::new(),
             compaction_loads: HashMap::new(),
@@ -300,10 +357,11 @@ impl Default for AiHistoryState {
             changes: RefCell::new(Changes::default()),
             sender,
             receiver,
-            wake: Arc::new(tokio::sync::Notify::new()),
+            wake: Default::default(),
             watch: None,
             write: None,
             load: None,
+            #[cfg(not(target_family = "wasm"))]
             status_watch: None,
             agents_load: None,
             save_timer: RefCell::new(None),
@@ -318,33 +376,26 @@ impl Drop for AiHistoryState {
     fn drop(&mut self) {
         self.migration_cancel
             .store(true, std::sync::atomic::Ordering::Release);
-        if let Some(task) = self.retry.take() {
-            task.abort();
-        }
         for (_, (_, task)) in self.compaction_runs.drain() {
             if let Some(task) = task {
                 task.abort();
             }
         }
-        for (_, task) in self.archive_tasks.drain() {
+        #[cfg(not(target_family = "wasm"))]
+        for (_, task) in self.answers.drain() {
             task.abort();
         }
-        for (_, task) in self.answers.drain() {
+        for (_, task) in self.archive_tasks.drain() {
             task.abort();
         }
         if let Some(task) = self.agents_load.take() {
             task.abort();
         }
-        if let Some(task) = self.save_timer.get_mut().take() {
-            task.abort();
-        }
         if let Some(task) = self.load.take() {
             task.abort();
         }
+        #[cfg(not(target_family = "wasm"))]
         if let Some(task) = self.status_watch.take() {
-            task.abort();
-        }
-        if let Some(task) = self.write.take() {
             task.abort();
         }
     }
@@ -369,44 +420,70 @@ fn metadata(conversation: &AiConversation) -> AiConversation {
 }
 
 impl AiWorkspaceEntity {
+    pub(crate) fn committed_history(&mut self) -> futures::channel::oneshot::Receiver<bool> {
+        let (sender, receiver) = futures::channel::oneshot::channel();
+        self.after_history_commit(Box::new(sender));
+        receiver
+    }
+    pub fn history_reader(&self) -> Option<Rc<dyn crate::bridge::history::AiHistoryReader>> {
+        if let Some(session) = &self.history.session {
+            return Some(session.reader.clone());
+        }
+        #[cfg(not(target_family = "wasm"))]
+        if let Some(store) = self.history.store.clone() {
+            return Some(Rc::new(crate::bridge::history::DesktopHistoryReader {
+                runtime: self.task_runtime().clone(),
+                store,
+            }));
+        }
+        None
+    }
+    pub(crate) fn has_history_writer(&self) -> bool {
+        self.history_writer().is_some()
+    }
+
+    fn history_writer(&self) -> Option<Rc<dyn AiHistoryWriter>> {
+        if let Some(session) = &self.history.session {
+            return Some(session.writer.clone());
+        }
+        #[cfg(not(target_family = "wasm"))]
+        if let Some(writer) = self.history.writer.clone() {
+            return Some(Rc::new(crate::bridge::history::DesktopHistoryWriter {
+                runtime: self.task_runtime().clone(),
+                writer,
+            }));
+        }
+        None
+    }
     pub fn schedule_history(&mut self, cx: &mut Context<Self>) {
-        cx.on_app_quit(|this, _| {
+        self.history.foreground = Some(cx.foreground_executor().clone());
+        self.history.background = Some(cx.background_executor().clone());
+        cx.on_app_quit(|this, cx| {
             this.persist_agent_records();
             let operations = this.history_operations();
-            let writer = this.history.writer.clone();
+            let writer = this.history_writer();
             let pending = this.history.write.take();
-            let runtime = this.task_runtime.clone();
+            let background = cx.background_executor().clone();
+            let hosted = this.history.session.is_some();
             async move {
-                // GPUI polls quit futures without a Tokio context; the entire flush
-                // must run on its owner, including large-batch writer admission.
-                let _ = runtime
-                    .spawn(async move {
-                        if let Some(pending) = pending {
-                            let _ = pending.await;
-                        }
-                        if let Some(writer) = writer {
-                            let Ok(batch) = operations else {
-                                return;
-                            };
-                            let Ok(batch) =
-                                tokio::task::spawn_blocking(move || batch.prepare()).await
-                            else {
-                                return;
-                            };
-                            if !batch.operations.is_empty() {
-                                let _ = writer.submit(batch.operations).await;
-                            }
-                            let _ = writer.flush().await;
-                        }
-                    })
-                    .await;
+                if let Some(pending) = pending {
+                    pending.await;
+                }
+                if let (Some(writer), Ok(batch)) = (writer, operations) {
+                    let batch = background.spawn(async move { batch.prepare(hosted) }).await;
+                    if !batch.operations.is_empty() {
+                        let _ = writer.submit(batch.operations).await;
+                    }
+                    let _ = writer.flush().await;
+                }
             }
         })
         .detach();
         let wake = self.history.wake.clone();
         self.history.watch = Some(cx.spawn(async move |weak, cx| {
             loop {
-                wake.notified().await;
+                wake.wait().await;
+                wake.take();
                 if weak.update(cx, |this, cx| this.drain_history(cx)).is_err() {
                     break;
                 }
@@ -414,6 +491,7 @@ impl AiWorkspaceEntity {
         }));
     }
 
+    #[cfg(not(target_family = "wasm"))]
     pub fn initialize_history(&mut self, path: PathBuf, cx: &mut Context<Self>) {
         self.history
             .migration_cancel
@@ -429,36 +507,108 @@ impl AiWorkspaceEntity {
         self.history.progress = None;
         let sender = self.history.sender.clone();
         let wake = self.history.wake.clone();
-        self.history.load = Some(self.task_runtime.spawn(async move {
-            let progress_sender = sender.clone();
-            let progress_wake = wake.clone();
-            let result = tokio::task::spawn_blocking(move || {
-                let store = ConversationStore::open_or_migrate_cancellable(
-                    &path,
-                    |done, total| {
-                        let _ = progress_sender.send(Delivery::Progress(generation, done, total));
-                        progress_wake.notify_one();
-                    },
-                    &cancelled,
-                )?;
-                let heads = store.list_conversation_heads(
-                    false,
-                    None,
-                    conversations::CONVERSATION_PAGE_SIZE + 1,
-                )?;
-                let revision = store.max_revision()?;
-                Ok::<_, anyhow::Error>((store, heads, revision))
-            })
-            .await;
-            let result = result
-                .map_err(|_| "History initialization interrupted".to_owned())
-                .and_then(|result| result.map_err(|_| "History could not be opened".to_owned()));
-            let _ = sender.send(Delivery::Initialized(generation, result));
-            wake.notify_one();
-        }));
+        self.history.load = Some(
+            self.task_runtime()
+                .spawn(async move {
+                    let progress_sender = sender.clone();
+                    let progress_wake = wake.clone();
+                    let result = tokio::task::spawn_blocking(move || {
+                        let store = ConversationStore::open_or_migrate_cancellable(
+                            &path,
+                            |done, total| {
+                                let _ = progress_sender
+                                    .send(Delivery::Progress(generation, done, total));
+                                progress_wake.mark();
+                            },
+                            &cancelled,
+                        )?;
+                        let heads = store.list_conversation_heads(
+                            false,
+                            None,
+                            conversations::CONVERSATION_PAGE_SIZE + 1,
+                        )?;
+                        let revision = store.max_revision()?;
+                        Ok::<_, anyhow::Error>((store, heads, revision))
+                    })
+                    .await;
+                    let result = result
+                        .map_err(|_| "History initialization interrupted".to_owned())
+                        .and_then(|result| {
+                            result.map_err(|_| "History could not be opened".to_owned())
+                        });
+                    let _ = sender.send(Delivery::Initialized(generation, result));
+                    wake.mark();
+                })
+                .into(),
+        );
         cx.notify();
     }
 
+    fn install_history_heads(
+        &mut self,
+        mut heads: Vec<oxideterm_ai::ConversationHead>,
+        revision: u64,
+    ) {
+        self.initialize_conversation_list(&mut heads);
+        self.history.changes.borrow_mut().revision = revision;
+        self.history.committed = self.history.changes.borrow().revision;
+        NEXT_REVISION.fetch_max(self.history.committed, std::sync::atomic::Ordering::Relaxed);
+        self.history.branches = heads
+            .iter()
+            .map(|head| (head.conversation.id.clone(), head.active_branch.clone()))
+            .collect();
+        self.conversation_state.conversations =
+            heads.into_iter().map(|head| head.conversation).collect();
+        self.conversation_state.active_conversation_id = self
+            .conversation_state
+            .conversations
+            .iter()
+            .find(|conversation| !conversation.archived)
+            .map(|conversation| conversation.id.clone());
+    }
+    pub fn initialize_hosted_history(&mut self, host: &dyn AiHistoryHost, cx: &mut Context<Self>) {
+        if !matches!(
+            self.history.status,
+            HistoryStatus::Idle | HistoryStatus::Failed
+        ) || self.history.session.is_some()
+        {
+            return;
+        }
+        self.history.generation += 1;
+        let generation = self.history.generation;
+        self.history.status = HistoryStatus::Loading;
+        let open = host.open(conversations::CONVERSATION_PAGE_SIZE + 1);
+        let task = cx.spawn(async move |weak, cx| {
+            let result = open.await;
+            let _ = weak.update(cx, |ai, cx| {
+                if ai.history.generation != generation {
+                    return;
+                }
+                ai.history.load.take();
+                match result {
+                    Ok((session, heads, revision)) => {
+                        ai.history.session = Some(session);
+                        ai.install_history_heads(heads, revision);
+                        ai.history.status = HistoryStatus::Ready;
+                        ai.chat_initialization_error = None;
+                        if ai.chat_ui.show_archived_conversations {
+                            ai.request_conversation_list_page(true);
+                        }
+                        if let Some(id) = ai.conversation_state.active_conversation_id.clone() {
+                            ai.request_history_conversation(id);
+                        }
+                    }
+                    Err(_) => {
+                        ai.history.status = HistoryStatus::Failed;
+                        ai.history_load_failed();
+                    }
+                }
+                cx.notify();
+            });
+        });
+        self.history.load = Some(crate::bridge::HostTask::new(move || drop(task)));
+        cx.notify();
+    }
     fn drain_history(&mut self, cx: &mut Context<Self>) {
         while let Ok(delivery) = self.history.receiver.try_recv() {
             match delivery {
@@ -469,52 +619,38 @@ impl AiWorkspaceEntity {
                     self.apply_conversation_list(archived, result);
                 }
                 Delivery::Archive(delivery) => self.apply_history_archive(delivery),
+                #[cfg(not(target_family = "wasm"))]
                 Delivery::Progress(generation, done, total)
                     if generation == self.history.generation =>
                 {
                     self.history.progress = Some((done, total))
                 }
+                #[cfg(not(target_family = "wasm"))]
                 Delivery::Initialized(generation, result)
                     if generation == self.history.generation =>
                 {
                     self.history.load.take();
                     match result {
-                        Ok((store, mut heads, revision)) => {
-                            self.initialize_conversation_list(&mut heads);
-                            self.history.changes.borrow_mut().revision = revision;
-                            self.history.committed = self.history.changes.borrow().revision;
-                            NEXT_REVISION.fetch_max(
-                                self.history.committed,
-                                std::sync::atomic::Ordering::Relaxed,
-                            );
-                            self.history.branches = heads
-                                .iter()
-                                .map(|head| {
-                                    (head.conversation.id.clone(), head.active_branch.clone())
-                                })
-                                .collect();
-                            self.conversation_state.conversations =
-                                heads.into_iter().map(|head| head.conversation).collect();
-                            self.conversation_state.active_conversation_id = self
-                                .conversation_state
-                                .conversations
-                                .iter()
-                                .find(|conversation| !conversation.archived)
-                                .map(|conversation| conversation.id.clone());
+                        Ok((store, heads, revision)) => {
+                            self.install_history_heads(heads, revision);
                             match HistoryWriter::new(store.clone()) {
                                 Ok(writer) => {
                                     let mut status = writer.subscribe();
                                     let sender = self.history.sender.clone();
                                     let wake = self.history.wake.clone();
-                                    self.history.status_watch =
-                                        Some(self.task_runtime.spawn(async move {
-                                            while status.changed().await.is_ok() {
-                                                let _ = sender.send(Delivery::WriteState(
-                                                    status.borrow_and_update().clone(),
-                                                ));
-                                                wake.notify_one();
-                                            }
-                                        }));
+                                    self.history.status_watch = Some(
+                                        self.task_runtime()
+                                            .spawn(async move {
+                                                while status.changed().await.is_ok() {
+                                                    let _ = sender.send(Delivery::WriteState(
+                                                        *status.borrow_and_update()
+                                                            == HistoryWriteState::Ready,
+                                                    ));
+                                                    wake.mark();
+                                                }
+                                            })
+                                            .into(),
+                                    );
                                     self.history.writer = Some(writer);
                                     self.history.store = Some(store);
                                     self.history.status = HistoryStatus::Ready;
@@ -657,8 +793,17 @@ impl AiWorkspaceEntity {
                     self.history.write.take();
                     self.history.status = HistoryStatus::Failed;
                 }
+                Delivery::Retried(ready) => {
+                    self.history.retry.take();
+                    self.history.status = if ready {
+                        HistoryStatus::Ready
+                    } else {
+                        HistoryStatus::Failed
+                    };
+                }
+                #[cfg(not(target_family = "wasm"))]
                 Delivery::WriteState(state) => {
-                    self.history.status = if state == HistoryWriteState::Ready {
+                    self.history.status = if state {
                         HistoryStatus::Ready
                     } else {
                         HistoryStatus::Failed
@@ -668,11 +813,7 @@ impl AiWorkspaceEntity {
             }
         }
         if matches!(self.history.status, HistoryStatus::Ready)
-            && self
-                .history
-                .writer
-                .as_ref()
-                .is_some_and(|writer| *writer.subscribe().borrow() == HistoryWriteState::Ready)
+            && self.history_writer().is_some_and(|writer| writer.ready())
         {
             let mut pending = Vec::new();
             for (version, sender) in self.history.waiters.drain(..) {
@@ -684,8 +825,12 @@ impl AiWorkspaceEntity {
             }
             self.history.waiters = pending;
         }
+        #[cfg(not(target_family = "wasm"))]
         self.history.answers.retain(|_, task| !task.is_finished());
-        self.start_history_write();
+        self.history
+            .hosted_answers
+            .retain(|_, answer| answer.lock().is_some());
+        self.start_history_write(cx);
         cx.notify();
     }
 
@@ -694,7 +839,7 @@ impl AiWorkspaceEntity {
     }
 
     pub fn request_history_agents(&mut self, id: &str) {
-        let Some(store) = self.history.store.clone() else {
+        let Some(store) = self.history_reader() else {
             return;
         };
         let id = id.to_owned();
@@ -704,15 +849,13 @@ impl AiWorkspaceEntity {
             task.abort();
         }
         let generation = self.history.generation;
-        self.history.agents_load = Some(self.task_runtime.spawn(async move {
-            let target = id.clone();
-            let result = tokio::task::spawn_blocking(move || store.load_agent_summaries(&target))
-                .await
-                .map_err(|_| ())
-                .and_then(|result| result.map_err(|_| ()));
-            let _ = sender.send(Delivery::Agents(generation, id, result));
-            wake.notify_one();
-        }));
+        self.history.agents_load = Some(store.agent_summaries(
+            id.clone(),
+            Box::new(move |result| {
+                let _ = sender.send(Delivery::Agents(generation, id, result.map_err(|_| ())));
+                wake.mark();
+            }),
+        ));
     }
 
     pub fn history_has_unsaved_messages(&self, conversation: &str) -> bool {
@@ -954,68 +1097,76 @@ impl AiWorkspaceEntity {
         !self.history.quitting
             && matches!(self.history.status, HistoryStatus::Ready)
             && self.chat_initialization_error.is_none()
-            && self
-                .history
-                .writer
-                .as_ref()
-                .is_some_and(|writer| *writer.subscribe().borrow() == HistoryWriteState::Ready)
+            && self.history_writer().is_some_and(|writer| writer.ready())
             && self
                 .conversation_state
                 .active_conversation()
                 .is_none_or(|conversation| conversation.messages_loaded)
     }
     pub fn retry_history_write(&mut self) {
-        let Some(writer) = self.history.writer.clone() else {
-            return;
-        };
-        if self
-            .history
-            .retry
-            .as_ref()
-            .is_some_and(|task| !task.is_finished())
-        {
+        if self.history.retry.is_some() {
             return;
         }
-        self.history.retry = Some(self.task_runtime.spawn(async move {
-            let _ = writer.retry().await;
+        let (Some(writer), Some(ui)) = (self.history_writer(), self.history.foreground.as_ref())
+        else {
+            return;
+        };
+        let tx = self.history.sender.clone();
+        let wake = self.history.wake.clone();
+        self.history.retry = Some(ui.spawn(async move {
+            let ok = writer.retry().await.is_ok();
+            let _ = tx.send(Delivery::Retried(ok));
+            wake.mark();
         }));
     }
     pub fn schedule_history_stream_save(&self) {
         if self.history.save_timer.borrow().is_some() {
             return;
         }
+        let Some(background) = self.history.background.as_ref() else {
+            return;
+        };
+        let timer = background.timer(Duration::from_millis(250));
         let sender = self.history.sender.clone();
         let wake = self.history.wake.clone();
-        *self.history.save_timer.borrow_mut() = Some(self.task_runtime.spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        *self.history.save_timer.borrow_mut() = Some(background.spawn(async move {
+            timer.await;
             let _ = sender.send(Delivery::StreamSave);
-            wake.notify_one();
+            wake.mark();
         }));
     }
     pub fn request_history_save(&self) {
         let _ = self.history.sender.send(Delivery::Save);
-        self.history.wake.notify_one();
+        self.history.wake.mark();
     }
     pub(super) fn deliver_answer_after_commit(
         &mut self,
         key: (u64, String),
         deliver: impl FnOnce() + Send + 'static,
     ) {
-        let (sender, receiver) = tokio::sync::oneshot::channel::<bool>();
-        self.after_history_commit(Box::new(sender));
-        let task = self.task_runtime.spawn(async move {
-            if receiver.await == Ok(true) {
-                deliver();
+        #[cfg(not(target_family = "wasm"))]
+        if let Some(desktop) = &self.desktop {
+            let runtime = desktop.task_runtime.clone();
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            self.after_history_commit(Box::new(tx));
+            let task = runtime.spawn(async move {
+                if rx.await == Ok(true) {
+                    deliver();
+                }
+            });
+            if let Some(old) = self.history.answers.insert(key, task) {
+                old.abort();
             }
-        });
-        if let Some(previous) = self.history.answers.insert(key, task) {
-            previous.abort();
+            return;
         }
+        let action: PendingAnswer = Arc::new(parking_lot::Mutex::new(Some(Box::new(deliver))));
+        let waiter = AnswerCommit(Arc::downgrade(&action));
+        self.history.hosted_answers.insert(key, action);
+        self.after_history_commit(Box::new(waiter));
     }
-
     pub(crate) fn after_history_commit(&mut self, sender: crate::stream::CommitReply) {
         let revision = self.history.changes.borrow().revision;
-        if self.history.quitting && self.history.writer.is_none() && revision == 0 {
+        if self.history.quitting && self.history_writer().is_none() && revision == 0 {
             // Initialization has admitted no work; cancellation preserves the source database.
             sender.resolve(true);
             return;
@@ -1026,11 +1177,7 @@ impl AiWorkspaceEntity {
         }
         if self.history.committed >= revision
             && matches!(self.history.status, HistoryStatus::Ready)
-            && self
-                .history
-                .writer
-                .as_ref()
-                .is_some_and(|writer| *writer.subscribe().borrow() == HistoryWriteState::Ready)
+            && self.history_writer().is_some_and(|writer| writer.ready())
         {
             sender.resolve(true);
         } else {
@@ -1317,11 +1464,11 @@ impl AiWorkspaceEntity {
         })
     }
 
-    fn start_history_write(&mut self) {
+    fn start_history_write(&mut self, cx: &mut Context<Self>) {
         if self.history.write.is_some() || !matches!(self.history.status, HistoryStatus::Ready) {
             return;
         }
-        let Some(writer) = self.history.writer.clone() else {
+        let Some(writer) = self.history_writer() else {
             return;
         };
         let Ok(batch) = self.history_operations() else {
@@ -1333,21 +1480,17 @@ impl AiWorkspaceEntity {
         }
         let sender = self.history.sender.clone();
         let wake = self.history.wake.clone();
-        self.history.write = Some(self.task_runtime.spawn(async move {
-            let prepared = tokio::task::spawn_blocking(move || batch.prepare()).await;
-            match prepared {
-                Ok(batch) => {
-                    if writer.submit(batch.operations).await.is_ok() {
-                        let _ = sender.send(Delivery::Written(batch.revision, batch.streams));
-                    } else {
-                        let _ = sender.send(Delivery::WriteFailed);
-                    }
-                }
-                Err(_) => {
-                    let _ = sender.send(Delivery::WriteFailed);
-                }
-            }
-            wake.notify_one();
+        let background = cx.background_executor().clone();
+        let hosted = self.history.session.is_some();
+        self.history.write = Some(cx.spawn(async move |_, _| {
+            let batch = background.spawn(async move { batch.prepare(hosted) }).await;
+            let result = if writer.submit(batch.operations).await.is_ok() {
+                Delivery::Written(batch.revision, batch.streams)
+            } else {
+                Delivery::WriteFailed
+            };
+            let _ = sender.send(result);
+            wake.mark();
         }));
     }
 }

@@ -1,15 +1,18 @@
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet, VecDeque},
-    path::PathBuf,
     rc::Rc,
     sync::Arc,
     time::Duration,
 };
 
+#[cfg(not(target_family = "wasm"))]
+use std::path::PathBuf;
+
+#[cfg(not(target_family = "wasm"))]
+use gpui::prelude::*;
 use gpui::{
     Context, Entity, FollowMode, ListAlignment, ListState, ScrollHandle, Subscription, Task,
-    prelude::*,
 };
 #[cfg(test)]
 use gpui::{IntoElement, ParentElement, Styled, Window, div};
@@ -38,8 +41,10 @@ use crate::{
     },
 };
 
+#[cfg(not(target_family = "wasm"))]
 mod lazy;
 mod presentation;
+#[cfg(not(target_family = "wasm"))]
 use lazy::LazyAiRagStore;
 pub use presentation::*;
 mod chat;
@@ -58,6 +63,7 @@ mod stream_records;
 
 pub mod agents;
 pub mod history;
+#[cfg(not(target_family = "wasm"))]
 pub mod local_command;
 pub use crate::knowledge::page::KNOWLEDGE_DOCUMENT_PAGE_SIZE;
 pub use history::HistoryStatus;
@@ -212,12 +218,12 @@ enum AiProviderKeyOperation {
     Remove,
 }
 
-enum AiModelRefreshFailure {
-    MissingApiKey,
-    Failed(String),
-}
+#[cfg(test)]
+use crate::bridge::native::ai_acp_probe_error_result;
+use crate::bridge::{AiAcpAgentProbeResult, AiHostBridge, AiModelRefreshFailure};
 
-fn model_refresh_failure_message(error: &anyhow::Error) -> String {
+#[cfg(not(target_family = "wasm"))]
+pub(crate) fn model_refresh_failure_message(error: &anyhow::Error) -> String {
     // Preserve the proxy/TLS/HTTP classification while keeping the toast
     // bounded and single-line. Reqwest errors already drop the request URL.
     let message = format!("{error:#}").replace(['\r', '\n'], " ");
@@ -243,12 +249,6 @@ struct AiAcpAgentProbeDelivery {
     result: AiAcpAgentProbeResult,
 }
 
-struct AiAcpAgentProbeResult {
-    runtime_state: oxideterm_settings::AcpAgentRuntimeState,
-    auth_status: oxideterm_settings::AcpAgentAuthStatus,
-    last_error_kind: Option<String>,
-}
-
 struct AiAcpModelDiscoveryDelivery {
     epoch: u64,
     conversation_id: String,
@@ -270,10 +270,11 @@ const AI_CHAT_STREAM_DELIVERY_BUDGET: oxideterm_workspace::delivery::DeliveryBud
 
 /// Owns AI worker delivery slices as they move out of the workspace root.
 pub struct AiWorkspaceEntity {
-    task_runtime: Arc<tokio::runtime::Runtime>,
+    host: AiHostBridge,
+    #[cfg(not(target_family = "wasm"))]
+    desktop: Option<DesktopWorkspace>,
+    history_host: Option<Rc<dyn crate::bridge::history::AiHistoryHost>>,
     loaded_skill_versions: HashMap<String, HashMap<String, String>>,
-    _rag_cache_cleanup: Task<()>,
-    key_store: oxideterm_ai::AiProviderKeyStore,
     model_ui: AiModelWorkspaceState,
     chat_ui: AiChatWorkspaceState,
     knowledge_window_activation_subscription: Option<Subscription>,
@@ -310,8 +311,8 @@ pub struct AiWorkspaceEntity {
     next_selector_probe_generation: u64,
     acp_agent_probe_pending: HashSet<String>,
     acp_agent_epochs: HashMap<String, u64>,
-    acp_probe_tasks: HashMap<String, tokio::task::AbortHandle>,
-    acp_discovery_tasks: HashMap<(String, String), tokio::task::AbortHandle>,
+    acp_probe_tasks: HashMap<String, crate::bridge::HostTask>,
+    acp_discovery_tasks: HashMap<(String, String), crate::bridge::HostTask>,
     acp_agent_probe_tx:
         oxideterm_workspace::delivery::ActiveDeliverySender<AiAcpAgentProbeDelivery>,
     acp_agent_probe_rx: std::sync::mpsc::Receiver<AiAcpAgentProbeDelivery>,
@@ -322,13 +323,12 @@ pub struct AiWorkspaceEntity {
         oxideterm_workspace::delivery::ActiveDeliverySender<AiAcpModelDiscoveryDelivery>,
     acp_model_discovery_rx: std::sync::mpsc::Receiver<AiAcpModelDiscoveryDelivery>,
     acp_model_discovery_intents: VecDeque<AiAcpModelDiscoveryIntent>,
-    rag_store: LazyAiRagStore,
     knowledge_page: Entity<KnowledgePage>,
     terminal_inline_panel: AiInlinePanelState,
     terminal_inline_tx:
         oxideterm_workspace::delivery::ActiveDeliverySender<AiTerminalInlineDelivery>,
     terminal_inline_rx: std::sync::mpsc::Receiver<AiTerminalInlineDelivery>,
-    terminal_inline_stream_task: Option<tokio::task::JoinHandle<()>>,
+    terminal_inline_stream_task: Option<crate::bridge::HostTask>,
     chat_stream_generation: u64,
     chat_stream_runs: HashMap<u64, AiChatStreamRun>,
     pub agents: agents::AiAgentWorkspace,
@@ -350,13 +350,21 @@ pub struct AiWorkspaceEntity {
     chat_drafts: HashMap<String, zeroize::Zeroizing<String>>,
     chat_image_drafts: HashMap<String, Vec<oxideterm_ai::AiImageAttachment>>,
     pub pending_image_requests: HashMap<String, AiPendingChatStream>,
+    #[cfg(not(target_family = "wasm"))]
+    pub(crate) host_questions: HashMap<(u64, String), crate::stream::PendingQuestion>,
+    #[cfg(not(target_family = "wasm"))]
+    pub(crate) host_cursors:
+        HashMap<(u64, String), crate::stream::PendingCursor<crate::stream::CursorReply>>,
+    #[cfg(not(target_family = "wasm"))]
+    host_stream_rx: std::sync::mpsc::Receiver<crate::stream::PortableStreamDelivery>,
+    #[cfg(not(target_family = "wasm"))]
+    host_stream_tx: crate::bridge::TurnSender,
     pub pending_user_questions: HashMap<(u64, String), AiPendingUserQuestion>,
     pub pending_cursor_requests: HashMap<(u64, String), AiPendingCursorRequest>,
     pending_tool_approvals: HashMap<(u64, String), crate::stream::Decision<bool>>,
     // Approval previews are runtime-only; conversation history never owns execution payloads.
     pub tool_approval_previews: HashMap<(u64, String), zeroize::Zeroizing<String>>,
-    pending_acp_permission_choices:
-        HashMap<(u64, String), tokio::sync::oneshot::Sender<Option<String>>>,
+    pending_acp_permission_choices: HashMap<(u64, String), crate::stream::Decision<Option<String>>>,
     pending_tool_candidate_selections:
         HashMap<(u64, String), crate::stream::Decision<Option<usize>>>,
     pending_tool_candidate_counts: HashMap<(u64, String), usize>,
@@ -364,7 +372,6 @@ pub struct AiWorkspaceEntity {
     // but these collections remain physically owned by this Entity.
     pub tool_execution_records: VecDeque<AiToolExecutionRecord>,
     pub tool_result_facts: VecDeque<AiToolResultFact>,
-    mcp_registry: oxideterm_ai::McpRegistry,
     compaction_tx: AiCompactionDeliverySender,
     compaction_rx: std::sync::mpsc::Receiver<AiCompactionDelivery>,
     compaction_deliveries: VecDeque<AiCompactionDelivery>,
@@ -372,22 +379,94 @@ pub struct AiWorkspaceEntity {
     compaction_notice: Option<AiCompactionNotice>,
 }
 
+#[cfg(not(target_family = "wasm"))]
+struct DesktopWorkspace {
+    task_runtime: Arc<tokio::runtime::Runtime>,
+    key_store: oxideterm_ai::AiProviderKeyStore,
+    mcp_registry: oxideterm_ai::McpRegistry,
+    rag_store: LazyAiRagStore,
+    _rag_cache_cleanup: Task<()>,
+}
+
+fn next_history_timestamp() -> i64 {
+    #[cfg(not(target_family = "wasm"))]
+    {
+        oxideterm_ai::AiChatPersistenceStore::next_projection_persist_at()
+    }
+    #[cfg(target_family = "wasm")]
+    {
+        static PREVIOUS: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+        let now = ai_now_ms();
+        let previous = PREVIOUS
+            .fetch_update(
+                std::sync::atomic::Ordering::AcqRel,
+                std::sync::atomic::Ordering::Acquire,
+                |old| Some(now.max(old.saturating_add(1))),
+            )
+            .unwrap();
+        now.max(previous.saturating_add(1))
+    }
+}
 struct AiChatStreamRun {
+    hosted_commands: HashMap<String, gpui::Task<()>>,
     conversation_id: String,
     assistant_id: String,
     agent: Option<oxideterm_ai::agent::AgentRunRef>,
     child: bool,
-    task: Option<tokio::task::JoinHandle<()>>,
+    task: Option<crate::bridge::HostTask>,
 }
 
 impl AiWorkspaceEntity {
-    /// Returns the protected provider key store without copying key material.
+    pub fn start_hosted_local_command(
+        &mut self,
+        host: &dyn crate::bridge::turns::AiLocalCommandHost,
+        request: crate::bridge::turns::LocalCommandRequest,
+        reply: crate::bridge::HostReply<oxideterm_ai::AiExecutedToolResult>,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        let generation = request.generation;
+        if !self.chat_stream_matches(generation, &request.conversation_id, &request.assistant_id)
+            || !self.run_accepts_tools(generation)
+        {
+            return false;
+        }
+        let Some(stream) = self.chat_stream_runs.get_mut(&generation) else {
+            return false;
+        };
+        let call_id = request.call_id.clone();
+        if stream.hosted_commands.contains_key(&call_id) {
+            return false;
+        }
+        let work = host.execute(request);
+        let owner = call_id.clone();
+        let task = cx.spawn(async move |weak, cx| {
+            let result = work.await;
+            let _ = weak.update(cx, |ai, _| {
+                if let Some(run) = ai.chat_stream_runs.get_mut(&generation) {
+                    run.hosted_commands.remove(&owner);
+                }
+                if ai.run_accepts_tools(generation) {
+                    reply(result);
+                }
+            });
+        });
+        stream.hosted_commands.insert(call_id, task);
+        true
+    }
+    #[cfg(not(target_family = "wasm"))]
+    fn desktop(&self) -> &DesktopWorkspace {
+        self.desktop
+            .as_ref()
+            .expect("desktop service requested from a hosted workspace")
+    }
+    #[cfg(not(target_family = "wasm"))]
     pub(crate) fn task_runtime(&self) -> &Arc<tokio::runtime::Runtime> {
-        &self.task_runtime
+        &self.desktop().task_runtime
     }
 
+    #[cfg(not(target_family = "wasm"))]
     pub fn key_store(&self) -> &oxideterm_ai::AiProviderKeyStore {
-        &self.key_store
+        &self.desktop().key_store
     }
 
     /// Returns provider and model presentation state from its sole owner.
@@ -1140,9 +1219,75 @@ impl AiWorkspaceEntity {
         self.model_ui.selector_status_signature = signature;
     }
 
+    #[cfg(not(target_family = "wasm"))]
     pub fn new(
         task_runtime: Arc<tokio::runtime::Runtime>,
         key_store: oxideterm_ai::AiProviderKeyStore,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let mcp_registry = oxideterm_ai::McpRegistry::new(key_store.clone());
+        let rag_store = LazyAiRagStore::default();
+        let knowledge_page = cx.new(|_| {
+            let store = rag_store.clone();
+            KnowledgePage::new(
+                Rc::new(move || store.get()),
+                task_runtime.clone(),
+                key_store.clone(),
+            )
+        });
+        let host = crate::bridge::native::desktop_bridge(
+            task_runtime.clone(),
+            key_store.clone(),
+            mcp_registry.clone(),
+        );
+        let store = rag_store.clone();
+        let cleanup = cx.spawn(async move |_, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_secs(60))
+                    .await;
+                let store = store.clone();
+                cx.background_executor()
+                    .spawn(async move { store.release_idle_index() })
+                    .await;
+            }
+        });
+        let desktop = DesktopWorkspace {
+            task_runtime,
+            key_store,
+            rag_store,
+            mcp_registry,
+            _rag_cache_cleanup: cleanup,
+        };
+        let agents =
+            agents::AiAgentWorkspace::new(cx.default_global::<agents::AiAgentServices>().clone());
+        Self::from_host(host, None, knowledge_page, agents, Some(desktop), cx)
+    }
+
+    pub fn with_bridge(
+        host: AiHostBridge,
+        history: Rc<dyn crate::bridge::history::AiHistoryHost>,
+        knowledge_page: Entity<KnowledgePage>,
+        agent_host: Rc<dyn crate::bridge::agents::AiAgentHost>,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        Self::from_host(
+            host,
+            Some(history),
+            knowledge_page,
+            agents::AiAgentWorkspace::with_bridge(agent_host),
+            #[cfg(not(target_family = "wasm"))]
+            None,
+            cx,
+        )
+    }
+
+    fn from_host(
+        host: AiHostBridge,
+        history_host: Option<Rc<dyn crate::bridge::history::AiHistoryHost>>,
+        knowledge_page: Entity<KnowledgePage>,
+        agents: agents::AiAgentWorkspace,
+        #[cfg(not(target_family = "wasm"))] desktop: Option<DesktopWorkspace>,
         cx: &mut Context<Self>,
     ) -> Self {
         let (model_refresh_tx, model_refresh_rx) =
@@ -1159,41 +1304,20 @@ impl AiWorkspaceEntity {
             oxideterm_workspace::delivery::ActiveDeliverySender::channel();
         let (chat_stream_tx, chat_stream_rx) =
             oxideterm_workspace::delivery::ActiveDeliverySender::channel();
+        #[cfg(not(target_family = "wasm"))]
+        let (host_stream_tx, host_stream_rx) =
+            crate::bridge::TurnSender::channel_with_wake(chat_stream_tx.wake());
         let (compaction_tx, compaction_rx) =
             oxideterm_workspace::delivery::ActiveDeliverySender::channel();
-        let mcp_registry = oxideterm_ai::McpRegistry::new(key_store.clone());
-        let rag_store = LazyAiRagStore::default();
-        let knowledge_page = cx.new(|_| {
-            let store = rag_store.clone();
-            KnowledgePage::new(
-                Rc::new(move || store.get()),
-                task_runtime.clone(),
-                key_store.clone(),
-            )
-        });
         let mut entity = Self {
-            task_runtime,
+            host,
+            history_host,
+            #[cfg(not(target_family = "wasm"))]
+            desktop,
             loaded_skill_versions: HashMap::new(),
-            // Entity ownership cancels cleanup; the weak handle cannot keep a closed workspace alive.
-            _rag_cache_cleanup: cx.spawn(async move |weak, cx| {
-                loop {
-                    cx.background_executor()
-                        .timer(std::time::Duration::from_secs(60))
-                        .await;
-                    let Ok(store) = weak.update(cx, |ai, _| ai.rag_store.clone()) else {
-                        break;
-                    };
-                    cx.background_executor()
-                        .spawn(async move {
-                            store.release_idle_index();
-                        })
-                        .await;
-                }
-            }),
             model_ui: AiModelWorkspaceState::new(),
             chat_ui: AiChatWorkspaceState::new(360.0, None),
             knowledge_window_activation_subscription: None,
-            key_store,
             visibility: AiWorkspaceVisibility::default(),
             provider_key_operation_tasks: HashMap::new(),
             pending_provider_key_removals: HashSet::new(),
@@ -1234,7 +1358,6 @@ impl AiWorkspaceEntity {
             acp_model_discovery_tx,
             acp_model_discovery_rx,
             acp_model_discovery_intents: VecDeque::new(),
-            rag_store,
             knowledge_page,
             terminal_inline_panel: AiInlinePanelState::default(),
             terminal_inline_tx,
@@ -1242,9 +1365,7 @@ impl AiWorkspaceEntity {
             terminal_inline_stream_task: None,
             chat_stream_generation: 0,
             chat_stream_runs: HashMap::new(),
-            agents: agents::AiAgentWorkspace::new(
-                cx.default_global::<agents::AiAgentServices>().clone(),
-            ),
+            agents,
             chat_stream_tx,
             chat_stream_rx,
             chat_stream_batch: crate::stream::AiChatDeliveryBatch::default(),
@@ -1263,6 +1384,14 @@ impl AiWorkspaceEntity {
             chat_drafts: HashMap::new(),
             chat_image_drafts: HashMap::new(),
             pending_image_requests: HashMap::new(),
+            #[cfg(not(target_family = "wasm"))]
+            host_questions: HashMap::new(),
+            #[cfg(not(target_family = "wasm"))]
+            host_cursors: HashMap::new(),
+            #[cfg(not(target_family = "wasm"))]
+            host_stream_tx,
+            #[cfg(not(target_family = "wasm"))]
+            host_stream_rx,
             pending_user_questions: HashMap::new(),
             pending_cursor_requests: HashMap::new(),
             pending_tool_approvals: HashMap::new(),
@@ -1272,7 +1401,6 @@ impl AiWorkspaceEntity {
             pending_tool_candidate_counts: HashMap::new(),
             tool_execution_records: VecDeque::new(),
             tool_result_facts: VecDeque::new(),
-            mcp_registry,
             compaction_tx,
             compaction_rx,
             compaction_deliveries: VecDeque::new(),
@@ -1332,8 +1460,9 @@ impl AiWorkspaceEntity {
         &self.conversation_state
     }
 
+    #[cfg(not(target_family = "wasm"))]
     pub fn rag_store(&self) -> Arc<oxideterm_ai::RagStore> {
-        self.rag_store.get()
+        self.desktop().rag_store.get()
     }
 
     pub fn conversation_state_mut(&mut self) -> &mut oxideterm_ai::AiChatState {
@@ -1363,8 +1492,7 @@ impl AiWorkspaceEntity {
                     .find(|message| message.id == message_id)
                 {
                     update(message);
-                    record.revision =
-                        oxideterm_ai::AiChatPersistenceStore::next_projection_persist_at();
+                    record.revision = next_history_timestamp();
                     self.agents.dirty.borrow_mut().insert(run_id);
                 }
             }
@@ -1420,8 +1548,7 @@ impl AiWorkspaceEntity {
                     .find(|target| target.id == message)
                 {
                     append(target);
-                    record.revision =
-                        oxideterm_ai::AiChatPersistenceStore::next_projection_persist_at();
+                    record.revision = next_history_timestamp();
                 }
             }
             self.history_stream_text_changed(conversation, message);
@@ -1468,6 +1595,31 @@ impl AiWorkspaceEntity {
         self.chat_initialized
     }
 
+    pub fn ensure_hosted_chat_initialized(&mut self, cx: &mut Context<Self>) {
+        if self.chat_initialized {
+            return;
+        }
+        let Some(host) = self.history_host.clone() else {
+            return;
+        };
+        self.chat_initialized = true;
+        self.initialize_hosted_history(host.as_ref(), cx);
+    }
+    pub fn retry_hosted_chat_initialization(&mut self, cx: &mut Context<Self>) {
+        let Some(host) = self.history_host.clone() else {
+            return;
+        };
+        self.chat_initialization_error = None;
+        if self.history_reader().is_some() {
+            if let Some(id) = self.conversation_state.active_conversation_id.clone() {
+                self.request_history_conversation(id);
+            }
+            self.retry_history_write();
+        } else {
+            self.initialize_hosted_history(host.as_ref(), cx);
+        }
+    }
+    #[cfg(not(target_family = "wasm"))]
     pub fn ensure_chat_initialized(&mut self, path: PathBuf, cx: &mut Context<Self>) {
         if self.chat_initialized {
             return;
@@ -1476,10 +1628,11 @@ impl AiWorkspaceEntity {
         self.initialize_history(path, cx);
     }
 
+    #[cfg(not(target_family = "wasm"))]
     pub fn retry_chat_initialization(&mut self, path: PathBuf, cx: &mut Context<Self>) {
         self.chat_initialized = true;
         self.chat_initialization_error = None;
-        if self.history.store.is_some() {
+        if self.history_reader().is_some() {
             if let Some(id) = self.conversation_state.active_conversation_id.clone() {
                 self.request_history_conversation(id);
             }
@@ -1497,9 +1650,7 @@ impl AiWorkspaceEntity {
             .any(|item| item.id == id)
         {
             match self
-                .history
-                .store
-                .as_ref()
+                .history_reader()
                 .map(|store| store.conversation_head(&id))
                 .transpose()
             {
@@ -1587,7 +1738,7 @@ impl AiWorkspaceEntity {
         self.chat_drafts.remove(id);
         self.chat_image_drafts.remove(id);
         self.pending_image_requests.remove(id);
-        self.agents.services.runtime.remove_conversation(id);
+        self.agents.host.remove_conversation(id);
         let removed: HashSet<_> = self
             .agents
             .records
@@ -1804,78 +1955,18 @@ impl AiWorkspaceEntity {
             return false;
         };
         let provider_id = provider.id.clone();
-        let key_store = self.key_store.clone();
         let worker_tx = self.model_refresh_tx.clone();
-        self.task_runtime.spawn(async move {
-            let key_policy = oxideterm_ai::provider_refresh_key_policy(&provider.provider_type);
-            let api_key = match key_policy {
-                oxideterm_ai::AiProviderRefreshKeyPolicy::NoKey => None,
-                oxideterm_ai::AiProviderRefreshKeyPolicy::OptionalStoredKey => {
-                    tokio::task::spawn_blocking({
-                        let key_store = key_store.clone();
-                        let provider_id = provider_id.clone();
-                        move || key_store.get_provider_key(&provider_id)
-                    })
-                    .await
-                    .ok()
-                    .and_then(Result::ok)
-                    .flatten()
-                }
-                oxideterm_ai::AiProviderRefreshKeyPolicy::RequiredStoredKey => {
-                    match tokio::task::spawn_blocking({
-                        let key_store = key_store.clone();
-                        let provider_id = provider_id.clone();
-                        move || key_store.get_provider_key(&provider_id)
-                    })
-                    .await
-                    {
-                        Ok(Ok(Some(key))) => Some(key),
-                        Ok(Ok(None)) => {
-                            let _ = worker_tx.send(AiModelRefreshWorkerDelivery {
-                                index,
-                                provider_id,
-                                generation,
-                                result: Err(AiModelRefreshFailure::MissingApiKey),
-                            });
-                            return;
-                        }
-                        Ok(Err(error)) => {
-                            let _ = worker_tx.send(AiModelRefreshWorkerDelivery {
-                                index,
-                                provider_id,
-                                generation,
-                                result: Err(AiModelRefreshFailure::Failed(format!(
-                                    "could not read the saved API key: {error}"
-                                ))),
-                            });
-                            return;
-                        }
-                        Err(error) => {
-                            let _ = worker_tx.send(AiModelRefreshWorkerDelivery {
-                                index,
-                                provider_id,
-                                generation,
-                                result: Err(AiModelRefreshFailure::Failed(format!(
-                                    "could not read the saved API key: {error}"
-                                ))),
-                            });
-                            return;
-                        }
-                    }
-                }
-            };
-            let result = oxideterm_ai::fetch_provider_models(provider, api_key)
-                .await
-                .map_err(|error| {
-                    AiModelRefreshFailure::Failed(model_refresh_failure_message(&error))
+        self.host.provider.models(
+            provider,
+            Box::new(move |result| {
+                let _ = worker_tx.send(AiModelRefreshWorkerDelivery {
+                    index,
+                    provider_id,
+                    generation,
+                    result,
                 });
-            let _ = worker_tx.send(AiModelRefreshWorkerDelivery {
-                index,
-                provider_id,
-                generation,
-                result,
-            });
-        });
+            }),
+        );
         true
     }
 
@@ -1902,17 +1993,10 @@ impl AiWorkspaceEntity {
         secret: zeroize::Zeroizing<String>,
         cx: &mut Context<Self>,
     ) -> bool {
-        let key_store = self.key_store.clone();
-        let task_runtime = self.task_runtime.clone();
-        let provider_id_for_store = provider_id.clone();
-        let operation = async move {
-            task_runtime
-                .spawn_blocking(move || {
-                    key_store.store_provider_key(&provider_id_for_store, secret)
-                })
-                .await
-                .is_ok_and(|result| result.is_ok())
-        };
+        let operation = self
+            .host
+            .provider
+            .update_key(provider_id.clone(), Some(secret));
         self.start_provider_key_operation(
             provider_id,
             AiProviderKeyOperation::Store { index },
@@ -1928,15 +2012,7 @@ impl AiWorkspaceEntity {
             self.pending_provider_key_removals.insert(provider_id);
             return true;
         }
-        let key_store = self.key_store.clone();
-        let task_runtime = self.task_runtime.clone();
-        let provider_id_for_delete = provider_id.clone();
-        let operation = async move {
-            task_runtime
-                .spawn_blocking(move || key_store.delete_provider_key(&provider_id_for_delete))
-                .await
-                .is_ok_and(|result| result.is_ok())
-        };
+        let operation = self.host.provider.update_key(provider_id.clone(), None);
         self.start_provider_key_operation(
             provider_id,
             AiProviderKeyOperation::Remove,
@@ -2147,15 +2223,7 @@ impl AiWorkspaceEntity {
         }
 
         let token = take_mcp_auth_token(&mut draft);
-        let registry = self.mcp_registry.clone();
-        let task_runtime = self.task_runtime.clone();
-        let keychain_server_id = server_id.clone();
-        let operation = async move {
-            task_runtime
-                .spawn_blocking(move || registry.store_auth_token(&keychain_server_id, token))
-                .await
-                .is_ok_and(|result| result.is_ok())
-        };
+        let operation = self.host.mcp.save_token(server_id.clone(), token);
         self.start_mcp_token_save(draft, server_id, operation, cx);
     }
 
@@ -2208,11 +2276,11 @@ impl AiWorkspaceEntity {
     }
 
     pub fn refresh_mcp_tools(&mut self, server_id: String, cx: &mut Context<Self>) -> bool {
-        let registry = self.mcp_registry.clone();
+        let refresh = self.host.mcp.refresh(server_id.clone());
         self.start_mcp_runtime_task(
-            server_id.clone(),
+            server_id,
             async move {
-                let _ = registry.refresh_tools(&server_id).await;
+                refresh.await;
                 None
             },
             cx,
@@ -2226,15 +2294,15 @@ impl AiWorkspaceEntity {
         cx: &mut Context<Self>,
     ) -> bool {
         let server_id = config.id.clone();
-        let registry = self.mcp_registry.clone();
+        let operation = if connected {
+            self.host.mcp.disconnect(server_id.clone())
+        } else {
+            self.host.mcp.connect(config)
+        };
         self.start_mcp_runtime_task(
             server_id,
             async move {
-                if connected {
-                    registry.disconnect_server(&config.id).await;
-                } else {
-                    registry.connect_config(config).await;
-                }
+                operation.await;
                 None
             },
             cx,
@@ -2242,19 +2310,11 @@ impl AiWorkspaceEntity {
     }
 
     pub fn remove_mcp_server(&mut self, server_id: String, cx: &mut Context<Self>) -> bool {
-        let registry = self.mcp_registry.clone();
-        let task_runtime = self.task_runtime.clone();
+        let remove = self.host.mcp.remove(server_id.clone());
         self.start_mcp_runtime_task(
             server_id.clone(),
             async move {
-                registry.disconnect_server(&server_id).await;
-                let delete_registry = registry.clone();
-                let server_id_for_delete = server_id.clone();
-                let _ = task_runtime
-                    .spawn_blocking(move || {
-                        delete_registry.delete_auth_token(&server_id_for_delete)
-                    })
-                    .await;
+                remove.await;
                 Some(server_id)
             },
             cx,
@@ -2312,19 +2372,15 @@ impl AiWorkspaceEntity {
                 continue;
             }
             let worker_tx = self.provider_key_status_tx.clone();
-            let key_store = self.key_store.clone();
-            self.task_runtime.spawn(async move {
-                let provider_id_for_check = provider_id.clone();
-                let has_key = tokio::task::spawn_blocking(move || {
-                    key_store.has_provider_key(&provider_id_for_check)
-                })
-                .await
-                .unwrap_or(false);
-                let _ = worker_tx.send(AiProviderKeyStatusDelivery {
-                    provider_id,
-                    has_key,
-                });
-            });
+            self.host.provider.key_status(
+                provider_id.clone(),
+                Box::new(move |has_key| {
+                    let _ = worker_tx.send(AiProviderKeyStatusDelivery {
+                        provider_id,
+                        has_key,
+                    });
+                }),
+            );
         }
     }
 
@@ -2361,34 +2417,17 @@ impl AiWorkspaceEntity {
             .insert(provider_id.clone(), generation);
         self.selector_probe_pending = self.selector_probe_pending.saturating_add(1);
         let worker_tx = self.selector_probe_tx.clone();
-        let key_store = self.key_store.clone();
-        self.task_runtime.spawn(async move {
-            let online = if provider.provider_type == "openai_compatible" {
-                let provider_id_for_key = provider_id.clone();
-                // OpenAI-compatible endpoints may be keyless or authenticated. Keep the optional
-                // secret in a zeroizing owner for this probe and never copy it into status state.
-                let api_key = tokio::task::spawn_blocking(move || {
-                    key_store.get_provider_key(&provider_id_for_key)
-                })
-                .await
-                .ok()
-                .and_then(Result::ok)
-                .flatten();
-                oxideterm_ai::check_openai_compatible_model_selector_provider_online(
-                    &provider.base_url,
-                    api_key,
-                )
-                .await
-            } else {
-                oxideterm_ai::check_model_selector_provider_online(&provider.base_url, endpoint)
-                    .await
-            };
-            let _ = worker_tx.send(AiModelSelectorProbeDelivery {
-                provider_id,
-                generation,
-                online,
-            });
-        });
+        self.host.provider.probe(
+            provider,
+            endpoint,
+            Box::new(move |online| {
+                let _ = worker_tx.send(AiModelSelectorProbeDelivery {
+                    provider_id,
+                    generation,
+                    online,
+                });
+            }),
+        );
         true
     }
 
@@ -2404,14 +2443,7 @@ impl AiWorkspaceEntity {
         if let Some(task) = self.acp_probe_tasks.remove(agent_id) {
             task.abort();
         }
-        self.acp_discovery_tasks.retain(|(_, id), task| {
-            if id == agent_id {
-                task.abort();
-                false
-            } else {
-                true
-            }
-        });
+        self.acp_discovery_tasks.retain(|(_, id), _| id != agent_id);
         self.acp_agent_probe_pending.remove(agent_id);
         self.acp_model_discovery_pending
             .retain(|(_, id)| id != agent_id);
@@ -2430,21 +2462,6 @@ impl AiWorkspaceEntity {
             return false;
         }
         let agent_id = agent.id.clone();
-        let capability_policy = oxideterm_ai::AcpHostCapabilityPolicy {
-            fs_read_text_file: agent.capability_policy.fs_read_text_file,
-            fs_write_text_file: agent.capability_policy.fs_write_text_file,
-            terminal: agent.capability_policy.terminal,
-        };
-        // Move args and env into the zeroizing launch config. They may contain
-        // local agent tokens and must not be cloned for worker convenience.
-        let launch_config = oxideterm_ai::AcpLaunchConfig {
-            id: agent.id,
-            display_name: agent.display_name,
-            command: agent.command,
-            args: agent.args,
-            env: agent.env,
-            cwd: agent.cwd.map(std::path::PathBuf::from),
-        };
         self.acp_agent_probe_pending.insert(agent_id.clone());
         let worker_tx = self.acp_agent_probe_tx.clone();
         let epoch = self
@@ -2453,49 +2470,17 @@ impl AiWorkspaceEntity {
             .copied()
             .unwrap_or_default();
         let task_agent_id = agent_id.clone();
-        let task = self.task_runtime.spawn(async move {
-            let result = match oxideterm_ai::build_acp_stdio_launcher(launch_config) {
-                Ok(launcher) => {
-                    if !oxideterm_ai::acp_launch_command_available(launcher.config())
-                        .unwrap_or(false)
-                    {
-                        ai_acp_probe_error_result("command_not_found")
-                    } else {
-                        match oxideterm_ai::initialize_acp_agent(
-                            launcher,
-                            env!("CARGO_PKG_VERSION").to_string(),
-                            capability_policy,
-                        )
-                        .await
-                        {
-                            Ok(response) => {
-                                AiAcpAgentProbeResult {
-                                    // Initialize advertises available auth methods; it does
-                                    // not prove that the current process still needs auth.
-                                    // Only an AuthRequired protocol error can establish that.
-                                    runtime_state: oxideterm_settings::AcpAgentRuntimeState::Ready,
-                                    auth_status: if response.auth_methods.is_empty() {
-                                        oxideterm_settings::AcpAgentAuthStatus::NotRequired
-                                    } else {
-                                        oxideterm_settings::AcpAgentAuthStatus::Unknown
-                                    },
-                                    last_error_kind: None,
-                                }
-                            }
-                            Err(_) => ai_acp_probe_error_result("initialize"),
-                        }
-                    }
-                }
-                Err(_) => ai_acp_probe_error_result("config"),
-            };
-            let _ = worker_tx.send(AiAcpAgentProbeDelivery {
-                epoch,
-                agent_id,
-                result,
-            });
-        });
-        self.acp_probe_tasks
-            .insert(task_agent_id, task.abort_handle());
+        let task = self.host.acp_metadata.probe_agent(
+            agent,
+            Box::new(move |result| {
+                let _ = worker_tx.send(AiAcpAgentProbeDelivery {
+                    epoch,
+                    agent_id,
+                    result,
+                });
+            }),
+        );
+        self.acp_probe_tasks.insert(task_agent_id, task);
         true
     }
 
@@ -2524,6 +2509,15 @@ impl AiWorkspaceEntity {
         agent: oxideterm_settings::AcpAgentConfig,
         session_cwd: std::path::PathBuf,
     ) -> bool {
+        self.discover_acp_models(conversation_id, agent, Some(session_cwd))
+    }
+
+    pub(crate) fn discover_acp_models(
+        &mut self,
+        conversation_id: String,
+        agent: oxideterm_settings::AcpAgentConfig,
+        session_cwd: Option<std::path::PathBuf>,
+    ) -> bool {
         if !self.visibility.model_selector_surface {
             return false;
         }
@@ -2534,26 +2528,6 @@ impl AiWorkspaceEntity {
         {
             return false;
         }
-        let capability_policy = oxideterm_ai::AcpHostCapabilityPolicy {
-            fs_read_text_file: agent.capability_policy.fs_read_text_file,
-            fs_write_text_file: agent.capability_policy.fs_write_text_file,
-            terminal: agent.capability_policy.terminal,
-        };
-        let display_name = if agent.display_name.trim().is_empty() {
-            agent_id.clone()
-        } else {
-            agent.display_name
-        };
-        // Discovery uses the same zeroizing one-shot launch config as a real
-        // ACP session and moves token-bearing args/env into the worker.
-        let launch_config = oxideterm_ai::AcpLaunchConfig {
-            id: agent.id,
-            display_name,
-            command: agent.command,
-            args: agent.args,
-            env: agent.env,
-            cwd: agent.cwd.map(std::path::PathBuf::from),
-        };
         let worker_tx = self.acp_model_discovery_tx.clone();
         let epoch = self
             .acp_agent_epochs
@@ -2561,31 +2535,19 @@ impl AiWorkspaceEntity {
             .copied()
             .unwrap_or_default();
         let task_key = (conversation_id.clone(), agent_id.clone());
-        let task = self.task_runtime.spawn(async move {
-            let config_options = match oxideterm_ai::build_acp_stdio_launcher(launch_config) {
-                Ok(launcher) => oxideterm_ai::discover_acp_session_config_options(
-                    launcher,
-                    env!("CARGO_PKG_VERSION").to_string(),
-                    capability_policy,
-                    session_cwd,
-                )
-                .await
-                .ok()
-                .filter(|options| {
-                    oxideterm_ai::acp_model_config_option(options)
-                        .is_some_and(|option| !option.choices.is_empty())
-                }),
-                Err(_) => None,
-            };
-            let _ = worker_tx.send(AiAcpModelDiscoveryDelivery {
-                epoch,
-                conversation_id,
-                agent_id,
-                config_options,
-            });
-        });
-        self.acp_discovery_tasks
-            .insert(task_key, task.abort_handle());
+        let task = self.host.acp_metadata.discover(
+            agent,
+            session_cwd,
+            Box::new(move |config_options| {
+                let _ = worker_tx.send(AiAcpModelDiscoveryDelivery {
+                    epoch,
+                    conversation_id,
+                    agent_id,
+                    config_options,
+                });
+            }),
+        );
+        self.acp_discovery_tasks.insert(task_key, task);
         true
     }
 
@@ -2689,7 +2651,7 @@ impl AiWorkspaceEntity {
         panel.loading = true;
         panel.has_api_key = None;
 
-        let mut config = match config_result {
+        let config = match config_result {
             Ok(config) => config,
             Err(message) => {
                 panel.loading = false;
@@ -2697,82 +2659,34 @@ impl AiWorkspaceEntity {
                 return true;
             }
         };
-        let requires_key = oxideterm_ai::provider_chat_requires_key(&config.provider_type);
-        let provider_id = config.provider_id.clone();
-        let key_store = self.key_store.clone();
         let worker_tx = self.terminal_inline_tx.clone();
-        let task = self.task_runtime.spawn(async move {
-            if let Some(provider_id) = provider_id {
-                let key_result =
-                    tokio::task::spawn_blocking(move || key_store.get_provider_key(&provider_id))
-                        .await
-                        .ok()
-                        .and_then(Result::ok);
-                match key_result {
-                    Some(api_key) => {
-                        let has_key = api_key.as_ref().is_some_and(|key| !key.trim().is_empty());
-                        let _ = worker_tx.send(AiTerminalInlineDelivery::KeyStatus {
+        let task = self.host.provider.inline(
+            config,
+            oxideterm_ai::sanitize_api_messages_for_provider(messages),
+            Box::new(move |event| {
+                use crate::bridge::InlineEvent as E;
+                let delivery = match event {
+                    E::KeyStatus(has_key) => AiTerminalInlineDelivery::KeyStatus {
+                        generation,
+                        has_key,
+                    },
+                    E::Content(chunk) => AiTerminalInlineDelivery::Content { generation, chunk },
+                    E::Done => AiTerminalInlineDelivery::Done { generation },
+                    E::MissingKey | E::KeyUnavailable | E::Failed => {
+                        AiTerminalInlineDelivery::Error {
                             generation,
-                            has_key,
-                        });
-                        if requires_key && !has_key {
-                            let _ = worker_tx.send(AiTerminalInlineDelivery::Error {
-                                generation,
-                                message: api_key_not_found,
-                            });
-                            return;
+                            message: match event {
+                                E::MissingKey => &api_key_not_found,
+                                E::KeyUnavailable => &failed_to_get_key,
+                                _ => &stream_failed,
+                            }
+                            .clone(),
                         }
-                        config.api_key = api_key.map(oxideterm_ai::SharedAiProviderKey::new);
                     }
-                    None if requires_key => {
-                        let _ = worker_tx.send(AiTerminalInlineDelivery::Error {
-                            generation,
-                            message: failed_to_get_key,
-                        });
-                        return;
-                    }
-                    None => {}
-                }
-            }
-
-            let (stream_tx, mut stream_rx) = tokio::sync::mpsc::unbounded_channel();
-            let provider_stream = oxideterm_ai::stream_chat_completion(
-                config,
-                oxideterm_ai::sanitize_api_messages_for_provider(messages),
-                stream_tx,
-            );
-            let deliver_stream = async move {
-                while let Some(event) = stream_rx.recv().await {
-                    match event {
-                        oxideterm_ai::AiStreamEvent::Content(chunk) => {
-                            let _ = worker_tx
-                                .send(AiTerminalInlineDelivery::Content { generation, chunk });
-                        }
-                        oxideterm_ai::AiStreamEvent::Done => {
-                            let _ = worker_tx.send(AiTerminalInlineDelivery::Done { generation });
-                            break;
-                        }
-                        oxideterm_ai::AiStreamEvent::Error(_) => {
-                            // Provider errors may contain response bodies or request
-                            // metadata, so only localized safe copy reaches the UI.
-                            let _ = worker_tx.send(AiTerminalInlineDelivery::Error {
-                                generation,
-                                message: stream_failed,
-                            });
-                            break;
-                        }
-                        oxideterm_ai::AiStreamEvent::Thinking(_)
-                        | oxideterm_ai::AiStreamEvent::Usage { .. }
-                        | oxideterm_ai::AiStreamEvent::ProviderResponsePart { .. }
-                        | oxideterm_ai::AiStreamEvent::ToolCall { .. }
-                        | oxideterm_ai::AiStreamEvent::ToolCallComplete { .. } => {}
-                    }
-                }
-            };
-            // Keeping producer and delivery in one retained task ensures an
-            // Entity abort cannot leave the provider request detached.
-            let _ = tokio::join!(provider_stream, deliver_stream);
-        });
+                };
+                let _ = worker_tx.send(delivery);
+            }),
+        );
         self.set_terminal_inline_stream_task(generation, task);
         true
     }
@@ -2780,8 +2694,9 @@ impl AiWorkspaceEntity {
     fn set_terminal_inline_stream_task(
         &mut self,
         generation: u64,
-        task: tokio::task::JoinHandle<()>,
+        task: impl Into<crate::bridge::HostTask>,
     ) {
+        let task = task.into();
         if generation == self.terminal_inline_panel.generation && self.terminal_inline_panel.loading
         {
             if let Some(replaced_task) = self.terminal_inline_stream_task.replace(task) {
@@ -2819,20 +2734,16 @@ impl AiWorkspaceEntity {
             return;
         }
         let generation = self.terminal_inline_panel.generation;
-        let key_store = self.key_store.clone();
         let worker_tx = self.terminal_inline_tx.clone();
-        self.task_runtime.spawn(async move {
-            // Opening the inline panel only checks presence, avoiding a secret
-            // read and biometric prompt before the user submits anything.
-            let has_key =
-                tokio::task::spawn_blocking(move || key_store.has_provider_key(&provider_id))
-                    .await
-                    .unwrap_or(false);
-            let _ = worker_tx.send(AiTerminalInlineDelivery::KeyStatus {
-                generation,
-                has_key,
-            });
-        });
+        self.host.provider.key_status(
+            provider_id,
+            Box::new(move |has_key| {
+                let _ = worker_tx.send(AiTerminalInlineDelivery::KeyStatus {
+                    generation,
+                    has_key,
+                });
+            }),
+        );
     }
 
     pub fn chat_stream_generation(&self) -> u64 {
@@ -2945,6 +2856,7 @@ impl AiWorkspaceEntity {
         self.chat_stream_runs.insert(
             self.chat_stream_generation,
             AiChatStreamRun {
+                hosted_commands: HashMap::new(),
                 conversation_id,
                 assistant_id,
                 child: agent.is_some(),
@@ -2959,7 +2871,16 @@ impl AiWorkspaceEntity {
         self.chat_stream_tx.send(delivery).is_ok()
     }
 
+    #[cfg(not(target_family = "wasm"))]
     pub fn set_chat_stream_task(&mut self, generation: u64, task: tokio::task::JoinHandle<()>) {
+        self.set_host_stream_task(generation, task.into());
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    pub(crate) fn host_stream_sender(&self) -> crate::bridge::TurnSender {
+        self.host_stream_tx.clone()
+    }
+    pub fn set_host_stream_task(&mut self, generation: u64, task: crate::bridge::HostTask) {
         if let Some(run) = self.chat_stream_runs.get_mut(&generation) {
             if let Some(replaced) = run.task.replace(task) {
                 replaced.abort();
@@ -2993,7 +2914,7 @@ impl AiWorkspaceEntity {
             .collect();
         for (child, run) in &runs {
             if !child {
-                let _ = self.agents.services.runtime.cancel_group(run);
+                let _ = self.agents.host.cancel_group(run);
             }
         }
         runs.sort_by_key(|(child, _)| !*child);
@@ -3001,7 +2922,7 @@ impl AiWorkspaceEntity {
             self.complete_chat_stream(generation);
         }
         for (child, run) in runs {
-            let _ = self.agents.services.runtime.complete(
+            let _ = self.agents.host.complete(
                 &run,
                 oxideterm_ai::agent::AgentResult {
                     summary: oxideterm_ai::agent::AgentText::default(),
@@ -3012,7 +2933,7 @@ impl AiWorkspaceEntity {
                 },
             );
             if !child {
-                let _ = self.agents.services.runtime.finish_group(&run);
+                let _ = self.agents.host.finish_group(&run);
             }
         }
         for record in self
@@ -3033,11 +2954,11 @@ impl AiWorkspaceEntity {
                 }
             }
         }
+        #[cfg(not(target_family = "wasm"))]
         self.agents.tool_leases.retain(|_, leases| {
             !leases.iter().any(|lease| {
                 self.agents
-                    .services
-                    .runtime
+                    .host
                     .snapshots(conversation_id)
                     .iter()
                     .any(|snapshot| snapshot.run == lease.lease().owner)
@@ -3046,8 +2967,7 @@ impl AiWorkspaceEntity {
         self.set_conversation_loading(conversation_id, false);
         self.agents.groups.retain(|_, group| {
             self.agents
-                .services
-                .runtime
+                .host
                 .snapshot(&group.parent)
                 .is_ok_and(|snapshot| snapshot.conversation_id != conversation_id)
         });
@@ -3068,6 +2988,7 @@ impl AiWorkspaceEntity {
     fn reject_run_tool_interactions(&mut self, generation: u64) {
         self.tool_approval_previews
             .retain(|(run, _), _| *run != generation);
+        #[cfg(not(target_family = "wasm"))]
         self.history.answers.retain(|(run, _), task| {
             if *run == generation {
                 task.abort();
@@ -3076,6 +2997,14 @@ impl AiWorkspaceEntity {
                 true
             }
         });
+        self.history
+            .hosted_answers
+            .retain(|(run, _), _| *run != generation);
+        #[cfg(not(target_family = "wasm"))]
+        {
+            self.host_questions.retain(|(run, _), _| *run != generation);
+            self.host_cursors.retain(|(run, _), _| *run != generation);
+        }
         self.pending_user_questions
             .retain(|(run, _), _| *run != generation);
         self.pending_cursor_requests
@@ -3099,7 +3028,7 @@ impl AiWorkspaceEntity {
             .collect();
         for key in choices {
             if let Some(sender) = self.pending_acp_permission_choices.remove(&key) {
-                let _ = sender.send(None);
+                sender(None);
             }
         }
         let candidates: Vec<_> = self
@@ -3132,6 +3061,12 @@ impl AiWorkspaceEntity {
             .conversation_state()
             .active_conversation_id
             .as_deref()?;
+        #[cfg(not(target_family = "wasm"))]
+        if let Some((key, _)) = self.host_questions.iter().find(|((g, _), q)| {
+            q.conversation_id == conversation && q.active() && self.run_accepts_tools(*g)
+        }) {
+            return Some(key.clone());
+        }
         self.pending_user_questions
             .iter()
             .find(|((generation, _), question)| {
@@ -3152,14 +3087,35 @@ impl AiWorkspaceEntity {
             return false;
         }
         let key = (generation, id.to_owned());
-        if !self
+        #[cfg(not(target_family = "wasm"))]
+        let question = if self
+            .host_questions
+            .get(&key)
+            .is_some_and(crate::stream::PendingQuestion::active)
+        {
+            self.host_questions.remove(&key)
+        } else {
+            self.pending_user_questions
+                .get(&key)
+                .filter(|q| q.active())
+                .map(|q| q.conversation_id.clone())
+                .and_then(|conversation| {
+                    self.pending_user_questions
+                        .remove(&key)
+                        .map(|q| crate::stream::PendingQuestion::new(conversation, Box::new(q)))
+                })
+        };
+        #[cfg(target_family = "wasm")]
+        let question = if self
             .pending_user_questions
             .get(&key)
             .is_some_and(AiPendingUserQuestion::active)
         {
-            return false;
-        }
-        let Some(question) = self.pending_user_questions.remove(&key) else {
+            self.pending_user_questions.remove(&key)
+        } else {
+            None
+        };
+        let Some(question) = question else {
             return false;
         };
         self.history_event(
@@ -3172,6 +3128,28 @@ impl AiWorkspaceEntity {
         true
     }
 
+    pub(crate) fn cursor_request(
+        &self,
+        key: &(u64, String),
+    ) -> Option<&dyn crate::stream::CursorInteraction> {
+        #[cfg(not(target_family = "wasm"))]
+        if let Some(cursor) = self.host_cursors.get(key) {
+            return Some(cursor);
+        }
+        self.pending_cursor_requests.get(key).map(|c| c as &_)
+    }
+    fn cursor_request_mut(
+        &mut self,
+        key: &(u64, String),
+    ) -> Option<&mut dyn crate::stream::CursorInteraction> {
+        #[cfg(not(target_family = "wasm"))]
+        if let Some(cursor) = self.host_cursors.get_mut(key) {
+            return Some(cursor);
+        }
+        self.pending_cursor_requests
+            .get_mut(key)
+            .map(|c| c as &mut _)
+    }
     pub fn select_cursor_option(
         &mut self,
         generation: u64,
@@ -3182,13 +3160,11 @@ impl AiWorkspaceEntity {
         if !self.run_accepts_tools(generation) {
             return;
         }
-        let Some(pending) = self
-            .pending_cursor_requests
-            .get_mut(&(generation, id.into()))
-        else {
+        let Some(pending) = self.cursor_request_mut(&(generation, id.into())) else {
             return;
         };
-        let oxideterm_ai::CursorRequest::Questions(request) = &pending.request else {
+        let (request, selections) = pending.choices();
+        let oxideterm_ai::CursorRequest::Questions(request) = request else {
             return;
         };
         let Some(question) = request.questions.get(question_index) else {
@@ -3197,7 +3173,7 @@ impl AiWorkspaceEntity {
         let Some(option) = question.options.get(option_index) else {
             return;
         };
-        let selected = &mut pending.selections[question_index];
+        let selected = &mut selections[question_index];
         if selected.contains(&option.id) {
             selected.retain(|id| id != &option.id);
         } else {
@@ -3213,17 +3189,15 @@ impl AiWorkspaceEntity {
             return false;
         }
         let key = (generation, id.into());
-        let Some(pending) = self.pending_cursor_requests.get(&key) else {
+        if !self
+            .cursor_request_mut(&key)
+            .is_some_and(|c| c.resolve_choice(accepted))
+        {
             return false;
-        };
-        let Some(response) = pending.request.response(accepted, &pending.selections) else {
-            return false;
-        };
-        let mut pending = self
-            .pending_cursor_requests
-            .remove(&key)
-            .expect("validated pending request");
-        pending.respond(response);
+        }
+        #[cfg(not(target_family = "wasm"))]
+        self.host_cursors.remove(&key);
+        self.pending_cursor_requests.remove(&key);
         true
     }
 
@@ -3289,21 +3263,21 @@ impl AiWorkspaceEntity {
         true
     }
 
-    pub fn register_acp_permission_choice(
+    pub fn register_acp_permission_decision(
         &mut self,
         generation: u64,
         tool_call_id: String,
-        sender: tokio::sync::oneshot::Sender<Option<String>>,
+        sender: crate::stream::Decision<Option<String>>,
     ) -> bool {
         if !self.is_chat_stream_generation(generation) {
-            let _ = sender.send(None);
+            sender(None);
             return false;
         }
         if let Some(stale_sender) = self
             .pending_acp_permission_choices
             .insert((generation, tool_call_id), sender)
         {
-            let _ = stale_sender.send(None);
+            stale_sender(None);
         }
         true
     }
@@ -3322,19 +3296,24 @@ impl AiWorkspaceEntity {
         };
         self.tool_approval_previews
             .remove(&(generation, tool_call_id.to_owned()));
-        let _ = sender.send(option_id);
+        sender(option_id);
         true
     }
 
     fn reject_all_tool_approvals(&mut self) {
         self.tool_approval_previews.clear();
+        #[cfg(not(target_family = "wasm"))]
+        {
+            self.host_questions.clear();
+            self.host_cursors.clear();
+        }
         self.pending_user_questions.clear();
         self.pending_cursor_requests.clear();
         for (_, sender) in self.pending_tool_approvals.drain() {
             sender(false);
         }
         for (_, sender) in self.pending_acp_permission_choices.drain() {
-            let _ = sender.send(None);
+            sender(None);
         }
     }
 
@@ -3445,8 +3424,13 @@ impl AiWorkspaceEntity {
         self.reject_all_tool_candidate_selections();
     }
 
+    pub fn host_bridge(&self) -> &AiHostBridge {
+        &self.host
+    }
+
+    #[cfg(not(target_family = "wasm"))]
     pub fn mcp_registry(&self) -> &oxideterm_ai::McpRegistry {
-        &self.mcp_registry
+        &self.desktop().mcp_registry
     }
 
     pub fn set_chat_stream_frame(&mut self, source: Rc<crate::stream::AiChatStreamFrameSource>) {
@@ -3520,6 +3504,8 @@ impl AiWorkspaceEntity {
     pub fn finish_compaction(&mut self, conversation_id: &str) {
         self.compacting_conversations.remove(conversation_id);
         self.history.compaction_key_loads.remove(conversation_id);
+        #[cfg(not(target_family = "wasm"))]
+        self.history.hosted_compaction_tasks.remove(conversation_id);
         if let Some((_, Some(task))) = self.history.compaction_runs.remove(conversation_id) {
             task.abort();
         }
@@ -4012,8 +3998,18 @@ impl AiWorkspaceEntity {
             AI_CHAT_STREAM_DELIVERY_BUDGET,
         );
         self.chat_stream_batch.extend(drain.items);
+        let backlog = drain.outcome.backlog_remaining;
+        #[cfg(not(target_family = "wasm"))]
+        let backlog = {
+            let hosted = oxideterm_workspace::delivery::drain_channel(
+                &self.host_stream_rx,
+                AI_CHAT_STREAM_DELIVERY_BUDGET,
+            );
+            self.chat_stream_batch.hosted.extend(hosted.items);
+            backlog || hosted.outcome.backlog_remaining
+        };
         self.advance_chat_stream_batch(cx);
-        drain.outcome.backlog_remaining
+        backlog
     }
 
     fn advance_chat_stream_batch(&mut self, cx: &mut Context<Self>) {
@@ -4173,16 +4169,6 @@ fn take_mcp_record_value(entries: &mut Vec<(String, String)>) -> Option<serde_js
     (!object.is_empty()).then(|| serde_json::Value::Object(object))
 }
 
-fn ai_acp_probe_error_result(kind: &'static str) -> AiAcpAgentProbeResult {
-    // Only stable categories cross the worker boundary; process errors may
-    // include args, env values, or local authentication material.
-    AiAcpAgentProbeResult {
-        runtime_state: oxideterm_settings::AcpAgentRuntimeState::Error,
-        auth_status: oxideterm_settings::AcpAgentAuthStatus::Unknown,
-        last_error_kind: Some(kind.to_string()),
-    }
-}
-
 impl Drop for AiWorkspaceEntity {
     fn drop(&mut self) {
         // Releasing the workspace is an explicit rejection boundary for every
@@ -4190,7 +4176,7 @@ impl Drop for AiWorkspaceEntity {
         self.reject_all_tool_interactions();
         for run in self.chat_stream_runs.values().filter(|run| !run.child) {
             if let Some(agent) = &run.agent {
-                let _ = self.agents.services.runtime.cancel_group(agent);
+                let _ = self.agents.host.cancel_group(agent);
             }
         }
         for (_, run) in self.chat_stream_runs.drain() {
@@ -4824,7 +4810,7 @@ mod entity_tests {
         entity.update(cx, |entity, cx| {
             entity
                 .acp_probe_tasks
-                .insert("agent".into(), task.abort_handle());
+                .insert("agent".into(), task.abort_handle().into());
             entity.acp_agent_probe_pending.insert("agent".into());
             entity
                 .acp_agent_probe_tx

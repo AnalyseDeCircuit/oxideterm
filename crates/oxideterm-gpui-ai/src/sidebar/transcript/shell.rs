@@ -123,7 +123,7 @@ impl AiAssistantSidebarView {
     fn render_ai_history_status(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let ai = self.state.read(cx);
         let failed = matches!(ai.history.status, crate::state::HistoryStatus::Failed)
-            && ai.history.writer.is_some();
+            && ai.has_history_writer();
         let loading = !failed && ai.chat_initialization_error().is_none() && !ai.history_ready();
         if !failed && !loading {
             return None;

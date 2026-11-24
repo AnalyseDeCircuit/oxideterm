@@ -1,6 +1,5 @@
 use super::{records::*, *};
-use serde::ser::{SerializeMap, SerializeSeq};
-use sha2::{Digest, Sha256};
+use crate::history_journal::identity;
 
 pub(super) fn shared_field(key: &str, in_payload: bool) -> bool {
     matches!(
@@ -11,50 +10,6 @@ pub(super) fn shared_field(key: &str, in_payload: bool) -> bool {
             key,
             "data" | "stdout" | "stderr" | "text" | "content" | "message"
         ))
-}
-
-pub(super) fn identity(value: &Value) -> Result<String> {
-    struct HashWriter(Sha256);
-    impl std::io::Write for HashWriter {
-        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-            self.0.update(bytes);
-            Ok(bytes.len())
-        }
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-    let mut writer = HashWriter(Sha256::new());
-    CanonicalValue(value).serialize(&mut rmp_serde::Serializer::new(&mut writer))?;
-    Ok(format!("{:x}", writer.0.finalize()))
-}
-
-struct CanonicalValue<'a>(&'a Value);
-impl Serialize for CanonicalValue<'_> {
-    fn serialize<S: serde::Serializer>(
-        &self,
-        serializer: S,
-    ) -> std::result::Result<S::Ok, S::Error> {
-        match self.0 {
-            Value::Object(fields) => {
-                let mut fields: Vec<_> = fields.iter().collect();
-                fields.sort_unstable_by_key(|(key, _)| *key);
-                let mut map = serializer.serialize_map(Some(fields.len()))?;
-                for (key, value) in fields {
-                    map.serialize_entry(key, &CanonicalValue(value))?;
-                }
-                map.end()
-            }
-            Value::Array(values) => {
-                let mut sequence = serializer.serialize_seq(Some(values.len()))?;
-                for value in values {
-                    sequence.serialize_element(&CanonicalValue(value))?;
-                }
-                sequence.end()
-            }
-            value => value.serialize(serializer),
-        }
-    }
 }
 
 pub(super) fn store(

@@ -1,5 +1,4 @@
 use std::{
-    path::PathBuf,
     rc::Rc,
     sync::{
         Arc,
@@ -8,13 +7,17 @@ use std::{
     time::Duration,
 };
 
+use crate::bridge::knowledge::AiKnowledgeHost;
 use gpui::{Context, EventEmitter, Task};
 use oxideterm_editor_core::utf16::replace_utf16;
 use oxideterm_settings_model::SettingsInput;
+#[cfg(not(target_family = "wasm"))]
+use std::path::PathBuf;
 
 #[cfg(test)]
 mod tests;
 
+#[cfg(not(target_family = "wasm"))]
 fn knowledge_audit(target: &str, action: &str) -> oxideterm_audit::AuditOperation {
     let context = oxideterm_audit::AuditContext::current_request()
         .or_else(oxideterm_audit::AuditContext::current)
@@ -69,6 +72,7 @@ pub struct KnowledgePageState {
     pub(super) import_progress: Option<(usize, usize)>,
     pub(super) embedding_progress: Option<(usize, usize)>,
     pub(super) delete_confirm: Option<oxideterm_settings_model::KnowledgeDeleteConfirm>,
+    #[cfg(not(target_family = "wasm"))]
     pub(super) external_edit: Option<oxideterm_settings_model::KnowledgeExternalEdit>,
     pub(super) error: Option<String>,
     pub(super) create_presence: oxideterm_gpui_ui::motion::ExitPresence,
@@ -99,6 +103,7 @@ impl Default for KnowledgePageState {
             import_progress: None,
             embedding_progress: None,
             delete_confirm: None,
+            #[cfg(not(target_family = "wasm"))]
             external_edit: None,
             error: None,
             create_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
@@ -124,12 +129,36 @@ pub enum KnowledgePageEvent {
     ReindexFailed,
 }
 
+pub trait KnowledgeJobs {
+    fn reindex(
+        &self,
+        collection: String,
+        cancel: Arc<AtomicBool>,
+    ) -> crate::bridge::HostFuture<Result<(), String>>;
+    fn embed(
+        &self,
+        collection: String,
+        job: EmbeddingJob,
+    ) -> crate::bridge::HostFuture<Result<(), String>>;
+}
+
+enum KnowledgeServices {
+    Hosted {
+        data: Arc<dyn AiKnowledgeHost>,
+        jobs: Rc<dyn KnowledgeJobs>,
+    },
+    #[cfg(not(target_family = "wasm"))]
+    Desktop {
+        store: Rc<dyn Fn() -> Arc<oxideterm_ai::RagStore>>,
+        task_runtime: Arc<tokio::runtime::Runtime>,
+        key_store: oxideterm_ai::AiProviderKeyStore,
+    },
+}
+
 pub struct KnowledgePage {
     state: KnowledgePageState,
     focused_settings_input: Option<SettingsInput>,
-    store: Rc<dyn Fn() -> Arc<oxideterm_ai::RagStore>>,
-    task_runtime: Arc<tokio::runtime::Runtime>,
-    key_store: oxideterm_ai::AiProviderKeyStore,
+    services: KnowledgeServices,
     knowledge_import_task: Option<Task<()>>,
     knowledge_embedding_task: Option<Task<()>>,
     reindex_task: Option<Task<()>>,
@@ -149,17 +178,28 @@ impl Drop for KnowledgePage {
 }
 
 impl KnowledgePage {
+    #[cfg(not(target_family = "wasm"))]
     pub fn new(
         store: Rc<dyn Fn() -> Arc<oxideterm_ai::RagStore>>,
         task_runtime: Arc<tokio::runtime::Runtime>,
         key_store: oxideterm_ai::AiProviderKeyStore,
     ) -> Self {
-        Self {
-            state: KnowledgePageState::default(),
-            focused_settings_input: None,
+        Self::from_services(KnowledgeServices::Desktop {
             store,
             task_runtime,
             key_store,
+        })
+    }
+
+    pub fn with_bridge(data: Arc<dyn AiKnowledgeHost>, jobs: Rc<dyn KnowledgeJobs>) -> Self {
+        Self::from_services(KnowledgeServices::Hosted { data, jobs })
+    }
+
+    fn from_services(services: KnowledgeServices) -> Self {
+        Self {
+            state: KnowledgePageState::default(),
+            focused_settings_input: None,
+            services,
             knowledge_import_task: None,
             knowledge_embedding_task: None,
             reindex_task: None,
@@ -168,8 +208,21 @@ impl KnowledgePage {
         }
     }
 
+    pub fn knowledge_host(&self) -> Arc<dyn AiKnowledgeHost> {
+        match &self.services {
+            KnowledgeServices::Hosted { data, .. } => data.clone(),
+            #[cfg(not(target_family = "wasm"))]
+            KnowledgeServices::Desktop { store, .. } => store(),
+        }
+    }
+
+    /// Desktop store access is available on pages created with `new`.
+    #[cfg(not(target_family = "wasm"))]
     pub fn rag_store(&self) -> Arc<oxideterm_ai::RagStore> {
-        (self.store)()
+        match &self.services {
+            KnowledgeServices::Desktop { store, .. } => store(),
+            KnowledgeServices::Hosted { .. } => panic!("hosted knowledge pages use knowledge_host"),
+        }
     }
 
     pub fn knowledge_reindex_progress(&self) -> Option<(usize, usize)> {
@@ -188,46 +241,70 @@ impl KnowledgePage {
         self.reindex_progress = Some((0, 0));
         let cancel = Arc::new(AtomicBool::new(false));
         self.reindex_cancel = Some(cancel.clone());
-        let store = (self.store)();
-        let (deliver, mut deliveries) = tokio::sync::mpsc::unbounded_channel();
-        let worker = self.task_runtime.spawn_blocking(move || {
-            let mut last_emitted = 0;
-            oxideterm_ai::rag_reindex_collection_with_progress(
-                &store,
-                &collection_id,
-                Some(&cancel),
-                Some(&mut |current, total| {
-                    if current == total || current.saturating_sub(last_emitted) >= 10 {
-                        let _ = deliver.send((current, total));
-                        last_emitted = current;
-                    }
-                }),
-            )
-            .is_err()
-        });
-        self.reindex_task = Some(cx.spawn(async move |page, cx| {
-            while let Some(progress) = deliveries.recv().await {
-                if page
-                    .update(cx, |page, cx| {
-                        page.reindex_progress = Some(progress);
+        match &self.services {
+            KnowledgeServices::Hosted { jobs, .. } => {
+                let work = jobs.reindex(collection_id, cancel);
+                self.reindex_task = Some(cx.spawn(async move |page, cx| {
+                    let failed = work.await.is_err();
+                    let _ = page.update(cx, |page, cx| {
+                        page.reindex_task = None;
+                        page.reindex_progress = None;
+                        page.reindex_cancel = None;
+                        if failed {
+                            cx.emit(KnowledgePageEvent::ReindexFailed);
+                        }
                         cx.notify();
-                    })
-                    .is_err()
-                {
-                    return;
-                }
+                    });
+                }));
             }
-            let failed = worker.await.unwrap_or(true);
-            let _ = page.update(cx, |page, cx| {
-                page.reindex_task = None;
-                page.reindex_progress = None;
-                page.reindex_cancel = None;
-                if failed {
-                    cx.emit(KnowledgePageEvent::ReindexFailed);
-                }
-                cx.notify();
-            });
-        }));
+            #[cfg(not(target_family = "wasm"))]
+            KnowledgeServices::Desktop {
+                store,
+                task_runtime,
+                ..
+            } => {
+                let store = store();
+                let (deliver, mut deliveries) = tokio::sync::mpsc::unbounded_channel();
+                let worker = task_runtime.spawn_blocking(move || {
+                    let mut last_emitted = 0;
+                    oxideterm_ai::rag_reindex_collection_with_progress(
+                        &store,
+                        &collection_id,
+                        Some(&cancel),
+                        Some(&mut |current, total| {
+                            if current == total || current.saturating_sub(last_emitted) >= 10 {
+                                let _ = deliver.send((current, total));
+                                last_emitted = current;
+                            }
+                        }),
+                    )
+                    .is_err()
+                });
+                self.reindex_task = Some(cx.spawn(async move |page, cx| {
+                    while let Some(progress) = deliveries.recv().await {
+                        if page
+                            .update(cx, |page, cx| {
+                                page.reindex_progress = Some(progress);
+                                cx.notify();
+                            })
+                            .is_err()
+                        {
+                            return;
+                        }
+                    }
+                    let failed = worker.await.unwrap_or(true);
+                    let _ = page.update(cx, |page, cx| {
+                        page.reindex_task = None;
+                        page.reindex_progress = None;
+                        page.reindex_cancel = None;
+                        if failed {
+                            cx.emit(KnowledgePageEvent::ReindexFailed);
+                        }
+                        cx.notify();
+                    });
+                }));
+            }
+        }
         cx.notify();
         true
     }
@@ -330,8 +407,8 @@ impl KnowledgePage {
         collection_id: &str,
         cx: &mut Context<Self>,
     ) -> Option<oxideterm_ai::RagStatsResponse> {
-        let store = (self.store)();
-        let key = (collection_id.to_owned(), store.collection_stats_revision());
+        let store = self.knowledge_host();
+        let key = (collection_id.to_owned(), store.stats_revision());
         self.state.stats_request = Some(key.clone());
         if let Some(stats) = &self.state.stats
             && stats.key == key
@@ -346,13 +423,11 @@ impl KnowledgePage {
                 let collection = key.0.clone();
                 let value = cx
                     .background_executor()
-                    .spawn(async move {
-                        oxideterm_ai::rag_get_collection_stats(&read_store, &collection).ok()
-                    })
+                    .spawn(async move { read_store.get_collection_stats(&collection).ok() })
                     .await;
                 let _ = entity.update(cx, |entity, cx| {
                     let current = entity.state.stats_request.as_ref() == Some(&key)
-                        && store.collection_stats_revision() == key.1;
+                        && store.stats_revision() == key.1;
                     let loaded = value.is_some();
                     if current {
                         entity.state.stats =
@@ -397,7 +472,7 @@ impl KnowledgePage {
         } else {
             0
         };
-        read_knowledge_document_page(&(self.store)(), collection_id, page)
+        read_knowledge_document_page(self.knowledge_host().as_ref(), collection_id, page)
     }
 
     pub fn knowledge_create_dialog_open(&self) -> bool {
@@ -486,6 +561,7 @@ impl KnowledgePage {
         self.state.delete_confirm.as_ref()
     }
 
+    #[cfg(not(target_family = "wasm"))]
     pub fn knowledge_external_edit(
         &self,
     ) -> Option<&oxideterm_settings_model::KnowledgeExternalEdit> {
@@ -669,18 +745,18 @@ impl KnowledgePage {
         if name.is_empty() {
             return false;
         }
-        let store = (self.store)();
+        let store = self.knowledge_host();
         let scope = match self.state.new_collection_connection_id.clone() {
             Some(connection_id) => oxideterm_ai::RagDocScopeRequest::Connection { connection_id },
             None => oxideterm_ai::RagDocScopeRequest::Global,
         };
+        #[cfg(not(target_family = "wasm"))]
         let mut audit = knowledge_audit("new_collection", "knowledge_collection_create");
-        match oxideterm_ai::rag_create_collection(
-            &store,
-            oxideterm_ai::RagCreateCollectionRequest { name, scope },
-        ) {
+        match store.create_collection(oxideterm_ai::RagCreateCollectionRequest { name, scope }) {
             Ok(collection) => {
+                #[cfg(not(target_family = "wasm"))]
                 audit.summary(&collection.id);
+                #[cfg(not(target_family = "wasm"))]
                 audit.finish(
                     oxideterm_audit::AuditOutcome::Succeeded,
                     oxideterm_audit::AuditEvidence::Protocol,
@@ -694,6 +770,7 @@ impl KnowledgePage {
                 true
             }
             Err(_) => {
+                #[cfg(not(target_family = "wasm"))]
                 audit.finish(
                     oxideterm_audit::AuditOutcome::Failed,
                     oxideterm_audit::AuditEvidence::Protocol,
@@ -710,7 +787,7 @@ impl KnowledgePage {
         &mut self,
         error_message: String,
     ) -> Option<(oxideterm_ai::RagDocumentResponse, bool)> {
-        let store = (self.store)();
+        let store = self.knowledge_host();
         let Some(collection_id) = self.state.new_document_collection_id.clone() else {
             self.state.new_document_error = Some(error_message);
             return None;
@@ -719,17 +796,17 @@ impl KnowledgePage {
         if title.is_empty() {
             return None;
         }
+        #[cfg(not(target_family = "wasm"))]
         let mut audit = knowledge_audit(&collection_id, "knowledge_document_create");
-        match oxideterm_ai::rag_create_blank_document(
-            &store,
-            oxideterm_ai::RagCreateBlankDocumentRequest {
-                collection_id,
-                title,
-                format: self.state.new_document_format.clone(),
-            },
-        ) {
+        match store.create_blank_document(oxideterm_ai::RagCreateBlankDocumentRequest {
+            collection_id,
+            title,
+            format: self.state.new_document_format.clone(),
+        }) {
             Ok(document) => {
+                #[cfg(not(target_family = "wasm"))]
                 audit.summary(&document.id);
+                #[cfg(not(target_family = "wasm"))]
                 audit.finish(
                     oxideterm_audit::AuditOutcome::Succeeded,
                     oxideterm_audit::AuditEvidence::Protocol,
@@ -741,6 +818,7 @@ impl KnowledgePage {
                 Some((document, self.state.new_document_open_in_workspace))
             }
             Err(_) => {
+                #[cfg(not(target_family = "wasm"))]
                 audit.finish(
                     oxideterm_audit::AuditOutcome::Failed,
                     oxideterm_audit::AuditEvidence::Protocol,
@@ -758,8 +836,14 @@ impl KnowledgePage {
         collection_id: &str,
         error_message: String,
     ) -> bool {
+        #[cfg(not(target_family = "wasm"))]
         let audit = knowledge_audit(collection_id, "knowledge_collection_delete");
-        if oxideterm_ai::rag_delete_collection(&(self.store)(), collection_id).is_err() {
+        if self
+            .knowledge_host()
+            .delete_collection(collection_id)
+            .is_err()
+        {
+            #[cfg(not(target_family = "wasm"))]
             audit.finish(
                 oxideterm_audit::AuditOutcome::Failed,
                 oxideterm_audit::AuditEvidence::Protocol,
@@ -769,6 +853,7 @@ impl KnowledgePage {
             self.state.error = Some(error_message);
             return false;
         }
+        #[cfg(not(target_family = "wasm"))]
         audit.finish(
             oxideterm_audit::AuditOutcome::Succeeded,
             oxideterm_audit::AuditEvidence::Protocol,
@@ -778,14 +863,19 @@ impl KnowledgePage {
         if self.state.selected_collection_id.as_deref() == Some(collection_id) {
             self.state.selected_collection_id = None;
         }
-        self.state.external_edit = None;
+        #[cfg(not(target_family = "wasm"))]
+        {
+            self.state.external_edit = None;
+        }
         self.state.error = None;
         true
     }
 
     pub fn delete_knowledge_document(&mut self, document_id: &str, error_message: String) -> bool {
+        #[cfg(not(target_family = "wasm"))]
         let audit = knowledge_audit(document_id, "knowledge_document_delete");
-        if oxideterm_ai::rag_remove_document(&(self.store)(), document_id).is_err() {
+        if self.knowledge_host().remove_document(document_id).is_err() {
+            #[cfg(not(target_family = "wasm"))]
             audit.finish(
                 oxideterm_audit::AuditOutcome::Failed,
                 oxideterm_audit::AuditEvidence::Protocol,
@@ -795,12 +885,14 @@ impl KnowledgePage {
             self.state.error = Some(error_message);
             return false;
         }
+        #[cfg(not(target_family = "wasm"))]
         audit.finish(
             oxideterm_audit::AuditOutcome::Succeeded,
             oxideterm_audit::AuditEvidence::Protocol,
             None,
             None,
         );
+        #[cfg(not(target_family = "wasm"))]
         if self
             .state
             .external_edit
@@ -813,6 +905,7 @@ impl KnowledgePage {
         true
     }
 
+    #[cfg(not(target_family = "wasm"))]
     pub fn prepare_knowledge_external_edit(
         &mut self,
         document_id: &str,
@@ -823,13 +916,15 @@ impl KnowledgePage {
             self.state.error = Some(error_message);
             return None;
         }
-        let store = (self.store)();
-        let document = oxideterm_ai::rag_list_collections(&store, None)
+        let store = self.knowledge_host();
+        let document = store
+            .list_collections(None)
             .ok()
             .into_iter()
             .flatten()
             .find_map(|collection| {
-                oxideterm_ai::rag_list_documents(&store, &collection.id, None, Some(500))
+                store
+                    .list_documents(&collection.id, None, Some(500))
                     .ok()
                     .and_then(|page| {
                         page.documents
@@ -841,7 +936,7 @@ impl KnowledgePage {
             self.state.error = Some(error_message);
             return None;
         };
-        let Ok(content) = oxideterm_ai::rag_get_document_content(&store, document_id) else {
+        let Ok(content) = store.get_document_content(document_id) else {
             self.state.error = Some(error_message);
             return None;
         };
@@ -880,6 +975,7 @@ impl KnowledgePage {
         ))
     }
 
+    #[cfg(not(target_family = "wasm"))]
     pub fn finish_knowledge_external_open(
         &mut self,
         edit: oxideterm_settings_model::KnowledgeExternalEdit,
@@ -895,6 +991,7 @@ impl KnowledgePage {
         }
     }
 
+    #[cfg(not(target_family = "wasm"))]
     pub fn sync_knowledge_external_edit(
         &mut self,
         error_message: String,
@@ -908,8 +1005,8 @@ impl KnowledgePage {
             self.state.error = Some(error_message);
             return KnowledgeExternalSyncOutcome::Failed;
         };
-        let store = (self.store)();
-        match oxideterm_ai::rag_get_document_content(&store, &edit.doc_id) {
+        let store = self.knowledge_host();
+        match store.get_document_content(&edit.doc_id) {
             Ok(current) if current == content => {
                 let _ = std::fs::remove_file(&edit.path);
                 self.state.external_edit = None;
@@ -922,7 +1019,7 @@ impl KnowledgePage {
                 return KnowledgeExternalSyncOutcome::Failed;
             }
         }
-        match oxideterm_ai::rag_update_document(&store, &edit.doc_id, content, Some(edit.version)) {
+        match store.save_document(&edit.doc_id, content, Some(edit.version)) {
             Ok(_) => {
                 let _ = std::fs::remove_file(&edit.path);
                 self.state.external_edit = None;
@@ -930,7 +1027,10 @@ impl KnowledgePage {
                 KnowledgeExternalSyncOutcome::Updated
             }
             Err(error) => {
-                if error.contains("Version conflict") {
+                if matches!(
+                    error,
+                    crate::bridge::knowledge::KnowledgeSaveError::Conflict
+                ) {
                     self.state.external_edit = None;
                 }
                 self.state.error = Some(error_message);
@@ -939,6 +1039,7 @@ impl KnowledgePage {
         }
     }
 
+    #[cfg(not(target_family = "wasm"))]
     pub fn start_knowledge_import(
         &mut self,
         paths: impl std::future::Future<Output = Option<Vec<PathBuf>>> + 'static,
@@ -946,10 +1047,48 @@ impl KnowledgePage {
         error_message: String,
         cx: &mut Context<Self>,
     ) -> bool {
+        self.start_import(
+            paths,
+            collection_id,
+            error_message,
+            |collection, path| {
+                oxideterm_settings_model::read_knowledge_import_file(collection, &path)
+            },
+            cx,
+        )
+    }
+
+    pub fn import_selected_text(
+        &mut self,
+        files: impl std::future::Future<Output = Option<Vec<(String, String)>>> + 'static,
+        collection_id: String,
+        error_message: String,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        self.start_import(
+            files,
+            collection_id,
+            error_message,
+            |collection, (name, content)| {
+                oxideterm_settings_model::prepare_knowledge_import_text(collection, &name, content)
+            },
+            cx,
+        )
+    }
+
+    fn start_import<T: 'static>(
+        &mut self,
+        paths: impl std::future::Future<Output = Option<Vec<T>>> + 'static,
+        collection_id: String,
+        error_message: String,
+        prepare: impl Fn(&str, T) -> Result<oxideterm_ai::RagAddDocumentRequest, String> + 'static,
+        cx: &mut Context<Self>,
+    ) -> bool {
         if self.knowledge_import_task.is_some() {
             return false;
         }
-        let store = (self.store)();
+        let store = self.knowledge_host();
+        #[cfg(not(target_family = "wasm"))]
         let audit_context = oxideterm_audit::AuditContext::current_request()
             .or_else(oxideterm_audit::AuditContext::current);
         let task = cx.spawn(async move |entity, cx| {
@@ -960,6 +1099,7 @@ impl KnowledgePage {
                 return;
             };
             let total = paths.len();
+            #[cfg(not(target_family = "wasm"))]
             let mut audit = audit_context.as_ref().map(|context| {
                 let mut context = context.clone();
                 if context.source == oxideterm_audit::AuditSource::Application {
@@ -979,8 +1119,9 @@ impl KnowledgePage {
             });
             let mut failed = false;
             let mut imported = 0usize;
-            for (index, path) in paths.iter().enumerate() {
-                if oxideterm_settings_model::import_knowledge_file(&store, &collection_id, path)
+            for (index, file) in paths.into_iter().enumerate() {
+                if prepare(&collection_id, file)
+                    .and_then(|request| store.add_document(request))
                     .is_err()
                 {
                     failed = true;
@@ -996,9 +1137,11 @@ impl KnowledgePage {
                     break;
                 }
             }
+            #[cfg(not(target_family = "wasm"))]
             if let Some(audit) = audit.as_mut() {
                 audit.summary(&format!("files={imported}/{total}"));
             }
+            #[cfg(not(target_family = "wasm"))]
             if let Some(audit) = audit {
                 audit.finish(
                     if failed {
@@ -1045,119 +1188,162 @@ impl KnowledgePage {
             return false;
         }
         self.state.error = None;
-        let store = (self.store)();
-        let key_store = self.key_store.clone();
-        let provider_id = provider.id.clone();
-        let task_runtime = self.task_runtime.clone();
-        let task = cx.spawn(async move |entity, cx| {
-            let api_key = if requires_api_key {
-                let key = task_runtime
-                    .spawn_blocking(move || key_store.get_provider_key(&provider_id).ok().flatten())
-                    .await
-                    .ok()
-                    .flatten();
-                match key {
-                    Some(key) if !key.trim().is_empty() => {
-                        Some(oxideterm_ai::SharedAiProviderKey::new(key))
-                    }
-                    _ => {
-                        let _ = entity.update(cx, |entity, cx| {
-                            entity.state.embedding_config_expanded = true;
-                            entity.state.error = Some(missing_key_error);
-                            entity.knowledge_embedding_task = None;
-                            entity.emit_knowledge_page_changed(cx);
-                        });
-                        return;
-                    }
-                }
-            } else {
-                None
-            };
-            let mut pending =
-                match oxideterm_ai::rag_get_pending_embeddings(&store, &collection_id, Some(500)) {
-                    Ok(pending) => pending,
-                    Err(_) => {
-                        let _ = entity.update(cx, |entity, cx| {
-                            entity.state.error = Some(embedding_error);
-                            entity.knowledge_embedding_task = None;
-                            entity.emit_knowledge_page_changed(cx);
-                        });
-                        return;
-                    }
-                };
-            if pending.is_empty() {
-                let _ = entity.update(cx, |entity, _cx| {
-                    entity.knowledge_embedding_task = None;
-                });
-                return;
+        match &self.services {
+            KnowledgeServices::Hosted { jobs, .. } => {
+                let work = jobs.embed(
+                    collection_id,
+                    EmbeddingJob {
+                        provider,
+                        model,
+                        requires_api_key,
+                        missing_key_error,
+                        retrieval_error: embedding_error,
+                        partial_failure: partial_failure_template,
+                    },
+                );
+                self.state.embedding_progress = Some((0, 0));
+                self.knowledge_embedding_task = Some(cx.spawn(async move |page, cx| {
+                    let result = work.await;
+                    let _ = page.update(cx, |page, cx| {
+                        page.knowledge_embedding_task = None;
+                        page.state.embedding_progress = None;
+                        page.state.error = result.err();
+                        cx.notify();
+                    });
+                }));
+                cx.notify();
+                return true;
             }
-            let total = pending.len();
-            let _ = entity.update(cx, |entity, cx| {
-                entity.state.embedding_config_expanded = true;
-                entity.state.embedding_progress = Some((0, total));
-                entity.state.error = None;
-                entity.emit_knowledge_page_changed(cx);
-            });
-            let mut processed = 0usize;
-            let mut failed_count = 0usize;
-            while !pending.is_empty() {
-                let batch_len = pending
-                    .len()
-                    .min(oxideterm_settings_model::KNOWLEDGE_EMBEDDING_BATCH_SIZE);
-                let mut batch = pending.drain(..batch_len).collect::<Vec<_>>();
-                // Move raw chunk allocations into the provider boundary; do
-                // not clone or pre-sanitize user document content here.
-                let texts = batch
-                    .iter_mut()
-                    .map(|pending| std::mem::take(&mut pending.content))
-                    .collect::<Vec<_>>();
-                match oxideterm_ai::embed_texts(&provider, api_key.as_ref(), &model, texts).await {
-                    Ok(vectors) => {
-                        let embeddings = batch
-                            .into_iter()
-                            .zip(vectors)
-                            .map(|(pending, vector)| oxideterm_ai::RagEmbeddingInputRequest {
-                                chunk_id: pending.chunk_id,
-                                vector,
+            #[cfg(not(target_family = "wasm"))]
+            KnowledgeServices::Desktop {
+                store,
+                key_store,
+                task_runtime,
+            } => {
+                let store = store();
+                let key_store = key_store.clone();
+                let task_runtime = task_runtime.clone();
+                let provider_id = provider.id.clone();
+                let task = cx.spawn(async move |entity, cx| {
+                    let api_key = if requires_api_key {
+                        let key = task_runtime
+                            .spawn_blocking(move || {
+                                key_store.get_provider_key(&provider_id).ok().flatten()
                             })
-                            .collect::<Vec<_>>();
-                        if oxideterm_ai::rag_store_embeddings(
-                            &store,
-                            oxideterm_ai::RagStoreEmbeddingsRequest {
-                                embeddings,
-                                model_name: model.clone(),
-                            },
-                        )
-                        .is_err()
-                        {
-                            failed_count += batch_len;
+                            .await
+                            .ok()
+                            .flatten();
+                        match key {
+                            Some(key) if !key.trim().is_empty() => {
+                                Some(oxideterm_ai::SharedAiProviderKey::new(key))
+                            }
+                            _ => {
+                                let _ = entity.update(cx, |entity, cx| {
+                                    entity.state.embedding_config_expanded = true;
+                                    entity.state.error = Some(missing_key_error);
+                                    entity.knowledge_embedding_task = None;
+                                    entity.emit_knowledge_page_changed(cx);
+                                });
+                                return;
+                            }
                         }
+                    } else {
+                        None
+                    };
+                    let mut pending = match oxideterm_ai::rag_get_pending_embeddings(
+                        &store,
+                        &collection_id,
+                        Some(500),
+                    ) {
+                        Ok(pending) => pending,
+                        Err(_) => {
+                            let _ = entity.update(cx, |entity, cx| {
+                                entity.state.error = Some(embedding_error);
+                                entity.knowledge_embedding_task = None;
+                                entity.emit_knowledge_page_changed(cx);
+                            });
+                            return;
+                        }
+                    };
+                    if pending.is_empty() {
+                        let _ = entity.update(cx, |entity, _cx| {
+                            entity.knowledge_embedding_task = None;
+                        });
+                        return;
                     }
-                    Err(_) => failed_count += batch_len,
-                }
-                processed += batch_len;
-                let _ = entity.update(cx, |entity, cx| {
-                    entity.state.embedding_progress = Some((processed, total));
-                    cx.notify();
+                    let total = pending.len();
+                    let _ = entity.update(cx, |entity, cx| {
+                        entity.state.embedding_config_expanded = true;
+                        entity.state.embedding_progress = Some((0, total));
+                        entity.state.error = None;
+                        entity.emit_knowledge_page_changed(cx);
+                    });
+                    let mut processed = 0usize;
+                    let mut failed_count = 0usize;
+                    while !pending.is_empty() {
+                        let batch_len = pending
+                            .len()
+                            .min(oxideterm_settings_model::KNOWLEDGE_EMBEDDING_BATCH_SIZE);
+                        let mut batch = pending.drain(..batch_len).collect::<Vec<_>>();
+                        // Move raw chunk allocations into the provider boundary; do
+                        // not clone or pre-sanitize user document content here.
+                        let texts = batch
+                            .iter_mut()
+                            .map(|pending| std::mem::take(&mut pending.content))
+                            .collect::<Vec<_>>();
+                        match oxideterm_ai::embed_texts(&provider, api_key.as_ref(), &model, texts)
+                            .await
+                        {
+                            Ok(vectors) => {
+                                let embeddings = batch
+                                    .into_iter()
+                                    .zip(vectors)
+                                    .map(|(pending, vector)| {
+                                        oxideterm_ai::RagEmbeddingInputRequest {
+                                            chunk_id: pending.chunk_id,
+                                            vector,
+                                        }
+                                    })
+                                    .collect::<Vec<_>>();
+                                if oxideterm_ai::rag_store_embeddings(
+                                    &store,
+                                    oxideterm_ai::RagStoreEmbeddingsRequest {
+                                        embeddings,
+                                        model_name: model.clone(),
+                                    },
+                                )
+                                .is_err()
+                                {
+                                    failed_count += batch_len;
+                                }
+                            }
+                            Err(_) => failed_count += batch_len,
+                        }
+                        processed += batch_len;
+                        let _ = entity.update(cx, |entity, cx| {
+                            entity.state.embedding_progress = Some((processed, total));
+                            cx.notify();
+                        });
+                    }
+                    let _ = entity.update(cx, |entity, cx| {
+                        entity.state.embedding_progress = None;
+                        entity.state.error = if failed_count == 0 {
+                            None
+                        } else {
+                            Some(
+                                partial_failure_template
+                                    .replace("{{failed}}", &failed_count.to_string())
+                                    .replace("{{total}}", &total.to_string()),
+                            )
+                        };
+                        entity.knowledge_embedding_task = None;
+                        entity.emit_knowledge_page_changed(cx);
+                    });
                 });
+                self.knowledge_embedding_task = Some(task);
+                true
             }
-            let _ = entity.update(cx, |entity, cx| {
-                entity.state.embedding_progress = None;
-                entity.state.error = if failed_count == 0 {
-                    None
-                } else {
-                    Some(
-                        partial_failure_template
-                            .replace("{{failed}}", &failed_count.to_string())
-                            .replace("{{total}}", &total.to_string()),
-                    )
-                };
-                entity.knowledge_embedding_task = None;
-                entity.emit_knowledge_page_changed(cx);
-            });
-        });
-        self.knowledge_embedding_task = Some(task);
-        true
+        }
     }
 }
 
@@ -1173,12 +1359,11 @@ fn set_private_permissions(path: &std::path::Path, mode: u32) -> std::io::Result
 pub const KNOWLEDGE_DOCUMENT_PAGE_SIZE: usize = 100;
 
 fn read_knowledge_document_page(
-    store: &oxideterm_ai::RagStore,
+    store: &dyn AiKnowledgeHost,
     collection_id: &str,
     page: usize,
 ) -> Result<(usize, oxideterm_ai::RagPaginatedDocuments), String> {
-    let documents = oxideterm_ai::rag_list_documents(
-        store,
+    let documents = store.list_documents(
         collection_id,
         Some(page * KNOWLEDGE_DOCUMENT_PAGE_SIZE),
         Some(KNOWLEDGE_DOCUMENT_PAGE_SIZE),

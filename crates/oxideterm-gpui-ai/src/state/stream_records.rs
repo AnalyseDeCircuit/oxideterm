@@ -140,12 +140,18 @@ impl AiWorkspaceEntity {
             return;
         }
         if name == "ask_user" && matches!(status, "completed" | "error" | "rejected") {
+            #[cfg(not(target_family = "wasm"))]
+            self.host_questions
+                .remove(&(generation, tool_call_id.to_owned()));
             self.pending_user_questions
                 .remove(&(generation, tool_call_id.to_owned()));
         }
         if matches!(name, "cursor/ask_question" | "cursor/create_plan")
             && matches!(status, "completed" | "error" | "rejected")
         {
+            #[cfg(not(target_family = "wasm"))]
+            self.host_cursors
+                .remove(&(generation, tool_call_id.to_owned()));
             self.pending_cursor_requests
                 .remove(&(generation, tool_call_id.to_owned()));
         }
@@ -199,6 +205,7 @@ impl AiWorkspaceEntity {
                 round_number = Some(number);
             });
         }
+        #[cfg(not(target_family = "wasm"))]
         if result.is_some() || matches!(status, "rejected" | "completed" | "error") {
             {
                 let run = self.agent_run(generation);

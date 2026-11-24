@@ -10,27 +10,22 @@ version.workspace = true
 [dependencies]
 base64.workspace = true
 chrono.workspace = true
+futures.workspace = true
 gpui.workspace = true
 oxideterm-ai = { path = "../oxideterm-ai" }
-oxideterm-audit = { path = "../oxideterm-audit" }
 oxideterm-workspace = { path = "../oxideterm-workspace" }
 oxideterm-ai-tasks = { path = "../oxideterm-ai-tasks" }
-oxideterm-acp-host-tools = { path = "../oxideterm-acp-host-tools" }
 oxideterm-skills = { path = "../oxideterm-skills" }
 oxideterm-editor-core = { path = "../oxideterm-editor-core" }
 oxideterm-editor-syntax = { path = "../oxideterm-editor-syntax" }
 oxideterm-gpui-editor = { path = "../oxideterm-gpui-editor" }
 oxideterm-gpui-markdown = { path = "../oxideterm-gpui-markdown" }
 oxideterm-gpui-ui = { path = "../oxideterm-gpui-ui" }
-oxideterm-gpui-terminal = { path = "../oxideterm-gpui-terminal" }
-oxideterm-terminal = { path = "../oxideterm-terminal" }
-oxideterm-gpui-connections = { path = "../oxideterm-gpui-connections" }
 oxideterm-i18n = { path = "../oxideterm-i18n" }
 oxideterm-settings = { path = "../oxideterm-settings" }
 oxideterm-settings-model = { path = "../oxideterm-settings-model" }
 oxideterm-theme = { path = "../oxideterm-theme" }
 tracing.workspace = true
-tokio.workspace = true
 uuid.workspace = true
 web-time.workspace = true
 
@@ -40,8 +35,20 @@ parking_lot.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
-tokio-util.workspace = true
 zeroize.workspace = true
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+oxideterm-acp-host-tools = { path = "../oxideterm-acp-host-tools" }
+oxideterm-audit = { path = "../oxideterm-audit" }
+oxideterm-gpui-connections = { path = "../oxideterm-gpui-connections" }
+oxideterm-gpui-terminal = { path = "../oxideterm-gpui-terminal" }
+oxideterm-terminal = { path = "../oxideterm-terminal" }
+tokio.workspace = true
+tokio-util.workspace = true
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+chrono = { workspace = true, features = ["wasmbind"] }
+uuid = { workspace = true, features = ["js"] }
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }

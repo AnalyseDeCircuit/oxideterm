@@ -6,7 +6,6 @@ use crate::{
 use gpui::{App, Window};
 use oxideterm_ai::{
     AiProviderView, AiReasoningLevel, select_provider_model as ai_select_provider_model,
-    tool_loop::acp_session_cwd_from_agent,
 };
 use oxideterm_settings::{AcpAgentConfig, AiActiveBackend, PersistedSettings};
 use oxideterm_settings_model::set_ai_model_reasoning_override;
@@ -104,9 +103,8 @@ pub trait AiModelPickerHost: AiChatActions {
             self.show_acp_plugin_requirement(&agent, cx);
             return;
         }
-        let session_cwd = acp_session_cwd_from_agent(&agent);
         self.chat_state().update(&mut **cx, |ai, _cx| {
-            ai.request_acp_model_discovery(conversation_id, agent, session_cwd);
+            ai.discover_acp_models(conversation_id, agent, None);
         });
         self.redraw_chat_chrome(cx);
     }

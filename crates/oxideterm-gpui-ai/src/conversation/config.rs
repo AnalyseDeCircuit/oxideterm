@@ -1,7 +1,7 @@
 use oxideterm_ai::{
     AiChatStreamConfig, AiExecutionBackend, AiImageInput, AiPolicySafetyMode, AiToolUsePolicy,
     active_model_selection, active_provider_view,
-    chat_tools::ai_stream_tool_definitions,
+    chat_tools::ai_stream_tool_definitions_with,
     provider_views as ai_provider_views,
     stream_state::{
         AI_COMPACTION_DEFAULT_CONTEXT_WINDOW, AI_SUGGESTIONS_INSTRUCTION, DEFAULT_AI_SYSTEM_PROMPT,
@@ -132,12 +132,12 @@ impl AiWorkspaceEntity {
                 })
                 .unwrap_or_else(|| self.picker_acp_fallback_for_id(settings, &acp_agent_id, i18n));
             let (memory_context, memory_entry_ids) = scope.read(settings, None, &model_label);
-            let tools = ai_stream_tool_definitions(
+            let tools = ai_stream_tool_definitions_with(
                 tool_policy.enabled,
                 settings.skills.enabled,
                 allow_web,
                 &tool_policy,
-                self.mcp_registry(),
+                || self.host_bridge().mcp.tool_definitions(),
             );
             return Ok(AiChatStreamConfig {
                 api_protocol: oxideterm_ai::AiApiProtocol::default(),
@@ -198,12 +198,12 @@ impl AiWorkspaceEntity {
         )
         .as_str()
         .to_string();
-        let mut tools = ai_stream_tool_definitions(
+        let mut tools = ai_stream_tool_definitions_with(
             tool_policy.enabled,
             settings.skills.enabled,
             allow_web,
             &tool_policy,
-            self.mcp_registry(),
+            || self.host_bridge().mcp.tool_definitions(),
         );
         if tool_policy.enabled {
             tools.extend(
@@ -374,6 +374,7 @@ pub fn build_ai_base_system_prompt(
     prompt.push_str("\n\n");
     prompt.push_str(&ai_orchestrator_system_prompt(config.tool_policy.enabled));
     if let Some(skill_catalog_prompt) = skill_catalog_prompt {
+        #[cfg(not(target_family = "wasm"))]
         if let Some(mut context) = oxideterm_audit::AuditContext::current_request()
             .or_else(oxideterm_audit::AuditContext::current)
         {

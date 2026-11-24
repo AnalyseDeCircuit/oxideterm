@@ -118,7 +118,6 @@ impl AiAssistantSidebarView {
     }
 
     fn preview_ai_image(&self, image: AiImageAttachment, cx: &mut App) {
-        let runtime = &self.bindings.runtime;
         let request = self.bindings.request.clone();
         self.state.update(cx, |state, cx| {
             if state
@@ -132,33 +131,24 @@ impl AiAssistantSidebarView {
                 return;
             }
             let conversation = state.conversation_state().active_conversation_id.clone();
-            let store = state.history.store.clone();
-            let target = conversation.clone();
-            let work = runtime.spawn_blocking(move || {
-                let bytes = match image.data {
-                    Some(data) => base64::engine::general_purpose::STANDARD
-                        .decode(data.as_bytes())
-                        .ok()?,
-                    None => store?
-                        .image_bytes(target.as_deref()?, &image.id)
-                        .ok()?
-                        .to_vec(),
-                };
-                let format = match image.mime_type.as_str() {
-                    "image/jpeg" => gpui::ImageFormat::Jpeg,
-                    "image/webp" => gpui::ImageFormat::Webp,
-                    _ => gpui::ImageFormat::Png,
-                };
-                Some((image.id, Arc::new(gpui::Image::from_bytes(format, bytes))))
-            });
+            let id = image.id.clone();
+            let format = match image.mime_type.as_str() {
+                "image/jpeg" => gpui::ImageFormat::Jpeg,
+                "image/webp" => gpui::ImageFormat::Webp,
+                _ => gpui::ImageFormat::Png,
+            };
+            let work = (self.bindings.image_bytes)(state, conversation.clone(), image);
             let task = cx.spawn(async move |weak, cx| {
                 let result = work.await;
                 let _ = weak.update(cx, |state, cx| {
                     if state.conversation_state().active_conversation_id != conversation {
                         return;
                     }
-                    if let Ok(Some(preview)) = result {
-                        state.set_chat_image_preview(Some(preview));
+                    if let Some(bytes) = result {
+                        state.set_chat_image_preview(Some((
+                            id,
+                            Arc::new(gpui::Image::from_bytes(format, bytes)),
+                        )));
                         cx.notify();
                     } else {
                         cx.defer(move |cx| {

@@ -32,7 +32,9 @@ mod records;
 mod stream_delta;
 mod text;
 mod tool_payloads;
-pub use stream_delta::{HistoryStreamDelta, HistoryStreamSnapshot};
+#[cfg(test)]
+use crate::HistoryStreamSnapshot;
+use crate::history_journal::{HistoryMutation, HistoryStreamDelta};
 mod archives;
 mod cache;
 mod compaction;
@@ -45,7 +47,6 @@ mod windows;
 mod writer;
 #[cfg(test)]
 use crate::live_windows::{live_content_page, live_message_view};
-pub use mutations::HistoryMutation;
 pub use store::ConversationStore;
 pub use writer::{HISTORY_PENDING_BYTES, HistoryWriteState, HistoryWriter};
 

@@ -8,7 +8,7 @@ pub struct ConversationListPage {
     pub has_more: bool,
     pub failed: bool,
     cursor: Option<(i64, String)>,
-    task: Option<tokio::task::JoinHandle<()>>,
+    task: Option<crate::bridge::HostTask>,
 }
 
 impl ConversationListPage {
@@ -43,7 +43,7 @@ impl AiWorkspaceEntity {
     }
 
     pub fn request_conversation_list_page(&mut self, archived: bool) {
-        let Some(store) = self.history.store.clone() else {
+        let Some(store) = self.history_reader() else {
             return;
         };
         let page = &mut self.history.conversation_lists[usize::from(archived)];
@@ -56,17 +56,20 @@ impl AiWorkspaceEntity {
         let sender = self.history.sender.clone();
         let wake = self.history.wake.clone();
         page.failed = false;
-        page.task = Some(self.task_runtime.spawn(async move {
-            let result = tokio::task::spawn_blocking(move || {
-                store.list_conversation_heads(archived, cursor, CONVERSATION_PAGE_SIZE + 1)
-            })
-            .await
-            .ok()
-            .and_then(Result::ok)
-            .ok_or(());
-            let _ = sender.send(Delivery::Conversations(generation, epoch, archived, result));
-            wake.notify_one();
-        }));
+        page.task = Some(store.conversations(
+            archived,
+            cursor,
+            CONVERSATION_PAGE_SIZE + 1,
+            Box::new(move |result| {
+                let _ = sender.send(Delivery::Conversations(
+                    generation,
+                    epoch,
+                    archived,
+                    result.map_err(|_| ()),
+                ));
+                wake.mark();
+            }),
+        ));
     }
 
     pub(super) fn initialize_conversation_list(
