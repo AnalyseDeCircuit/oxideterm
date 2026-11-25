@@ -57,7 +57,7 @@ pub fn classify_canvas_fallback(grapheme: &str) -> Option<CanvasFallback> {
         return None;
     }
 
-    if is_cjk(grapheme) {
+    if is_cjk(grapheme) || is_ui_keycap_symbol(grapheme) {
         Some(CanvasFallback {
             is_emoji: false,
             emoji_presentation: false,
@@ -68,6 +68,27 @@ pub fn classify_canvas_fallback(grapheme: &str) -> Option<CanvasFallback> {
             emoji_presentation,
         })
     }
+}
+
+fn is_ui_keycap_symbol(grapheme: &str) -> bool {
+    let mut characters = grapheme.chars();
+    let Some(base) = characters.next() else {
+        return false;
+    };
+    characters.next().is_none()
+        && matches!(
+            base,
+            '\u{21a9}' // ↩
+                | '\u{21e4}' // ⇤
+                | '\u{21e5}' // ⇥
+                | '\u{21e7}' // ⇧
+                | '\u{2303}' // ⌃
+                | '\u{2318}' // ⌘
+                | '\u{2325}' // ⌥
+                | '\u{2326}' // ⌦
+                | '\u{232b}' // ⌫
+                | '\u{238b}' // ⎋
+        )
 }
 
 fn is_cjk(grapheme: &str) -> bool {
