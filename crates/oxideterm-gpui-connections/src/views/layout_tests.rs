@@ -1,6 +1,6 @@
 use super::*;
 use crate::form_state::NewConnectionTransport;
-use gpui::{Context, Render, px};
+use gpui::{Context, ParentElement, Render, Styled, px};
 use oxideterm_i18n::Locale;
 
 struct FormPreview {
