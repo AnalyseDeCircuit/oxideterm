@@ -61,8 +61,8 @@ pub fn ssh_capability_report() -> SshCapabilityReport {
     // Keep this report data-only so diagnostics can inspect SSH capabilities
     // without opening a connection or touching user secrets.
     SshCapabilityReport {
-        default_offer: algorithm_offer(&russh::Preferred::DEFAULT),
-        legacy_compatibility_offer: algorithm_offer(&russh::Preferred::legacy_compatibility()),
+        default_offer: algorithm_offer(&crate::algorithms::baseline_preferred(false)),
+        legacy_compatibility_offer: algorithm_offer(&crate::algorithms::baseline_preferred(true)),
         integration: integration_capabilities(),
         limitations: known_limitations(),
     }

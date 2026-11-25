@@ -46,6 +46,69 @@ pub enum SshAlgorithmPreferenceError {
     },
 }
 
+pub(crate) fn baseline_preferred(legacy_compatibility: bool) -> russh::Preferred {
+    let mut preferred = if legacy_compatibility {
+        let mut legacy = russh::Preferred::legacy_compatibility();
+        // `russh` ships `3des-cbc` behind its default `des` feature, and
+        // `server_offers_legacy_cipher` already directs users to Legacy Mode
+        // for 3DES-only appliances (Cisco IOS 12.x, older iLO/iDRAC, switches).
+        if !legacy.cipher.contains(&russh::cipher::TRIPLE_DES_CBC) {
+            let mut ciphers = legacy.cipher.into_owned();
+            ciphers.push(russh::cipher::TRIPLE_DES_CBC);
+            legacy.cipher = Cow::Owned(ciphers);
+        }
+        legacy
+    } else {
+        russh::Preferred::DEFAULT
+    };
+    reorder_preferred_kex(&mut preferred);
+    preferred
+}
+
+/// Prefer fixed-group KEX algorithms ahead of dynamic DH-GEX within each tier.
+/// Legacy appliances (such as Cisco IOS) commonly advertise `diffie-hellman-group-exchange-sha1`
+/// with a 1024-bit modulus that `russh` rejects (`min_group_size >= 2048`) with `Error::KexInit`,
+/// while also supporting fixed-group `diffie-hellman-group14-sha1` or `diffie-hellman-group1-sha1`.
+fn reorder_preferred_kex(preferred: &mut russh::Preferred) {
+    let mut modern_fixed = Vec::new();
+    let mut has_dh_gex_sha256 = false;
+    let mut has_dh_g14_sha1 = false;
+    let mut has_dh_g1_sha1 = false;
+    let mut has_dh_gex_sha1 = false;
+    let mut extensions = Vec::new();
+
+    for &name in preferred.kex.iter() {
+        if is_internal_kex_name(name.as_ref()) {
+            extensions.push(name);
+        } else if name == russh::kex::DH_GEX_SHA256 {
+            has_dh_gex_sha256 = true;
+        } else if name == russh::kex::DH_G14_SHA1 {
+            has_dh_g14_sha1 = true;
+        } else if name == russh::kex::DH_G1_SHA1 {
+            has_dh_g1_sha1 = true;
+        } else if name == russh::kex::DH_GEX_SHA1 {
+            has_dh_gex_sha1 = true;
+        } else {
+            modern_fixed.push(name);
+        }
+    }
+
+    if has_dh_gex_sha256 {
+        modern_fixed.push(russh::kex::DH_GEX_SHA256);
+    }
+    if has_dh_g14_sha1 {
+        modern_fixed.push(russh::kex::DH_G14_SHA1);
+    }
+    if has_dh_g1_sha1 {
+        modern_fixed.push(russh::kex::DH_G1_SHA1);
+    }
+    if has_dh_gex_sha1 {
+        modern_fixed.push(russh::kex::DH_GEX_SHA1);
+    }
+    modern_fixed.extend(extensions);
+    preferred.kex = Cow::Owned(modern_fixed);
+}
+
 pub fn preferred_algorithms(
     legacy_compatibility: bool,
     preferences: &SshAlgorithmPreferences,
@@ -53,11 +116,7 @@ pub fn preferred_algorithms(
     preferences
         .validate()
         .map_err(|_| SshAlgorithmPreferenceError::InvalidPreferences)?;
-    let mut preferred = if legacy_compatibility {
-        russh::Preferred::legacy_compatibility()
-    } else {
-        russh::Preferred::DEFAULT
-    };
+    let mut preferred = baseline_preferred(legacy_compatibility);
 
     if !preferences.kex.is_empty() {
         let mut selected = preferences
@@ -129,6 +188,15 @@ pub(crate) fn preferred_gex(
         // russh minimum is 3072 bits, even when SHA-1 KEX is opted into.
         russh::client::GexParams::new(2048, 2048, 8192)
             .expect("fixed legacy GEX bounds satisfy the client configuration contract")
+    } else if preferences
+        .kex
+        .iter()
+        .any(|name| name == "diffie-hellman-group-exchange-sha256")
+    {
+        // Servers that only offer 2048-bit DH-GEX-SHA256 moduli (e.g. OpenSSH 6.x,
+        // CentOS 7, IOS-XE) fail under russh's 3072-bit minimum when opted into explicitly.
+        russh::client::GexParams::new(2048, 3072, 8192)
+            .expect("explicit DH-GEX-SHA256 bounds satisfy the client configuration contract")
     } else {
         russh::client::GexParams::default()
     }
@@ -274,5 +342,58 @@ mod tests {
             preferred_algorithms(false, &preferences),
             Err(SshAlgorithmPreferenceError::Unsupported { .. })
         ));
+    }
+
+    #[test]
+    fn baseline_kex_prefers_fixed_dh_groups_ahead_of_group_exchange() {
+        let default_kex = visible_algorithm_names(
+            &preferred_algorithms(false, &SshAlgorithmPreferences::default()).unwrap(),
+            SshAlgorithmCategory::Kex,
+        );
+        let pos = |list: &[String], name: &str| {
+            list.iter()
+                .position(|entry| entry == name)
+                .unwrap_or_else(|| panic!("missing KEX algorithm {name}"))
+        };
+        assert!(
+            pos(&default_kex, "diffie-hellman-group14-sha256")
+                < pos(&default_kex, "diffie-hellman-group-exchange-sha256")
+        );
+        assert!(
+            pos(&default_kex, "ecdh-sha2-nistp256")
+                < pos(&default_kex, "diffie-hellman-group-exchange-sha256")
+        );
+        assert!(!default_kex.iter().any(|name| name.ends_with("-sha1")));
+
+        let legacy_kex = visible_algorithm_names(
+            &preferred_algorithms(true, &SshAlgorithmPreferences::default()).unwrap(),
+            SshAlgorithmCategory::Kex,
+        );
+        let legacy_tail = &legacy_kex[legacy_kex.len() - 3..];
+        assert_eq!(
+            legacy_tail,
+            [
+                "diffie-hellman-group14-sha1",
+                "diffie-hellman-group1-sha1",
+                "diffie-hellman-group-exchange-sha1",
+            ]
+        );
+        let report = crate::ssh_capability_report();
+        assert_eq!(report.legacy_compatibility_offer.kex, legacy_kex);
+        assert!(
+            !report
+                .default_offer
+                .ciphers
+                .iter()
+                .any(|name| name == "3des-cbc")
+        );
+        assert_eq!(
+            report
+                .legacy_compatibility_offer
+                .ciphers
+                .last()
+                .map(String::as_str),
+            Some("3des-cbc")
+        );
     }
 }

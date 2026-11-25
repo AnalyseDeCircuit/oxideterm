@@ -10495,6 +10495,7 @@ dependencies = [
  "data-encoding",
  "delegate",
  "der",
+ "des",
  "digest 0.11.3",
  "ecdsa",
  "ed25519-dalek",

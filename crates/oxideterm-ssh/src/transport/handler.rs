@@ -2,12 +2,19 @@ fn ssh_client_config(
     legacy_ssh_compatibility: bool,
     ssh_algorithms: &oxideterm_connections::SshAlgorithmPreferences,
 ) -> Result<client::Config, SshTransportError> {
+    // Legacy embedded SSH servers (Cisco IOS, older Dropbear/Huawei/BMC) can reject
+    // SSH_MSG_CHANNEL_OPEN when max_packet_size exceeds the RFC 4254 32 KiB baseline.
+    let (window_size, maximum_packet_size) = if legacy_ssh_compatibility {
+        (2 * 1024 * 1024, 32 * 1024)
+    } else {
+        (32 * 1024 * 1024, 256 * 1024)
+    };
     let mut config = client::Config {
         inactivity_timeout: None,
         keepalive_interval: Some(Duration::from_secs(30)),
         keepalive_max: 3,
-        window_size: 32 * 1024 * 1024,
-        maximum_packet_size: 256 * 1024,
+        window_size,
+        maximum_packet_size,
         gex: crate::algorithms::preferred_gex(legacy_ssh_compatibility, ssh_algorithms),
         ..client::Config::default()
     };
@@ -759,10 +766,14 @@ async fn authenticate_flow(
     // when the user has configured a broad TOTP regular expression.
     let password_prompt_handler = prompt_handler;
     let totp_handler = config.totp.as_ref().map(|binding| totp::TotpPromptHandler {
-        binding: binding.clone(), manual: prompt_handler,
+        binding: binding.clone(),
+        manual: prompt_handler,
         submitted: std::sync::atomic::AtomicBool::new(false),
     });
-    let prompt_handler = totp_handler.as_ref().map(|handler| handler as &dyn SshPromptHandler).or(prompt_handler);
+    let prompt_handler = totp_handler
+        .as_ref()
+        .map(|handler| handler as &dyn SshPromptHandler)
+        .or(prompt_handler);
     let result = match auth {
         AuthMethod::Password { password, prompt } => {
             let prompted;
@@ -830,8 +841,15 @@ async fn authenticate_flow(
                 key_path,
                 passphrase.as_ref().map(|passphrase| passphrase.as_str()),
             )?;
-            let result =
-                authenticate_publickey_best_algo(handle, &config.username, key, prompt_handler, audit).await?;
+            let result = authenticate_publickey_best_algo(
+                handle,
+                &config.username,
+                key,
+                config.legacy_ssh_compatibility,
+                prompt_handler,
+                audit,
+            )
+            .await?;
             log_auth_result("publickey", &result);
             result
         }
@@ -859,9 +877,16 @@ async fn authenticate_flow(
                 cert_path,
                 passphrase.as_ref().map(|passphrase| passphrase.as_str()),
             )?;
-            let result =
-                authenticate_certificate_best_algo(handle, &config.username, key, cert, prompt_handler, audit)
-                    .await?;
+            let result = authenticate_certificate_best_algo(
+                handle,
+                &config.username,
+                key,
+                cert,
+                config.legacy_ssh_compatibility,
+                prompt_handler,
+                audit,
+            )
+            .await?;
             log_auth_result("certificate", &result);
             result
         }
@@ -885,9 +910,15 @@ async fn authenticate_flow(
                     &agent_attempt.offered_public_keys,
                 );
                 for key in fallback_keys {
-                    let result =
-                        authenticate_publickey_best_algo(handle, &config.username, key, prompt_handler, audit)
-                            .await?;
+                    let result = authenticate_publickey_best_algo(
+                        handle,
+                        &config.username,
+                        key,
+                        config.legacy_ssh_compatibility,
+                        prompt_handler,
+                        audit,
+                    )
+                    .await?;
                     log_auth_result("default-publickey", &result);
                     if result.success() || !server_allows_more_publickey_attempts(&result) {
                         return if result.success() {
@@ -931,12 +962,37 @@ async fn authenticate_flow(
                 passphrase.as_ref().map(|passphrase| passphrase.as_str()),
             )?;
             let result = if let Some(certificate) = &private_key.certificate {
-                let certificate = Certificate::from_openssh(certificate).map_err(|_| SshTransportError::AuthenticationFailed("Invalid managed SSH certificate".into()))?;
+                let certificate = Certificate::from_openssh(certificate).map_err(|_| {
+                    SshTransportError::AuthenticationFailed(
+                        "Invalid managed SSH certificate".into(),
+                    )
+                })?;
                 if certificate.public_key() != key.public_key().key_data() {
-                    return Err(SshTransportError::AuthenticationFailed("Managed SSH certificate does not match its private key".into()));
+                    return Err(SshTransportError::AuthenticationFailed(
+                        "Managed SSH certificate does not match its private key".into(),
+                    ));
                 }
-                authenticate_certificate_best_algo(handle,&config.username,key,certificate,prompt_handler,audit).await?
-            } else { authenticate_publickey_best_algo(handle, &config.username, key, prompt_handler, audit).await? };
+                authenticate_certificate_best_algo(
+                    handle,
+                    &config.username,
+                    key,
+                    certificate,
+                    config.legacy_ssh_compatibility,
+                    prompt_handler,
+                    audit,
+                )
+                .await?
+            } else {
+                authenticate_publickey_best_algo(
+                    handle,
+                    &config.username,
+                    key,
+                    config.legacy_ssh_compatibility,
+                    prompt_handler,
+                    audit,
+                )
+                .await?
+            };
             log_auth_result("managed-key", &result);
             result
         }

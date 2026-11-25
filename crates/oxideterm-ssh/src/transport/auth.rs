@@ -363,7 +363,8 @@ fn classify_private_key_decode_error(
     if private_key_text_looks_dsa(private_key) {
         return PrivateKeyAuthErrorKind::UnsupportedDsaKey;
     }
-    if private_key_error_is_passphrase_related(error) || private_key_text_looks_encrypted(private_key)
+    if private_key_error_is_passphrase_related(error)
+        || private_key_text_looks_encrypted(private_key)
     {
         return if passphrase_supplied {
             PrivateKeyAuthErrorKind::InvalidPassphrase
@@ -399,12 +400,10 @@ fn private_key_auth_error_message(kind: PrivateKeyAuthErrorKind, fallback: Strin
 }
 
 fn private_key_auth_error_is_missing_passphrase(error: &SshTransportError) -> bool {
-    error
-        .to_string()
-        .contains(&private_key_auth_error_message(
-            PrivateKeyAuthErrorKind::MissingPassphrase,
-            String::new(),
-        ))
+    error.to_string().contains(&private_key_auth_error_message(
+        PrivateKeyAuthErrorKind::MissingPassphrase,
+        String::new(),
+    ))
 }
 
 fn decode_private_key_for_auth(
@@ -412,14 +411,13 @@ fn decode_private_key_for_auth(
     passphrase: Option<&str>,
 ) -> Result<PrivateKey, SshTransportError> {
     let passphrase_supplied = passphrase.is_some_and(|value| !value.is_empty());
-    let key = russh::keys::decode_secret_key(private_key, passphrase)
-        .map_err(|error| {
-            let kind = classify_private_key_decode_error(private_key, &error, passphrase_supplied);
-            SshTransportError::AuthenticationFailed(private_key_auth_error_message(
-                kind,
-                error.to_string(),
-            ))
-        })?;
+    let key = russh::keys::decode_secret_key(private_key, passphrase).map_err(|error| {
+        let kind = classify_private_key_decode_error(private_key, &error, passphrase_supplied);
+        SshTransportError::AuthenticationFailed(private_key_auth_error_message(
+            kind,
+            error.to_string(),
+        ))
+    })?;
     Ok(key)
 }
 
@@ -477,6 +475,7 @@ async fn resolve_server_rsa_preference(
 fn auth_algorithm_attempt_order(
     is_rsa: bool,
     server_preference: Option<Option<HashAlg>>,
+    legacy_compatibility: bool,
 ) -> Vec<Option<HashAlg>> {
     if !is_rsa {
         return vec![None];
@@ -494,6 +493,9 @@ fn auth_algorithm_attempt_order(
             );
             algorithms
         }
+        // When a legacy server omits RFC 8308 server-sig-algs, try legacy ssh-rsa
+        // first so strict MaxAuthTries limits are not exhausted on RSA-SHA2 probes.
+        None if legacy_compatibility => vec![None, Some(HashAlg::Sha256), Some(HashAlg::Sha512)],
         None => RSA_AUTH_ALGORITHMS.to_vec(),
     }
 }
@@ -512,6 +514,7 @@ async fn authenticate_publickey_best_algo(
     handle: &mut client::Handle<NativeClientHandler>,
     username: &str,
     key: Arc<PrivateKey>,
+    legacy_compatibility: bool,
     prompt_handler: Option<&dyn SshPromptHandler>,
     audit: &mut AuthenticationAudit,
 ) -> Result<client::AuthResult, SshTransportError> {
@@ -537,6 +540,7 @@ async fn authenticate_publickey_best_algo(
     let algorithms = auth_algorithm_attempt_order(
         matches!(key.algorithm(), Algorithm::Rsa { .. }),
         resolve_server_rsa_preference(handle).await,
+        legacy_compatibility,
     );
     let mut last_result = None;
 
@@ -574,6 +578,7 @@ async fn authenticate_certificate_best_algo(
     username: &str,
     key: Arc<PrivateKey>,
     cert: Certificate,
+    legacy_compatibility: bool,
     prompt_handler: Option<&dyn SshPromptHandler>,
     audit: &mut AuthenticationAudit,
 ) -> Result<client::AuthResult, SshTransportError> {
@@ -598,6 +603,7 @@ async fn authenticate_certificate_best_algo(
     let algorithms = auth_algorithm_attempt_order(
         matches!(cert.algorithm(), Algorithm::Rsa { .. }),
         resolve_server_rsa_preference(handle).await,
+        legacy_compatibility,
     );
     let mut signer = LocalKeySigner::new(key);
     let mut last_result = None;
@@ -701,7 +707,8 @@ async fn authenticate_agent(
     );
 
     let server_rsa_preference = resolve_server_rsa_preference(handle).await;
-    let rsa_algorithms = auth_algorithm_attempt_order(true, server_rsa_preference);
+    let rsa_algorithms =
+        auth_algorithm_attempt_order(true, server_rsa_preference, config.legacy_ssh_compatibility);
     let mut last_result = None;
     let mut failure_reason = None;
     let mut publickey_exhausted = false;
@@ -798,7 +805,9 @@ async fn authenticate_agent(
     }
 }
 
-async fn connect_agent_client(configured_endpoint: Option<&str>) -> Result<NativeAgentClient, String> {
+async fn connect_agent_client(
+    configured_endpoint: Option<&str>,
+) -> Result<NativeAgentClient, String> {
     let endpoint = resolve_ssh_agent_endpoint(configured_endpoint)?;
     #[cfg(unix)]
     {
@@ -856,12 +865,23 @@ mod private_key_auth_error_tests {
         let key = generated_key_text(Some("secret-pass"));
         for (input, passphrase, diagnostic) in [
             (key.as_str(), None, "requires a passphrase"),
-            (key.as_str(), Some("wrong-pass"), "Invalid SSH key passphrase"),
-            ("not a private key", None, "Unsupported SSH private key format"),
+            (
+                key.as_str(),
+                Some("wrong-pass"),
+                "Invalid SSH key passphrase",
+            ),
+            (
+                "not a private key",
+                None,
+                "Unsupported SSH private key format",
+            ),
             ("sk-ssh-ed25519", None, "FIDO/security-key"),
         ] {
             let error = decode_private_key_for_auth(input, passphrase).unwrap_err();
-            assert!(error.to_string().contains(diagnostic), "{diagnostic}: {error}");
+            assert!(
+                error.to_string().contains(diagnostic),
+                "{diagnostic}: {error}"
+            );
         }
     }
 }

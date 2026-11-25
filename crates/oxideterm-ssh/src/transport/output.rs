@@ -77,24 +77,35 @@ struct SshSftpChannelOpener {
 }
 
 impl SshConnectionHandle {
-    pub(crate) async fn create_sftp_session(&self) -> Result<oxideterm_sftp::SftpSession, SftpError> {
-        let transport = self.physical::<PooledSshConnection>().ok_or_else(||
-            SftpError::ChannelError("no active SSH connection is available for SFTP".into()))?;
+    pub(crate) async fn create_sftp_session(
+        &self,
+    ) -> Result<oxideterm_sftp::SftpSession, SftpError> {
+        let transport = self.physical::<PooledSshConnection>().ok_or_else(|| {
+            SftpError::ChannelError("no active SSH connection is available for SFTP".into())
+        })?;
         let opener = SshSftpChannelOpener { transport };
         oxideterm_sftp::SftpSession::new(opener, self.connection_id().to_string()).await
     }
 }
 
 impl SftpChannelOpener for SshSftpChannelOpener {
-    fn audit_context(&self) -> Option<oxideterm_audit::AuditContext> { self.transport.audit.clone() }
+    fn audit_context(&self) -> Option<oxideterm_audit::AuditContext> {
+        self.transport.audit.clone()
+    }
 
-    fn open_sftp_channel(&self) -> impl Future<Output = Result<russh::Channel<client::Msg>, SftpError>> + Send {
+    fn open_sftp_channel(
+        &self,
+    ) -> impl Future<Output = Result<russh::Channel<client::Msg>, SftpError>> + Send {
         async {
             // Auxiliary channels belong to this SFTP session's transport, never a later registry binding.
-            self.transport.target.channel_open_session().await
+            self.transport
+                .target
+                .channel_open_session()
+                .await
                 .map_err(|error| match error {
                     russh::Error::ChannelOpenFailure(
-                        russh::ChannelOpenFailure::ConnectFailed | russh::ChannelOpenFailure::ResourceShortage,
+                        russh::ChannelOpenFailure::ConnectFailed
+                        | russh::ChannelOpenFailure::ResourceShortage,
                     ) => SftpError::ChannelOpenRejected(error.to_string()),
                     _ => SftpError::ChannelError(error.to_string()),
                 })
@@ -292,6 +303,22 @@ mod tests {
 
         assert!(!modern.preferred.kex.contains(&russh::kex::DH_G14_SHA1));
         assert!(legacy.preferred.kex.contains(&russh::kex::DH_G14_SHA1));
+        assert!(
+            !modern
+                .preferred
+                .cipher
+                .contains(&russh::cipher::TRIPLE_DES_CBC)
+        );
+        assert!(
+            legacy
+                .preferred
+                .cipher
+                .contains(&russh::cipher::TRIPLE_DES_CBC)
+        );
+        assert_eq!(modern.window_size, 32 * 1024 * 1024);
+        assert_eq!(modern.maximum_packet_size, 256 * 1024);
+        assert_eq!(legacy.window_size, 2 * 1024 * 1024);
+        assert_eq!(legacy.maximum_packet_size, 32 * 1024);
         assert_eq!(modern.gex.min_group_size(), 3072);
         assert_eq!(modern.gex.preferred_group_size(), 8192);
         assert_eq!(legacy.gex.min_group_size(), 2048);
@@ -306,5 +333,28 @@ mod tests {
         .unwrap();
         assert_eq!(explicit.gex.min_group_size(), 2048);
         assert_eq!(explicit.gex.max_group_size(), 8192);
+        let explicit_sha256 = ssh_client_config(
+            false,
+            &oxideterm_connections::SshAlgorithmPreferences {
+                kex: vec!["diffie-hellman-group-exchange-sha256".into()],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(explicit_sha256.gex.min_group_size(), 2048);
+        assert_eq!(explicit_sha256.gex.preferred_group_size(), 3072);
+        assert_eq!(explicit_sha256.gex.max_group_size(), 8192);
+        assert_eq!(
+            auth_algorithm_attempt_order(true, None, false),
+            vec![Some(HashAlg::Sha512), Some(HashAlg::Sha256), None]
+        );
+        assert_eq!(
+            auth_algorithm_attempt_order(true, None, true),
+            vec![None, Some(HashAlg::Sha256), Some(HashAlg::Sha512)]
+        );
+        assert_eq!(
+            auth_algorithm_attempt_order(true, Some(Some(HashAlg::Sha256)), true),
+            vec![Some(HashAlg::Sha256), Some(HashAlg::Sha512), None]
+        );
     }
 }
