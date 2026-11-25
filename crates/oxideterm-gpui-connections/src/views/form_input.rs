@@ -49,6 +49,8 @@ pub(super) enum FormAction {
         connection_id: String,
     },
     RevealSavedPassword,
+    #[cfg(target_family = "wasm")]
+    RequestBleScan,
     QueueTooltip {
         id: String,
         label: String,

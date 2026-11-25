@@ -82,6 +82,16 @@ pub enum PortableProtocolDraft {
         shell_id: Option<String>,
         cwd: String,
     },
+    Ble {
+        device_id: Option<String>,
+        device_name: String,
+        service_uuid: Option<uuid::Uuid>,
+        input_line_ending: SerialLineEnding,
+        output_line_ending: SerialLineEnding,
+        local_echo: bool,
+        mtu: Option<u16>,
+        write_without_response: bool,
+    },
 }
 
 pub struct PortableTunnelEndpoints {
@@ -517,7 +527,33 @@ impl PortableConnectionDraft {
                         cwd: f.local_cwd.clone(),
                     },
                 ),
-                Ble | WslGraphics => return Err("ssh.form.validation_required"),
+                Ble => {
+                    #[cfg(target_family = "wasm")]
+                    let (device_id, device_name) = (
+                        f.ble.web_device_id.clone(),
+                        f.ble
+                            .web_device_name
+                            .clone()
+                            .unwrap_or_else(|| f.ble.profile_name.clone()),
+                    );
+                    #[cfg(not(target_family = "wasm"))]
+                    let (device_id, device_name) = (None, f.ble.profile_name.clone());
+                    let mtu = f.ble.mtu.trim().parse::<u16>().ok().filter(|v| *v >= 23);
+                    (
+                        f.ble.profile_id.clone(),
+                        PortableProtocolDraft::Ble {
+                            device_id,
+                            device_name,
+                            service_uuid: f.ble.selected_service_uuid,
+                            input_line_ending: f.ble.input_line_ending,
+                            output_line_ending: f.ble.output_line_ending,
+                            local_echo: f.ble.local_echo,
+                            mtu,
+                            write_without_response: f.ble.write_without_response,
+                        },
+                    )
+                }
+                WslGraphics => return Err("ssh.form.validation_required"),
             }
         };
         let name = if env.tunnel.is_some() {
@@ -526,6 +562,7 @@ impl PortableConnectionDraft {
             match f.transport {
                 Serial => &f.serial_profile_name,
                 Telnet => &f.telnet_profile_name,
+                Ble => &f.ble.profile_name,
                 _ => &f.name,
             }
         };

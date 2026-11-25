@@ -7,7 +7,7 @@ use gpui::{AnyElement, IntoElement, ParentElement, Styled, div, prelude::*, px, 
 use oxideterm_i18n::I18n;
 use oxideterm_settings::{
     HighlightRule, HighlightRuleMatchScope, HighlightRuleRenderMode, MAX_HIGHLIGHT_PATTERN_LENGTH,
-    TerminalSemanticScheme, create_default_highlight_rule,
+    create_default_highlight_rule,
 };
 use oxideterm_theme::ThemeTokens;
 
@@ -269,23 +269,7 @@ pub fn highlight_match_scope_label(mode: HighlightRuleMatchScope, i18n: &I18n) -
     }
 }
 
-pub fn terminal_semantic_scheme_options() -> &'static [TerminalSemanticScheme] {
-    &[
-        TerminalSemanticScheme::Balanced,
-        TerminalSemanticScheme::Conservative,
-    ]
-}
-
-pub fn terminal_semantic_scheme_label(scheme: TerminalSemanticScheme, i18n: &I18n) -> String {
-    match scheme {
-        TerminalSemanticScheme::Balanced => {
-            i18n.t("settings_view.terminal.highlight_rules.semantic_scheme_balanced")
-        }
-        TerminalSemanticScheme::Conservative => {
-            i18n.t("settings_view.terminal.highlight_rules.semantic_scheme_conservative")
-        }
-    }
-}
+pub use crate::options::{terminal_semantic_scheme_label, terminal_semantic_scheme_options};
 
 pub fn highlight_preset_groups(i18n: &I18n) -> Vec<HighlightPresetGroup> {
     vec![

@@ -927,6 +927,17 @@ pub struct NewConnectionForm {
     pub mosh_prediction: MoshPredictionMode,
 }
 
+/// Discovered GATT service summary surfaced by browser Web Bluetooth.
+#[cfg(target_family = "wasm")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WebBleServiceSummary {
+    pub uuid: uuid::Uuid,
+    pub label: String,
+    pub has_write: bool,
+    pub has_write_without_response: bool,
+    pub has_notify: bool,
+}
+
 /// BLE-specific draft and discovery view state of the new-connection form.
 /// Grouped so the shared form draft keeps other transports' fields flat while
 /// the BLE surface stays in one resettable unit; nothing here is persisted —
@@ -948,6 +959,12 @@ pub struct BleFormState {
     pub selected_adapter_index: usize,
     #[cfg(not(target_family = "wasm"))]
     pub devices: Vec<oxideterm_ble::BleDeviceInfo>,
+    #[cfg(target_family = "wasm")]
+    pub web_device_id: Option<String>,
+    #[cfg(target_family = "wasm")]
+    pub web_device_name: Option<String>,
+    #[cfg(target_family = "wasm")]
+    pub web_services: Vec<WebBleServiceSummary>,
     pub scanning: bool,
     pub scan_started: bool,
     // Holds the adapter that produced `devices` so inspection and the
@@ -1002,6 +1019,12 @@ impl Default for BleFormState {
             selected_adapter_index: 0,
             #[cfg(not(target_family = "wasm"))]
             devices: Vec::new(),
+            #[cfg(target_family = "wasm")]
+            web_device_id: None,
+            #[cfg(target_family = "wasm")]
+            web_device_name: None,
+            #[cfg(target_family = "wasm")]
+            web_services: Vec::new(),
             scanning: false,
             scan_started: false,
             #[cfg(not(target_family = "wasm"))]

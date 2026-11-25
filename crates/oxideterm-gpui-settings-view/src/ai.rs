@@ -740,7 +740,6 @@ pub mod text_editor;
 
 #[cfg(not(target_family = "wasm"))]
 pub mod acp;
-#[cfg(not(target_family = "wasm"))]
 pub(crate) mod basic;
 #[cfg(not(target_family = "wasm"))]
 pub(crate) mod context;
@@ -752,14 +751,12 @@ pub mod mcp;
 pub mod mcp_dialog;
 #[cfg(not(target_family = "wasm"))]
 pub mod mcp_draft;
-#[cfg(not(target_family = "wasm"))]
 pub mod providers;
 #[cfg(not(target_family = "wasm"))]
 pub(crate) mod skills;
 #[cfg(not(target_family = "wasm"))]
 pub mod subagents;
 
-#[cfg(not(target_family = "wasm"))]
 pub(crate) fn available(section: AnyElement, enabled: bool) -> AnyElement {
     if enabled {
         section
@@ -774,7 +771,6 @@ pub(crate) fn available(section: AnyElement, enabled: bool) -> AnyElement {
     }
 }
 
-#[cfg(not(target_family = "wasm"))]
 pub(crate) fn section(
     tokens: &ThemeTokens,
     header: AnyElement,

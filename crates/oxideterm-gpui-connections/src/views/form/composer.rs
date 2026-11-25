@@ -402,10 +402,7 @@ impl ConnectionFormView {
                 group.retain(|entry| {
                     !matches!(
                         entry,
-                        ProtocolEntry::BuiltIn(
-                            NewConnectionTransport::Ble | NewConnectionTransport::WslGraphics,
-                            _
-                        )
+                        ProtocolEntry::BuiltIn(NewConnectionTransport::WslGraphics, _)
                     )
                 });
             }

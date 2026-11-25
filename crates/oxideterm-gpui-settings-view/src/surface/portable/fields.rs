@@ -53,7 +53,10 @@ impl Fields {
         std::mem::take(&mut self.password)
     }
     fn editing_password(&self) -> bool {
-        self.active == Some(SettingsInput::NetworkProxyPassword)
+        matches!(
+            self.active,
+            Some(SettingsInput::NetworkProxyPassword | SettingsInput::AiProviderApiKey(_))
+        )
     }
     fn selection(&self) -> Range<usize> {
         self.anchor.min(self.caret)..self.anchor.max(self.caret)
@@ -146,9 +149,18 @@ impl SettingsImeSource for PageState {
             .or_default()
             .clone();
         let focused = self.fields.active == Some(input);
+        let stored_value = self.fields.value(input).or_else(|| match input {
+            SettingsInput::AiProviderApiKey(index) => {
+                self.ai_api_key_drafts.get(&index).map(|k| k.as_str())
+            }
+            SettingsInput::AiProviderNewModel(index) => {
+                self.ai_new_model_drafts.get(&index).map(String::as_str)
+            }
+            _ => None,
+        });
         SettingsImeFrame {
             input,
-            value: self.fields.value(input).unwrap_or(value),
+            value: stored_value.unwrap_or(value),
             focused,
             caret_visible: focused,
             selected_range: focused.then(|| self.fields.selection()),
@@ -189,6 +201,18 @@ impl PageState {
             SettingsInput::KeybindingSearch => {
                 Some(self.shortcuts.keybinding_search_query().to_owned())
             }
+            SettingsInput::AiProviderApiKey(index) => Some(
+                self.ai_api_key_drafts
+                    .get(&index)
+                    .map(|k| k.as_str().to_owned())
+                    .unwrap_or_default(),
+            ),
+            SettingsInput::AiProviderNewModel(index) => Some(
+                self.ai_new_model_drafts
+                    .get(&index)
+                    .cloned()
+                    .unwrap_or_default(),
+            ),
             SettingsInput::CustomThemeName => self.editor.as_ref().map(|e| e.name.clone()),
             SettingsInput::CustomThemeTerminalColor(i) => self
                 .editor
@@ -237,6 +261,13 @@ impl PageState {
             }
             SettingsInput::KeybindingSearch => {
                 self.shortcuts.keybinding_search_query.clone_from(draft)
+            }
+            SettingsInput::AiProviderApiKey(index) => {
+                self.ai_api_key_drafts
+                    .insert(index, Zeroizing::new(draft.to_owned()));
+            }
+            SettingsInput::AiProviderNewModel(index) => {
+                self.ai_new_model_drafts.insert(index, draft.to_owned());
             }
             SettingsInput::CustomThemeName => {
                 if let Some(e) = self.editor.as_mut() {

@@ -17,15 +17,30 @@ use oxideterm_gpui_shell::{
     overlays::{transients::*, *},
     panes::*,
     shortcuts::{self, bindings::*},
-    tabs::{TabLayout, geometry::TabStripState, strip::*},
+    tabs::{
+        TabLayout,
+        geometry::{ExitingTabVisual, TabStripState, tab_exit_visual_index},
+        strip::*,
+    },
     *,
 };
-use oxideterm_gpui_ui::{icons::LucideIcon, motion::ExitPhase};
+use oxideterm_gpui_ui::{
+    disclosure_motion::DisclosureMotions,
+    icons::LucideIcon,
+    motion::{
+        ExitPhase, MotionDuration, UserSegmentedControlMotionState, duration as motion_duration,
+        exit_duration, exit_settle_duration, fade_in, settle_duration, slide_fade_in_y,
+    },
+};
 use oxideterm_i18n::I18n;
 use oxideterm_notification_center::*;
 use oxideterm_theme::ThemeTokens;
 use oxideterm_workspace::*;
-use std::{collections::HashMap, rc::Rc, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    rc::Rc,
+    time::Duration,
+};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Action {
@@ -37,45 +52,27 @@ pub enum Action {
     Catalog,
     Notifications,
     NewConnection,
+    Ble,
     Forwards,
     Quick,
     Welcome,
     Files,
     Sftp,
     Ide,
+    Runtime,
+    Plugins,
+    CloudSync,
+    Knowledge,
     Assistant,
-    Monitor,
-    Docker,
-    Services,
+    HostTool(ContextSidebarTool),
     Theme,
     Zen,
 }
 impl Action {
-    pub const ALL: &[Self] = &[
-        Self::Terminal,
-        Self::Split,
-        Self::Catalog,
-        Self::NewConnection,
-        Self::Files,
-        Self::Sftp,
-        Self::Ide,
-        Self::Forwards,
-        Self::Quick,
-        Self::Monitor,
-        Self::Docker,
-        Self::Services,
-        Self::Assistant,
-        Self::Settings,
-        Self::Welcome,
-        Self::Notifications,
-        Self::Close,
-    ];
     pub fn key(self) -> &'static str {
         match self {
             Self::Assistant => "sidebar.panels.ai",
-            Self::Monitor => ContextSidebarTool::Monitor.label_key(),
-            Self::Docker => ContextSidebarTool::Docker.label_key(),
-            Self::Services => ContextSidebarTool::Services.label_key(),
+            Self::HostTool(tool) => tool.label_key(),
             Self::Zen => "sidebar.actions.enter_zen",
             Self::Theme => "settings_view.appearance.configure_schemes",
             Self::Terminal => "menu.new_terminal",
@@ -85,6 +82,7 @@ impl Action {
             Self::Settings => "menu.settings",
             Self::Catalog => "sidebar.panels.connections_header",
             Self::NewConnection => "ssh.form.title",
+            Self::Ble => "modals.new_connection.transport_ble",
             Self::Notifications => "event_log.audit.notifications",
             Self::Forwards => "sidebar.panels.forwards",
             Self::Quick => "terminal.quick_commands.title",
@@ -92,6 +90,10 @@ impl Action {
             Self::Files => "sidebar.panels.files",
             Self::Sftp => "sidebar.panels.sftp",
             Self::Ide => "connections.monitor.ide",
+            Self::Runtime => "sidebar.panels.runtime",
+            Self::Plugins => "plugin.manager_title",
+            Self::CloudSync => "plugin.cloud_sync.panel_title",
+            Self::Knowledge => "sidebar.panels.knowledge",
         }
     }
 }
@@ -116,7 +118,32 @@ pub struct Workspace {
     pub catalog_data: PortableCatalogData,
     pub next_profile: u64,
     pub form: Option<Entity<PortableConnectionFormView>>,
+    pub form_close_generation: u64,
+    pub disclosure_motions: DisclosureMotions,
+    pub segmented_motion: UserSegmentedControlMotionState,
+    pub popover_generation: usize,
     pub sessions: HashMap<TerminalSessionId, Session>,
+    pub paired_ble: Option<crate::ble::PairedWebBle>,
+    pub ble_profiles: HashMap<String, crate::ble::BleProfile>,
+    pub ble_links: HashMap<TerminalSessionId, crate::ble::WebBleLink>,
+    pub expanded_nodes: HashSet<String>,
+    session_host_view: bool,
+    session_sort_order: oxideterm_settings::SessionSortOrder,
+    session_sort_menu_open: bool,
+    session_search_open: bool,
+    session_search_query: String,
+    connections_sort_field: oxideterm_gpui_connections::session_manager::SessionSortField,
+    connections_sort_direction: oxideterm_gpui_connections::session_manager::SortDirection,
+    connections_sort_menu_open: bool,
+    connections_search_open: bool,
+    connections_search_query: String,
+    selected_connection_id: Option<String>,
+    connection_context_menu: Option<(String, Point<Pixels>)>,
+    pub sidebar_search_focused: bool,
+    pub pages: crate::pages::PagesState,
+    pub knowledge: crate::knowledge::WebKnowledge,
+    context_tools_menu: Option<ContextSidebarTool>,
+    context_tools_menu_scroll: ScrollHandle,
     pub transport: Option<Box<dyn WebTransport>>,
     pub ready: bool,
     pub connecting: bool,
@@ -145,6 +172,15 @@ impl Workspace {
         }
         let sidebar = preferences.sidebar_ui.clone();
         let settings = cx.new(|cx| PortableSettingsSurface::new(preferences, actions.clone(), cx));
+        settings.update(cx, |s, cx| {
+            s.set_app_icon_picker(
+                crate::icon::APP_ICON_VARIANTS,
+                crate::icon::APP_ICON_PREVIEW_SIZE,
+                crate::icon::app_icon_source,
+                cx,
+            );
+        });
+        crate::icon::sync_browser_favicon(settings.read(cx).settings(cx).appearance.app_icon);
         let (tokens, i18n) = settings.read(cx).environment(dark(w), cx);
         let focus = cx.focus_handle();
         let mut files = None;
@@ -211,8 +247,36 @@ impl Workspace {
         let center = cx.new(|_| NotificationCenter::new(frame, None));
         let palette = Palette::new(cx);
         let tools = Tools::new(demo, tokens, &i18n, &focus, cx);
-        let assistant =
-            demo.then(|| cx.new(|cx| crate::ai::Assistant::new(tokens, i18n.clone(), cx)));
+        let knowledge = crate::knowledge::WebKnowledge::new(&focus, cx);
+        let open_ai_settings_owner = cx.weak_entity();
+        let insert_cmd_owner = cx.weak_entity();
+        let assistant = demo.then(|| {
+            let settings_handle = settings.clone();
+            cx.new(|cx| {
+                crate::ai::Assistant::new(
+                    tokens,
+                    i18n.clone(),
+                    settings_handle,
+                    Rc::new(move |w, cx| {
+                        let _ = open_ai_settings_owner.update(cx, |h, cx| {
+                            h.settings.update(cx, |s, cx| {
+                                s.open_section(oxideterm_gpui_settings_view::SettingsTab::Ai, cx);
+                            });
+                            h.action(Action::Settings, w, cx);
+                        });
+                    }),
+                    Rc::new(move |cmd, _, cx| {
+                        let _ = insert_cmd_owner.update(cx, |h, cx| {
+                            if let Some(sid) = h.active_session() {
+                                h.input(sid, cmd.as_bytes(), cx);
+                                cx.notify();
+                            }
+                        });
+                    }),
+                    cx,
+                )
+            })
+        });
         Self {
             assistant,
             focus,
@@ -244,7 +308,10 @@ impl Workspace {
             drag: None,
             zen_exit: Default::default(),
             palette,
-            transients: TransientOverlays::new(Duration::from_millis(120)),
+            transients: TransientOverlays::new(exit_settle_duration(
+                &tokens,
+                MotionDuration::Control,
+            )),
             deadline: None,
             notifications,
             center,
@@ -252,7 +319,34 @@ impl Workspace {
             catalog_data,
             next_profile: 0,
             form: None,
+            form_close_generation: 0,
+            disclosure_motions: DisclosureMotions::default(),
+            segmented_motion: UserSegmentedControlMotionState::default(),
+            popover_generation: 0,
             sessions: Default::default(),
+            paired_ble: None,
+            ble_profiles: Default::default(),
+            ble_links: Default::default(),
+            expanded_nodes: HashSet::from(["demo".to_string(), "local".to_string()]),
+            session_host_view: false,
+            session_sort_order: oxideterm_settings::SessionSortOrder::Default,
+            session_sort_menu_open: false,
+            session_search_open: false,
+            session_search_query: String::new(),
+            connections_sort_field:
+                oxideterm_gpui_connections::session_manager::SessionSortField::Name,
+            connections_sort_direction:
+                oxideterm_gpui_connections::session_manager::SortDirection::Asc,
+            connections_sort_menu_open: false,
+            connections_search_open: false,
+            connections_search_query: String::new(),
+            selected_connection_id: None,
+            connection_context_menu: None,
+            sidebar_search_focused: false,
+            pages: Default::default(),
+            knowledge,
+            context_tools_menu: None,
+            context_tools_menu_scroll: ScrollHandle::new(),
             connecting: !demo && transport.is_some(),
             gateway_host,
             transport,
@@ -266,11 +360,14 @@ impl Workspace {
     pub fn start(&mut self, w: &mut Window, cx: &mut Context<Self>) {
         w.focus(&self.focus, cx);
         if self.demo {
-            self.new_terminal("local".into(), None, w, cx)
+            // Start with the demo SSH host active so the sidebar session tree
+            // immediately presents desktop's full connected host actions.
+            self.new_terminal("demo".into(), None, w, cx)
         }
     }
     fn preferences(&mut self, w: &Window, cx: &mut Context<Self>) {
         (self.tokens, self.i18n) = self.settings.read(cx).environment(dark(w), cx);
+        crate::icon::sync_browser_favicon(self.settings.read(cx).settings(cx).appearance.app_icon);
         let env = self.connection_env();
         self.catalog
             .update(cx, |v, cx| v.set_environment(env.clone(), cx));
@@ -300,6 +397,7 @@ impl Workspace {
                 cx.notify();
             });
         }
+        App::notify(cx, self.knowledge.views.view.entity_id());
         self.refresh_center(cx);
         self.changed(cx);
     }
@@ -356,22 +454,120 @@ impl Workspace {
         }
         self.changed(cx);
     }
+    pub(crate) fn begin_disclosure(&mut self, key: String, expanded: bool, cx: &mut Context<Self>) {
+        if !self.tokens.motion.enabled {
+            self.disclosure_motions.remove(&key);
+            return;
+        }
+        let generation = self.disclosure_motions.begin(key.clone(), expanded);
+        let delay = motion_duration(&self.tokens, MotionDuration::Micro);
+        at_deadline(Instant::now() + delay, cx, move |h, _, cx| {
+            if h.disclosure_motions.finish(&key, generation) {
+                cx.notify();
+            }
+        })
+        .detach();
+    }
+
+    pub(crate) fn begin_segmented_transition(
+        &mut self,
+        control_id: &'static str,
+        previous_index: usize,
+        target_index: usize,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(motion) = oxideterm_gpui_ui::segmented_control_motion(&self.tokens) else {
+            self.segmented_motion.clear(control_id);
+            return;
+        };
+        let generation = self.segmented_motion.begin_with_previous_index(
+            control_id,
+            Some(previous_index),
+            target_index,
+            None,
+        );
+        at_deadline(Instant::now() + motion.duration, cx, move |h, _, cx| {
+            if h.segmented_motion.finish(control_id, generation) {
+                cx.notify();
+            }
+        })
+        .detach();
+    }
+
     pub fn close(&mut self, id: TabId, cx: &mut Context<Self>) {
         let Some(index) = self.layout.tab_index_by_id(id) else {
             return;
+        };
+        let exit_delay = exit_duration(&self.tokens, MotionDuration::Control);
+        let exiting_visual = if self.tokens.motion.enabled && !exit_delay.is_zero() {
+            let tab = &self.layout.tabs()[index];
+            self.layout
+                .main_tabs()
+                .position(|(_, candidate)| candidate.id == tab.id)
+                .map(|live_visual_index| {
+                    let mut occupied = self
+                        .strip
+                        .read(cx)
+                        .state
+                        .exiting_tabs
+                        .iter()
+                        .map(|e| e.visual_index)
+                        .collect::<Vec<_>>();
+                    occupied.sort_unstable();
+                    let visual_index = tab_exit_visual_index(live_visual_index, &occupied);
+                    ExitingTabVisual {
+                        tab_id: tab.id,
+                        kind: tab.kind.clone(),
+                        title: tab.title.clone(),
+                        width: self.tokens.metrics.tab_min_width.max(140.0),
+                        visual_index,
+                        was_active: self.layout.active_tab_id() == Some(tab.id),
+                        started_at: cx.background_executor().now(),
+                        duration: exit_delay,
+                    }
+                })
+        } else {
+            None
         };
         let mut sessions = Vec::new();
         if let Some(p) = &self.layout.tabs()[index].root_pane {
             p.collect_session_ids(&mut sessions);
         }
         self.layout.remove_tab_at(index);
+        if let Some(visual) = exiting_visual {
+            self.strip
+                .update(cx, |strip, cx| strip.begin_exit(visual, cx));
+        }
+        self.transients
+            .clear_tooltip(&format!("tab-{}", id.0), Instant::now());
         for s in sessions {
             self.release_session(s, cx);
         }
         self.changed(cx);
     }
+    pub fn disconnect_node(&mut self, node_id: &str, cx: &mut Context<Self>) {
+        let target_tabs: Vec<TabId> = self
+            .layout
+            .tabs()
+            .iter()
+            .filter_map(|tab| {
+                let root = tab.root_pane.as_ref()?;
+                let mut ids = Vec::new();
+                root.collect_session_ids(&mut ids);
+                ids.iter()
+                    .any(|sid| self.sessions.get(sid).is_some_and(|s| s.node == node_id))
+                    .then_some(tab.id)
+            })
+            .collect();
+        for tab_id in target_tabs {
+            self.close(tab_id, cx);
+        }
+        self.expanded_nodes.remove(node_id);
+        self.changed(cx);
+    }
     pub fn action(&mut self, a: Action, w: &mut Window, cx: &mut Context<Self>) {
         use self::Action::*;
+        self.sidebar_search_focused = false;
         match a {
             Terminal => self.new_terminal("local".into(), None, w, cx),
             Close => {
@@ -397,14 +593,14 @@ impl Workspace {
             Settings => self.open_page(TabKind::Settings, a.key(), cx),
             Notifications => self.open_page(TabKind::NotificationCenter, a.key(), cx),
             Welcome => self.open_page(TabKind::Onboarding, a.key(), cx),
+            Ble => self.form_for_transport(
+                oxideterm_gpui_connections::form_state::NewConnectionTransport::Ble,
+                w,
+                cx,
+            ),
             _ if !self.demo => self.notice("remote_desktop.capability_unsupported", cx),
             Catalog => self.open_page(TabKind::SessionManager, a.key(), cx),
-            Monitor | Docker | Services => {
-                let tool = match a {
-                    Docker => ContextSidebarTool::Docker,
-                    Services => ContextSidebarTool::Services,
-                    _ => ContextSidebarTool::Monitor,
-                };
+            HostTool(tool) => {
                 if let Some(m) = &self.tools.monitor {
                     let close = !self.rails.right.collapsed()
                         && self.rails.context_panel == ContextSidebarPanel::HostTools
@@ -416,6 +612,7 @@ impl Workspace {
                 }
             }
             Assistant => {
+                self.context_tools_menu = None;
                 let close = !self.rails.right.collapsed()
                     && self.rails.context_panel == ContextSidebarPanel::Assistant;
                 self.rails.context_panel = ContextSidebarPanel::Assistant;
@@ -427,6 +624,16 @@ impl Workspace {
             Sftp => self.open_page(TabKind::Sftp, a.key(), cx),
             Ide => self.open_page(TabKind::Ide, a.key(), cx),
             Forwards => self.open_page(TabKind::Forwards, a.key(), cx),
+            Runtime => self.open_page(TabKind::Runtime, a.key(), cx),
+            Plugins => self.open_page(TabKind::PluginManager, a.key(), cx),
+            CloudSync => self.open_page(TabKind::CloudSync, a.key(), cx),
+            Knowledge => {
+                self.open_page(TabKind::Knowledge, a.key(), cx);
+                if let Some(tab_id) = self.layout.active_tab_id() {
+                    self.knowledge.views.register_tab(tab_id, cx);
+                }
+                self.knowledge.views.refresh(cx);
+            }
             Quick => {
                 if self.active_session().is_some() {
                     self.tools.quick.toggle_open();
@@ -470,10 +677,21 @@ impl Workspace {
                 }
                 .render(&root, self, w, cx)
             } else {
-                self.page(&tab, cx)
+                fade_in(
+                    &t,
+                    ("web-page-enter", tab.id.0 as usize),
+                    div().size_full().child(self.page(&tab, cx)),
+                    MotionDuration::Micro,
+                )
             }
         } else {
-            self.empty_workspace(cx)
+            slide_fade_in_y(
+                &t,
+                "web-empty-workspace-enter",
+                div().size_full().child(self.empty_workspace(w, cx)),
+                8.0,
+                MotionDuration::Control,
+            )
         };
         let top = t.metrics.titlebar_height;
         let left = self.rails.left.mounted().then(|| self.left_drawer(cx));
@@ -514,6 +732,22 @@ impl Workspace {
                 }),
             );
         let mut overlays = OverlayStack::default();
+        if let Some(menu) = self.render_context_tools_menu(w, cx) {
+            overlays.at(60);
+            overlays.extend([menu]);
+        }
+        if let Some(menu) = self.render_session_sort_menu(cx) {
+            overlays.at(62);
+            overlays.extend([menu]);
+        }
+        if let Some(menu) = self.render_connections_sort_menu(cx) {
+            overlays.at(62);
+            overlays.extend([menu]);
+        }
+        if let Some(menu) = self.render_connection_context_menu(cx) {
+            overlays.at(64);
+            overlays.extend([menu]);
+        }
         if let Some(form) = &self.form {
             overlays.at(FORM);
             overlays.extend([form.clone().into_any_element()]);
@@ -576,7 +810,7 @@ impl Workspace {
             background: None,
             title_row: (!zen).then(|| self.titlebar(cx)),
             left_rail: Some(self.left_activity_rail(&env, cx)),
-            right_rail: self.demo.then(|| self.right_activity_rail(&env, cx)),
+            right_rail: self.demo.then(|| self.right_activity_rail(w, &env, cx)),
             left_panel,
             right_panel,
             center,
@@ -585,7 +819,7 @@ impl Workspace {
             environment: env,
         })
     }
-    fn page(&self, tab: &Tab, cx: &App) -> AnyElement {
+    fn page(&self, tab: &Tab, cx: &Context<Self>) -> AnyElement {
         match tab.kind {
             TabKind::Settings => self.settings.clone().into_any_element(),
             TabKind::SessionManager => self.catalog.clone().into_any_element(),
@@ -597,6 +831,10 @@ impl Workspace {
                 .child(self.tools.forwards.body())
                 .child(self.tools.forwards.dialogs())
                 .into_any_element(),
+            TabKind::Runtime => self.render_runtime_page(cx),
+            TabKind::PluginManager => self.render_plugin_manager_page(cx),
+            TabKind::CloudSync => self.render_cloud_sync_page(cx),
+            TabKind::Knowledge => self.knowledge.views.view.clone().into_any_element(),
             _ => self
                 .files
                 .as_ref()
@@ -605,6 +843,88 @@ impl Workspace {
         }
     }
     fn key(&mut self, e: &KeyDownEvent, w: &mut Window, cx: &mut Context<Self>) {
+        if (self.context_tools_menu.is_some()
+            || self.session_sort_menu_open
+            || self.connections_sort_menu_open
+            || self.connection_context_menu.is_some())
+            && e.keystroke.key == "escape"
+        {
+            self.context_tools_menu = None;
+            self.session_sort_menu_open = false;
+            self.connections_sort_menu_open = false;
+            self.connection_context_menu = None;
+            w.prevent_default();
+            cx.stop_propagation();
+            cx.notify();
+            return;
+        }
+        if self.knowledge_input_key(e, w, cx) {
+            w.prevent_default();
+            cx.stop_propagation();
+            return;
+        }
+        if self.plugin_search_key(e, cx) {
+            w.prevent_default();
+            cx.stop_propagation();
+            return;
+        }
+        if self.sidebar_search_focused
+            && !e.keystroke.modifiers.platform
+            && !e.keystroke.modifiers.control
+        {
+            let is_conn =
+                self.rails.section == SidebarSection::Connections && self.connections_search_open;
+            let is_sess =
+                self.rails.section == SidebarSection::Sessions && self.session_search_open;
+            if is_conn || is_sess {
+                match e.keystroke.key.as_str() {
+                    "escape" => {
+                        if is_conn {
+                            self.connections_search_query.clear();
+                            self.connections_search_open = false;
+                            self.begin_disclosure("connections-search".into(), false, cx);
+                        } else {
+                            self.session_search_query.clear();
+                            self.session_search_open = false;
+                            self.begin_disclosure("session-search".into(), false, cx);
+                        }
+                        self.sidebar_search_focused = false;
+                        w.prevent_default();
+                        cx.stop_propagation();
+                        cx.notify();
+                        return;
+                    }
+                    "backspace" => {
+                        if is_conn {
+                            self.connections_search_query.pop();
+                        } else {
+                            self.session_search_query.pop();
+                        }
+                        w.prevent_default();
+                        cx.stop_propagation();
+                        cx.notify();
+                        return;
+                    }
+                    _ => {
+                        if let Some(text) = &e.keystroke.key_char
+                            && !text.chars().any(char::is_control)
+                        {
+                            if is_conn {
+                                self.connections_search_query.push_str(text);
+                            } else {
+                                self.session_search_query.push_str(text);
+                            }
+                            w.prevent_default();
+                            cx.stop_propagation();
+                            cx.notify();
+                            return;
+                        }
+                    }
+                }
+            } else {
+                self.sidebar_search_focused = false;
+            }
+        }
         let layers = [
             (FORM, self.form.is_some()),
             (
@@ -694,24 +1014,40 @@ impl Workspace {
             layout,
             visuals: tabs
                 .iter()
-                .map(|tab| TabVisual {
-                    title: tab.title.clone(),
-                    icon: svg()
-                        .path(oxideterm_gpui_shell::chrome::tab_icon(&tab.kind).path())
-                        .text_color(TabVisual::color(
-                            &t,
-                            self.layout.active_tab_id() == Some(tab.id),
-                            bells.contains(&tab.id),
-                            unread.contains(&tab.id),
-                        ))
-                        .size(px(t.metrics.tab_icon_size))
-                        .into_any_element(),
-                    status: None,
-                    bell: bells.contains(&tab.id),
-                    unread: unread.contains(&tab.id),
-                    closeable: true,
-                    draggable: true,
-                    detachable: false,
+                .map(|tab| {
+                    let is_ble_tab = tab.root_pane.as_ref().is_some_and(|root| {
+                        let mut ids = Vec::new();
+                        root.collect_session_ids(&mut ids);
+                        ids.iter().any(|sid| {
+                            self.sessions
+                                .get(sid)
+                                .is_some_and(|s| crate::ble::is_ble_node(&s.node))
+                        })
+                    });
+                    let icon = if is_ble_tab {
+                        LucideIcon::Bluetooth
+                    } else {
+                        oxideterm_gpui_shell::chrome::tab_icon(&tab.kind)
+                    };
+                    TabVisual {
+                        title: tab.title.clone(),
+                        icon: svg()
+                            .path(icon.path())
+                            .text_color(TabVisual::color(
+                                &t,
+                                self.layout.active_tab_id() == Some(tab.id),
+                                bells.contains(&tab.id),
+                                unread.contains(&tab.id),
+                            ))
+                            .size(px(t.metrics.tab_icon_size))
+                            .into_any_element(),
+                        status: None,
+                        bell: bells.contains(&tab.id),
+                        unread: unread.contains(&tab.id),
+                        closeable: true,
+                        draggable: true,
+                        detachable: false,
+                    }
                 })
                 .collect(),
             active: self.layout.active_tab_id(),
@@ -797,7 +1133,15 @@ impl ShellHost for Workspace {
             }
             ShellRequest::Select(section) => {
                 let close = self.rails.section == section && !self.rails.left.collapsed();
-                self.rails.select_section(section, &self.tokens);
+                if let Some(transition_gen) = self.rails.select_section(section, &self.tokens) {
+                    let delay = settle_duration(&self.tokens, MotionDuration::Micro);
+                    at_deadline(Instant::now() + delay, cx, move |h, _, cx| {
+                        if h.rails.finish_section_transition(transition_gen) {
+                            cx.notify();
+                        }
+                    })
+                    .detach();
+                }
                 self.collapse(RailSide::Left, close, cx);
             }
             ShellRequest::BeginResize(side, _) => {
@@ -877,6 +1221,7 @@ impl PaneHost for Workspace {
         use ShellPaneRequest::*;
         match r {
             Focus(t, p, c) => {
+                self.sidebar_search_focused = false;
                 self.layout.set_active_pane(Some(t), p);
                 if let PaneContent::Terminal(s) = c
                     && let Some(s) = self.sessions.get(&s)

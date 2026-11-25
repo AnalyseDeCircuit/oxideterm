@@ -50,10 +50,15 @@ pub enum PortableConnectionFormEvent {
     SaveAndConnect(PortableConnectionDraft),
     Test(PortableConnectionDraft),
     RequestPathPicker(NewConnectionField),
-    OpenPlugin { plugin: String, type_id: String },
+    OpenPlugin {
+        plugin: String,
+        type_id: String,
+    },
     OpenMoshPlugin,
     OpenRemoteDesktopPlugin(oxideterm_remote_desktop::RemoteDesktopProtocol),
     RevealSavedPassword(String),
+    #[cfg(target_family = "wasm")]
+    RequestBleScan,
     Cancel,
 }
 /// Mount with `cx.new` and subscribe to [`PortableConnectionFormEvent`] on the returned entity.
@@ -164,6 +169,70 @@ impl PortableConnectionFormView {
 
     pub fn set_environment(&mut self, env: ConnectionsEnvironment, cx: &mut Context<Self>) {
         self.theme = env;
+        self.refresh(cx);
+    }
+
+    pub fn begin_exit(&mut self, cx: &mut Context<Self>) -> bool {
+        let started = self.state.update(cx, |state, cx| {
+            let started = state.presence.begin_exit().is_some();
+            if started {
+                cx.notify();
+            }
+            started
+        });
+        if started {
+            self.refresh(cx);
+        }
+        started
+    }
+
+    #[cfg(target_family = "wasm")]
+    pub fn set_web_ble_scanning(
+        &mut self,
+        scanning: bool,
+        error: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        self.state.update(cx, |state, cx| {
+            if let Some(form) = state.form.as_mut() {
+                form.ble.scanning = scanning;
+                form.ble.scan_started = true;
+                form.ble.inspect_error = error;
+            }
+            cx.notify();
+        });
+        self.refresh(cx);
+    }
+
+    #[cfg(target_family = "wasm")]
+    pub fn set_web_ble_device(
+        &mut self,
+        id: String,
+        name: String,
+        services: Vec<crate::form_state::WebBleServiceSummary>,
+        cx: &mut Context<Self>,
+    ) {
+        self.state.update(cx, |state, cx| {
+            if let Some(form) = state.form.as_mut() {
+                form.ble.scanning = false;
+                form.ble.scan_started = true;
+                form.ble.inspect_error = None;
+                form.ble.web_device_id = Some(id);
+                if form.ble.profile_name.trim().is_empty() {
+                    form.ble.profile_name = name.clone();
+                }
+                form.ble.web_device_name = Some(name);
+                let preferred = services
+                    .iter()
+                    .find(|s| (s.has_write || s.has_write_without_response) && s.has_notify)
+                    .or_else(|| services.first())
+                    .map(|s| s.uuid);
+                form.ble.selected_service_uuid = preferred;
+                form.ble.web_services = services;
+                form.error = None;
+            }
+            cx.notify();
+        });
         self.refresh(cx);
     }
 
@@ -323,6 +392,8 @@ impl PortableConnectionFormView {
                     cx.emit(Event::RevealSavedPassword(id));
                 }
             }
+            #[cfg(target_family = "wasm")]
+            RequestBleScan => cx.emit(Event::RequestBleScan),
             QueueTooltip { id, label, x, y } => self.tooltip = Some((id, label, x, y)),
             ClearTooltip(id) => {
                 if self.tooltip.as_ref().is_some_and(|t| t.0 == id) {

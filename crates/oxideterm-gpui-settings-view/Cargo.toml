@@ -11,6 +11,7 @@ version.workspace = true
 anyhow.workspace = true
 chrono.workspace = true
 gpui.workspace = true
+oxideterm-ai = { path = "../oxideterm-ai" }
 oxideterm-gpui-shell = { path = "../oxideterm-gpui-shell" }
 oxideterm-editor-core = { path = "../oxideterm-editor-core" }
 oxideterm-gpui-editor = { path = "../oxideterm-gpui-editor" }
@@ -30,7 +31,6 @@ sha2.workspace = true
 zeroize.workspace = true
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
-oxideterm-ai = { path = "../oxideterm-ai" }
 oxideterm-audit = { path = "../oxideterm-audit" }
 oxideterm-background-media = { path = "../oxideterm-background-media" }
 oxideterm-connections = { path = "../oxideterm-connections" }

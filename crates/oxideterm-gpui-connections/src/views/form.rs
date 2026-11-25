@@ -78,6 +78,8 @@ use oxideterm_settings_model::{settings_multiline_line_ranges, settings_multilin
 // submodules so their dependencies and visibility remain locally auditable.
 #[cfg(not(target_family = "wasm"))]
 mod ble_fields;
+#[cfg(target_family = "wasm")]
+mod ble_portable;
 #[cfg(not(target_family = "wasm"))]
 mod desktop;
 mod owner;

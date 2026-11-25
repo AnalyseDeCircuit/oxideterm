@@ -126,6 +126,27 @@ pub fn set_terminal_session_log_include_control_sequences(
     settings.terminal.session_log.include_control_sequences = value;
 }
 
+pub fn terminal_semantic_scheme_options() -> &'static [oxideterm_settings::TerminalSemanticScheme] {
+    &[
+        oxideterm_settings::TerminalSemanticScheme::Balanced,
+        oxideterm_settings::TerminalSemanticScheme::Conservative,
+    ]
+}
+
+pub fn terminal_semantic_scheme_label(
+    scheme: oxideterm_settings::TerminalSemanticScheme,
+    i18n: &I18n,
+) -> String {
+    match scheme {
+        oxideterm_settings::TerminalSemanticScheme::Balanced => {
+            i18n.t("settings_view.terminal.highlight_rules.semantic_scheme_balanced")
+        }
+        oxideterm_settings::TerminalSemanticScheme::Conservative => {
+            i18n.t("settings_view.terminal.highlight_rules.semantic_scheme_conservative")
+        }
+    }
+}
+
 pub fn terminal_session_log_file_mode_options() -> &'static [TerminalSessionLogFileMode] {
     &[
         TerminalSessionLogFileMode::Unique,

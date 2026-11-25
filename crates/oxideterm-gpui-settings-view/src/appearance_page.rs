@@ -495,6 +495,116 @@ impl CoreAppearancePage<'_> {
         settings_appearance_card_shell(&self.tokens, self.has_background, header, rows)
     }
 
+    pub fn appearance_app_icon_card(
+        &self,
+        settings: &PersistedSettings,
+        icon_variants: &'static [AppIconVariant],
+        icon_size: f32,
+        icon_source: fn(AppIconVariant) -> gpui::ImageSource,
+    ) -> AnyElement {
+        let selected = settings.appearance.app_icon;
+        let mut picker = div()
+            .w_full()
+            .flex()
+            .flex_row()
+            .items_center()
+            .justify_start()
+            .gap(px(10.0))
+            .min_w(px(0.0))
+            .flex_wrap();
+        for (index, &variant) in icon_variants.iter().enumerate() {
+            let is_selected = variant == selected;
+            let border_color = if is_selected {
+                self.tokens.ui.accent
+            } else {
+                self.tokens.ui.border
+            };
+            let image = gpui::img(icon_source(variant))
+                .size(px(icon_size))
+                .object_fit(gpui::ObjectFit::Contain)
+                .rounded(px(self.tokens.radii.md));
+            picker = picker.child(
+                div()
+                    .relative()
+                    .size(px(58.0))
+                    .flex_none()
+                    .rounded(px(self.tokens.radii.lg))
+                    .border_1()
+                    .border_color(rgb(border_color))
+                    .bg(rgb(self.tokens.ui.bg_sunken))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .cursor_pointer()
+                    .hover(|button| button.bg(rgb(self.tokens.ui.bg_hover)))
+                    .child(image)
+                    .when(is_selected, |button| {
+                        button.child(
+                            div()
+                                .absolute()
+                                .right(px(4.0))
+                                .bottom(px(4.0))
+                                .size(px(16.0))
+                                .rounded_full()
+                                .bg(rgb(self.tokens.ui.accent))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .child(oxideterm_gpui_ui::motion::animated_checkmark(
+                                    &self.tokens,
+                                    ("appearance-app-icon-check", index),
+                                    gpui::svg()
+                                        .path("lucide/check.svg")
+                                        .size(px(11.0))
+                                        .text_color(rgb(self.tokens.ui.bg)),
+                                    true,
+                                )),
+                        )
+                    })
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        self.press(AppearanceAction::Icon(variant)),
+                    ),
+            );
+        }
+        let row = div()
+            .w_full()
+            .min_w(px(0.0))
+            .flex()
+            .flex_col()
+            .gap(px(12.0))
+            .child(
+                div()
+                    .min_w(px(0.0))
+                    .flex()
+                    .flex_col()
+                    .gap(px(4.0))
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_sm))
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(rgb(self.tokens.ui.text))
+                            .child(self.i18n.t("settings_view.appearance.app_icon_variant")),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_color(rgb(self.tokens.ui.text_muted))
+                            .child(
+                                self.i18n
+                                    .t("settings_view.appearance.app_icon_variant_hint"),
+                            ),
+                    ),
+            )
+            .child(picker)
+            .into_any_element();
+        self.appearance_card_with_icon(
+            "lucide/app-window.svg",
+            self.i18n.t("settings_view.appearance.app_icon"),
+            vec![row],
+        )
+    }
+
     pub fn appearance_action_button(
         &self,
         icon: &'static str,

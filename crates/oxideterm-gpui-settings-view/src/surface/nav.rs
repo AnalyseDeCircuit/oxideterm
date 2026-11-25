@@ -1,9 +1,7 @@
 use super::*;
 use crate::SettingsTabIcon;
-#[cfg(not(target_family = "wasm"))]
-use gpui::{MouseButton, MouseDownEvent, MouseMoveEvent, ScrollHandle};
+use gpui::{MouseButton, MouseDownEvent, MouseMoveEvent};
 use gpui::{Rgba, svg};
-#[cfg(not(target_family = "wasm"))]
 use oxideterm_gpui_ui::{
     button::{ButtonRadius, IconButtonOptions, icon_button},
     entity_row::{EntityListRowOptions, entity_list_row},
@@ -11,7 +9,6 @@ use oxideterm_gpui_ui::{
     separator::{SeparatorOrientation, separator},
 };
 
-#[cfg(not(target_family = "wasm"))]
 const SETTINGS_NAVIGATION_ID: &str = "settings-navigation";
 
 pub(crate) fn render_icon(icon: &'static str, size: f32, color: Rgba) -> AnyElement {
@@ -22,7 +19,6 @@ pub(crate) fn render_icon(icon: &'static str, size: f32, color: Rgba) -> AnyElem
         .into_any_element()
 }
 
-#[cfg(not(target_family = "wasm"))]
 fn panel_background(frame: &SettingsSurfaceFrame, color: u32) -> Rgba {
     if frame.has_background {
         rgba((color << 8) | oxideterm_gpui_ui::theme_glass_card_background_alpha(&frame.tokens))
@@ -49,7 +45,6 @@ pub(crate) fn tab_icon(tab: SettingsTab) -> &'static str {
     }
 }
 
-#[cfg(not(target_family = "wasm"))]
 fn settings_nav_item_index(groups: &[Vec<SettingsTab>], tab: SettingsTab) -> Option<usize> {
     let mut item_index = 0;
     for (group_index, group) in groups.iter().enumerate() {
@@ -66,7 +61,6 @@ fn settings_nav_item_index(groups: &[Vec<SettingsTab>], tab: SettingsTab) -> Opt
     None
 }
 
-#[cfg(not(target_family = "wasm"))]
 fn settings_nav_vertical_offset(
     scroll_handle: &ScrollHandle,
     source_index: usize,
@@ -77,13 +71,26 @@ fn settings_nav_vertical_offset(
     Some(f32::from(source_bounds.origin.y - target_bounds.origin.y))
 }
 
-#[cfg(not(target_family = "wasm"))]
-impl SettingsSurfaceView {
+pub(super) struct SearchPanel<'a> {
+    pub query: &'a str,
+    pub input: Option<AnyElement>,
+    pub results: Vec<&'a SettingsSearchResult>,
+}
+
+pub(super) struct Sidebar<'a, T> {
+    pub state: &'a NavigationState,
+    pub owner: WeakEntity<T>,
+    pub active_tab: SettingsTab,
+    pub dispatch: Rc<dyn Fn(SettingsSurfaceRequest, &mut Window, &mut App)>,
+    pub desktop_toolbar: bool,
+}
+
+impl<T: SettingsRouteOwner> Sidebar<'_, T> {
     fn action(
         &self,
         request: impl Fn() -> SettingsSurfaceRequest + 'static,
     ) -> impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static {
-        let dispatch = self.bindings.dispatch.clone();
+        let dispatch = self.dispatch.clone();
         move |_, window, cx| {
             dispatch(request(), window, cx);
             cx.stop_propagation();
@@ -102,8 +109,21 @@ impl SettingsSurfaceView {
         flex_none: bool,
         on_click: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
     ) -> AnyElement {
-        let move_dispatch = self.bindings.dispatch.clone();
-        let leave_dispatch = self.bindings.dispatch.clone();
+        if !self.desktop_toolbar {
+            return oxideterm_gpui_ui::button::icon_button_with_tooltip(
+                &frame.tokens,
+                icon,
+                icon_size,
+                icon_color,
+                options,
+                tooltip,
+                id,
+                flex_none,
+                on_click,
+            );
+        }
+        let move_dispatch = self.dispatch.clone();
+        let leave_dispatch = self.dispatch.clone();
         let moved = tooltip.clone();
         icon_button(
             &frame.tokens,
@@ -132,14 +152,14 @@ impl SettingsSurfaceView {
         .into_any_element()
     }
 
-    pub(super) fn render_settings_nav(
+    pub(super) fn render(
         &self,
         frame: &SettingsSurfaceFrame,
-        cx: &mut Context<SettingsSurfaceView>,
+        search: Option<SearchPanel<'_>>,
     ) -> AnyElement {
         let theme = frame.tokens.ui;
-        let settings_search_open = self.settings.read(cx).settings_search_open();
-        let settings_nav_scroll = self.nav_scroll.clone();
+        let settings_search_open = search.is_some();
+        let settings_nav_scroll = self.state.nav_scroll.clone();
         let settings_nav_width = frame.tokens.metrics.settings_nav_width;
         let navigation_groups = &frame.groups;
         let mut nav = div()
@@ -220,26 +240,28 @@ impl SettingsSurfaceView {
                                 self.action(|| SettingsSurfaceRequest::ToggleSearch),
                             ),
                         )
-                        .child(self.nav_button(
-                            frame,
-                            "lucide/list-tree.svg",
-                            15.0,
-                            rgb(theme.text_muted),
-                            IconButtonOptions {
-                                hover_background: Some(rgb(theme.bg_hover)),
-                                ..IconButtonOptions::opaque_toolbar(28.0, ButtonRadius::Sm)
-                            },
-                            frame.i18n.t("settings_view.navigation_editor.open"),
-                            "settings-navigation-editor",
-                            true,
-                            self.action(|| SettingsSurfaceRequest::OpenNavigationEditor),
-                        )),
+                        .when(self.desktop_toolbar, |toolbar| {
+                            toolbar.child(self.nav_button(
+                                frame,
+                                "lucide/list-tree.svg",
+                                15.0,
+                                rgb(theme.text_muted),
+                                IconButtonOptions {
+                                    hover_background: Some(rgb(theme.bg_hover)),
+                                    ..IconButtonOptions::opaque_toolbar(28.0, ButtonRadius::Sm)
+                                },
+                                frame.i18n.t("settings_view.navigation_editor.open"),
+                                "settings-navigation-editor",
+                                true,
+                                self.action(|| SettingsSurfaceRequest::OpenNavigationEditor),
+                            ))
+                        }),
                 ),
         );
 
-        if settings_search_open {
+        if let Some(search) = search {
             return nav
-                .child(self.render_settings_search_panel(frame, cx))
+                .child(self.render_settings_search_panel(frame, search))
                 .into_any_element();
         }
 
@@ -273,7 +295,6 @@ impl SettingsSurfaceView {
                     *tab,
                     navigation_groups,
                     &settings_nav_scroll,
-                    cx,
                 ));
             }
         }
@@ -295,21 +316,20 @@ impl SettingsSurfaceView {
         .into_any_element()
     }
 
-    pub fn render_settings_nav_item(
+    fn render_settings_nav_item(
         &self,
         frame: &SettingsSurfaceFrame,
         tab: SettingsTab,
         navigation_groups: &[Vec<SettingsTab>],
         settings_nav_scroll: &ScrollHandle,
-        cx: &mut Context<SettingsSurfaceView>,
     ) -> AnyElement {
         let theme = frame.tokens.ui;
-        let active = self.settings.read(cx).route_snapshot().active_tab == tab;
+        let active = self.active_tab == tab;
         let nav_item_index = settings_nav_item_index(navigation_groups, tab);
         let navigation_groups_for_click = navigation_groups.to_vec();
         let transition_scroll_handle = settings_nav_scroll.clone();
         let tokens = frame.tokens;
-        let dispatch = self.bindings.dispatch.clone();
+        let owner = self.owner.clone();
         let selection_surface = active.then(|| {
             let surface = div()
                 .absolute()
@@ -321,7 +341,7 @@ impl SettingsSurfaceView {
             let surface = oxideterm_gpui_ui::theme_card_surface_shadow(surface, &frame.tokens);
 
             match nav_item_index {
-                Some(index) => self.nav_motion.render_vertical(
+                Some(index) => self.state.motion.render_vertical(
                     SETTINGS_NAVIGATION_ID,
                     index,
                     &frame.tokens,
@@ -331,10 +351,9 @@ impl SettingsSurfaceView {
             }
         });
         nav_row(&frame.tokens, &frame.i18n, tab, active, selection_surface)
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _, window, cx| {
-                    let active_tab = this.settings.read(cx).route_snapshot().active_tab;
+            .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+                let _ = owner.update(cx, |this, cx| {
+                    let active_tab = this.active_tab(cx);
                     if active_tab != tab
                         && let Some(source) =
                             settings_nav_item_index(&navigation_groups_for_click, active_tab)
@@ -345,27 +364,22 @@ impl SettingsSurfaceView {
                             settings_nav_vertical_offset(&transition_scroll_handle, source, target);
                         this.animate_route(SETTINGS_NAVIGATION_ID, &tokens, target, offset, cx);
                     }
-                    this.settings
-                        .update(cx, |settings, cx| settings.set_active_tab(tab, cx));
-                    dispatch(SettingsSurfaceRequest::SelectedTab(tab), window, cx);
-                    cx.stop_propagation();
-                }),
-            )
+                    this.select_tab(tab, window, cx);
+                });
+                cx.stop_propagation();
+            })
             .into_any_element()
     }
 
-    pub fn render_settings_search_panel(
+    fn render_settings_search_panel(
         &self,
         frame: &SettingsSurfaceFrame,
-        cx: &mut Context<SettingsSurfaceView>,
-    ) -> AnyElement {
-        let settings = self.settings.read(cx);
-        let query = settings.settings_search_query();
-        let input = (self.bindings.search_field)(
+        SearchPanel {
             query,
-            settings.settings_entity_focused_input() == Some(crate::SettingsInput::SettingsSearch),
-            cx,
-        );
+            input,
+            results,
+        }: SearchPanel<'_>,
+    ) -> AnyElement {
         // The navigation surface already owns its image tint.
         let search_input = div()
             .w_full()
@@ -396,15 +410,7 @@ impl SettingsSurfaceView {
                     self.action(|| SettingsSurfaceRequest::ClearSearch),
                 ))
             });
-        let cached = self.search_filter.results(&frame.i18n);
-        let results = cached
-            .iter()
-            .filter(|result| {
-                result.section != SettingsSectionId::KnowledgeDocuments
-                    || (self.bindings.knowledge_available)(cx)
-            })
-            .collect::<Vec<_>>();
-        let result_scroll = self.search_scroll.clone();
+        let result_scroll = self.state.search_scroll.clone();
         let mut result_list = div()
             .id("settings-search-results-scroll")
             .size_full()

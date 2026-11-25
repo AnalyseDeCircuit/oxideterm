@@ -20,6 +20,99 @@ use oxideterm_settings_model::{
     ThemeEditorSection, app_ui_colors_to_colors, editor_terminal_theme, terminal_theme_to_colors,
 };
 
+pub(super) fn ai_providers_view(
+    owner: &Entity<PageState>,
+    picker: &Entity<SettingsThemePicker>,
+    cx: &mut Context<PortableSettingsSurface>,
+) -> Entity<crate::ai::providers::AiProviderSettingsView> {
+    use crate::ai::{
+        confirm::AiSettingsConfirmIntent,
+        providers::{AiProviderBindings, AiProviderRequest, AiProviderSettingsView},
+    };
+    let controls_owner = owner.downgrade();
+    let controls_picker = picker.downgrade();
+    let status_owner = owner.downgrade();
+    let req_owner = owner.downgrade();
+    cx.new(|cx| {
+        let view_weak: WeakEntity<AiProviderSettingsView> = cx.weak_entity();
+        AiProviderSettingsView::new(AiProviderBindings {
+            controls: Rc::new(move |cx| {
+                let entity = controls_owner.upgrade()?;
+                let state = entity.read(cx);
+                Some(state.controls(
+                    &state.tokens_cache,
+                    window_dispatch(controls_owner.clone(), controls_picker.clone()),
+                ))
+            }),
+            status: Rc::new(move |id, cx| {
+                let has_key = status_owner
+                    .upgrade()
+                    .is_some_and(|s| s.read(cx).ai_api_keys.contains_key(id));
+                (has_key, false)
+            }),
+            request: Rc::new(move |req, cx| {
+                let view_weak = view_weak.clone();
+                let _ = req_owner.update(cx, |s, cx| match req {
+                    AiProviderRequest::Edit(edit) => {
+                        edit(&mut s.settings);
+                        s.changed(cx);
+                    }
+                    AiProviderRequest::SaveKey { index, provider_id } => {
+                        if s.fields.active == Some(SettingsInput::AiProviderApiKey(index)) {
+                            s.fields.blur();
+                        }
+                        if let Some(key) = s.ai_api_key_drafts.remove(&index)
+                            && !key.trim().is_empty()
+                        {
+                            s.ai_api_keys.insert(provider_id, key);
+                            s.changed(cx);
+                        }
+                    }
+                    AiProviderRequest::ClearModelDraft(SettingsInput::AiProviderNewModel(
+                        index,
+                    )) => {
+                        if s.fields.active == Some(SettingsInput::AiProviderNewModel(index)) {
+                            s.fields.blur();
+                        }
+                        s.ai_new_model_drafts.remove(&index);
+                        cx.notify();
+                    }
+                    AiProviderRequest::Confirm(intent, _) => match intent {
+                        AiSettingsConfirmIntent::Enable => {
+                            crate::options::set_ai_enabled(&mut s.settings, true);
+                            s.changed(cx);
+                        }
+                        AiSettingsConfirmIntent::RemoveProviderKey { provider_id } => {
+                            s.ai_api_keys.remove(&provider_id);
+                            s.changed(cx);
+                        }
+                        AiSettingsConfirmIntent::RemoveProvider { provider_id } => {
+                            s.ai_api_keys.remove(&provider_id);
+                            if let Some(index) = s.settings.ai.providers.iter().position(|p| {
+                                oxideterm_ai::provider_view(p)
+                                    .is_some_and(|view| view.id == provider_id)
+                            }) {
+                                oxideterm_ai::remove_provider_at(
+                                    &mut s.settings.ai.providers,
+                                    &mut s.settings.ai.active_provider_id,
+                                    &mut s.settings.ai.active_model,
+                                    index,
+                                );
+                            }
+                            let _ =
+                                view_weak.update(cx, |v, cx| v.remove_provider(&provider_id, cx));
+                            s.changed(cx);
+                        }
+                    },
+                    AiProviderRequest::RefreshModels(_)
+                    | AiProviderRequest::LoadKeyStatus(_)
+                    | AiProviderRequest::ClearModelDraft(_) => {}
+                });
+            }),
+        })
+    })
+}
+
 pub(super) fn theme_picker(
     owner: &Entity<PageState>,
     cx: &mut Context<PortableSettingsSurface>,
@@ -101,6 +194,10 @@ pub(super) fn window_dispatch(
                     s.move_slider(f32::from(event.position.x), system_dark(window), cx)
                 }
                 FinishSlider => s.slider = None,
+                ConfirmAiEnable => {
+                    crate::options::set_ai_enabled(&mut s.settings, true);
+                    s.changed(cx);
+                }
                 _ => {}
             }
         });
@@ -206,6 +303,7 @@ impl PageState {
                 dark,
             ),
             AppearanceAction::Corner(style) => self.settings.appearance.corner_style = style,
+            AppearanceAction::Icon(variant) => self.settings.appearance.app_icon = variant,
             AppearanceAction::ZenModeKeepTabbar(keep) => {
                 self.settings.appearance.zen_mode_keep_tabbar = keep
             }

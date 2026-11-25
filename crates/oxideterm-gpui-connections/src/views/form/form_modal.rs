@@ -761,14 +761,18 @@ impl ConnectionFormView {
                                         })
                                         .when(ble_mode, |content| {
                                             #[cfg(target_family = "wasm")]
-                                            {content}
+                                            {
+                                                content.child(self.render_web_ble_form_branch(cx))
+                                            }
                                             #[cfg(not(target_family = "wasm"))]
-                                            {content.child(self.render_ble_form_branch(
-                                                form.active_drawer,
-                                                studio_layout,
-                                                window,
-                                                cx,
-                                            ))}
+                                            {
+                                                content.child(self.render_ble_form_branch(
+                                                    form.active_drawer,
+                                                    studio_layout,
+                                                    window,
+                                                    cx,
+                                                ))
+                                            }
                                         })
                                         .when(telnet_mode, |content| {
                                             content.child(self.render_telnet_form_branch(

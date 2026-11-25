@@ -12,21 +12,19 @@ use gpui::{
     AnyElement, App, Context, Entity, EventEmitter, FocusHandle, KeyDownEvent, MouseButton, Render,
     ScrollHandle, Subscription, Window, WindowAppearance, div, prelude::*, px, rgb,
 };
-use oxideterm_gpui_ui::{
-    select::{OverlayAnchor, SelectAnchorId},
-    virtual_list::tauri_virtual_list,
-};
+use oxideterm_gpui_ui::select::{OverlayAnchor, SelectAnchorId};
 use oxideterm_i18n::{I18n, Locale};
 use oxideterm_settings::{Language, PersistedSettings};
 use oxideterm_settings_model::{
-    AiSettingsPage, SettingsDynamicSectionCounts, SettingsSectionId, ThemeEditorState,
-    settings_tab_sections,
+    AiSettingsPage, SETTINGS_SECTION_HEADER_ITEM_COUNT, SettingsDynamicSectionCounts,
+    SettingsNavigationLayout, SettingsSectionId, ThemeEditorState, settings_tab_sections,
 };
 use oxideterm_theme::ThemeTokens;
 
 use super::{
-    SettingsSectionList, SettingsSurfaceFrame, nav, page_header,
-    search_filter::SettingsSearchFilter,
+    NavigationState, SettingsRouteOwner, SettingsSectionList, SettingsSurfaceFrame,
+    SettingsSurfaceRequest, TERMINAL_PAGE_SWITCHER, nav, page_switcher,
+    search_filter::SettingsSearchFilter, settings_content, settings_layout,
 };
 use crate::{
     SettingsInput, SettingsRouteState, SettingsSearchResult, SettingsSelect,
@@ -53,6 +51,7 @@ pub struct PortableSettingsChanged;
 pub struct PortableSettingsSurface {
     state: Entity<PageState>,
     picker: Entity<SettingsThemePicker>,
+    ai_providers: Entity<crate::ai::providers::AiProviderSettingsView>,
     _observe: Subscription,
     _edits: Subscription,
 }
@@ -67,13 +66,18 @@ fn supported(tab: SettingsTab, section: SettingsSectionId) -> bool {
             section,
             GeneralLanguage | GeneralExternalConnectionUris | GeneralWindowBehavior
         ),
+        SettingsTab::Portable => section == PortableRuntime,
         SettingsTab::Connections => section == ConnectionsKnownHosts,
+        SettingsTab::Privilege => section == PrivilegeCredentials,
         SettingsTab::Network => matches!(section, NetworkSharedProxy | NetworkRouting),
         SettingsTab::Help => matches!(
             section,
             HelpVersion | HelpDiagnostics | HelpTechStack | HelpResources | HelpSafety | HelpLegal
         ),
-        SettingsTab::Appearance => matches!(section, AppearanceTheme | AppearanceLayout),
+        SettingsTab::Appearance => matches!(
+            section,
+            AppearanceTheme | AppearanceLayout | AppearanceEffects | AppearanceAppIcon
+        ),
         SettingsTab::Terminal => matches!(
             section,
             TerminalPageSwitcher
@@ -85,21 +89,56 @@ fn supported(tab: SettingsTab, section: SettingsSectionId) -> bool {
                 | TerminalInputClipboard
                 | TerminalInputMouseLinks
                 | TerminalInputKeyboard
+                | TerminalLocalShell
+                | TerminalLocalShellProfile
+                | TerminalLocalPrivilegeCredentials
+                | TerminalTransferInBand
+                | TerminalTransferXmodem
+                | TerminalCommandBarControls
+                | TerminalCommandBarFocusHandoff
+                | TerminalCommandBarQuickCommands
+                | TerminalAwarenessControls
+                | TerminalAwarenessShellIntegration
+                | TerminalAwarenessTriggers
+                | TerminalLoggingSession
+                | TerminalHighlightSelection
+                | TerminalHighlightSemantic
+                | TerminalHighlightRules
         ),
         SettingsTab::Sftp => matches!(section, SftpOpening | SftpPerformance | SftpConflict),
         SettingsTab::Ide => matches!(
             section,
             IdeEditing | IdeTypography | IdeAgent | IdeAgentPrivacy
         ),
+        SettingsTab::Ai => matches!(
+            section,
+            AiPageSwitcher
+                | AiGeneralSettings
+                | AiGeneralPrivacy
+                | AiProvidersSettings
+                | AiContextControls
+                | AiContextSystemPrompt
+                | AiContextMemory
+                | AiContextModelWindows
+                | AiToolsToolUse
+                | AiToolsWebSearch
+                | AiToolsAgents
+                | AiToolsSkills
+                | AiToolsMcpServers
+        ),
+        SettingsTab::Knowledge => {
+            matches!(section, KnowledgeCollections | KnowledgeEmbeddingConfig)
+        }
         SettingsTab::Keybindings => matches!(section, KeybindingsToolbar | KeybindingsScope(_)),
-        _ => false,
     }
 }
 
 struct PageState {
     settings: PersistedSettings,
+    tokens_cache: ThemeTokens,
     catalog: Vec<ActionDefinition>,
     route: SettingsRouteState,
+    navigation: NavigationState,
     list: SettingsSectionList,
     target: Cell<Option<SettingsSectionId>>,
     query: String,
@@ -117,12 +156,21 @@ struct PageState {
     editor_scroll: ScrollHandle,
     known_hosts: host::KnownHosts,
     probe: host::ProxyProbe,
+    ai_api_keys: HashMap<String, zeroize::Zeroizing<String>>,
+    ai_api_key_drafts: HashMap<usize, zeroize::Zeroizing<String>>,
+    ai_new_model_drafts: HashMap<usize, String>,
+    ai_tool_policy_expanded: bool,
     document: Option<(
         bool,
         oxideterm_gpui_markdown::MarkdownVirtualListScrollHandle,
     )>,
     shortcuts: KeybindingState,
     reset_open: bool,
+    app_icon_picker: Option<(
+        &'static [oxideterm_settings::AppIconVariant],
+        f32,
+        fn(oxideterm_settings::AppIconVariant) -> gpui::ImageSource,
+    )>,
     i18n: I18n,
 }
 
@@ -132,11 +180,14 @@ impl PortableSettingsSurface {
         actions: Vec<ActionDefinition>,
         cx: &mut Context<Self>,
     ) -> Self {
+        let initial_tokens = pages::tokens(&settings, true);
         let state = cx.new(|cx| PageState {
             i18n: I18n::new(locale(settings.general.language)),
+            tokens_cache: initial_tokens,
             settings,
             catalog: actions,
             route: SettingsRouteState::default(),
+            navigation: Default::default(),
             list: Default::default(),
             target: Cell::new(None),
             query: String::new(),
@@ -156,11 +207,17 @@ impl PortableSettingsSurface {
             editor_scroll: ScrollHandle::new(),
             known_hosts: Default::default(),
             probe: Default::default(),
+            ai_api_keys: Default::default(),
+            ai_api_key_drafts: Default::default(),
+            ai_new_model_drafts: Default::default(),
+            ai_tool_policy_expanded: false,
             document: None,
             shortcuts: Default::default(),
             reset_open: false,
+            app_icon_picker: None,
         });
         let picker = actions::theme_picker(&state, cx);
+        let ai_providers = actions::ai_providers_view(&state, &picker, cx);
         Self {
             _observe: cx.observe(&state, |_, _, cx| cx.notify()),
             _edits: cx.subscribe(&state, |_, _, _: &PortableSettingsChanged, cx| {
@@ -168,11 +225,21 @@ impl PortableSettingsSurface {
             }),
             state,
             picker,
+            ai_providers,
         }
     }
 
     pub fn settings<'a>(&self, cx: &'a App) -> &'a PersistedSettings {
         &self.state.read(cx).settings
+    }
+
+    /// Returns the in-memory session API key configured for an AI provider, if any.
+    pub fn provider_api_key(
+        &self,
+        provider_id: &str,
+        cx: &App,
+    ) -> Option<zeroize::Zeroizing<String>> {
+        self.state.read(cx).ai_api_keys.get(provider_id).cloned()
     }
 
     /// Resolve the same palette and language for surfaces mounted outside settings.
@@ -191,6 +258,19 @@ impl PortableSettingsSurface {
     pub fn open_section(&self, tab: SettingsTab, cx: &mut App) {
         self.state
             .update(cx, |state, cx| state.navigate(tab, None, cx));
+    }
+
+    pub fn set_app_icon_picker(
+        &self,
+        variants: &'static [oxideterm_settings::AppIconVariant],
+        size: f32,
+        source: fn(oxideterm_settings::AppIconVariant) -> gpui::ImageSource,
+        cx: &mut App,
+    ) {
+        self.state.update(cx, |state, cx| {
+            state.app_icon_picker = Some((variants, size, source));
+            cx.notify();
+        });
     }
 }
 
@@ -287,7 +367,7 @@ impl PageState {
         let route = self.route.route_snapshot();
         let counts = SettingsDynamicSectionCounts {
             terminal_page: route.terminal_page,
-            ai_page: AiSettingsPage::General,
+            ai_page: route.ai_page,
             visible_keybinding_scope_count: if route.active_tab == SettingsTab::Keybindings {
                 crate::keybinding_page::scope_count(&self.catalog, &self.shortcuts, |a| {
                     a.label
@@ -310,10 +390,24 @@ impl PageState {
             }
             sections
         };
-        let tabs = SettingsTab::all()
+        let layout = SettingsNavigationLayout::from_persisted_groups(
+            &self.settings.settings_navigation.groups,
+        );
+        let groups = layout
+            .groups()
             .iter()
-            .copied()
-            .filter(|&tab| sections_for(tab).into_iter().any(|s| supported(tab, s)))
+            .filter_map(|group| {
+                let tabs: Vec<_> = group
+                    .iter()
+                    .copied()
+                    .filter(|&tab| {
+                        sections_for(tab)
+                            .into_iter()
+                            .any(|section| supported(tab, section))
+                    })
+                    .collect();
+                (!tabs.is_empty()).then_some(tabs)
+            })
             .collect();
         let sections: Vec<_> = sections_for(route.active_tab)
             .into_iter()
@@ -394,6 +488,32 @@ impl PageState {
                                 .hash(&mut h);
                         }
                     }
+                    Some(SettingsSectionId::AiProvidersSettings) => {
+                        self.settings.ai.enabled.hash(&mut h);
+                        self.settings.ai.providers.len().hash(&mut h);
+                        self.settings.ai.active_provider_id.hash(&mut h);
+                        self.ai_api_keys.len().hash(&mut h);
+                    }
+                    Some(SettingsSectionId::AiGeneralSettings) => {
+                        self.settings.ai.enabled.hash(&mut h);
+                    }
+                    Some(SettingsSectionId::AiToolsToolUse) => {
+                        self.settings.ai.enabled.hash(&mut h);
+                        self.settings.ai.tool_use.enabled.hash(&mut h);
+                        self.ai_tool_policy_expanded.hash(&mut h);
+                    }
+                    Some(
+                        SettingsSectionId::AiContextControls
+                        | SettingsSectionId::AiContextSystemPrompt
+                        | SettingsSectionId::AiContextMemory
+                        | SettingsSectionId::AiContextModelWindows
+                        | SettingsSectionId::AiToolsWebSearch
+                        | SettingsSectionId::AiToolsAgents
+                        | SettingsSectionId::AiToolsSkills
+                        | SettingsSectionId::AiToolsMcpServers,
+                    ) => {
+                        self.settings.ai.enabled.hash(&mut h);
+                    }
                     _ => {}
                 }
                 h.finish()
@@ -410,18 +530,62 @@ impl PageState {
                 ui_font: oxideterm_gpui_ui::typography::tauri_ui_font_family(
                     &self.settings.appearance.ui_font_family,
                 ),
-                divider: rgb(tokens.ui.border),
-                groups: vec![tabs],
+                divider: gpui::rgba((tokens.ui.border << 8) | 0x66),
+                groups,
             },
             sections,
         )
     }
 }
 
+impl SettingsRouteOwner for PageState {
+    fn navigation_mut(&mut self) -> &mut NavigationState {
+        &mut self.navigation
+    }
+
+    fn active_tab(&self, _: &App) -> SettingsTab {
+        self.route.route_snapshot().active_tab
+    }
+
+    fn select_tab(&mut self, tab: SettingsTab, _: &mut Window, cx: &mut Context<Self>) {
+        self.navigate(tab, None, cx);
+    }
+}
+
+impl PageState {
+    fn navigation_request(&mut self, request: SettingsSurfaceRequest, cx: &mut Context<Self>) {
+        match request {
+            SettingsSurfaceRequest::ToggleSearch | SettingsSurfaceRequest::ClearSearch => {
+                let open =
+                    !self.search_open || matches!(request, SettingsSurfaceRequest::ClearSearch);
+                self.fields.blur();
+                self.query.clear();
+                self.search.apply(String::new());
+                self.search_open = open;
+                if open {
+                    self.focus_input(SettingsInput::SettingsSearch);
+                }
+            }
+            SettingsSurfaceRequest::SearchResult(result) => {
+                return self.navigate(result.tab, Some(&result), cx);
+            }
+            SettingsSurfaceRequest::SelectedTab(tab) => return self.navigate(tab, None, cx),
+            SettingsSurfaceRequest::OpenNavigationEditor | SettingsSurfaceRequest::Tooltip(..) => {
+                unreachable!("desktop toolbar actions use host bindings")
+            }
+        }
+        cx.notify();
+    }
+}
+
 impl Render for PortableSettingsSurface {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let state = self.state.read(cx);
         let dark = system_dark(window);
+        let refreshed_tokens = pages::tokens(&self.state.read(cx).settings, dark);
+        self.state.update(cx, |s, _| {
+            s.tokens_cache = refreshed_tokens;
+        });
+        let state = self.state.read(cx);
         let (frame, sections) = state.frame(dark);
         let tab = state.route.route_snapshot().active_tab;
         state.list.sync(tab, frame.counts, &frame.signatures);
@@ -429,60 +593,137 @@ impl Render for PortableSettingsSurface {
             && let Some(index) = sections.iter().position(|s| *s == target)
         {
             state.list.state().scroll_to(gpui::ListOffset {
-                item_ix: index + 1,
+                item_ix: index + SETTINGS_SECTION_HEADER_ITEM_COUNT,
                 offset_in_item: px(0.0),
             });
         }
         let tokens = frame.tokens;
         let dispatch = actions::window_dispatch(self.state.downgrade(), self.picker.downgrade());
-        let nav = self.navigation(&frame, dispatch.clone(), cx);
+        let cached;
+        let search = if state.search_open {
+            let controls = state.controls(&tokens, dispatch.clone());
+            let input = controls.navigation_search_field(
+                SettingsImeSource::frame(state, SettingsInput::SettingsSearch, &state.query, cx),
+                dispatch.clone(),
+            );
+            cached = state.search.results(&frame.i18n);
+            Some(nav::SearchPanel {
+                query: &state.query,
+                input: Some(input),
+                results: cached.iter().collect(),
+            })
+        } else {
+            None
+        };
+        let owner = self.state.downgrade();
+        let nav = nav::Sidebar {
+            state: &state.navigation,
+            owner: owner.clone(),
+            active_tab: tab,
+            desktop_toolbar: false,
+            dispatch: Rc::new(move |request, _, cx| {
+                let _ = owner.update(cx, |s, cx| s.navigation_request(request, cx));
+            }),
+        }
+        .render(&frame, search);
         let list = state.list.state().clone();
         let owner = self.state.clone();
         let focus = state.focus.clone();
         let ime = state.fields.active.is_some();
         let ui_font = frame.ui_font.clone();
-        let rows = tauri_virtual_list(list, SettingsSectionList::spec(tab), {
-            let dispatch = dispatch.clone();
-            move |index, _, cx| {
-                let pad = px(tokens.metrics.settings_content_padding);
-                let row = if index == 0 {
-                    page_header(
-                        &frame,
-                        tab,
-                        &|s, _, _| Some(div().child(s).into_any_element()),
-                        cx,
+        let has_background = frame.has_background;
+        let scroll_owner = self.state.downgrade();
+        let section_dispatch = dispatch.clone();
+        let ai_providers = self.ai_providers.clone();
+        let content = settings_content(
+            frame,
+            tab,
+            list,
+            move |index| sections.get(index).copied(),
+            |s, _, _| Some(div().child(s).into_any_element()),
+            move |cx| {
+                let _ = scroll_owner.update(cx, |s, cx| {
+                    s.anchors.clear();
+                    if s.select.take().is_some() {
+                        cx.notify();
+                    }
+                });
+            },
+            move |frame, section, cx| {
+                if section == SettingsSectionId::TerminalPageSwitcher {
+                    let state = owner.read(cx);
+                    let route = state.route.route_snapshot();
+                    page_switcher(
+                        &state.navigation,
+                        frame,
+                        TERMINAL_PAGE_SWITCHER,
+                        &[
+                            TerminalSettingsPage::Display,
+                            TerminalSettingsPage::Input,
+                            TerminalSettingsPage::Local,
+                            TerminalSettingsPage::Transfer,
+                            TerminalSettingsPage::CommandBar,
+                            TerminalSettingsPage::Awareness,
+                            TerminalSettingsPage::Logging,
+                            TerminalSettingsPage::Highlight,
+                        ],
+                        route.terminal_page,
+                        route.previous_terminal_page,
+                        TerminalSettingsPage::label_key,
+                        |s: &mut PageState, page, cx| {
+                            s.fields.blur();
+                            s.select = None;
+                            let changed = s.route.set_terminal_page(page);
+                            cx.notify();
+                            changed
+                        },
+                        &owner.downgrade(),
                     )
+                } else if section == SettingsSectionId::AiPageSwitcher {
+                    let state = owner.read(cx);
+                    let route = state.route.route_snapshot();
+                    page_switcher(
+                        &state.navigation,
+                        frame,
+                        "settings-ai-page-switcher",
+                        &[
+                            AiSettingsPage::General,
+                            AiSettingsPage::Providers,
+                            AiSettingsPage::Context,
+                            AiSettingsPage::Tools,
+                        ],
+                        route.ai_page,
+                        route.previous_ai_page,
+                        AiSettingsPage::label_key,
+                        |s: &mut PageState, page, cx| {
+                            s.fields.blur();
+                            s.select = None;
+                            let changed = s.route.set_ai_page(page);
+                            cx.notify();
+                            changed
+                        },
+                        &owner.downgrade(),
+                    )
+                } else if section == SettingsSectionId::AiProvidersSettings {
+                    ai_providers.clone().into_any_element()
                 } else {
                     pages::render_section(
                         &owner,
-                        &tokens,
+                        &frame.tokens,
                         dark,
-                        sections[index - 1],
-                        dispatch.clone(),
+                        section,
+                        section_dispatch.clone(),
                         cx,
                     )
-                };
-                div()
-                    .w_full()
-                    .min_w_0()
-                    .px(pad)
-                    .pb(px(tokens.metrics.settings_page_gap))
-                    .when(index == 0, |row| row.pt(pad))
-                    .child(row)
-                    .into_any_element()
-            }
-        });
+                }
+            },
+        );
         let owner = self.state.clone();
         let picker = self.picker.clone();
-        let root = div()
+        let root = settings_layout(&tokens, has_background, nav, content)
             .id("portable-settings")
-            .size_full()
-            .relative()
-            .flex()
             .min_h_0()
             .font_family(ui_font)
-            .bg(rgb(tokens.ui.bg))
-            .text_color(rgb(tokens.ui.text))
             .track_focus(&focus)
             .capture_any_mouse_down({
                 let focus = focus.clone();
@@ -503,27 +744,7 @@ impl Render for PortableSettingsSurface {
             .on_mouse_up(MouseButton::Left, {
                 let state = self.state.clone();
                 move |_, _, cx| state.update(cx, |s, _| s.slider = None)
-            })
-            .child(nav)
-            .child(
-                div()
-                    .id("portable-settings-content")
-                    .flex_1()
-                    .min_w_0()
-                    .min_h_0()
-                    .on_scroll({
-                        let owner = self.state.clone();
-                        move |_, _, cx| {
-                            owner.update(cx, |s, cx| {
-                                s.anchors.clear();
-                                if s.select.take().is_some() {
-                                    cx.notify();
-                                }
-                            })
-                        }
-                    })
-                    .child(rows),
-            );
+            });
         let overlays = self.overlays(&tokens, dispatch, cx);
         root.children(overlays).when(ime, |root| {
             let owner = self.state.clone();
@@ -542,97 +763,5 @@ impl Render for PortableSettingsSurface {
                 .inset_0(),
             )
         })
-    }
-}
-
-impl PortableSettingsSurface {
-    fn navigation(
-        &self,
-        frame: &SettingsSurfaceFrame,
-        dispatch: crate::components::SettingsWindowDispatch,
-        cx: &App,
-    ) -> AnyElement {
-        let state = self.state.read(cx);
-        let controls = state.controls(&frame.tokens, dispatch.clone());
-        let field = controls.navigation_search_field(
-            SettingsImeSource::frame(state, SettingsInput::SettingsSearch, &state.query, cx),
-            dispatch,
-        );
-        let mut nav = div()
-            .id("portable-settings-nav")
-            .w(px(frame.tokens.metrics.settings_nav_width))
-            .h_full()
-            .flex_none()
-            .overflow_y_scroll()
-            .bg(rgb(frame.tokens.ui.bg_panel))
-            .p_2()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .child(
-                div()
-                    .text_color(rgb(frame.tokens.ui.text_heading))
-                    .child(frame.i18n.t("settings_view.title")),
-            )
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .border_1()
-                    .border_color(rgb(frame.tokens.ui.border))
-                    .rounded(px(frame.tokens.radii.md))
-                    .px_2()
-                    .h(px(32.0))
-                    .child(nav::render_icon(
-                        "lucide/search.svg",
-                        15.0,
-                        rgb(frame.tokens.ui.text_muted),
-                    ))
-                    .child(field),
-            );
-        if !state.query.trim().is_empty() && state.search_open {
-            let results = state.search.results(&state.i18n);
-            if results.is_empty() {
-                nav = nav.child(frame.i18n.t("settings_view.search.no_results"));
-            }
-            for result in results.iter().cloned() {
-                let owner = self.state.clone();
-                nav = nav.child(
-                    div()
-                        .cursor_pointer()
-                        .p_2()
-                        .child(result.label.clone())
-                        .child(
-                            div()
-                                .text_size(px(frame.tokens.metrics.ui_text_xs))
-                                .text_color(rgb(frame.tokens.ui.text_muted))
-                                .child(result.breadcrumb.clone()),
-                        )
-                        .on_mouse_down(MouseButton::Left, move |_, _, cx| {
-                            owner.update(cx, |s, cx| s.navigate(result.tab, Some(&result), cx));
-                        }),
-                );
-            }
-        } else {
-            for &tab in frame.groups.iter().flatten() {
-                let active = state.route.route_snapshot().active_tab == tab;
-                let owner = self.state.clone();
-                let selected = active.then(|| {
-                    div()
-                        .absolute()
-                        .inset_0()
-                        .rounded(px(frame.tokens.radii.md))
-                        .bg(rgb(frame.tokens.ui.bg_active))
-                        .into_any_element()
-                });
-                nav = nav.child(
-                    nav::nav_row(&frame.tokens, &frame.i18n, tab, active, selected)
-                        .on_mouse_down(MouseButton::Left, move |_, _, cx| {
-                            owner.update(cx, |s, cx| s.navigate(tab, None, cx))
-                        }),
-                );
-            }
-        }
-        nav.into_any_element()
     }
 }

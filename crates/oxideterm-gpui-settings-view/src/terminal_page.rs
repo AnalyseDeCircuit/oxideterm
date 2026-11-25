@@ -1,7 +1,6 @@
 use gpui::{
     AnyElement, App, MouseButton, MouseDownEvent, MouseMoveEvent, div, prelude::*, px, rgb,
 };
-#[cfg(not(target_family = "wasm"))]
 use oxideterm_gpui_ui::button::{
     ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, ToolbarButtonOptions, toolbar_button,
 };
@@ -12,7 +11,6 @@ use oxideterm_gpui_ui::{
 use oxideterm_settings::PersistedSettings;
 use oxideterm_settings_model::SettingsSectionId;
 
-#[cfg(not(target_family = "wasm"))]
 use crate::components::SettingsCalloutTone;
 use crate::{
     SettingsInput, SettingsSelect, SettingsSlider,
@@ -58,11 +56,8 @@ pub enum TerminalSettingsSection {
     Clipboard,
     MouseLinks,
     Keyboard,
-    #[cfg(not(target_family = "wasm"))]
     InBandTransfer,
-    #[cfg(not(target_family = "wasm"))]
     Xmodem,
-    #[cfg(not(target_family = "wasm"))]
     SessionLogging {
         default_directory: String,
     },
@@ -324,7 +319,6 @@ impl SettingsControls<'_> {
                 settings,
                 cx,
             ),
-            #[cfg(not(target_family = "wasm"))]
             TerminalSettingsSection::InBandTransfer => self.settings_card(
                 "settings_view.terminal.in_band_transfer.title",
                 "",
@@ -375,7 +369,6 @@ impl SettingsControls<'_> {
                     self.in_band_transfer_runtime_note(),
                 ],
             ),
-            #[cfg(not(target_family = "wasm"))]
             TerminalSettingsSection::Xmodem => self.settings_card(
                 "settings_view.terminal.xmodem.title",
                 "",
@@ -388,7 +381,6 @@ impl SettingsControls<'_> {
                     cx,
                 )],
             ),
-            #[cfg(not(target_family = "wasm"))]
             TerminalSettingsSection::SessionLogging { default_directory } => {
                 let configured_directory = settings
                     .terminal
@@ -761,7 +753,6 @@ impl SettingsControls<'_> {
         )
     }
 
-    #[cfg(not(target_family = "wasm"))]
     fn in_band_transfer_number_row(
         &self,
         label_key: &str,
@@ -779,7 +770,6 @@ impl SettingsControls<'_> {
         )
     }
 
-    #[cfg(not(target_family = "wasm"))]
     fn in_band_transfer_runtime_note(&self) -> AnyElement {
         self.settings_callout(
             SettingsCalloutTone::Warning,
@@ -793,7 +783,6 @@ impl SettingsControls<'_> {
                 .into_any_element(),
         )
     }
-    #[cfg(not(target_family = "wasm"))]
     fn session_log_directory_button(
         &self,
         label: &'static str,

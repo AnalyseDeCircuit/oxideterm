@@ -17,10 +17,12 @@ serde.workspace = true
 serde_json.workspace = true
 js-sys.workspace = true
 url.workspace = true
+uuid.workspace = true
 oxideterm-settings-model = { path = "../oxideterm-settings-model" }
 wasm-bindgen.workspace = true
+wasm-bindgen-futures.workspace = true
 zeroize.workspace = true
-web-sys = { version = "=0.3.107", features = ["Window", "Location", "Navigator", "WebSocket", "MessageEvent", "Event", "UrlSearchParams"] }
+web-sys = { version = "=0.3.107", features = ["Window", "Location", "Navigator", "WebSocket", "MessageEvent", "Event", "UrlSearchParams", "Request", "RequestInit", "RequestMode", "Response", "Headers", "ReadableStream", "ReadableStreamDefaultReader"] }
 oxideterm-gpui-platform = { path = "../oxideterm-gpui-platform" }
 oxideterm-gpui-shell = { path = "../oxideterm-gpui-shell" }
 oxideterm-gpui-ui = { path = "../oxideterm-gpui-ui" }
@@ -36,6 +38,7 @@ oxideterm-gpui-sftp = { path = "../oxideterm-gpui-sftp" }
 oxideterm-gpui-ide = { path = "../oxideterm-gpui-ide" }
 oxideterm-gpui-host-tools = { path = "../oxideterm-gpui-host-tools" }
 oxideterm-gpui-ai = { path = "../oxideterm-gpui-ai" }
+oxideterm-gpui-markdown = { path = "../oxideterm-gpui-markdown" }
 oxideterm-ai = { path = "../oxideterm-ai" }
 oxideterm-ai-tasks = { path = "../oxideterm-ai-tasks" }
 oxideterm-theme = { path = "../oxideterm-theme" }

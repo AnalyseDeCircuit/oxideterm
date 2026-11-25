@@ -9,12 +9,12 @@ use std::{
     hash::{Hash, Hasher},
 };
 
-#[cfg(not(target_family = "wasm"))]
 use oxideterm_ai::{
-    AiProviderView, ContextWindowSource, ProviderModelRefresh, model_context_window_info,
+    AiProviderView, McpAuthHeaderMode, McpTransport,
     provider_views as ai_provider_views_from_values,
 };
-use oxideterm_ai::{McpAuthHeaderMode, McpTransport};
+#[cfg(not(target_family = "wasm"))]
+use oxideterm_ai::{ContextWindowSource, ProviderModelRefresh, model_context_window_info};
 use oxideterm_settings::{
     AI_TOOL_CANCEL_BACKGROUND_TASK, AI_TOOL_CONFIGURE_CLOUD_SYNC, AI_TOOL_CONTROL_HOST_TOOL,
     AI_TOOL_CREATE_BACKGROUND_TASK, AI_TOOL_GET_BACKGROUND_TASK, AI_TOOL_GET_CLOUD_SYNC_STATE,
@@ -29,7 +29,6 @@ use oxideterm_settings::{
 };
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-#[cfg(not(target_family = "wasm"))]
 pub fn ai_provider_views(settings: &PersistedSettings) -> Vec<AiProviderView> {
     ai_provider_views_from_values(&settings.ai.providers)
 }
@@ -547,7 +546,6 @@ pub fn ai_provider_model_row_signature(
     hasher.finish()
 }
 
-#[cfg(not(target_family = "wasm"))]
 pub fn ai_provider_card_signature(
     provider: &AiProviderView,
     expanded: bool,

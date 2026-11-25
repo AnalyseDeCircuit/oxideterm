@@ -36,6 +36,10 @@ pub use resources::*;
 pub use runtime::*;
 #[cfg(not(target_family = "wasm"))]
 pub use scheduler::{AgentPermit, DEFAULT_AGENT_CONCURRENCY, MAX_AGENT_CONCURRENCY};
+#[cfg(target_family = "wasm")]
+pub const DEFAULT_AGENT_CONCURRENCY: usize = 2;
+#[cfg(target_family = "wasm")]
+pub const MAX_AGENT_CONCURRENCY: usize = 4;
 pub use tools::{CHILD_AGENT_TOOLS, PARENT_AGENT_TOOLS, agent_tool_definitions, is_agent_tool};
 
 #[cfg(test)]

@@ -29,10 +29,6 @@ pub struct Tools {
     pub quick: TerminalQuickCommandsState,
 }
 impl Tools {
-    pub fn forwards_sidebar(&self, t: &ThemeTokens, i: &I18n) -> AnyElement {
-        self.forwards.sidebar(&self.rules.rules, t, i)
-    }
-
     pub fn new(
         demo: bool,
         t: ThemeTokens,
@@ -69,6 +65,7 @@ impl Tools {
                 frame: Rc::new(move |cx| {
                     read.read_with(cx, |h, cx| {
                         let settings = h.settings.read(cx).settings(cx).clone();
+                        let app_icon = settings.appearance.app_icon;
                         OnboardingFrame {
                             tokens: h.tokens,
                             preview_tokens: h.tokens,
@@ -80,7 +77,7 @@ impl Tools {
                             has_background: false,
                             system_dark: true,
                             edit_scheme: h.tools.edit_dark,
-                            app_icon_source: "icons/oxide-mark.svg".into(),
+                            app_icon_source: crate::icon::app_icon_source(app_icon),
                             ui_font_family: "IBM Plex Sans".into(),
                             mono_font_family: "Lilex".into(),
                             animation_options: animation_options()

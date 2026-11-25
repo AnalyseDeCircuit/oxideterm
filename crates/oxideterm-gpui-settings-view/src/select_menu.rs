@@ -740,6 +740,176 @@ impl<S: CoreSelectOwner> CoreSelectMenu<'_, S> {
                 }
                 Some(popup)
             }
+            (SettingsTab::Terminal, SettingsSelect::SshLatencyInterval) => {
+                let mut popup = select_overlay_popup(&self.tokens, width);
+                for seconds in [5, 10, 15, 30, 60] {
+                    popup = popup.child(select_option_action(
+                        select_option(
+                            &self.tokens,
+                            seconds.to_string(),
+                            seconds == settings.terminal.command_bar.ssh_latency_interval_secs,
+                        ),
+                        false,
+                        false,
+                        self.action(move |this, _event, _window, cx| {
+                            this.send(SelectMenuRequest::Close, _window, cx);
+                            this.send(
+                                SelectMenuRequest::Edit(Box::new(move |settings| {
+                                    settings.terminal.command_bar.ssh_latency_interval_secs =
+                                        seconds
+                                })),
+                                _window,
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        }),
+                    ));
+                }
+                Some(popup)
+            }
+            (SettingsTab::Terminal, SettingsSelect::TerminalSessionLogFileMode) => {
+                let mut popup = select_overlay_popup(&self.tokens, width);
+                for &mode in terminal_session_log_file_mode_options() {
+                    popup = popup.child(select_option_action(
+                        select_option(
+                            &self.tokens,
+                            terminal_session_log_file_mode_label(mode, &self.i18n),
+                            mode == settings.terminal.session_log.file_mode,
+                        ),
+                        false,
+                        false,
+                        self.action(move |this, _event, _window, cx| {
+                            this.send(SelectMenuRequest::Close, _window, cx);
+                            this.send(
+                                SelectMenuRequest::Edit(Box::new(move |settings| {
+                                    settings.terminal.session_log.file_mode = mode
+                                })),
+                                _window,
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        }),
+                    ));
+                }
+                Some(popup)
+            }
+            (SettingsTab::Terminal, SettingsSelect::XmodemBlockSize) => {
+                let mut popup = select_overlay_popup(&self.tokens, width);
+                for size in [
+                    oxideterm_settings::XmodemBlockSize::Bytes128,
+                    oxideterm_settings::XmodemBlockSize::Bytes1024,
+                ] {
+                    popup = popup.child(select_option_action(
+                        select_option(
+                            &self.tokens,
+                            xmodem_block_size_label(size, &self.i18n),
+                            size == settings.terminal.xmodem_block_size,
+                        ),
+                        false,
+                        false,
+                        self.action(move |this, _event, _window, cx| {
+                            this.send(SelectMenuRequest::Close, _window, cx);
+                            this.send(
+                                SelectMenuRequest::Edit(Box::new(move |settings| {
+                                    settings.terminal.xmodem_block_size = size
+                                })),
+                                _window,
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        }),
+                    ));
+                }
+                Some(popup)
+            }
+            (SettingsTab::Terminal, SettingsSelect::RemoteShellIntegrationMode) => {
+                let mut popup = select_overlay_popup(&self.tokens, width);
+                for mode in [
+                    oxideterm_settings::RemoteShellIntegrationMode::Ask,
+                    oxideterm_settings::RemoteShellIntegrationMode::Enabled,
+                    oxideterm_settings::RemoteShellIntegrationMode::Disabled,
+                ] {
+                    popup = popup.child(select_option_action(
+                        select_option(
+                            &self.tokens,
+                            remote_shell_integration_mode_label(mode, &self.i18n),
+                            mode == settings.terminal.remote_shell_integration_mode,
+                        ),
+                        false,
+                        false,
+                        self.action(move |this, _event, _window, cx| {
+                            this.send(SelectMenuRequest::Close, _window, cx);
+                            this.send(
+                                SelectMenuRequest::Edit(Box::new(move |settings| {
+                                    settings.terminal.remote_shell_integration_mode = mode
+                                })),
+                                _window,
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        }),
+                    ));
+                }
+                Some(popup)
+            }
+            (SettingsTab::Terminal, SettingsSelect::TerminalSemanticScheme) => {
+                let mut popup = select_overlay_popup(&self.tokens, width);
+                for &scheme in terminal_semantic_scheme_options() {
+                    popup = popup.child(select_option_action(
+                        select_option(
+                            &self.tokens,
+                            terminal_semantic_scheme_label(scheme, &self.i18n),
+                            settings.terminal.semantic_custom_scheme.is_none()
+                                && scheme == settings.terminal.semantic_scheme,
+                        ),
+                        false,
+                        false,
+                        self.action(move |this, _event, _window, cx| {
+                            this.send(SelectMenuRequest::Close, _window, cx);
+                            this.send(
+                                SelectMenuRequest::Edit(Box::new(move |settings| {
+                                    settings.terminal.semantic_scheme = scheme;
+                                    settings.terminal.semantic_custom_scheme = None;
+                                })),
+                                _window,
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        }),
+                    ));
+                }
+                Some(popup)
+            }
+            (SettingsTab::Ide | SettingsTab::Ai, SettingsSelect::IdeAgentMode) => {
+                let mut popup = select_overlay_popup(&self.tokens, width);
+                for mode in [
+                    oxideterm_settings::IdeAgentMode::Disabled,
+                    oxideterm_settings::IdeAgentMode::Enabled,
+                    oxideterm_settings::IdeAgentMode::Ask,
+                ] {
+                    popup = popup.child(select_option_action(
+                        select_option(
+                            &self.tokens,
+                            ide_agent_label(mode, &self.i18n),
+                            mode == settings.ide.agent_mode,
+                        ),
+                        false,
+                        false,
+                        self.action(move |this, _event, _window, cx| {
+                            this.send(SelectMenuRequest::Close, _window, cx);
+                            this.send(
+                                SelectMenuRequest::Edit(Box::new(move |settings| {
+                                    settings.ide.agent_mode = mode
+                                })),
+                                _window,
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        }),
+                    ));
+                }
+                Some(popup)
+            }
             _ => self.network_or_update_menu(active_tab, open_select, width),
         }?;
         Some(overlay_content_boundary(popup).into_any_element())
