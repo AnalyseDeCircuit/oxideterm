@@ -889,7 +889,8 @@ impl SftpBrowserView {
             })
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
+                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                    window.focus(&this.focus_handle, cx);
                     this.sftp_view().update(cx, |sftp, cx| {
                         let mut changed = false;
                         if sftp.active_pane != pane {
@@ -901,9 +902,6 @@ impl SftpBrowserView {
                                 SftpPane::Local => {
                                     if !sftp.editing_local_path {
                                         sftp.editing_local_path = true;
-                                        changed = true;
-                                    }
-                                    if sftp.local_path_input != sftp.local_path {
                                         sftp.local_path_input.clone_from(&sftp.local_path);
                                         changed = true;
                                     }
@@ -911,9 +909,6 @@ impl SftpBrowserView {
                                 SftpPane::Remote => {
                                     if !sftp.editing_remote_path {
                                         sftp.editing_remote_path = true;
-                                        changed = true;
-                                    }
-                                    if sftp.remote_path_input != sftp.remote_path {
                                         sftp.remote_path_input.clone_from(&sftp.remote_path);
                                         changed = true;
                                     }
@@ -1248,7 +1243,8 @@ impl SftpBrowserView {
             })
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
+                cx.listener(move |this, _event, window, cx| {
+                    window.focus(&this.focus_handle, cx);
                     this.sftp_view().update(cx, |sftp, cx| {
                         let mut changed = false;
                         if sftp.active_pane != pane {

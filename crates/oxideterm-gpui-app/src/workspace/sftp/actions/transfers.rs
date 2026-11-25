@@ -9,6 +9,12 @@ impl WorkspaceApp {
             // SCP cannot browse, so first place keyboard focus in the existing
             // remote path field and let the user provide one exact file path.
             self.start_sftp_path_edit(SftpPane::Remote, cx);
+            self.push_sftp_toast(
+                self.i18n.t("sftp.scp.enter_remote_file_path_error"),
+                None,
+                TerminalNoticeVariant::Default,
+                cx,
+            );
             return;
         }
         let Some(remote_id) = self.visible_sftp_remote_id(cx) else {

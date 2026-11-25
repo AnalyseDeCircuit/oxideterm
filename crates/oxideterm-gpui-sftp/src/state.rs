@@ -553,6 +553,7 @@ pub struct SftpWorkspaceEntity {
     pub(crate) preview_editor_retry_task: Option<Task<()>>,
     pub transfers: Vec<SftpTransferItem>,
     pub(crate) feature_views: SftpViews,
+    pub(crate) ime_overrides: HashMap<SftpInput, SftpDialogIme>,
     pub(crate) transfer_batches: HashMap<u64, SftpTransferBatch>,
     pub incomplete_transfers: Vec<StoredTransferProgress>,
     pub incomplete_load_inflight: bool,
@@ -693,6 +694,7 @@ impl SftpWorkspaceEntity {
             preview_editor_retry_task: None,
             transfers: Vec::new(),
             feature_views: SftpViews::default(),
+            ime_overrides: HashMap::new(),
             transfer_batches: HashMap::new(),
             incomplete_transfers: Vec::new(),
             incomplete_load_inflight: false,
@@ -842,13 +844,18 @@ impl SftpWorkspaceEntity {
         true
     }
 
-    pub fn refresh_ime(&self, input: SftpInput, ime: SftpDialogIme, cx: &mut Context<Self>) {
-        if input == SftpInput::DialogValue {
-            if let Some(view) = &self.feature_views.dialog {
-                view.update(cx, |view, cx| view.refresh_ime(ime, cx));
-            }
-        } else if let Some(view) = &self.feature_views.browser {
-            view.update(cx, |view, cx| view.refresh_ime(input, ime, cx));
+    pub fn refresh_ime(&mut self, input: SftpInput, ime: SftpDialogIme, cx: &mut Context<Self>) {
+        self.ime_overrides.insert(input, ime);
+        // Notify the owning view by EntityId instead of calling `view.update` so
+        // pointer/focus events dispatched from inside SftpBrowserView or SftpDialogView
+        // never re-entrantly lease the same view entity.
+        let target = if input == SftpInput::DialogValue {
+            self.feature_views.dialog.as_ref().map(Entity::entity_id)
+        } else {
+            self.feature_views.browser.as_ref().map(Entity::entity_id)
+        };
+        if let Some(entity_id) = target {
+            gpui::App::notify(cx, entity_id);
         }
     }
 

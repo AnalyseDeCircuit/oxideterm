@@ -39,8 +39,9 @@ impl SftpBrowserView {
                     .child(self.render_sftp_text_button(
                         self.i18n.t("sftp.scp.download_path"),
                         false,
-                        cx.listener(|this, _event, _window, cx| {
-                            this.send(SftpBrowserRequest::QuickDownload, None, cx);
+                        cx.listener(|this, _event, window, cx| {
+                            window.focus(&this.focus_handle, cx);
+                            this.send(SftpBrowserRequest::QuickDownload, Some(window), cx);
                             cx.stop_propagation();
                             cx.notify();
                         }),

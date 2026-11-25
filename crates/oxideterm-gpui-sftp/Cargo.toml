@@ -51,3 +51,6 @@ objc2-av-foundation = "0.3.2"
 objc2-av-kit = "0.3.2"
 objc2-foundation = "0.3.2"
 raw-window-handle.workspace = true
+
+[target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }

@@ -141,6 +141,9 @@ impl SftpDialogView {
         frame: SftpDialogFrame,
         cx: &mut App,
     ) -> AnyElement {
+        source.update(cx, |state, _| {
+            state.ime_overrides.remove(&SftpInput::DialogValue);
+        });
         if let Some(view) = source.read(cx).feature_views.dialog.clone() {
             view.update(cx, |view, cx| view.configure(frame, cx));
             return view.into_any_element();
@@ -166,11 +169,6 @@ impl SftpDialogView {
 
     fn configure(&mut self, frame: SftpDialogFrame, cx: &mut Context<Self>) {
         self.frame = frame;
-        cx.notify();
-    }
-
-    pub(crate) fn refresh_ime(&mut self, ime: SftpDialogIme, cx: &mut Context<Self>) {
-        self.frame.ime = ime;
         cx.notify();
     }
 
@@ -265,48 +263,58 @@ impl SftpDialogView {
         focused: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let ime = &self.ime;
-        let control = text_input_with_viewport_and_content_align(
-            &self.tokens,
-            TextInputView {
-                value,
-                placeholder: self.i18n.t(placeholder_key),
-                focused,
-                caret_visible: ime.caret_visible,
-                secret: false,
-                selected_all: false,
-                selected_range: ime.selected_range.clone(),
-                marked_text: ime.marked_text.as_deref(),
-            },
-            TextInputContentAlign::Start,
-            &ime.viewport,
-            ime.active_offset,
-        )
-        .flex_1()
-        .min_w(px(0.0))
-        .h_full()
-        .px(px(0.0))
-        .border_0()
-        .bg(rgba(0x00000000))
-        .text_size(px(self.sftp_ui_metrics().text_xs))
-        .cursor(CursorStyle::IBeam)
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(|this, event: &MouseDownEvent, window, cx| {
-                this.sftp_view().update(cx, |state, cx| {
-                    if state.set_input_focus(Some(SftpInput::DialogValue), cx) {
-                        cx.notify();
-                    }
-                });
-                this.send(SftpDialogRequest::InputPressed(event.clone()), window, cx);
-                cx.stop_propagation();
-            }),
-        )
-        .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
-            this.send(SftpDialogRequest::InputDragged(event.clone()), window, cx);
-        }));
-        let update = ime.update_anchor.clone();
-        text_input_anchor_probe(ime.anchor_id, control, move |anchor, _, _| update(anchor))
+        let source = self.sftp_view();
+        let (control, anchor_id, update) = {
+            let state = source.read(cx);
+            let ime = state
+                .ime_overrides
+                .get(&SftpInput::DialogValue)
+                .unwrap_or(&self.ime);
+            let control = text_input_with_viewport_and_content_align(
+                &self.tokens,
+                TextInputView {
+                    value,
+                    placeholder: self.i18n.t(placeholder_key),
+                    focused,
+                    caret_visible: ime.caret_visible,
+                    secret: false,
+                    selected_all: false,
+                    selected_range: ime.selected_range.clone(),
+                    marked_text: ime.marked_text.as_deref(),
+                },
+                TextInputContentAlign::Start,
+                &ime.viewport,
+                ime.active_offset,
+            );
+            (control, ime.anchor_id, ime.update_anchor.clone())
+        };
+        let press_dispatch = self.dispatch.clone();
+        let drag_dispatch = self.dispatch.clone();
+        let control = control
+            .flex_1()
+            .min_w(px(0.0))
+            .h_full()
+            .px(px(0.0))
+            .border_0()
+            .bg(rgba(0x00000000))
+            .text_size(px(self.sftp_ui_metrics().text_xs))
+            .cursor(CursorStyle::IBeam)
+            .on_mouse_down(
+                MouseButton::Left,
+                move |event: &MouseDownEvent, window, cx| {
+                    source.update(cx, |state, cx| {
+                        if state.set_input_focus(Some(SftpInput::DialogValue), cx) {
+                            cx.notify();
+                        }
+                    });
+                    (press_dispatch)(SftpDialogRequest::InputPressed(event.clone()), window, cx);
+                    cx.stop_propagation();
+                },
+            )
+            .on_mouse_move(move |event: &MouseMoveEvent, window, cx| {
+                (drag_dispatch)(SftpDialogRequest::InputDragged(event.clone()), window, cx);
+            });
+        text_input_anchor_probe(anchor_id, control, move |anchor, _, _| update(anchor))
             .into_any_element()
     }
 

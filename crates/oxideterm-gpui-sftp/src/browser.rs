@@ -150,6 +150,11 @@ impl SftpBrowserView {
         frame: SftpBrowserFrame,
         cx: &mut App,
     ) -> AnyElement {
+        source.update(cx, |state, _| {
+            state
+                .ime_overrides
+                .retain(|input, _| *input == SftpInput::DialogValue);
+        });
         if let Some(view) = source.read(cx).feature_views.browser.clone() {
             view.update(cx, |view, cx| view.configure(frame, cx));
             return view.into_any_element();
@@ -176,16 +181,6 @@ impl SftpBrowserView {
 
     fn configure(&mut self, frame: SftpBrowserFrame, cx: &mut Context<Self>) {
         self.frame = frame;
-        cx.notify();
-    }
-
-    pub(crate) fn refresh_ime(
-        &mut self,
-        input: SftpInput,
-        ime: SftpDialogIme,
-        cx: &mut Context<Self>,
-    ) {
-        self.frame.ime.insert(input, ime);
         cx.notify();
     }
 
@@ -429,58 +424,65 @@ impl SftpBrowserView {
         focused: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let ime = &self.ime[&input];
-        let control = text_input_with_viewport_and_content_align(
-            &self.tokens,
-            TextInputView {
-                value,
-                placeholder: self.i18n.t(placeholder_key),
-                focused,
-                caret_visible: ime.caret_visible,
-                secret: false,
-                selected_all: false,
-                selected_range: ime.selected_range.clone(),
-                marked_text: ime.marked_text.as_deref(),
-            },
-            TextInputContentAlign::Start,
-            &ime.viewport,
-            ime.active_offset,
-        )
-        .flex_1()
-        .min_w(px(0.0))
-        .h_full()
-        .px(px(0.0))
-        .border_0()
-        .bg(rgba(0x00000000))
-        .text_size(px(self.sftp_ui_metrics().text_xs))
-        .cursor(CursorStyle::IBeam)
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                this.sftp_view().update(cx, |state, cx| {
-                    if let Some(pane) = pane {
-                        state.active_pane = pane;
-                    }
-                    state.set_input_focus(Some(input), cx);
-                    cx.notify();
-                });
-                this.send(
-                    SftpBrowserRequest::InputPressed(input, event.clone()),
+        let source = self.sftp_view();
+        let (control, anchor_id, update) = {
+            let state = source.read(cx);
+            let ime = state.ime_overrides.get(&input).unwrap_or(&self.ime[&input]);
+            let control = text_input_with_viewport_and_content_align(
+                &self.tokens,
+                TextInputView {
+                    value,
+                    placeholder: self.i18n.t(placeholder_key),
+                    focused,
+                    caret_visible: ime.caret_visible,
+                    secret: false,
+                    selected_all: false,
+                    selected_range: ime.selected_range.clone(),
+                    marked_text: ime.marked_text.as_deref(),
+                },
+                TextInputContentAlign::Start,
+                &ime.viewport,
+                ime.active_offset,
+            );
+            (control, ime.anchor_id, ime.update_anchor.clone())
+        };
+        let press_dispatch = self.dispatch.clone();
+        let drag_dispatch = self.dispatch.clone();
+        let control = control
+            .flex_1()
+            .min_w(px(0.0))
+            .h_full()
+            .px(px(0.0))
+            .border_0()
+            .bg(rgba(0x00000000))
+            .text_size(px(self.sftp_ui_metrics().text_xs))
+            .cursor(CursorStyle::IBeam)
+            .on_mouse_down(
+                MouseButton::Left,
+                move |event: &MouseDownEvent, window, cx| {
+                    source.update(cx, |state, cx| {
+                        if let Some(pane) = pane {
+                            state.active_pane = pane;
+                        }
+                        state.set_input_focus(Some(input), cx);
+                        cx.notify();
+                    });
+                    (press_dispatch)(
+                        SftpBrowserRequest::InputPressed(input, event.clone()),
+                        Some(window),
+                        cx,
+                    );
+                    cx.stop_propagation();
+                },
+            )
+            .on_mouse_move(move |event: &MouseMoveEvent, window, cx| {
+                (drag_dispatch)(
+                    SftpBrowserRequest::InputDragged(event.clone()),
                     Some(window),
                     cx,
                 );
-                cx.stop_propagation();
-            }),
-        )
-        .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
-            this.send(
-                SftpBrowserRequest::InputDragged(event.clone()),
-                Some(window),
-                cx,
-            );
-        }));
-        let update = ime.update_anchor.clone();
-        text_input_anchor_probe(ime.anchor_id, control, move |anchor, _, _| update(anchor))
+            });
+        text_input_anchor_probe(anchor_id, control, move |anchor, _, _| update(anchor))
             .into_any_element()
     }
 
@@ -906,4 +908,168 @@ pub(crate) fn render_lucide_icon(icon: LucideIcon, size: f32, color: Rgba) -> An
         .size(px(size))
         .text_color(color)
         .into_any_element()
+}
+
+#[cfg(all(test, not(target_family = "wasm")))]
+mod tests {
+    use super::*;
+    use oxideterm_gpui_editor::EditorSearchLabels;
+    use oxideterm_gpui_markdown::{MarkdownCodeBlockActions, MarkdownOptions};
+    use oxideterm_gpui_ui::text_input::{TextInputAnchorId, TextInputViewport};
+    use std::path::PathBuf;
+
+    fn test_ime(id: u64, selected_range: Option<std::ops::Range<usize>>) -> SftpDialogIme {
+        SftpDialogIme {
+            anchor_id: TextInputAnchorId(id),
+            viewport: TextInputViewport::default(),
+            caret_visible: true,
+            selected_range,
+            active_offset: Some(0),
+            marked_text: None,
+            update_anchor: Rc::new(|_| {}),
+        }
+    }
+
+    fn browser_frame(bookmarks: Entity<SftpBookmarks>, cx: &mut gpui::App) -> SftpBrowserFrame {
+        SftpBrowserFrame {
+            sidebar: false,
+            sidebar_target: None,
+            sidebar_open: None,
+            active_sftp_tab: true,
+            embedded_sftp_pinned: false,
+            has_background: false,
+            remote_title: "remote".into(),
+            pair_primary_title: None,
+            terminal_directory: None,
+            reveal_terminal_key: None,
+            can_sync_terminal: false,
+            tree_enabled: false,
+            bookmarks,
+            bookmark_remote_key: None,
+            tokens: ThemeTokens::from_builtin(oxideterm_theme::DEFAULT_THEME),
+            i18n: I18n::default(),
+            focus_handle: cx.focus_handle(),
+            mono_font: "monospace".into(),
+            ime: [
+                SftpInput::LocalPath,
+                SftpInput::RemotePath,
+                SftpInput::LocalFilter,
+                SftpInput::RemoteFilter,
+            ]
+            .into_iter()
+            .enumerate()
+            .map(|(index, input)| (input, test_ime(index as u64 + 1, None)))
+            .collect(),
+            completion_anchor: Rc::new(|_| None),
+            selectable: Rc::new(|_, _, _, _, text, _| div().child(text).into_any_element()),
+            dispatch: Rc::new(|_, _, _| {}),
+        }
+    }
+
+    fn dialog_frame() -> SftpDialogFrame {
+        SftpDialogFrame {
+            tokens: ThemeTokens::from_builtin(oxideterm_theme::DEFAULT_THEME),
+            i18n: I18n::default(),
+            markdown_options: MarkdownOptions::default(),
+            markdown_actions: MarkdownCodeBlockActions::default(),
+            editor_preferences: SftpPreviewEditorPreferences {
+                editor_font_family: "monospace".into(),
+                editor_font_weight: 400.0,
+                editor_font_fallback: None,
+                editor_font_size: 13.0,
+                editor_line_height: 1.4,
+                word_wrap: false,
+                background_active: false,
+            },
+            search_labels: EditorSearchLabels {
+                find_placeholder: String::new(),
+                insert_newline: String::new(),
+                replace_placeholder: String::new(),
+                find_next: String::new(),
+                find_previous: String::new(),
+                match_case: String::new(),
+                toggle_replace: String::new(),
+                close_search: String::new(),
+                replace_btn: String::new(),
+                replace_all_btn: String::new(),
+                use_regex: String::new(),
+                invalid_regex: String::new(),
+                no_results: String::new(),
+            },
+            mono_font: "monospace".into(),
+            ui_font: "sans-serif".into(),
+            ime: test_ime(99, None),
+            has_background: false,
+            selectable: Rc::new(|_, text, _| div().child(text).into_any_element()),
+            dispatch: Rc::new(|_, _, _| {}),
+        }
+    }
+
+    #[gpui::test]
+    fn refresh_ime_does_not_reenter_browser_or_dialog_views_and_mount_clears_overrides(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let source = cx.new(SftpWorkspaceEntity::new);
+        let bookmarks = cx.new(|_| SftpBookmarks::new(PathBuf::from("/tmp/sftp-bookmarks.json")));
+
+        let (browser, dialog) = cx.update(|cx| {
+            let _ = SftpBrowserView::mount(&source, browser_frame(bookmarks.clone(), cx), cx);
+            let _ = SftpDialogView::mount(&source, dialog_frame(), cx);
+            let state = source.read(cx);
+            (
+                state
+                    .feature_views
+                    .browser
+                    .clone()
+                    .expect("mounted browser view"),
+                state
+                    .feature_views
+                    .dialog
+                    .clone()
+                    .expect("mounted dialog view"),
+            )
+        });
+
+        // Simulate a pointer listener running while SftpBrowserView is actively leased.
+        cx.update(|cx| {
+            browser.update(cx, |_, cx| {
+                source.update(cx, |sftp, cx| {
+                    sftp.refresh_ime(SftpInput::RemoteFilter, test_ime(10, Some(0..4)), cx);
+                });
+            });
+            // Simulate a pointer listener running while SftpDialogView is actively leased.
+            dialog.update(cx, |_, cx| {
+                source.update(cx, |sftp, cx| {
+                    sftp.refresh_ime(SftpInput::DialogValue, test_ime(11, Some(0..6)), cx);
+                });
+            });
+
+            let state = source.read(cx);
+            assert_eq!(
+                state.ime_overrides[&SftpInput::RemoteFilter].selected_range,
+                Some(0..4)
+            );
+            assert_eq!(
+                state.ime_overrides[&SftpInput::DialogValue].selected_range,
+                Some(0..6)
+            );
+
+            // Re-mounting the browser clears stale browser overrides without dropping dialog overrides.
+            let _ = SftpBrowserView::mount(&source, browser_frame(bookmarks.clone(), cx), cx);
+            let state = source.read(cx);
+            assert!(!state.ime_overrides.contains_key(&SftpInput::RemoteFilter));
+            assert_eq!(
+                state.ime_overrides[&SftpInput::DialogValue].selected_range,
+                Some(0..6)
+            );
+
+            let _ = SftpDialogView::mount(&source, dialog_frame(), cx);
+            assert!(
+                !source
+                    .read(cx)
+                    .ime_overrides
+                    .contains_key(&SftpInput::DialogValue)
+            );
+        });
+    }
 }
