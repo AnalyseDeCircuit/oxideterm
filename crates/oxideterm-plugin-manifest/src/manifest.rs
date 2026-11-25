@@ -162,6 +162,14 @@ pub struct NativePluginLanguage {
     pub highlights: String,
     pub parser_sha256: String,
     pub highlights_sha256: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon_light: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon_sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon_light_sha256: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub injections: Vec<NativePluginInjectedLanguage>,
 }

@@ -109,6 +109,17 @@ pub(crate) fn install_native_plugin_package_bytes(
                     return Err("Language parser is not a WebAssembly module".into());
                 }
             }
+            if let (Some(icon), Some(checksum)) =
+                (language.icon.as_deref(), language.icon_sha256.as_deref())
+            {
+                load_verified_language_icon_bytes(&source_dir, icon, checksum)?;
+            }
+            if let (Some(icon_light), Some(checksum)) = (
+                language.icon_light.as_deref(),
+                language.icon_light_sha256.as_deref(),
+            ) {
+                load_verified_language_icon_bytes(&source_dir, icon_light, checksum)?;
+            }
         }
         let mut effective_manifest = manifest.clone();
         if let Some(catalog) = load_catalog_cache(settings_path, &[&manifest.id])? {
@@ -392,6 +403,82 @@ pub(crate) fn native_plugin_version_parts(version: &str) -> Vec<u32> {
         .split('.')
         .filter_map(|part| part.parse::<u32>().ok())
         .collect()
+}
+
+/// Maximum SVG icon size accepted for language plugins (256 KiB).
+pub const NATIVE_PLUGIN_LANGUAGE_ICON_MAX_BYTES: u64 = 256 * 1024;
+
+/// Loads a language plugin SVG icon from `root_dir` after checking path containment,
+/// file size, SHA-256 integrity, and UTF-8 `<svg>` document structure.
+pub fn load_verified_language_icon_bytes(
+    root_dir: &Path,
+    relative_path: &str,
+    expected_sha256: &str,
+) -> Result<Vec<u8>, String> {
+    use std::io::Read as _;
+
+    validation::validate_language_icon_asset(relative_path, expected_sha256)?;
+    let canonical_root = fs::canonicalize(root_dir).map_err(|error| error.to_string())?;
+    let icon_path = root_dir.join(relative_path);
+    // Reject symlinks and non-regular files so installed plugins cannot read outside their root.
+    let metadata = fs::symlink_metadata(&icon_path).map_err(|error| error.to_string())?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err("Language icon must be a regular file".into());
+    }
+    let canonical_icon = fs::canonicalize(&icon_path).map_err(|error| error.to_string())?;
+    if !canonical_icon.starts_with(&canonical_root) {
+        return Err("Language icon path escapes plugin directory".into());
+    }
+
+    let mut bytes = Vec::new();
+    fs::File::open(&canonical_icon)
+        .map_err(|error| error.to_string())?
+        .take(NATIVE_PLUGIN_LANGUAGE_ICON_MAX_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| error.to_string())?;
+    if bytes.len() as u64 > NATIVE_PLUGIN_LANGUAGE_ICON_MAX_BYTES
+        || native_plugin_sha256_hex(&bytes) != expected_sha256
+    {
+        return Err("Language icon size or checksum mismatch".into());
+    }
+    validate_svg_icon_bytes(&bytes)?;
+    Ok(bytes)
+}
+
+fn validate_svg_icon_bytes(bytes: &[u8]) -> Result<(), String> {
+    let text = std::str::from_utf8(bytes)
+        .map_err(|_| "Language icon must be valid UTF-8 SVG".to_string())?;
+    let mut rest = text.trim_start_matches('\u{feff}').trim_start();
+    loop {
+        if let Some(after) = rest.strip_prefix("<?") {
+            let Some(end) = after.find("?>") else {
+                return Err("Language icon is not a valid SVG document".into());
+            };
+            rest = after[end + 2..].trim_start();
+        } else if let Some(after) = rest.strip_prefix("<!--") {
+            let Some(end) = after.find("-->") else {
+                return Err("Language icon is not a valid SVG document".into());
+            };
+            rest = after[end + 3..].trim_start();
+        } else if rest.len() >= 9 && rest[..9].eq_ignore_ascii_case("<!doctype") {
+            let Some(end) = rest.find('>') else {
+                return Err("Language icon is not a valid SVG document".into());
+            };
+            rest = rest[end + 1..].trim_start();
+        } else {
+            break;
+        }
+    }
+    let starts_with_svg = rest.len() >= 4
+        && rest[..4].eq_ignore_ascii_case("<svg")
+        && rest
+            .as_bytes()
+            .get(4)
+            .is_some_and(|byte| byte.is_ascii_whitespace() || matches!(byte, b'>' | b'/'));
+    if !starts_with_svg {
+        return Err("Language icon root element must be <svg>".into());
+    }
+    Ok(())
 }
 
 #[allow(dead_code)]

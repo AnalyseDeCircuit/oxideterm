@@ -747,7 +747,72 @@ impl PluginWorkspaceEntity {
                 definition,
             }
         }));
+        let plugin_icons = installed
+            .iter()
+            .filter(|plugin| {
+                matches!(
+                    plugin.state,
+                    plugin_host::NativePluginState::ReadyManifestOnly
+                )
+            })
+            .filter_map(|plugin| {
+                let language = plugin.manifest.contributes.as_ref()?.language.as_ref()?;
+                let icon_path = language.icon.as_deref()?;
+                let icon_sha256 = language.icon_sha256.as_deref()?;
+                let dark_svg = match plugin_host::load_verified_language_icon_bytes(
+                    &plugin.install_dir,
+                    icon_path,
+                    icon_sha256,
+                ) {
+                    Ok(bytes) => bytes,
+                    Err(error) => {
+                        tracing::warn!(
+                            plugin_id = %plugin.manifest.id,
+                            icon = icon_path,
+                            error = %error,
+                            "Skipping unverified language plugin icon"
+                        );
+                        return None;
+                    }
+                };
+                let light_svg = match (
+                    language.icon_light.as_deref(),
+                    language.icon_light_sha256.as_deref(),
+                ) {
+                    (Some(light_path), Some(light_sha256)) => {
+                        match plugin_host::load_verified_language_icon_bytes(
+                            &plugin.install_dir,
+                            light_path,
+                            light_sha256,
+                        ) {
+                            Ok(bytes) => Some(bytes),
+                            Err(error) => {
+                                tracing::warn!(
+                                    plugin_id = %plugin.manifest.id,
+                                    icon = light_path,
+                                    error = %error,
+                                    "Skipping unverified language plugin light icon"
+                                );
+                                None
+                            }
+                        }
+                    }
+                    _ => None,
+                };
+                Some(oxideterm_gpui_ui::file_icons::PluginFileIconRegistration {
+                    plugin_id: plugin.manifest.id.clone(),
+                    extensions: language.definition.extensions.clone(),
+                    file_names: language.definition.file_names.clone(),
+                    dark_svg,
+                    light_svg,
+                })
+            })
+            .collect();
+        let icons_changed = oxideterm_gpui_ui::file_icons::set_plugin_file_icons(plugin_icons);
         oxideterm_gpui_editor::EditorLanguagePlugins::update_languages(sources, definitions, cx);
+        if icons_changed {
+            cx.refresh_windows();
+        }
     }
 
     pub(in crate::workspace) fn set_plugin_setting_value(

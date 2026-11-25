@@ -467,6 +467,220 @@ fn language_packages_validate_assets_and_follow_install_update_disable_uninstall
 }
 
 #[test]
+fn language_icon_assets_are_validated_on_install_and_verified_on_load() {
+    use std::io::Read as _;
+
+    let directory = unique_temp_dir("language-icon-assets");
+    let settings = directory.join("settings.json");
+    let package = include_bytes!("../../oxideterm-editor-syntax/tests/fixtures/elixir.zip");
+    let id = "com.oxideterm.language.elixir";
+    let dark_svg = b"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 16 16\"><circle cx=\"8\" cy=\"8\" r=\"6\"/></svg>".to_vec();
+    let light_svg = b"<?xml version=\"1.0\"?><!-- light --><svg viewBox=\"0 0 16 16\"><rect width=\"12\" height=\"12\"/></svg>".to_vec();
+    let dark_sha = install::native_plugin_sha256_hex(&dark_svg);
+    let light_sha = install::native_plugin_sha256_hex(&light_svg);
+
+    let build_package = |mutate: &dyn Fn(&mut serde_json::Value), extra_files: &[(&str, &[u8])]| {
+        let mut source = zip::ZipArchive::new(Cursor::new(package)).unwrap();
+        let mut updated = ZipWriter::new(Cursor::new(Vec::new()));
+        for index in 0..source.len() {
+            let mut entry = source.by_index(index).unwrap();
+            let mut bytes = Vec::new();
+            entry.read_to_end(&mut bytes).unwrap();
+            if entry.name() == "plugin.json" {
+                let mut manifest: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+                mutate(&mut manifest);
+                bytes = serde_json::to_vec(&manifest).unwrap();
+            }
+            updated
+                .start_file(entry.name(), SimpleFileOptions::default())
+                .unwrap();
+            updated.write_all(&bytes).unwrap();
+        }
+        for (path, bytes) in extra_files {
+            updated
+                .start_file(*path, SimpleFileOptions::default())
+                .unwrap();
+            updated.write_all(bytes).unwrap();
+        }
+        updated.finish().unwrap().into_inner()
+    };
+
+    // Missing checksum, iconLight without icon, non-SVG extension, non-SVG payload, checksum mismatch, and oversized SVG must fail install.
+    let non_svg = b"<html><body>not an svg</body></html>";
+    let non_svg_sha = install::native_plugin_sha256_hex(non_svg);
+    let oversized_svg = format!(
+        "<svg>{}</svg>",
+        "a".repeat(NATIVE_PLUGIN_LANGUAGE_ICON_MAX_BYTES as usize)
+    );
+    let oversized_sha = install::native_plugin_sha256_hex(oversized_svg.as_bytes());
+    let invalid_cases: Vec<(&str, Vec<u8>, &str)> = vec![
+        (
+            "missing iconSha256",
+            build_package(
+                &|manifest| {
+                    manifest["contributes"]["language"]["icon"] =
+                        serde_json::json!("icons/exs.svg");
+                },
+                &[("icons/exs.svg", &dark_svg)],
+            ),
+            "declared together",
+        ),
+        (
+            "iconLight without icon",
+            build_package(
+                &|manifest| {
+                    manifest["contributes"]["language"]["iconLight"] =
+                        serde_json::json!("icons/exs_light.svg");
+                    manifest["contributes"]["language"]["iconLightSha256"] =
+                        serde_json::json!(light_sha);
+                },
+                &[("icons/exs_light.svg", &light_svg)],
+            ),
+            "requires icon",
+        ),
+        (
+            "non-svg extension",
+            build_package(
+                &|manifest| {
+                    manifest["contributes"]["language"]["icon"] =
+                        serde_json::json!("icons/exs.png");
+                    manifest["contributes"]["language"]["iconSha256"] = serde_json::json!(dark_sha);
+                },
+                &[("icons/exs.png", &dark_svg)],
+            ),
+            "must be SVG",
+        ),
+        (
+            "non-svg content",
+            build_package(
+                &|manifest| {
+                    manifest["contributes"]["language"]["icon"] =
+                        serde_json::json!("icons/exs.svg");
+                    manifest["contributes"]["language"]["iconSha256"] =
+                        serde_json::json!(non_svg_sha);
+                },
+                &[("icons/exs.svg", non_svg)],
+            ),
+            "root element must be <svg>",
+        ),
+        (
+            "checksum mismatch",
+            build_package(
+                &|manifest| {
+                    manifest["contributes"]["language"]["icon"] =
+                        serde_json::json!("icons/exs.svg");
+                    manifest["contributes"]["language"]["iconSha256"] =
+                        serde_json::json!(light_sha);
+                },
+                &[("icons/exs.svg", &dark_svg)],
+            ),
+            "checksum mismatch",
+        ),
+        (
+            "oversized svg",
+            build_package(
+                &|manifest| {
+                    manifest["contributes"]["language"]["icon"] =
+                        serde_json::json!("icons/exs.svg");
+                    manifest["contributes"]["language"]["iconSha256"] =
+                        serde_json::json!(oversized_sha);
+                },
+                &[("icons/exs.svg", oversized_svg.as_bytes())],
+            ),
+            "size or checksum mismatch",
+        ),
+    ];
+    for (label, bytes, expected_error) in invalid_cases {
+        let error = NativePluginRegistry::install_managed_plugin_package(
+            &settings, id, None, &bytes, false,
+        )
+        .unwrap_err();
+        assert!(
+            error.contains(expected_error),
+            "{label}: expected {expected_error:?} in {error:?}"
+        );
+    }
+
+    let valid_package = build_package(
+        &|manifest| {
+            manifest["contributes"]["language"]["icon"] = serde_json::json!("icons/exs.svg");
+            manifest["contributes"]["language"]["iconLight"] =
+                serde_json::json!("icons/exs_light.svg");
+            manifest["contributes"]["language"]["iconSha256"] = serde_json::json!(dark_sha);
+            manifest["contributes"]["language"]["iconLightSha256"] = serde_json::json!(light_sha);
+        },
+        &[
+            ("icons/exs.svg", &dark_svg),
+            ("icons/exs_light.svg", &light_svg),
+        ],
+    );
+    NativePluginRegistry::install_managed_plugin_package(
+        &settings,
+        id,
+        None,
+        &valid_package,
+        false,
+    )
+    .unwrap();
+    let registry = NativePluginRegistry::discover(&settings);
+    let installed = &registry.plugins()[0];
+    let language = installed
+        .manifest
+        .contributes
+        .as_ref()
+        .unwrap()
+        .language
+        .as_ref()
+        .unwrap();
+    assert_eq!(
+        load_verified_language_icon_bytes(
+            &installed.install_dir,
+            language.icon.as_deref().unwrap(),
+            language.icon_sha256.as_deref().unwrap(),
+        )
+        .unwrap(),
+        dark_svg
+    );
+    assert_eq!(
+        load_verified_language_icon_bytes(
+            &installed.install_dir,
+            language.icon_light.as_deref().unwrap(),
+            language.icon_light_sha256.as_deref().unwrap(),
+        )
+        .unwrap(),
+        light_svg
+    );
+
+    // Post-install tampering on disk must be rejected before rendering.
+    fs::write(
+        installed.install_dir.join("icons/exs.svg"),
+        b"<svg><path/></svg>",
+    )
+    .unwrap();
+    assert!(
+        load_verified_language_icon_bytes(&installed.install_dir, "icons/exs.svg", &dark_sha,)
+            .unwrap_err()
+            .contains("checksum mismatch")
+    );
+
+    #[cfg(unix)]
+    {
+        let external = directory.join("outside.svg");
+        fs::write(&external, &dark_svg).unwrap();
+        let icon_file = installed.install_dir.join("icons/exs.svg");
+        fs::remove_file(&icon_file).unwrap();
+        std::os::unix::fs::symlink(&external, &icon_file).unwrap();
+        assert!(
+            load_verified_language_icon_bytes(&installed.install_dir, "icons/exs.svg", &dark_sha)
+                .unwrap_err()
+                .contains("regular file")
+        );
+    }
+
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
 fn embedded_language_assets_are_verified_before_replacing_a_package() {
     use std::io::Read as _;
     let directory = unique_temp_dir("embedded-language-assets");

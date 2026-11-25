@@ -324,6 +324,12 @@ pub(crate) fn validate_native_plugin_manifest(
             &manifest.runtime.as_ref().unwrap().entry,
             &language.parser_sha256,
         )?;
+        validate_language_icon_fields(
+            language.icon.as_deref(),
+            language.icon_sha256.as_deref(),
+            language.icon_light.as_deref(),
+            language.icon_light_sha256.as_deref(),
+        )?;
         if language.injections.len() > 8 {
             return Err("Too many embedded language grammars".into());
         }
@@ -358,7 +364,7 @@ pub(crate) fn validate_native_plugin_manifest(
     Ok(())
 }
 
-fn validate_language_asset(path: &str, checksum: &str) -> Result<(), String> {
+pub(crate) fn validate_language_asset(path: &str, checksum: &str) -> Result<(), String> {
     validate_plugin_relative_path(path)?;
     if checksum.len() != 64
         || !checksum
@@ -366,6 +372,40 @@ fn validate_language_asset(path: &str, checksum: &str) -> Result<(), String> {
             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
     {
         return Err("Language assets require lowercase SHA-256 checksums".into());
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_language_icon_asset(path: &str, checksum: &str) -> Result<(), String> {
+    validate_language_asset(path, checksum)?;
+    if !path.to_ascii_lowercase().ends_with(".svg") {
+        return Err("Language icon assets must be SVG files".into());
+    }
+    Ok(())
+}
+
+fn validate_language_icon_fields(
+    icon: Option<&str>,
+    icon_sha256: Option<&str>,
+    icon_light: Option<&str>,
+    icon_light_sha256: Option<&str>,
+) -> Result<(), String> {
+    match (icon, icon_sha256) {
+        (Some(path), Some(checksum)) => validate_language_icon_asset(path, checksum)?,
+        (None, None) => {}
+        _ => return Err("Language icon and iconSha256 must be declared together".into()),
+    }
+    match (icon_light, icon_light_sha256) {
+        (Some(path), Some(checksum)) => {
+            if icon.is_none() {
+                return Err("Language iconLight requires icon to be declared".into());
+            }
+            validate_language_icon_asset(path, checksum)?;
+        }
+        (None, None) => {}
+        _ => {
+            return Err("Language iconLight and iconLightSha256 must be declared together".into());
+        }
     }
     Ok(())
 }

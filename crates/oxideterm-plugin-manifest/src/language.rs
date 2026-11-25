@@ -28,6 +28,28 @@ mod tests {
             "parserSha256":"a".repeat(64), "highlightsSha256":"b".repeat(64)});
         let language: crate::NativePluginLanguage = serde_json::from_value(legacy.clone()).unwrap();
         assert_eq!(serde_json::to_value(language).unwrap(), legacy);
+        let with_icons = serde_json::json!({
+            "id": "exs",
+            "extensions": ["exs"],
+            "highlights": "highlights.scm",
+            "parserSha256": "a".repeat(64),
+            "highlightsSha256": "b".repeat(64),
+            "icon": "icons/exs.svg",
+            "iconLight": "icons/exs_light.svg",
+            "iconSha256": "c".repeat(64),
+            "iconLightSha256": "d".repeat(64),
+        });
+        let language_with_icons: crate::NativePluginLanguage =
+            serde_json::from_value(with_icons.clone()).unwrap();
+        assert_eq!(
+            serde_json::to_value(&language_with_icons).unwrap(),
+            with_icons
+        );
+        assert_eq!(language_with_icons.icon.as_deref(), Some("icons/exs.svg"));
+        assert_eq!(
+            language_with_icons.icon_light.as_deref(),
+            Some("icons/exs_light.svg")
+        );
         let definition = NativePluginLanguageDefinition {
             id: "custom-lang".into(),
             display_name: Some("Custom Language".into()),

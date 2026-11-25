@@ -256,6 +256,7 @@ pub(super) enum FileManagerOperationEvent {
 
 struct FileManagerSortedFilesCache {
     source_revision: u64,
+    icon_revision: u64,
     filter: String,
     sort_field: LocalSortField,
     sort_direction: LocalSortDirection,
@@ -920,8 +921,10 @@ impl FileManagerState {
     }
 
     fn sorted_files(&self) -> Arc<Vec<LocalFileEntry>> {
+        let icon_revision = oxideterm_gpui_ui::file_icons::plugin_icon_revision();
         if let Some(cache) = self.sorted_files_cache.borrow().as_ref()
             && cache.source_revision == self.source_revision
+            && cache.icon_revision == icon_revision
             && cache.filter == self.filter
             && cache.sort_field == self.sort_field
             && cache.sort_direction == self.sort_direction
@@ -943,6 +946,7 @@ impl FileManagerState {
         );
         *self.sorted_files_cache.borrow_mut() = Some(FileManagerSortedFilesCache {
             source_revision: self.source_revision,
+            icon_revision,
             filter: self.filter.clone(),
             sort_field: self.sort_field,
             sort_direction: self.sort_direction,
