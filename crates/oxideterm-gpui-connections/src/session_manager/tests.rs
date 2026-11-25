@@ -354,10 +354,47 @@ fn session_tree_projection_preserves_nested_groups_and_ungrouped_items() {
             },
         ]);
         assert_eq!(
-            session_manager_tree_rows(&items, &roots, &children, &expanded),
+            session_manager_tree_rows(&items, &roots, &children, &expanded, false),
             expected
         );
     }
+}
+
+#[test]
+fn session_tree_search_expands_matching_groups_and_drops_empty_ones() {
+    let mut connection = saved_connection_fixture(SavedAuth::Agent);
+    let items: Vec<_> = ["telnet session", "telnet session"]
+        .into_iter()
+        .map(|group| {
+            connection.group = Some(group.to_string());
+            SessionManagerDisplayItem::Connection(ConnectionInfo::from(&connection))
+        })
+        .collect();
+    let roots = vec!["telnet session".into(), "ssh".into()];
+
+    let rows = session_manager_tree_rows(&items, &roots, &HashMap::new(), &HashSet::new(), true);
+
+    // A search must surface matches even though no group is expanded, and it
+    // must not leave a header for a group whose items were filtered out.
+    assert_eq!(
+        rows,
+        vec![
+            SessionManagerTreeRow::Group {
+                path: "telnet session".into(),
+                depth: 0,
+                expanded: true,
+                has_children: true,
+            },
+            SessionManagerTreeRow::Item {
+                item_index: 0,
+                depth: 1,
+            },
+            SessionManagerTreeRow::Item {
+                item_index: 1,
+                depth: 1,
+            },
+        ]
+    );
 }
 
 #[test]

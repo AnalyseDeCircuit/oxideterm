@@ -781,12 +781,19 @@ impl CatalogView {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let (roots, children) = self.session_group_tree();
-        let expanded_groups = self.session_manager.read(cx).expanded_groups.clone();
+        let (expanded_groups, search_active) = {
+            let manager = self.session_manager.read(cx);
+            (
+                manager.expanded_groups.clone(),
+                !manager.search_query.trim().is_empty(),
+            )
+        };
         let rows = Arc::<[SessionManagerTreeRow]>::from(session_manager_tree_rows(
             &items,
             &roots,
             &children,
             &expanded_groups,
+            search_active,
         ));
         let has_rows = !rows.is_empty();
         self.set_session_manager_visible_selection_targets(
@@ -3304,6 +3311,7 @@ impl CatalogView {
             &roots,
             &children,
             &expanded_groups,
+            has_search_query,
         ));
         let has_rows = !rows.is_empty();
         self.set_session_manager_visible_selection_targets(
