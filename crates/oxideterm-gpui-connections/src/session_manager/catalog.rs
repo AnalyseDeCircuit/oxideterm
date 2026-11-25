@@ -454,6 +454,7 @@ pub(super) fn session_manager_tree_rows<T: CatalogEntry>(
     roots: &[String],
     children: &HashMap<String, Vec<String>>,
     expanded_groups: &HashSet<String>,
+    search_active: bool,
 ) -> Vec<SessionManagerTreeRow> {
     // Index direct membership once; scanning every connection for each visible
     // group makes a tree repaint quadratic as saved connections accumulate.
@@ -461,6 +462,21 @@ pub(super) fn session_manager_tree_rows<T: CatalogEntry>(
     for (index, item) in items.iter().enumerate() {
         grouped_items.entry(item.group()).or_default().push(index);
     }
+    // Items are filtered before the tree is projected, so a collapsed group
+    // would silently hide every match. While searching, collect the groups on
+    // each matching item's ancestor path: those are the only groups worth
+    // rendering, and they must ignore the saved disclosure state.
+    let matching_groups = search_active.then(|| {
+        let mut groups = HashSet::new();
+        for group in items.iter().filter_map(CatalogEntry::group) {
+            let mut path = Some(group);
+            while let Some(current) = path {
+                groups.insert(current);
+                path = current.rsplit_once('/').map(|(parent, _)| parent);
+            }
+        }
+        groups
+    });
     let mut rows = Vec::new();
     for root in roots {
         push_session_manager_tree_group_rows(
@@ -470,6 +486,7 @@ pub(super) fn session_manager_tree_rows<T: CatalogEntry>(
             &grouped_items,
             children,
             expanded_groups,
+            matching_groups.as_ref(),
         );
     }
     rows.extend(
@@ -524,18 +541,34 @@ fn push_session_manager_tree_group_rows(
     grouped_items: &HashMap<Option<&str>, Vec<usize>>,
     children: &HashMap<String, Vec<String>>,
     expanded_groups: &HashSet<String>,
+    matching_groups: Option<&HashSet<&str>>,
 ) {
+    // A search must not leave an empty group header behind: it would suggest
+    // the group still has results while every row inside it is filtered out.
+    if matching_groups
+        .as_ref()
+        .is_some_and(|groups| !groups.contains(group))
+    {
+        return;
+    }
     let group_item_indices = grouped_items
         .get(&Some(group))
         .map(Vec::as_slice)
         .unwrap_or_default();
     let child_groups = children.get(group).map(Vec::as_slice).unwrap_or_default();
-    let expanded = expanded_groups.contains(group);
+    // Matches stay reachable even when the user collapsed their group; the
+    // saved disclosure state only applies while no search is active.
+    let expanded = matching_groups.is_some() || expanded_groups.contains(group);
+    let has_visible_child = child_groups.iter().any(|child| {
+        matching_groups
+            .as_ref()
+            .is_none_or(|groups| groups.contains(child.as_str()))
+    });
     rows.push(SessionManagerTreeRow::Group {
         path: group.to_string(),
         depth,
         expanded,
-        has_children: !child_groups.is_empty() || !group_item_indices.is_empty(),
+        has_children: !group_item_indices.is_empty() || has_visible_child,
     });
     if !expanded {
         return;
@@ -549,6 +582,7 @@ fn push_session_manager_tree_group_rows(
             grouped_items,
             children,
             expanded_groups,
+            matching_groups,
         );
     }
     rows.extend(

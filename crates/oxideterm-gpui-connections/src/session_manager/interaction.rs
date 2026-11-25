@@ -57,12 +57,41 @@ pub fn close_session_menu_state(session_manager: &mut SessionManagerState) -> bo
 }
 
 impl SessionManagerState {
+    pub fn search_active(&self) -> bool {
+        !self.search_query.trim().is_empty()
+    }
+
     pub fn toggle_session_group_expanded(&mut self, group: &str, cx: &mut Context<Self>) {
+        // Matching parent groups are forced open during search; ignore toggles so
+        // clicking a group header cannot silently alter the post-search fold state.
+        if self.search_active() {
+            return;
+        }
         if self.expanded_groups.contains(group) {
             self.expanded_groups.remove(group);
         } else {
             self.expanded_groups.insert(group.to_string());
         }
+        cx.notify();
+    }
+
+    pub fn expand_all_session_groups(
+        &mut self,
+        groups: std::collections::HashSet<String>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.search_active() {
+            return;
+        }
+        self.expanded_groups = groups;
+        cx.notify();
+    }
+
+    pub fn collapse_all_session_groups(&mut self, cx: &mut Context<Self>) {
+        if self.search_active() {
+            return;
+        }
+        self.expanded_groups.clear();
         cx.notify();
     }
 

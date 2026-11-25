@@ -354,10 +354,155 @@ fn session_tree_projection_preserves_nested_groups_and_ungrouped_items() {
             },
         ]);
         assert_eq!(
-            session_manager_tree_rows(&items, &roots, &children, &expanded),
+            session_manager_tree_rows(&items, &roots, &children, &expanded, false),
             expected
         );
     }
+}
+
+#[test]
+fn session_tree_search_expands_matching_groups_and_drops_empty_ones() {
+    let mut connection = saved_connection_fixture(SavedAuth::Agent);
+    let items: Vec<_> = ["telnet session", "telnet session"]
+        .into_iter()
+        .map(|group| {
+            connection.group = Some(group.to_string());
+            SessionManagerDisplayItem::Connection(ConnectionInfo::from(&connection))
+        })
+        .collect();
+    let roots = vec!["telnet session".into(), "ssh".into()];
+
+    let rows = session_manager_tree_rows(&items, &roots, &HashMap::new(), &HashSet::new(), true);
+
+    // A search must surface matches even though no group is expanded, and it
+    // must not leave a header for a group whose items were filtered out.
+    assert_eq!(
+        rows,
+        vec![
+            SessionManagerTreeRow::Group {
+                path: "telnet session".into(),
+                depth: 0,
+                expanded: true,
+                has_children: true,
+            },
+            SessionManagerTreeRow::Item {
+                item_index: 0,
+                depth: 1,
+            },
+            SessionManagerTreeRow::Item {
+                item_index: 1,
+                depth: 1,
+            },
+        ]
+    );
+}
+
+#[gpui::test]
+fn session_tree_search_preserves_collapsed_groups_across_group_clicks_and_bulk_toggles(
+    cx: &mut gpui::TestAppContext,
+) {
+    use gpui::AppContext as _;
+
+    let mut telnet = saved_connection_fixture(SavedAuth::Agent);
+    telnet.id = "telnet-1".into();
+    telnet.name = "Router".into();
+    telnet.group = Some("telnet session".into());
+
+    let mut ssh = saved_connection_fixture(SavedAuth::Agent);
+    ssh.id = "ssh-1".into();
+    ssh.name = "Bastion".into();
+    ssh.group = Some("ssh".into());
+
+    let all_items = vec![
+        SessionManagerDisplayItem::Connection(ConnectionInfo::from(&telnet)),
+        SessionManagerDisplayItem::Connection(ConnectionInfo::from(&ssh)),
+    ];
+    let matched_items = vec![all_items[0].clone()];
+    let roots = vec!["telnet session".to_string(), "ssh".to_string()];
+    let children = HashMap::new();
+
+    // Start with "telnet session" collapsed and "ssh" expanded.
+    let manager = cx.new(|_| {
+        let mut state = SessionManagerState::default();
+        state.expanded_groups.insert("ssh".into());
+        state
+    });
+
+    // Enter search, click the collapsed group header, and trigger bulk expand/collapse.
+    manager.update(cx, |state, cx| {
+        state.search_query = "router".into();
+        state.toggle_session_group_expanded("telnet session", cx);
+        state.expand_all_session_groups(roots.iter().cloned().collect(), cx);
+        state.collapse_all_session_groups(cx);
+    });
+
+    let during_search = manager.read_with(cx, |state, _| {
+        session_manager_tree_rows(
+            &matched_items,
+            &roots,
+            &children,
+            &state.expanded_groups,
+            state.search_active(),
+        )
+    });
+    assert_eq!(
+        during_search,
+        vec![
+            SessionManagerTreeRow::Group {
+                path: "telnet session".into(),
+                depth: 0,
+                expanded: true,
+                has_children: true,
+            },
+            SessionManagerTreeRow::Item {
+                item_index: 0,
+                depth: 1,
+            },
+        ]
+    );
+
+    // Clearing search must restore the exact pre-search disclosure state.
+    manager.update(cx, |state, _| {
+        state.search_query.clear();
+    });
+    let after_clear = manager.read_with(cx, |state, _| {
+        session_manager_tree_rows(
+            &all_items,
+            &roots,
+            &children,
+            &state.expanded_groups,
+            state.search_active(),
+        )
+    });
+    assert_eq!(
+        after_clear,
+        vec![
+            SessionManagerTreeRow::Group {
+                path: "telnet session".into(),
+                depth: 0,
+                expanded: false,
+                has_children: true,
+            },
+            SessionManagerTreeRow::Group {
+                path: "ssh".into(),
+                depth: 0,
+                expanded: true,
+                has_children: true,
+            },
+            SessionManagerTreeRow::Item {
+                item_index: 1,
+                depth: 1,
+            },
+        ]
+    );
+
+    // Once search is cleared, clicking the group header toggles normally again.
+    manager.update(cx, |state, cx| {
+        state.toggle_session_group_expanded("telnet session", cx);
+    });
+    assert!(manager.read_with(cx, |state, _| {
+        state.expanded_groups.contains("telnet session")
+    }));
 }
 
 #[test]

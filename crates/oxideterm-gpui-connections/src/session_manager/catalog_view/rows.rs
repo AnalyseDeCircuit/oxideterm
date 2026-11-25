@@ -781,12 +781,19 @@ impl CatalogView {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let (roots, children) = self.session_group_tree();
-        let expanded_groups = self.session_manager.read(cx).expanded_groups.clone();
+        let (expanded_groups, search_active) = {
+            let manager = self.session_manager.read(cx);
+            (
+                manager.expanded_groups.clone(),
+                !manager.search_query.trim().is_empty(),
+            )
+        };
         let rows = Arc::<[SessionManagerTreeRow]>::from(session_manager_tree_rows(
             &items,
             &roots,
             &children,
             &expanded_groups,
+            search_active,
         ));
         let has_rows = !rows.is_empty();
         self.set_session_manager_visible_selection_targets(
@@ -906,18 +913,19 @@ impl CatalogView {
             .px_3()
             .py_1();
         if include_tree_controls {
+            let search_active = self.session_manager.read(cx).search_active();
             row = row
                 .child(self.render_tree_mode_action_button(
                     LucideIcon::ChevronDown,
                     self.i18n.t("sessionManager.views.expand_all"),
                     has_background,
+                    search_active,
                     cx.listener(|this, _event, _window, cx| {
                         let (roots, children) = this.session_group_tree();
                         let mut groups = HashSet::new();
                         collect_session_group_paths(&roots, &children, &mut groups);
                         this.session_manager.update(cx, |manager, cx| {
-                            manager.expanded_groups = groups;
-                            cx.notify();
+                            manager.expand_all_session_groups(groups, cx);
                         });
                         cx.stop_propagation();
                     }),
@@ -927,10 +935,10 @@ impl CatalogView {
                     LucideIcon::ChevronRight,
                     self.i18n.t("sessionManager.views.collapse_all"),
                     has_background,
+                    search_active,
                     cx.listener(|this, _event, _window, cx| {
                         this.session_manager.update(cx, |manager, cx| {
-                            manager.expanded_groups.clear();
-                            cx.notify();
+                            manager.collapse_all_session_groups(cx);
                         });
                         cx.stop_propagation();
                     }),
@@ -943,6 +951,7 @@ impl CatalogView {
             LucideIcon::FolderPlus,
             self.i18n.t("sessionManager.folder_tree.new_group"),
             has_background,
+            false,
             cx.listener(|this, _event, _window, cx| {
                 this.action(CatalogAction::NewGroup, None, cx);
                 cx.stop_propagation();
@@ -953,6 +962,7 @@ impl CatalogView {
             LucideIcon::FolderInput,
             self.i18n.t("settings_view.connections.ssh_config.title"),
             has_background,
+            false,
             cx.listener(|this, _event, _window, cx| {
                 this.close_session_row_menus(cx);
                 this.action(CatalogAction::OpenSshConfigImporter, None, cx);
@@ -964,6 +974,7 @@ impl CatalogView {
             LucideIcon::Download,
             self.i18n.t("settings_view.connections.importers.title"),
             has_background,
+            false,
             cx.listener(|this, _event, window, cx| {
                 this.close_session_row_menus(cx);
                 this.action(CatalogAction::OpenImporters, Some(window), cx);
@@ -978,6 +989,7 @@ impl CatalogView {
         icon: LucideIcon,
         label: String,
         has_background: bool,
+        disabled: bool,
         listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
         _cx: &mut Context<Self>,
     ) -> Div {
@@ -993,7 +1005,7 @@ impl CatalogView {
                     variant: ButtonVariant::Ghost,
                     size: ButtonSize::Sm,
                     radius: ButtonRadius::Md,
-                    disabled: false,
+                    disabled,
                 },
                 has_background,
                 show_label: true,
@@ -1182,6 +1194,7 @@ impl CatalogView {
             if sidebar { 14.0 } else { 16.0 },
             rgb(theme.warning),
         );
+        let search_active = self.session_manager.read(cx).search_active();
         div()
             .w_full()
             .min_w(px(0.0))
@@ -1189,7 +1202,7 @@ impl CatalogView {
                 row.h(px(self.session_tree_node_height()))
                     .px_2()
                     .rounded(px(radius))
-                    .cursor_pointer()
+                    .when(!search_active, |row| row.cursor_pointer())
                     .gap(px(6.0))
                     .hover(move |row| row.bg(rgb(theme.bg_hover)))
             })
@@ -1224,7 +1237,7 @@ impl CatalogView {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    if has_children {
+                    if has_children && !this.session_manager.read(cx).search_active() {
                         this.toggle_session_group_expanded(&group_id, cx);
                         cx.notify();
                     }
@@ -3304,6 +3317,7 @@ impl CatalogView {
             &roots,
             &children,
             &expanded_groups,
+            has_search_query,
         ));
         let has_rows = !rows.is_empty();
         self.set_session_manager_visible_selection_targets(

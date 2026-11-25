@@ -924,8 +924,15 @@ pub fn session_manager_tree_rows(
     roots: &[String],
     children: &HashMap<String, Vec<String>>,
     expanded_groups: &HashSet<String>,
+    search_active: bool,
 ) -> Vec<SessionManagerTreeRow> {
-    super::catalog::session_manager_tree_rows(items, roots, children, expanded_groups)
+    super::catalog::session_manager_tree_rows(
+        items,
+        roots,
+        children,
+        expanded_groups,
+        search_active,
+    )
 }
 
 pub fn session_manager_tree_visible_targets(
