@@ -159,9 +159,8 @@ impl Render for DetachedTabWindow {
                 MouseButton::Left,
                 cx.listener(|detached, _event: &MouseDownEvent, window, cx| {
                     detached.session.update(cx, |session, cx| {
-                        session.dismiss_transient_workspace_overlays_from_outside_pointer(
-                            window, cx,
-                        );
+                        session
+                            .dismiss_transient_workspace_overlays_from_outside_pointer(window, cx);
                         session.blur_text_inputs(cx);
                         session.clear_read_only_ime_selection(cx);
                     });
@@ -350,7 +349,11 @@ impl Render for DetachedTabWindow {
                             .read(cx)
                             .keybinding_recording_action_id()
                             .is_some()
-                        && session.settings_workspace.read(cx).route_snapshot().active_tab
+                        && session
+                            .settings_workspace
+                            .read(cx)
+                            .route_snapshot()
+                            .active_tab
                             == SettingsTab::Keybindings
                     {
                         session.handle_keybinding_recording_key(event, cx);

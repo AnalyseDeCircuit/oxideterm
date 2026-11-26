@@ -1622,79 +1622,79 @@ impl WorkspaceApp {
         let has_leading_items = renamable || edit_target.is_some();
         let item_height = context_menu_item_height_estimate(&self.tokens);
         let separator_height = context_menu_separator_height_estimate(&self.tokens);
-        let merge_submenu_overlay = menu
-            .merge_submenu
-            .filter(|_| has_merge_targets)
-            .map(|direction| {
-                let sub_width = oxideterm_gpui_ui::estimate_menu_width(
-                    &self.tokens,
-                    TAB_CONTEXT_SUBMENU_MIN_WIDTH,
-                    TAB_CONTEXT_SUBMENU_MAX_WIDTH,
-                    false,
-                    merge_targets.iter().map(|(_, title)| title.as_str()),
-                );
-                let sub_height = (merge_targets.len() as f32 * item_height
-                    + self.tokens.metrics.ui_menu_padding * 2.0)
-                    .min(f32::from(viewport.height) - TAB_CONTEXT_MENU_MARGIN * 2.0);
-                let rows_above = usize::from(renamable) + usize::from(edit_target.is_some());
-                let sep_above = if has_leading_items {
-                    separator_height
-                } else {
-                    0.0
-                };
-                let direction_row = match direction {
-                    SplitDirection::Horizontal => 0.0,
-                    SplitDirection::Vertical => 1.0,
-                };
-                let trigger_offset_y =
-                    rows_above as f32 * item_height + sep_above + direction_row * item_height;
-                let sub_placement = place_tab_context_submenu(
-                    placement,
-                    menu_width,
-                    trigger_offset_y,
-                    sub_width,
-                    sub_height,
-                    f32::from(viewport.width),
-                    f32::from(viewport.height),
-                    TAB_CONTEXT_MENU_MARGIN,
-                );
-                let sub_body = overlay_content_boundary(context_menu_event_boundary(
-                    div().child(
-                        context_menu_sub_content(&self.tokens)
-                            .w(px(sub_width))
-                            .id("tab-context-merge-submenu-content")
-                            .max_h(px(sub_height))
-                            .overflow_y_scroll()
-                            .children(merge_targets.into_iter().map(|(target, title)| {
-                                context_menu_item(
-                                    &self.tokens,
-                                    title,
-                                    ContextMenuItemKind::Plain,
-                                    false,
-                                    false,
-                                )
-                                .on_mouse_down(
-                                    MouseButton::Left,
-                                    cx.listener(move |this, _, window, cx| {
-                                        this.combine_tabs(
-                                            menu.tab_id,
-                                            target,
-                                            direction,
-                                            window,
-                                            cx,
-                                        );
-                                        cx.stop_propagation();
-                                    }),
-                                )
-                            })),
-                    ),
-                ));
-                anchored()
-                    .anchor(Corner::TopLeft)
-                    .position(gpui::point(px(sub_placement.x), px(sub_placement.y)))
-                    .position_mode(AnchoredPositionMode::Window)
-                    .child(sub_body)
-            });
+        let merge_submenu_overlay =
+            menu.merge_submenu
+                .filter(|_| has_merge_targets)
+                .map(|direction| {
+                    let sub_width = oxideterm_gpui_ui::estimate_menu_width(
+                        &self.tokens,
+                        TAB_CONTEXT_SUBMENU_MIN_WIDTH,
+                        TAB_CONTEXT_SUBMENU_MAX_WIDTH,
+                        false,
+                        merge_targets.iter().map(|(_, title)| title.as_str()),
+                    );
+                    let sub_height = (merge_targets.len() as f32 * item_height
+                        + self.tokens.metrics.ui_menu_padding * 2.0)
+                        .min(f32::from(viewport.height) - TAB_CONTEXT_MENU_MARGIN * 2.0);
+                    let rows_above = usize::from(renamable) + usize::from(edit_target.is_some());
+                    let sep_above = if has_leading_items {
+                        separator_height
+                    } else {
+                        0.0
+                    };
+                    let direction_row = match direction {
+                        SplitDirection::Horizontal => 0.0,
+                        SplitDirection::Vertical => 1.0,
+                    };
+                    let trigger_offset_y =
+                        rows_above as f32 * item_height + sep_above + direction_row * item_height;
+                    let sub_placement = place_tab_context_submenu(
+                        placement,
+                        menu_width,
+                        trigger_offset_y,
+                        sub_width,
+                        sub_height,
+                        f32::from(viewport.width),
+                        f32::from(viewport.height),
+                        TAB_CONTEXT_MENU_MARGIN,
+                    );
+                    let sub_body = overlay_content_boundary(context_menu_event_boundary(
+                        div().child(
+                            context_menu_sub_content(&self.tokens)
+                                .w(px(sub_width))
+                                .id("tab-context-merge-submenu-content")
+                                .max_h(px(sub_height))
+                                .overflow_y_scroll()
+                                .children(merge_targets.into_iter().map(|(target, title)| {
+                                    context_menu_item(
+                                        &self.tokens,
+                                        title,
+                                        ContextMenuItemKind::Plain,
+                                        false,
+                                        false,
+                                    )
+                                    .on_mouse_down(
+                                        MouseButton::Left,
+                                        cx.listener(move |this, _, window, cx| {
+                                            this.combine_tabs(
+                                                menu.tab_id,
+                                                target,
+                                                direction,
+                                                window,
+                                                cx,
+                                            );
+                                            cx.stop_propagation();
+                                        }),
+                                    )
+                                })),
+                        ),
+                    ));
+                    anchored()
+                        .anchor(Corner::TopLeft)
+                        .position(gpui::point(px(sub_placement.x), px(sub_placement.y)))
+                        .position_mode(AnchoredPositionMode::Window)
+                        .child(sub_body)
+                });
         let clear_merge_submenu = |id: &'static str, item: gpui::Div, cx: &mut Context<Self>| {
             let item = item.id(id);
             if has_merge_targets {
@@ -1856,19 +1856,13 @@ impl WorkspaceApp {
                                     .id(id)
                                     .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
                                         if *hovered {
-                                            this.set_tab_context_merge_submenu(
-                                                Some(direction),
-                                                cx,
-                                            );
+                                            this.set_tab_context_merge_submenu(Some(direction), cx);
                                         }
                                     }))
                                     .on_mouse_down(
                                         MouseButton::Left,
                                         cx.listener(move |this, _, _, cx| {
-                                            this.set_tab_context_merge_submenu(
-                                                Some(direction),
-                                                cx,
-                                            );
+                                            this.set_tab_context_merge_submenu(Some(direction), cx);
                                             cx.stop_propagation();
                                         }),
                                     )
@@ -2961,7 +2955,12 @@ mod tests {
                 workspace.settings_workspace.update(cx, |settings, cx| {
                     settings.open_settings_search(cx);
                     assert!(settings.focus_settings_entity_input(search_input, cx));
-                    assert!(settings.replace_settings_entity_input(search_input, None, "proxy", cx));
+                    assert!(settings.replace_settings_entity_input(
+                        search_input,
+                        None,
+                        "proxy",
+                        cx
+                    ));
                 });
             });
         });
@@ -3010,188 +3009,190 @@ mod tests {
             local_tab,
             unsaved_pane,
         ) = cx.update(|window, cx| {
-                workspace.update(cx, |workspace, cx| {
-                    let saved = workspace
-                        .connection_store
-                        .upsert(oxideterm_connections::SaveConnectionRequest {
-                            totp_credential_id: None,
-                            id: Some("saved-edge-1".to_string()),
-                            name: "Edge Host".to_string(),
+            workspace.update(cx, |workspace, cx| {
+                let saved = workspace
+                    .connection_store
+                    .upsert(oxideterm_connections::SaveConnectionRequest {
+                        totp_credential_id: None,
+                        id: Some("saved-edge-1".to_string()),
+                        name: "Edge Host".to_string(),
+                        group: None,
+                        notes: Some("Primary edge host".to_string()),
+                        host: "10.0.0.10".to_string(),
+                        port: 22,
+                        username: "ops".to_string(),
+                        auth: oxideterm_connections::SavedAuth::Agent,
+                        proxy_chain: Vec::new(),
+                        upstream_proxy: oxideterm_connections::SavedUpstreamProxyPolicy::UseGlobal,
+                        proxy_command: None,
+                        color: None,
+                        icon_background_color: None,
+                        icon: None,
+                        tags: Vec::new(),
+                        connect_timeout_seconds: 15,
+                        keep_alive_interval_seconds: 15,
+                        keep_alive_count_max: 3,
+                        agent_forwarding: false,
+                        identity_agent: None,
+                        agent_forwarding_socket: None,
+                        legacy_ssh_compatibility: false,
+                        ssh_algorithms: Default::default(),
+                        dedicated_new_terminal_connection: false,
+                        open_sftp_on_connect: false,
+                        ssh_channel_strategy: Default::default(),
+                        x11_forwarding: Default::default(),
+                        post_connect_command: None,
+                        pre_connect_command: None,
+                        terminal: Default::default(),
+                    })
+                    .expect("saved SSH connection fixture");
+                let local_profile = workspace
+                    .connection_store
+                    .upsert_local_terminal_profile(
+                        oxideterm_connections::SaveLocalTerminalProfileRequest {
+                            id: Some("local-prof-1".to_string()),
+                            name: "Dev Shell".to_string(),
                             group: None,
-                            notes: Some("Primary edge host".to_string()),
-                            host: "10.0.0.10".to_string(),
-                            port: 22,
-                            username: "ops".to_string(),
-                            auth: oxideterm_connections::SavedAuth::Agent,
-                            proxy_chain: Vec::new(),
-                            upstream_proxy: oxideterm_connections::SavedUpstreamProxyPolicy::UseGlobal,
-                            proxy_command: None,
+                            icon: None,
                             color: None,
                             icon_background_color: None,
-                            icon: None,
-                            tags: Vec::new(),
-                            connect_timeout_seconds: 15,
-                            keep_alive_interval_seconds: 15,
-                            keep_alive_count_max: 3,
-                            agent_forwarding: false,
-                            identity_agent: None,
-                            agent_forwarding_socket: None,
-                            legacy_ssh_compatibility: false,
-                            ssh_algorithms: Default::default(),
-                            dedicated_new_terminal_connection: false,
-                            open_sftp_on_connect: false,
-                            ssh_channel_strategy: Default::default(),
-                            x11_forwarding: Default::default(),
-                            post_connect_command: None,
+                            shell_id: None,
+                            cwd: None,
                             pre_connect_command: None,
-                            terminal: Default::default(),
-                        })
-                        .expect("saved SSH connection fixture");
-                    let local_profile = workspace
-                        .connection_store
-                        .upsert_local_terminal_profile(
-                            oxideterm_connections::SaveLocalTerminalProfileRequest {
-                                id: Some("local-prof-1".to_string()),
-                                name: "Dev Shell".to_string(),
-                                group: None,
-                                icon: None,
-                                color: None,
-                                icon_background_color: None,
-                                shell_id: None,
-                                cwd: None,
-                                pre_connect_command: None,
-                            },
-                        )
-                        .expect("saved local profile fixture");
-
-                    let mut make_ssh_tab =
-                        |node_name: &str,
-                         saved_connection_id: Option<String>,
-                         readiness: NodeReadiness| {
-                            let node_id = NodeId::new(node_name);
-                            let mut config = SshConfig::default();
-                            config.host = "10.0.0.10".into();
-                            config.port = 22;
-                            config.username = "ops".into();
-                            workspace.ssh_nodes.insert(
-                                node_id.clone(),
-                                WorkspaceSshNode::new(
-                                    saved_connection_id,
-                                    &config,
-                                    node_name.into(),
-                                    Vec::new(),
-                                    readiness,
-                                ),
-                            );
-                            let tab_id = workspace.alloc_tab_id(cx);
-                            let pane_id = workspace.alloc_pane_id(cx);
-                            let session_id = workspace.alloc_session_id(cx);
-                            let pane = cx.new(|cx| {
-                                TerminalPane::new_recording_playback(
-                                    80,
-                                    24,
-                                    Default::default(),
-                                    window,
-                                    cx,
-                                )
-                                .unwrap()
-                            });
-                            workspace.register_terminal_pane(pane_id, session_id, pane, window, cx);
-                            assert!(workspace.workspace_runtime.update(cx, |runtime, _| {
-                                runtime.register_ssh_terminal_session(session_id, node_id)
-                            }));
-                            workspace.insert_tab(
-                                Tab {
-                                    id: tab_id,
-                                    kind: TabKind::SshTerminal,
-                                    title: node_name.into(),
-                                    title_source: TabTitleSource::Static,
-                                    root_pane: Some(PaneNode::leaf(pane_id, session_id)),
-                                    active_pane_id: Some(pane_id),
-                                },
-                                cx,
-                            );
-                            workspace.bind_terminal_location(tab_id, pane_id, session_id, cx);
-                            (tab_id, pane_id)
-                        };
-
-                    // Disconnected saved SSH node must still remain editable.
-                    let (saved_tab, saved_pane) = make_ssh_tab(
-                        "edge-node",
-                        Some(saved.id.clone()),
-                        NodeReadiness::Disconnected,
-                    );
-                    let (unsaved_tab, unsaved_pane) =
-                        make_ssh_tab("adhoc-node", None, NodeReadiness::Ready);
-                    let (missing_tab, _) = make_ssh_tab(
-                        "deleted-node",
-                        Some("deleted-connection".to_string()),
-                        NodeReadiness::Ready,
-                    );
-
-                    // Local terminal tab backed by a saved profile.
-                    let local_tab = workspace.alloc_tab_id(cx);
-                    let local_pane = workspace.alloc_pane_id(cx);
-                    let local_session = workspace.alloc_session_id(cx);
-                    let pane = cx.new(|cx| {
-                        TerminalPane::new_recording_playback(
-                            80,
-                            24,
-                            Default::default(),
-                            window,
-                            cx,
-                        )
-                        .unwrap()
-                    });
-                    workspace.register_terminal_pane(local_pane, local_session, pane, window, cx);
-                    workspace.tab_host.update(cx, |host, _| {
-                        host.local_sessions.insert(
-                            local_session,
-                            local_sessions::LocalTerminalInstance {
-                                profile_id: Some(local_profile.id.clone()),
-                                title: "Dev Shell".to_string(),
-                                shell: None,
-                                cwd: None,
-                                remove_env: Vec::new(),
-                            },
-                        );
-                    });
-                    workspace.insert_tab(
-                        Tab {
-                            id: local_tab,
-                            kind: TabKind::LocalTerminal,
-                            title: "Dev Shell".into(),
-                            title_source: TabTitleSource::Static,
-                            root_pane: Some(PaneNode::leaf(local_pane, local_session)),
-                            active_pane_id: Some(local_pane),
                         },
-                        cx,
-                    );
-                    workspace.bind_terminal_location(local_tab, local_pane, local_session, cx);
-
-                    (
-                        saved.id,
-                        local_profile.id,
-                        saved_tab,
-                        saved_pane,
-                        unsaved_tab,
-                        missing_tab,
-                        local_tab,
-                        unsaved_pane,
                     )
-                })
-            });
+                    .expect("saved local profile fixture");
+
+                let mut make_ssh_tab =
+                    |node_name: &str,
+                     saved_connection_id: Option<String>,
+                     readiness: NodeReadiness| {
+                        let node_id = NodeId::new(node_name);
+                        let mut config = SshConfig::default();
+                        config.host = "10.0.0.10".into();
+                        config.port = 22;
+                        config.username = "ops".into();
+                        workspace.ssh_nodes.insert(
+                            node_id.clone(),
+                            WorkspaceSshNode::new(
+                                saved_connection_id,
+                                &config,
+                                node_name.into(),
+                                Vec::new(),
+                                readiness,
+                            ),
+                        );
+                        let tab_id = workspace.alloc_tab_id(cx);
+                        let pane_id = workspace.alloc_pane_id(cx);
+                        let session_id = workspace.alloc_session_id(cx);
+                        let pane = cx.new(|cx| {
+                            TerminalPane::new_recording_playback(
+                                80,
+                                24,
+                                Default::default(),
+                                window,
+                                cx,
+                            )
+                            .unwrap()
+                        });
+                        workspace.register_terminal_pane(pane_id, session_id, pane, window, cx);
+                        assert!(workspace.workspace_runtime.update(cx, |runtime, _| {
+                            runtime.register_ssh_terminal_session(session_id, node_id)
+                        }));
+                        workspace.insert_tab(
+                            Tab {
+                                id: tab_id,
+                                kind: TabKind::SshTerminal,
+                                title: node_name.into(),
+                                title_source: TabTitleSource::Static,
+                                root_pane: Some(PaneNode::leaf(pane_id, session_id)),
+                                active_pane_id: Some(pane_id),
+                            },
+                            cx,
+                        );
+                        workspace.bind_terminal_location(tab_id, pane_id, session_id, cx);
+                        (tab_id, pane_id)
+                    };
+
+                // Disconnected saved SSH node must still remain editable.
+                let (saved_tab, saved_pane) = make_ssh_tab(
+                    "edge-node",
+                    Some(saved.id.clone()),
+                    NodeReadiness::Disconnected,
+                );
+                let (unsaved_tab, unsaved_pane) =
+                    make_ssh_tab("adhoc-node", None, NodeReadiness::Ready);
+                let (missing_tab, _) = make_ssh_tab(
+                    "deleted-node",
+                    Some("deleted-connection".to_string()),
+                    NodeReadiness::Ready,
+                );
+
+                // Local terminal tab backed by a saved profile.
+                let local_tab = workspace.alloc_tab_id(cx);
+                let local_pane = workspace.alloc_pane_id(cx);
+                let local_session = workspace.alloc_session_id(cx);
+                let pane = cx.new(|cx| {
+                    TerminalPane::new_recording_playback(80, 24, Default::default(), window, cx)
+                        .unwrap()
+                });
+                workspace.register_terminal_pane(local_pane, local_session, pane, window, cx);
+                workspace.tab_host.update(cx, |host, _| {
+                    host.local_sessions.insert(
+                        local_session,
+                        local_sessions::LocalTerminalInstance {
+                            profile_id: Some(local_profile.id.clone()),
+                            title: "Dev Shell".to_string(),
+                            shell: None,
+                            cwd: None,
+                            remove_env: Vec::new(),
+                        },
+                    );
+                });
+                workspace.insert_tab(
+                    Tab {
+                        id: local_tab,
+                        kind: TabKind::LocalTerminal,
+                        title: "Dev Shell".into(),
+                        title_source: TabTitleSource::Static,
+                        root_pane: Some(PaneNode::leaf(local_pane, local_session)),
+                        active_pane_id: Some(local_pane),
+                    },
+                    cx,
+                );
+                workspace.bind_terminal_location(local_tab, local_pane, local_session, cx);
+
+                (
+                    saved.id,
+                    local_profile.id,
+                    saved_tab,
+                    saved_pane,
+                    unsaved_tab,
+                    missing_tab,
+                    local_tab,
+                    unsaved_pane,
+                )
+            })
+        });
 
         workspace.read_with(cx, |workspace, cx| {
             assert_eq!(
                 workspace.editable_saved_target_for_tab(saved_tab, cx),
                 Some(SessionManagerOpenTarget::Connection(saved_id.clone()))
             );
-            assert_eq!(workspace.editable_saved_target_for_tab(unsaved_tab, cx), None);
-            assert_eq!(workspace.editable_saved_target_for_tab(missing_tab, cx), None);
+            assert_eq!(
+                workspace.editable_saved_target_for_tab(unsaved_tab, cx),
+                None
+            );
+            assert_eq!(
+                workspace.editable_saved_target_for_tab(missing_tab, cx),
+                None
+            );
             assert_eq!(
                 workspace.editable_saved_target_for_tab(local_tab, cx),
-                Some(SessionManagerOpenTarget::LocalTerminal(local_profile_id.clone()))
+                Some(SessionManagerOpenTarget::LocalTerminal(
+                    local_profile_id.clone()
+                ))
             );
         });
 
@@ -3240,7 +3241,10 @@ mod tests {
                 workspace.tab_host.update(cx, |host, _| {
                     host.set_active_pane(Some(combined_id), unsaved_pane);
                 });
-                assert_eq!(workspace.editable_saved_target_for_tab(combined_id, cx), None);
+                assert_eq!(
+                    workspace.editable_saved_target_for_tab(combined_id, cx),
+                    None
+                );
             });
         });
     }
