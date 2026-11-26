@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use super::*;
-use crate::form_state::ConnectionFormDrawer;
 use oxideterm_gpui_ui::{Scrollbar, ScrollbarAxis, modal::rounded_shell_child_radius};
 use oxideterm_settings_model::parse_rgb24_hex;
 
@@ -134,18 +133,9 @@ pub(super) fn studio_modal_size(
 }
 
 const STUDIO_PROTOCOL_SELECTOR_ID: &str = "studio-protocol-selector";
-const STUDIO_CATEGORY_SELECTOR_ID: &str = "studio-category-selector";
 const STUDIO_PROTOCOL_ROW_GAP: f32 = 2.0;
 const STUDIO_PROTOCOL_DIVIDER_HEIGHT: f32 = 1.0;
 const STUDIO_PROTOCOL_DIVIDER_MARGIN_Y: f32 = 4.0;
-const STUDIO_CATEGORY_TAB_BAR_HEIGHT: f32 = 38.0;
-
-pub(super) struct CategoryNavItem {
-    /// `None` represents the primary General/Session page.
-    pub(super) drawer: Option<ConnectionFormDrawer>,
-    pub(super) label: String,
-    pub(super) summary: Option<String>,
-}
 
 impl ConnectionFormView {
     pub(super) fn transport_display_meta(
@@ -316,9 +306,6 @@ impl ConnectionFormView {
                 }
             }
         });
-        self.user_motion.clear(STUDIO_CATEGORY_SELECTOR_ID);
-        self.selectable_text_scroll_handle("studio-category-tabs-scroll")
-            .set_offset(point(px(0.0), px(0.0)));
         self.close_new_connection_select(cx);
         if should_refresh_ports {
             self.refresh_serial_ports(cx);
@@ -762,146 +749,6 @@ impl ConnectionFormView {
                             ),
                     ),
             )
-            .into_any_element()
-    }
-
-    /// Horizontal underline section tab bar at the top of the right content pane.
-    pub(super) fn render_studio_category_tabs(
-        &self,
-        items: Vec<CategoryNavItem>,
-        active_drawer: Option<ConnectionFormDrawer>,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let theme = self.tokens.ui;
-        let active_index = items
-            .iter()
-            .position(|item| item.drawer == active_drawer)
-            .unwrap_or(0);
-        let tab_font_size = self.tokens.metrics.ui_text_xs;
-        let tabs_scroll = self.selectable_text_scroll_handle("studio-category-tabs-scroll");
-
-        // Align the first tab's text (16px bar padding + 6px tab padding = 22px)
-        // with the form content margin below.
-        let mut strip = div()
-            .id("studio-category-tabs-scroll")
-            .size_full()
-            .overflow_x_scroll()
-            .track_scroll(&tabs_scroll)
-            .flex()
-            .flex_row()
-            .items_stretch()
-            .px(px(16.0))
-            .gap(px(2.0));
-
-        for (item_index, item) in items.into_iter().enumerate() {
-            let target = item.drawer;
-            let active = item_index == active_index;
-            let underline = active.then(|| {
-                let bar = div()
-                    .absolute()
-                    .left(px(6.0))
-                    .right(px(6.0))
-                    .bottom_0()
-                    .h(px(2.0))
-                    .rounded_t_full()
-                    .bg(rgb(theme.accent));
-                if let Some((generation, _)) =
-                    self.segmented_control_user_transition(STUDIO_CATEGORY_SELECTOR_ID, item_index)
-                {
-                    oxideterm_gpui_ui::motion::fade_in(
-                        &self.tokens,
-                        (STUDIO_CATEGORY_SELECTOR_ID, generation),
-                        bar,
-                        oxideterm_gpui_ui::motion::MotionDuration::Control,
-                    )
-                } else {
-                    bar.into_any_element()
-                }
-            });
-
-            let tab = div()
-                .id(SharedString::from(format!("studio-category-{target:?}")))
-                .debug_selector(move || format!("studio-category-{target:?}"))
-                .relative()
-                .flex_none()
-                .h_full()
-                .px(px(6.0))
-                .cursor_pointer()
-                .flex()
-                .items_center()
-                .gap(px(5.0))
-                .text_color(rgb(if active {
-                    theme.text_heading
-                } else {
-                    theme.text_muted
-                }))
-                .when(!active, |el| el.hover(|el| el.text_color(rgb(theme.text))))
-                .child(
-                    div()
-                        .whitespace_nowrap()
-                        .text_size(px(tab_font_size))
-                        .font_weight(if active {
-                            gpui::FontWeight::MEDIUM
-                        } else {
-                            gpui::FontWeight::NORMAL
-                        })
-                        .child(item.label),
-                )
-                .when_some(item.summary, |tab, summary| {
-                    if summary == "•" {
-                        tab.child(div().size(px(5.0)).rounded_full().bg(rgb(theme.accent)))
-                    } else {
-                        tab.child(
-                            div()
-                                .px(px(5.0))
-                                .py(px(1.0))
-                                .rounded(px(self.tokens.radii.xs))
-                                .bg(rgba((theme.accent << 8) | 0x20))
-                                .text_size(px(10.0))
-                                .text_color(rgb(theme.accent))
-                                .child(summary),
-                        )
-                    }
-                })
-                .when_some(underline, |tab, bar| tab.child(bar))
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _event, _window, cx| {
-                        this.close_new_connection_select(cx);
-                        if item_index != active_index {
-                            this.reset_studio_form_scroll();
-                            this.begin_user_segmented_control_transition_from(
-                                STUDIO_CATEGORY_SELECTOR_ID,
-                                active_index,
-                                item_index,
-                                cx,
-                            );
-                        }
-                        this.update_connection_form_state(cx, |state| {
-                            if let Some(form) = state.form.as_mut() {
-                                form.active_drawer = target;
-                                form.ssh_algorithm_menu = None;
-                                form.field_focused = false;
-                                clear_connection_selection(form);
-                            }
-                        });
-                        cx.stop_propagation();
-                        cx.notify();
-                    }),
-                );
-            strip = strip.child(tab);
-        }
-
-        let tab_bar_height =
-            (STUDIO_CATEGORY_TAB_BAR_HEIGHT * studio_ui_scale(&self.tokens)).round();
-        div()
-            .flex_none()
-            .w_full()
-            .h(px(tab_bar_height))
-            .bg(rgb(theme.bg_elevated))
-            .border_b_1()
-            .border_color(rgba((theme.border << 8) | 0xb3))
-            .child(strip)
             .into_any_element()
     }
 

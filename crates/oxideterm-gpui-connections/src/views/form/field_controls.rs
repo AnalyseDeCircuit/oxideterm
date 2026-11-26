@@ -1382,7 +1382,7 @@ impl ConnectionFormView {
         )
     }
 
-    fn render_connection_inline_input(
+    fn render_connection_mono_input(
         &self,
         value: &str,
         placeholder: String,
@@ -1396,7 +1396,6 @@ impl ConnectionFormView {
         };
         let form = self.connection_form_state(cx).form.as_ref();
         let focused = form.is_some_and(|form| form.field_focused && form.focused_field == field);
-        let theme = self.tokens.ui;
         let input = text_input_with_viewport_and_content_align(
             &self.tokens,
             TextInputView {
@@ -1413,19 +1412,26 @@ impl ConnectionFormView {
             &frame.viewport,
             frame.active_offset,
         )
-        .h_full()
-        .px(px(8.0))
-        .rounded_none()
-        .border_0()
-        .bg(if focused {
-            rgba((theme.accent << 8) | 0x0e)
-        } else {
-            rgba(0x00000000)
-        })
         .font_family(SharedString::from(
             self.tokens.metrics.markdown_code_font_family,
         ));
         self.finish_connection_input(input, field, cx)
+    }
+
+    fn render_endpoint_separator_symbol(&self, glyph: &'static str, width: f32) -> Div {
+        div()
+            .w(px(width))
+            .h(px(self.tokens.metrics.ui_control_height))
+            .flex_none()
+            .flex()
+            .items_center()
+            .justify_center()
+            .font_family(SharedString::from(
+                self.tokens.metrics.markdown_code_font_family,
+            ))
+            .text_size(px(self.tokens.metrics.ui_text_sm))
+            .text_color(rgb(self.tokens.ui.text_muted))
+            .child(glyph)
     }
 
     /// Clickable connection avatar badge that opens the Appearance Popover directly
@@ -1559,8 +1565,8 @@ impl ConnectionFormView {
             })
     }
 
-    /// Unified monospace `host : port` bar in a single sunken shell for protocols
-    /// without an inline address username (Telnet, RDP, VNC, SSH tunnel endpoints).
+    /// Separate monospace `host` and `port` inputs with a standalone `:`
+    /// separator between them (Telnet, RDP, VNC, SSH tunnel endpoints).
     #[allow(clippy::too_many_arguments)]
     pub(super) fn render_unified_host_port_bar(
         &self,
@@ -1575,106 +1581,44 @@ impl ConnectionFormView {
         content_width: f32,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let theme = self.tokens.ui;
-        let mono_font = SharedString::from(self.tokens.metrics.markdown_code_font_family);
-        let any_focused = self
-            .connection_form_state(cx)
-            .form
-            .as_ref()
-            .is_some_and(|form| {
-                form.field_focused
-                    && (form.focused_field == host_field || form.focused_field == port_field)
-            });
-        let bar_height = self.tokens.metrics.ui_control_height + 4.0;
         let port_width = (content_width * 0.16).clamp(68.0, 96.0).round();
-
-        let labels = div()
-            .w_full()
-            .flex()
-            .flex_row()
-            .items_center()
-            .text_size(px(self.tokens.metrics.ui_text_xs))
-            .font_weight(gpui::FontWeight::MEDIUM)
-            .text_color(rgb(theme.text_muted))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .px(px(2.0))
-                    .truncate()
-                    .child(host_label),
-            )
-            .child(div().w(px(14.0)).flex_none())
-            .child(
-                div()
-                    .w(px(port_width))
-                    .flex_none()
-                    .text_align(gpui::TextAlign::Center)
-                    .truncate()
-                    .child(port_label),
-            );
-
-        let bar =
-            div()
-                .w_full()
-                .h(px(bar_height))
-                .rounded(px(self.tokens.radii.md))
-                .bg(rgba((theme.bg_sunken << 8) | 0xd9))
-                .border_1()
-                .border_color(if any_focused {
-                    rgba((theme.accent << 8) | 0xff)
-                } else {
-                    rgba((theme.border << 8) | 0xb8)
-                })
-                .overflow_hidden()
-                .flex()
-                .flex_row()
-                .items_center()
-                .child(div().flex_1().min_w_0().h_full().child(
-                    self.render_connection_inline_input(
-                        host,
-                        host_placeholder,
-                        host_field,
-                        TextInputContentAlign::Start,
-                        cx,
-                    ),
-                ))
-                .child(
-                    div()
-                        .w(px(14.0))
-                        .flex_none()
-                        .h_full()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .font_family(mono_font)
-                        .text_size(px(self.tokens.metrics.ui_text_sm))
-                        .text_color(rgba((theme.text_muted << 8) | 0xb0))
-                        .child(":"),
-                )
-                .child(div().w(px(port_width)).flex_none().h_full().child(
-                    self.render_connection_inline_input(
-                        port,
-                        port_placeholder,
-                        port_field,
-                        TextInputContentAlign::Center,
-                        cx,
-                    ),
-                ));
+        let host_control = form_field(
+            &self.tokens,
+            host_label,
+            self.render_connection_mono_input(
+                host,
+                host_placeholder,
+                host_field,
+                TextInputContentAlign::Start,
+                cx,
+            ),
+        );
+        let port_control = form_field(
+            &self.tokens,
+            port_label,
+            self.render_connection_mono_input(
+                port,
+                port_placeholder,
+                port_field,
+                TextInputContentAlign::Center,
+                cx,
+            ),
+        );
 
         div()
             .w_full()
             .flex()
-            .flex_col()
-            .gap(px(5.0))
-            .child(labels)
-            .child(bar)
+            .flex_row()
+            .items_end()
+            .child(div().flex_1().min_w_0().child(host_control))
+            .child(self.render_endpoint_separator_symbol(":", 18.0))
+            .child(div().w(px(port_width)).flex_none().child(port_control))
             .into_any_element()
     }
 
-    /// Unified monospace address bar (`username @ host : port`) rendered in one
-    /// sunken shell so the destination reads like an actual target. On narrow
-    /// panes it folds into a two-row stacked shell to preserve host readability.
+    /// Separate monospace `username`, `host`, and `port` inputs with standalone
+    /// `@` and `:` symbols between them. Folds cleanly onto two rows on narrow
+    /// panes to preserve host readability.
     pub(super) fn render_unified_address_bar(
         &self,
         username: &str,
@@ -1714,229 +1658,74 @@ impl ConnectionFormView {
         content_width: f32,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let theme = self.tokens.ui;
-        let mono_font = SharedString::from(self.tokens.metrics.markdown_code_font_family);
-        let any_focused = self
-            .connection_form_state(cx)
-            .form
-            .as_ref()
-            .is_some_and(|form| {
-                form.field_focused
-                    && (form.focused_field == username_field
-                        || form.focused_field == host_field
-                        || form.focused_field == port_field)
-            });
-        let bar_height = self.tokens.metrics.ui_control_height + 4.0;
-        let shell_border = if any_focused {
-            rgba((theme.accent << 8) | 0xff)
-        } else {
-            rgba((theme.border << 8) | 0xb8)
-        };
+        let username_control = form_field(
+            &self.tokens,
+            self.i18n.t("ssh.form.username"),
+            self.render_connection_mono_input(
+                username,
+                username_placeholder,
+                username_field,
+                TextInputContentAlign::Start,
+                cx,
+            ),
+        );
+        let host_control = form_field(
+            &self.tokens,
+            self.i18n.t("ssh.form.host"),
+            self.render_connection_mono_input(
+                host,
+                host_placeholder,
+                host_field,
+                TextInputContentAlign::Start,
+                cx,
+            ),
+        );
+        let port_control = form_field(
+            &self.tokens,
+            self.i18n.t("ssh.form.port"),
+            self.render_connection_mono_input(
+                port,
+                port_placeholder,
+                port_field,
+                TextInputContentAlign::Center,
+                cx,
+            ),
+        );
 
         if content_width < 420.0 {
             let port_width = 72.0;
-            let stacked_shell =
-                div()
-                    .w_full()
-                    .rounded(px(self.tokens.radii.md))
-                    .bg(rgba((theme.bg_sunken << 8) | 0xd9))
-                    .border_1()
-                    .border_color(shell_border)
-                    .overflow_hidden()
-                    .flex()
-                    .flex_col()
-                    .child(div().w_full().h(px(bar_height)).child(
-                        self.render_connection_inline_input(
-                            host,
-                            host_placeholder,
-                            host_field,
-                            TextInputContentAlign::Start,
-                            cx,
-                        ),
-                    ))
-                    .child(self.form_hairline())
-                    .child(
-                        div()
-                            .w_full()
-                            .h(px(bar_height))
-                            .flex()
-                            .flex_row()
-                            .items_center()
-                            .child(div().flex_1().min_w_0().h_full().child(
-                                self.render_connection_inline_input(
-                                    username,
-                                    username_placeholder,
-                                    username_field,
-                                    TextInputContentAlign::Start,
-                                    cx,
-                                ),
-                            ))
-                            .child(
-                                div()
-                                    .w(px(14.0))
-                                    .flex_none()
-                                    .h_full()
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .font_family(mono_font)
-                                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                                    .text_color(rgba((theme.text_muted << 8) | 0xb0))
-                                    .child(":"),
-                            )
-                            .child(div().w(px(port_width)).flex_none().h_full().child(
-                                self.render_connection_inline_input(
-                                    port,
-                                    port_placeholder,
-                                    port_field,
-                                    TextInputContentAlign::Center,
-                                    cx,
-                                ),
-                            )),
-                    );
             return div()
                 .w_full()
                 .flex()
                 .flex_col()
-                .gap(px(5.0))
+                .gap(px(10.0))
+                .child(div().w_full().min_w_0().child(host_control))
                 .child(
                     div()
                         .w_full()
                         .flex()
                         .flex_row()
-                        .items_center()
-                        .justify_between()
-                        .gap(px(8.0))
-                        .text_size(px(self.tokens.metrics.ui_text_xs))
-                        .font_weight(gpui::FontWeight::MEDIUM)
-                        .text_color(rgb(theme.text_muted))
-                        .child(
-                            div()
-                                .min_w_0()
-                                .truncate()
-                                .child(self.i18n.t("ssh.form.host")),
-                        )
-                        .child(div().flex_none().child(format!(
-                            "{} : {}",
-                            self.i18n.t("ssh.form.username"),
-                            self.i18n.t("ssh.form.port")
-                        ))),
+                        .items_end()
+                        .gap(px(10.0))
+                        .child(div().flex_1().min_w_0().child(username_control))
+                        .child(div().w(px(port_width)).flex_none().child(port_control)),
                 )
-                .child(stacked_shell)
                 .into_any_element();
         }
 
         let user_width = (content_width * 0.24).clamp(96.0, 168.0).round();
-        let port_width = (content_width * 0.12).clamp(58.0, 84.0).round();
-
-        let labels = div()
-            .w_full()
-            .flex()
-            .flex_row()
-            .items_center()
-            .text_size(px(self.tokens.metrics.ui_text_xs))
-            .font_weight(gpui::FontWeight::MEDIUM)
-            .text_color(rgb(theme.text_muted))
-            .child(
-                div()
-                    .w(px(user_width))
-                    .flex_none()
-                    .px(px(2.0))
-                    .truncate()
-                    .child(self.i18n.t("ssh.form.username")),
-            )
-            .child(div().w(px(20.0)).flex_none())
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .px(px(2.0))
-                    .truncate()
-                    .child(self.i18n.t("ssh.form.host")),
-            )
-            .child(div().w(px(14.0)).flex_none())
-            .child(
-                div()
-                    .w(px(port_width))
-                    .flex_none()
-                    .text_align(gpui::TextAlign::Center)
-                    .truncate()
-                    .child(self.i18n.t("ssh.form.port")),
-            );
-
-        let bar =
-            div()
-                .w_full()
-                .h(px(bar_height))
-                .rounded(px(self.tokens.radii.md))
-                .bg(rgba((theme.bg_sunken << 8) | 0xd9))
-                .border_1()
-                .border_color(shell_border)
-                .overflow_hidden()
-                .flex()
-                .flex_row()
-                .items_center()
-                .child(div().w(px(user_width)).flex_none().h_full().child(
-                    self.render_connection_inline_input(
-                        username,
-                        username_placeholder,
-                        username_field,
-                        TextInputContentAlign::Start,
-                        cx,
-                    ),
-                ))
-                .child(
-                    div()
-                        .w(px(20.0))
-                        .flex_none()
-                        .h_full()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .font_family(mono_font.clone())
-                        .text_size(px(self.tokens.metrics.ui_text_sm))
-                        .text_color(rgba((theme.text_muted << 8) | 0xb0))
-                        .child("@"),
-                )
-                .child(div().flex_1().min_w_0().h_full().child(
-                    self.render_connection_inline_input(
-                        host,
-                        host_placeholder,
-                        host_field,
-                        TextInputContentAlign::Start,
-                        cx,
-                    ),
-                ))
-                .child(
-                    div()
-                        .w(px(14.0))
-                        .flex_none()
-                        .h_full()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .font_family(mono_font)
-                        .text_size(px(self.tokens.metrics.ui_text_sm))
-                        .text_color(rgba((theme.text_muted << 8) | 0xb0))
-                        .child(":"),
-                )
-                .child(div().w(px(port_width)).flex_none().h_full().child(
-                    self.render_connection_inline_input(
-                        port,
-                        port_placeholder,
-                        port_field,
-                        TextInputContentAlign::Center,
-                        cx,
-                    ),
-                ));
+        let port_width = (content_width * 0.12).clamp(64.0, 88.0).round();
 
         div()
             .w_full()
             .flex()
-            .flex_col()
-            .gap(px(5.0))
-            .child(labels)
-            .child(bar)
+            .flex_row()
+            .items_end()
+            .child(div().w(px(user_width)).flex_none().child(username_control))
+            .child(self.render_endpoint_separator_symbol("@", 22.0))
+            .child(div().flex_1().min_w_0().child(host_control))
+            .child(self.render_endpoint_separator_symbol(":", 18.0))
+            .child(div().w(px(port_width)).flex_none().child(port_control))
             .into_any_element()
     }
 
@@ -5113,7 +4902,7 @@ impl ConnectionFormView {
             ));
         }
 
-        // Lay out select controls in balanced 2-column rows on desktop and fold
+        // Lay out select controls in balanced 3-column rows on desktop and fold
         // cleanly to a single column on narrow viewports so values never clip.
         let mut grid = div().flex().flex_col().gap(px(12.0));
         if single_column {
@@ -5122,17 +4911,23 @@ impl ConnectionFormView {
             }
         } else {
             let mut iter = controls.into_iter();
-            while let Some(left) = iter.next() {
-                let right = iter.next();
+            while let Some(first) = iter.next() {
+                let second = iter.next();
+                let third = iter.next();
                 grid = grid.child(
                     div()
                         .w_full()
                         .flex()
                         .flex_row()
                         .gap(px(12.0))
-                        .child(div().flex_1().min_w_0().child(left))
-                        .child(if let Some(right) = right {
-                            div().flex_1().min_w_0().child(right)
+                        .child(div().flex_1().min_w_0().child(first))
+                        .child(if let Some(second) = second {
+                            div().flex_1().min_w_0().child(second)
+                        } else {
+                            div().flex_1().min_w_0()
+                        })
+                        .child(if let Some(third) = third {
+                            div().flex_1().min_w_0().child(third)
                         } else {
                             div().flex_1().min_w_0()
                         }),

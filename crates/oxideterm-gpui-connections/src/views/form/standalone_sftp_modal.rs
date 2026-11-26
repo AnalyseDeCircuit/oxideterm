@@ -29,7 +29,10 @@ struct StandaloneSftpModalSnapshot {
     proxy_command_enabled: bool,
     proxy_command: zeroize::Zeroizing<String>,
     proxy_command_configured: bool,
+    proxy_hops_len: usize,
+    upstream_proxy_policy: NewConnectionUpstreamProxyPolicy,
     route_customized: bool,
+    appearance_customized: bool,
     secondary_host: String,
     secondary_port: String,
     secondary_username: String,
@@ -50,6 +53,8 @@ struct StandaloneSftpModalSnapshot {
     secondary_proxy_command_enabled: bool,
     secondary_proxy_command: zeroize::Zeroizing<String>,
     secondary_proxy_command_configured: bool,
+    secondary_proxy_hops_len: usize,
+    secondary_upstream_proxy_policy: NewConnectionUpstreamProxyPolicy,
     pending: bool,
     error: Option<String>,
     feedback_success: bool,
@@ -62,12 +67,15 @@ impl StandaloneSftpModalSnapshot {
             form.standalone_sftp_transfer_mode == StandaloneSftpTransferMode::RemoteRemote;
         let primary_route_customized = form.proxy_command_enabled
             || !form.proxy_hops.is_empty()
-            || form.upstream_proxy_policy != NewConnectionUpstreamProxyPolicy::Direct;
+            || form.upstream_proxy_policy != NewConnectionUpstreamProxyPolicy::UseGlobal;
         let secondary_route_customized = remote_to_remote
             && (form.standalone_sftp_secondary.proxy_command_enabled
                 || !form.standalone_sftp_secondary.proxy_hops.is_empty()
                 || form.standalone_sftp_secondary.upstream_proxy_policy
-                    != NewConnectionUpstreamProxyPolicy::Direct);
+                    != NewConnectionUpstreamProxyPolicy::UseGlobal);
+        let appearance_customized = !form.icon.trim().is_empty()
+            || !form.color.trim().is_empty()
+            || !form.icon_background_color.trim().is_empty();
 
         Self {
             profile_id: form.standalone_sftp_profile_id.clone(),
@@ -97,7 +105,10 @@ impl StandaloneSftpModalSnapshot {
             // Rendering owns one bounded zeroizing copy of the protected command draft.
             proxy_command: zeroize::Zeroizing::new(form.proxy_command.as_str().to_owned()),
             proxy_command_configured: form.proxy_command_keychain_id.is_some(),
+            proxy_hops_len: form.proxy_hops.len(),
+            upstream_proxy_policy: form.upstream_proxy_policy,
             route_customized: primary_route_customized || secondary_route_customized,
+            appearance_customized,
             secondary_host: form.standalone_sftp_secondary.host.clone(),
             secondary_port: form.standalone_sftp_secondary.port.clone(),
             secondary_username: form.standalone_sftp_secondary.username.clone(),
@@ -141,6 +152,8 @@ impl StandaloneSftpModalSnapshot {
                 .standalone_sftp_secondary
                 .proxy_command_keychain_id
                 .is_some(),
+            secondary_proxy_hops_len: form.standalone_sftp_secondary.proxy_hops.len(),
+            secondary_upstream_proxy_policy: form.standalone_sftp_secondary.upstream_proxy_policy,
             pending: form.pending,
             error: form.error.clone(),
             feedback_success: form.feedback_is_success(),
@@ -209,40 +222,6 @@ impl ConnectionFormView {
             self.i18n.t("sftp.standalone.form_title")
         };
 
-        let mut tab_items = vec![
-            composer::CategoryNavItem {
-                drawer: None,
-                label: self.i18n.t("ssh.form.basic_information"),
-                summary: None,
-            },
-            composer::CategoryNavItem {
-                drawer: Some(ConnectionFormDrawer::StandaloneSftpPrimary),
-                label: self.i18n.t(if remote_to_remote {
-                    "sftp.standalone.remote_host_1"
-                } else {
-                    "sftp.standalone.remote_host"
-                }),
-                summary: (!form.host.trim().is_empty()).then(|| "•".to_string()),
-            },
-        ];
-        if remote_to_remote {
-            tab_items.push(composer::CategoryNavItem {
-                drawer: Some(ConnectionFormDrawer::StandaloneSftpSecondary),
-                label: self.i18n.t("sftp.standalone.remote_host_2"),
-                summary: (!form.secondary_host.trim().is_empty()).then(|| "•".to_string()),
-            });
-        }
-        tab_items.push(composer::CategoryNavItem {
-            drawer: Some(ConnectionFormDrawer::Route),
-            label: self.i18n.t("ssh.form.connection_route"),
-            summary: form.route_customized.then(|| "•".to_string()),
-        });
-        tab_items.push(composer::CategoryNavItem {
-            drawer: Some(ConnectionFormDrawer::Notes),
-            label: self.i18n.t("ssh.form.appearance"),
-            summary: (!form.notes.trim().is_empty()).then(|| "•".to_string()),
-        });
-
         let active_drawer = if !remote_to_remote
             && form.active_drawer == Some(ConnectionFormDrawer::StandaloneSftpSecondary)
         {
@@ -251,13 +230,98 @@ impl ConnectionFormView {
             form.active_drawer
         };
 
-        let category_tabs = self.render_studio_category_tabs(tab_items, active_drawer, cx);
-
         let studio_layout = composer::StudioLayoutMetrics::compute(
             modal_width,
             &self.tokens,
             shows_transport_selector,
         );
+        let subpage_header = active_drawer.map(|drawer| {
+            let root_label = self
+                .i18n
+                .t("modals.new_connection.transport_standalone_sftp");
+            let current_label = match drawer {
+                ConnectionFormDrawer::StandaloneSftpPrimary => self.i18n.t(if remote_to_remote {
+                    "sftp.standalone.remote_host_1"
+                } else {
+                    "sftp.standalone.remote_host"
+                }),
+                ConnectionFormDrawer::StandaloneSftpSecondary => {
+                    self.i18n.t("sftp.standalone.remote_host_2")
+                }
+                ConnectionFormDrawer::Route => self.i18n.t("ssh.form.connection_route"),
+                ConnectionFormDrawer::Notes => self.i18n.t("ssh.form.appearance"),
+                _ => root_label.clone(),
+            };
+            div()
+                .flex_none()
+                .w_full()
+                .h(px(40.0))
+                .px(px(studio_layout.content_padding_x - 6.0))
+                .bg(rgb(theme.bg_elevated))
+                .border_b_1()
+                .border_color(rgba((theme.border << 8) | 0xb3))
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(8.0))
+                .child(
+                    div()
+                        .id("standalone-sftp-subpage-back")
+                        .debug_selector(|| "standalone-sftp-subpage-back".to_string())
+                        .px(px(6.0))
+                        .py(px(4.0))
+                        .rounded(px(self.tokens.radii.sm))
+                        .cursor_pointer()
+                        .hover(|el| el.bg(rgba((theme.bg_hover << 8) | 0x99)))
+                        .flex()
+                        .flex_row()
+                        .items_center()
+                        .gap(px(4.0))
+                        .text_size(px(self.tokens.metrics.ui_text_sm))
+                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .text_color(rgb(theme.text_muted))
+                        .child(Self::render_lucide_icon(
+                            LucideIcon::ChevronLeft,
+                            14.0,
+                            rgb(theme.text_muted),
+                        ))
+                        .child(root_label)
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, _event, _window, cx| {
+                                this.close_new_connection_select(cx);
+                                this.reset_studio_form_scroll();
+                                this.update_connection_form_state(cx, |state| {
+                                    if let Some(form) = state.form.as_mut() {
+                                        form.active_drawer = None;
+                                        form.ssh_algorithm_menu = None;
+                                        form.field_focused = false;
+                                        clear_connection_selection(form);
+                                    }
+                                });
+                                cx.stop_propagation();
+                                cx.notify();
+                            }),
+                        ),
+                )
+                .child(
+                    div()
+                        .text_size(px(self.tokens.metrics.ui_text_xs))
+                        .text_color(rgba((theme.text_muted << 8) | 0x88))
+                        .child("/"),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .text_size(px(self.tokens.metrics.ui_text_sm))
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .text_color(rgb(theme.text_heading))
+                        .child(current_label),
+                )
+                .into_any_element()
+        });
         let page_content = match active_drawer {
             Some(ConnectionFormDrawer::StandaloneSftpPrimary) => self
                 .render_standalone_sftp_endpoint_page(
@@ -339,7 +403,7 @@ impl ConnectionFormView {
                                 .min_h(px(0.0))
                                 .flex()
                                 .flex_col()
-                                .child(category_tabs)
+                                .when_some(subpage_header, |pane, header| pane.child(header))
                                 .child(
                                     div()
                                         .flex_1()
@@ -451,12 +515,140 @@ impl ConnectionFormView {
             .into_any_element()
     }
 
+    fn standalone_sftp_endpoint_summary(host: &str, username: &str, port: &str) -> (String, bool) {
+        let host = host.trim();
+        if host.is_empty() {
+            return ("—".to_string(), false);
+        }
+        let user = username.trim();
+        let port = port.trim();
+        let summary = match (
+            user.is_empty(),
+            port.is_empty() || port == SSH_DEFAULT_PORT_TEXT,
+        ) {
+            (true, true) => host.to_string(),
+            (true, false) => format!("{host}:{port}"),
+            (false, true) => format!("{user}@{host}"),
+            (false, false) => format!("{user}@{host}:{port}"),
+        };
+        (summary, true)
+    }
+
     fn render_standalone_sftp_basic_page(
         &self,
         form: &StandaloneSftpModalSnapshot,
         layout: composer::StudioLayoutMetrics,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let remote_to_remote = form.transfer_mode == StandaloneSftpTransferMode::RemoteRemote;
+        let total_hops = form.proxy_hops_len
+            + if remote_to_remote {
+                form.secondary_proxy_hops_len
+            } else {
+                0
+            };
+        let route_summary = if form.proxy_command_enabled
+            || (remote_to_remote && form.secondary_proxy_command_enabled)
+        {
+            self.i18n.t("ssh.form.proxy_command")
+        } else if total_hops > 0 {
+            self.i18n
+                .t("ssh.form.proxy_chain_count")
+                .replace("{{count}}", &total_hops.to_string())
+                .trim_end_matches(['.', '。'])
+                .to_string()
+        } else if remote_to_remote
+            && form.secondary_upstream_proxy_policy != form.upstream_proxy_policy
+        {
+            self.i18n.t("ssh.form.ssh_algorithms_custom")
+        } else {
+            match form.upstream_proxy_policy {
+                NewConnectionUpstreamProxyPolicy::UseGlobal => {
+                    self.i18n.t("modals.upstream_proxy.use_global")
+                }
+                NewConnectionUpstreamProxyPolicy::Direct => {
+                    self.i18n.t("modals.upstream_proxy.direct")
+                }
+                NewConnectionUpstreamProxyPolicy::Custom => {
+                    self.i18n.t("modals.upstream_proxy.custom")
+                }
+            }
+        };
+        let notes_trimmed = form.notes.trim();
+        let notes_highlighted = !notes_trimmed.is_empty() || form.appearance_customized;
+        let notes_summary = if !notes_trimmed.is_empty() {
+            notes_trimmed
+                .lines()
+                .next()
+                .unwrap_or(notes_trimmed)
+                .to_string()
+        } else if form.appearance_customized {
+            self.i18n.t("ssh.form.ssh_algorithms_custom")
+        } else {
+            self.i18n.t("ssh.form.ssh_algorithms_default")
+        };
+
+        let (primary_summary, primary_set) =
+            Self::standalone_sftp_endpoint_summary(&form.host, &form.username, &form.port);
+        let mut summary_rows = div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .gap(px(2.0))
+            .child(self.form_hairline())
+            .child(self.render_connection_disclosure_row(
+                "standalone-sftp-summary-Primary",
+                LucideIcon::Server,
+                self.i18n.t(if remote_to_remote {
+                    "sftp.standalone.remote_host_1"
+                } else {
+                    "sftp.standalone.remote_host"
+                }),
+                primary_summary,
+                primary_set,
+                ConnectionFormDrawer::StandaloneSftpPrimary,
+                cx,
+            ));
+        if remote_to_remote {
+            let (secondary_summary, secondary_set) = Self::standalone_sftp_endpoint_summary(
+                &form.secondary_host,
+                &form.secondary_username,
+                &form.secondary_port,
+            );
+            summary_rows = summary_rows.child(self.form_hairline()).child(
+                self.render_connection_disclosure_row(
+                    "standalone-sftp-summary-Secondary",
+                    LucideIcon::Server,
+                    self.i18n.t("sftp.standalone.remote_host_2"),
+                    secondary_summary,
+                    secondary_set,
+                    ConnectionFormDrawer::StandaloneSftpSecondary,
+                    cx,
+                ),
+            );
+        }
+        summary_rows = summary_rows
+            .child(self.form_hairline())
+            .child(self.render_connection_disclosure_row(
+                "standalone-sftp-summary-Route",
+                LucideIcon::Network,
+                self.i18n.t("ssh.form.connection_route"),
+                route_summary,
+                form.route_customized,
+                ConnectionFormDrawer::Route,
+                cx,
+            ))
+            .child(self.form_hairline())
+            .child(self.render_connection_disclosure_row(
+                "standalone-sftp-summary-Notes",
+                LucideIcon::Sparkles,
+                self.i18n.t("ssh.form.appearance"),
+                notes_summary,
+                notes_highlighted,
+                ConnectionFormDrawer::Notes,
+                cx,
+            ));
+
         div()
             .flex()
             .flex_col()
@@ -473,7 +665,7 @@ impl ConnectionFormView {
             ))
             .child(self.form_hairline())
             .child(self.render_standalone_sftp_transfer_mode(form.transfer_mode, cx))
-            .child(self.render_connection_hint(self.i18n.t("sftp.standalone.usage_notice")))
+            .child(summary_rows)
             .when_some(form.error.clone(), |content, error| {
                 content.child(self.render_prompt_feedback_box(error, form.feedback_success))
             })
