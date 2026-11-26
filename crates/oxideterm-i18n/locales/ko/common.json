@@ -1375,6 +1375,8 @@
     "workspace": "작업 공간",
     "merge_into_horizontal": "“{{title}}”에 합치기 (좌우 분할)",
     "merge_into_vertical": "“{{title}}”에 합치기 (상하 분할)",
+    "merge_side_by_side_into": "좌우 분할로 합치기",
+    "merge_stacked_into": "상하 분할로 합치기",
     "move_pane_to_tab": "새 탭으로 이동",
     "move_pane_to_window": "새 창으로 이동",
     "offline": "오프라인",

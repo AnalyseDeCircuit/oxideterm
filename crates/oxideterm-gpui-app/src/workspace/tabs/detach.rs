@@ -5,8 +5,10 @@ use oxideterm_gpui_connections::session_manager::SessionManagerOpenTarget;
 
 use oxideterm_gpui_ui::button::ButtonVariant;
 use oxideterm_gpui_ui::context_menu::{
-    context_menu_content, context_menu_event_boundary, context_menu_item_height_estimate,
+    BrowserOverlayPlacement, ContextMenuItemKind, context_menu_content,
+    context_menu_event_boundary, context_menu_item, context_menu_item_height_estimate,
     context_menu_item_with_icon, context_menu_separator, context_menu_separator_height_estimate,
+    context_menu_sub_content,
 };
 use oxideterm_gpui_ui::modal::overlay_content_boundary;
 
@@ -17,6 +19,9 @@ const TAB_CONTEXT_MENU_RENAME_HEIGHT: f32 = 168.0;
 const TAB_CONTEXT_MENU_SPLIT_HEIGHT: f32 = 72.0;
 const TAB_CONTEXT_MENU_SWITCH_HEIGHT: f32 = 32.0;
 const TAB_CONTEXT_MENU_MARGIN: f32 = 8.0;
+const TAB_CONTEXT_SUBMENU_OVERLAP: f32 = 2.0;
+const TAB_CONTEXT_SUBMENU_MIN_WIDTH: f32 = 168.0;
+const TAB_CONTEXT_SUBMENU_MAX_WIDTH: f32 = 300.0;
 
 const TAB_RENAME_DIALOG_WIDTH: f32 = 420.0;
 const TAB_HANDOFF_PREVIEW_WIDTH_EXTRA: f32 = 96.0;
@@ -52,6 +57,30 @@ struct TabWindowHandoffRect {
 struct SshTabNodeMenu {
     node_id: NodeId,
     terminals: Vec<TerminalSessionId>,
+}
+
+/// Positions a cascading tab context submenu next to its trigger row,
+/// preferring the right side with a slight overlap to eliminate pointer dead
+/// zones and flipping to the left when it would overflow the viewport.
+fn place_tab_context_submenu(
+    parent_placement: BrowserOverlayPlacement,
+    parent_width: f32,
+    trigger_offset_y: f32,
+    sub_width: f32,
+    sub_height: f32,
+    viewport_width: f32,
+    viewport_height: f32,
+    margin: f32,
+) -> BrowserOverlayPlacement {
+    let right_x = parent_placement.x + parent_width - TAB_CONTEXT_SUBMENU_OVERLAP;
+    let x = if right_x + sub_width + margin <= viewport_width {
+        right_x
+    } else {
+        (parent_placement.x - sub_width + TAB_CONTEXT_SUBMENU_OVERLAP).max(margin)
+    };
+    let max_y = (viewport_height - sub_height - margin).max(margin);
+    let y = (parent_placement.y + trigger_offset_y).clamp(margin, max_y);
+    BrowserOverlayPlacement { x, y }
 }
 
 fn tab_handoff_preview_width(tab_width: f32) -> f32 {
@@ -168,12 +197,26 @@ impl WorkspaceApp {
             tab_id,
             x: f32::from(position.x),
             y: f32::from(position.y),
+            merge_submenu: None,
         });
         cx.notify();
     }
 
     pub(in crate::workspace) fn close_tab_context_menu(&mut self) -> bool {
         self.tab_context_menu.take().is_some()
+    }
+
+    fn set_tab_context_merge_submenu(
+        &mut self,
+        direction: Option<SplitDirection>,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(menu) = self.tab_context_menu.as_mut()
+            && menu.merge_submenu != direction
+        {
+            menu.merge_submenu = direction;
+            cx.notify();
+        }
     }
 
     /// Resolves the SSH node actions offered by the tab context menu: the node
@@ -1508,13 +1551,12 @@ impl WorkspaceApp {
         } else {
             TAB_CONTEXT_MENU_HEIGHT
         };
-        if can_split_into_active {
+        if can_split_into_active || !merge_targets.is_empty() {
             menu_height += TAB_CONTEXT_MENU_SPLIT_HEIGHT;
         }
         if is_session_manager {
             menu_height += TAB_CONTEXT_MENU_SWITCH_HEIGHT;
         }
-        menu_height += merge_targets.len() as f32 * TAB_CONTEXT_MENU_SPLIT_HEIGHT;
         let edit_target = self.editable_saved_target_for_tab(menu.tab_id, cx);
         if edit_target.is_some() {
             menu_height += context_menu_item_height_estimate(&self.tokens);
@@ -1530,7 +1572,7 @@ impl WorkspaceApp {
         }
         menu_height = menu_height.min(f32::from(viewport.height) - TAB_CONTEXT_MENU_MARGIN * 2.0);
         let detached = self.tab_host.read(cx).is_detached(menu.tab_id);
-        let base_menu_width = if can_split_into_active || !merge_targets.is_empty() {
+        let base_menu_width = if can_split_into_active {
             TAB_CONTEXT_MENU_SPLIT_WIDTH
         } else {
             TAB_CONTEXT_MENU_WIDTH
@@ -1553,12 +1595,9 @@ impl WorkspaceApp {
             menu_labels.push(self.i18n.t("tabbar.split_into_active_horizontal"));
             menu_labels.push(self.i18n.t("tabbar.split_into_active_vertical"));
         }
-        for (_, title) in &merge_targets {
-            menu_labels.push(
-                self.i18n_replace("tabbar.merge_into_horizontal", &[("title", title.clone())]),
-            );
-            menu_labels
-                .push(self.i18n_replace("tabbar.merge_into_vertical", &[("title", title.clone())]));
+        if !merge_targets.is_empty() {
+            menu_labels.push(self.i18n.t("tabbar.merge_side_by_side_into"));
+            menu_labels.push(self.i18n.t("tabbar.merge_stacked_into"));
         }
         if is_session_manager {
             menu_labels.push(self.i18n.t("tabbar.switch_to_sidebar"));
@@ -1579,6 +1618,95 @@ impl WorkspaceApp {
             menu_height,
             TAB_CONTEXT_MENU_MARGIN,
         );
+        let has_merge_targets = !merge_targets.is_empty();
+        let has_leading_items = renamable || edit_target.is_some();
+        let item_height = context_menu_item_height_estimate(&self.tokens);
+        let separator_height = context_menu_separator_height_estimate(&self.tokens);
+        let merge_submenu_overlay = menu
+            .merge_submenu
+            .filter(|_| has_merge_targets)
+            .map(|direction| {
+                let sub_width = oxideterm_gpui_ui::estimate_menu_width(
+                    &self.tokens,
+                    TAB_CONTEXT_SUBMENU_MIN_WIDTH,
+                    TAB_CONTEXT_SUBMENU_MAX_WIDTH,
+                    false,
+                    merge_targets.iter().map(|(_, title)| title.as_str()),
+                );
+                let sub_height = (merge_targets.len() as f32 * item_height
+                    + self.tokens.metrics.ui_menu_padding * 2.0)
+                    .min(f32::from(viewport.height) - TAB_CONTEXT_MENU_MARGIN * 2.0);
+                let rows_above = usize::from(renamable) + usize::from(edit_target.is_some());
+                let sep_above = if has_leading_items {
+                    separator_height
+                } else {
+                    0.0
+                };
+                let direction_row = match direction {
+                    SplitDirection::Horizontal => 0.0,
+                    SplitDirection::Vertical => 1.0,
+                };
+                let trigger_offset_y =
+                    rows_above as f32 * item_height + sep_above + direction_row * item_height;
+                let sub_placement = place_tab_context_submenu(
+                    placement,
+                    menu_width,
+                    trigger_offset_y,
+                    sub_width,
+                    sub_height,
+                    f32::from(viewport.width),
+                    f32::from(viewport.height),
+                    TAB_CONTEXT_MENU_MARGIN,
+                );
+                let sub_body = overlay_content_boundary(context_menu_event_boundary(
+                    div().child(
+                        context_menu_sub_content(&self.tokens)
+                            .w(px(sub_width))
+                            .id("tab-context-merge-submenu-content")
+                            .max_h(px(sub_height))
+                            .overflow_y_scroll()
+                            .children(merge_targets.into_iter().map(|(target, title)| {
+                                context_menu_item(
+                                    &self.tokens,
+                                    title,
+                                    ContextMenuItemKind::Plain,
+                                    false,
+                                    false,
+                                )
+                                .on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener(move |this, _, window, cx| {
+                                        this.combine_tabs(
+                                            menu.tab_id,
+                                            target,
+                                            direction,
+                                            window,
+                                            cx,
+                                        );
+                                        cx.stop_propagation();
+                                    }),
+                                )
+                            })),
+                    ),
+                ));
+                anchored()
+                    .anchor(Corner::TopLeft)
+                    .position(gpui::point(px(sub_placement.x), px(sub_placement.y)))
+                    .position_mode(AnchoredPositionMode::Window)
+                    .child(sub_body)
+            });
+        let clear_merge_submenu = |id: &'static str, item: gpui::Div, cx: &mut Context<Self>| {
+            let item = item.id(id);
+            if has_merge_targets {
+                item.on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                    if *hovered {
+                        this.set_tab_context_merge_submenu(None, cx);
+                    }
+                }))
+            } else {
+                item
+            }
+        };
         let menu_body = context_menu_event_boundary(
             div().child(
                 context_menu_content(&self.tokens)
@@ -1588,12 +1716,16 @@ impl WorkspaceApp {
                     .overflow_y_scroll()
                     .when(renamable, |content| {
                         content.child(
-                            context_menu_item_with_icon(
-                                &self.tokens,
-                                "lucide/pencil.svg",
-                                self.i18n.t("tabbar.rename_tab"),
-                                false,
-                                false,
+                            clear_merge_submenu(
+                                "tab-context-menu-rename",
+                                context_menu_item_with_icon(
+                                    &self.tokens,
+                                    "lucide/pencil.svg",
+                                    self.i18n.t("tabbar.rename_tab"),
+                                    false,
+                                    false,
+                                ),
+                                cx,
                             )
                             .on_mouse_down(
                                 MouseButton::Left,
@@ -1606,12 +1738,16 @@ impl WorkspaceApp {
                     })
                     .when_some(edit_target, |content, target| {
                         content.child(
-                            context_menu_item_with_icon(
-                                &self.tokens,
-                                "lucide/settings.svg",
-                                self.i18n.t("tabbar.edit_connection"),
-                                false,
-                                false,
+                            clear_merge_submenu(
+                                "tab-context-menu-edit-connection",
+                                context_menu_item_with_icon(
+                                    &self.tokens,
+                                    "lucide/settings.svg",
+                                    self.i18n.t("tabbar.edit_connection"),
+                                    false,
+                                    false,
+                                ),
+                                cx,
                             )
                             .on_mouse_down(
                                 MouseButton::Left,
@@ -1669,68 +1805,95 @@ impl WorkspaceApp {
                                 ),
                             )
                     })
-                    .children(
-                        merge_targets
-                            .into_iter()
-                            .flat_map(|(target, title)| {
-                                [SplitDirection::Horizontal, SplitDirection::Vertical]
-                                    .into_iter()
-                                    .map(move |direction| (target, title.clone(), direction))
-                            })
-                            .map(|(target, title, direction)| {
-                                let icon_path = match direction {
-                                    SplitDirection::Horizontal => {
-                                        "lucide/square-split-horizontal.svg"
-                                    }
-                                    SplitDirection::Vertical => "lucide/square-split-vertical.svg",
-                                };
-                                context_menu_item_with_icon(
-                                    &self.tokens,
-                                    icon_path,
-                                    self.i18n_replace(
-                                        match direction {
-                                            SplitDirection::Horizontal => {
-                                                "tabbar.merge_into_horizontal"
-                                            }
-                                            SplitDirection::Vertical => {
-                                                "tabbar.merge_into_vertical"
-                                            }
-                                        },
-                                        &[("title", title)],
-                                    ),
-                                    false,
-                                    false,
-                                )
-                                .on_mouse_down(
-                                    MouseButton::Left,
-                                    cx.listener(move |this, _, window, cx| {
-                                        this.combine_tabs(
-                                            menu.tab_id,
-                                            target,
-                                            direction,
-                                            window,
-                                            cx,
-                                        );
-                                        cx.stop_propagation();
-                                    }),
-                                )
-                            }),
-                    )
+                    .when(has_merge_targets, |content| {
+                        let content = if has_leading_items {
+                            content.child(context_menu_separator(&self.tokens))
+                        } else {
+                            content
+                        };
+                        content.children(
+                            [SplitDirection::Horizontal, SplitDirection::Vertical]
+                                .into_iter()
+                                .map(|direction| {
+                                    let (id, icon_path, label_key) = match direction {
+                                        SplitDirection::Horizontal => (
+                                            "tab-context-menu-merge-horizontal",
+                                            "lucide/square-split-horizontal.svg",
+                                            "tabbar.merge_side_by_side_into",
+                                        ),
+                                        SplitDirection::Vertical => (
+                                            "tab-context-menu-merge-vertical",
+                                            "lucide/square-split-vertical.svg",
+                                            "tabbar.merge_stacked_into",
+                                        ),
+                                    };
+                                    let active = menu.merge_submenu == Some(direction);
+                                    context_menu_item_with_icon(
+                                        &self.tokens,
+                                        icon_path,
+                                        self.i18n.t(label_key),
+                                        false,
+                                        false,
+                                    )
+                                    .child(
+                                        div()
+                                            .ml_auto()
+                                            .flex_none()
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
+                                            .child(
+                                                svg()
+                                                    .path("lucide/chevron-right.svg")
+                                                    .size(px(self
+                                                        .tokens
+                                                        .metrics
+                                                        .ui_menu_indicator_size))
+                                                    .text_color(rgb(self.tokens.ui.text_muted)),
+                                            ),
+                                    )
+                                    .when(active, |item| item.bg(rgb(self.tokens.ui.bg_hover)))
+                                    .id(id)
+                                    .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+                                        if *hovered {
+                                            this.set_tab_context_merge_submenu(
+                                                Some(direction),
+                                                cx,
+                                            );
+                                        }
+                                    }))
+                                    .on_mouse_down(
+                                        MouseButton::Left,
+                                        cx.listener(move |this, _, _, cx| {
+                                            this.set_tab_context_merge_submenu(
+                                                Some(direction),
+                                                cx,
+                                            );
+                                            cx.stop_propagation();
+                                        }),
+                                    )
+                                }),
+                        )
+                    })
                     .child(
-                        context_menu_item_with_icon(
-                            &self.tokens,
-                            if detached {
-                                "lucide/arrow-left-right.svg"
-                            } else {
-                                "lucide/external-link.svg"
-                            },
-                            if detached {
-                                self.i18n.t("tabbar.return_to_main_window")
-                            } else {
-                                self.i18n.t("tabbar.detach_to_window")
-                            },
-                            false,
-                            false,
+                        clear_merge_submenu(
+                            "tab-context-menu-detach",
+                            context_menu_item_with_icon(
+                                &self.tokens,
+                                if detached {
+                                    "lucide/arrow-left-right.svg"
+                                } else {
+                                    "lucide/external-link.svg"
+                                },
+                                if detached {
+                                    self.i18n.t("tabbar.return_to_main_window")
+                                } else {
+                                    self.i18n.t("tabbar.detach_to_window")
+                                },
+                                false,
+                                false,
+                            ),
+                            cx,
                         )
                         .on_mouse_down(
                             MouseButton::Left,
@@ -1748,7 +1911,18 @@ impl WorkspaceApp {
                     .when_some(ssh_node_menu, |content, ssh| {
                         let node_id = ssh.node_id;
                         let active_session = self.active_terminal_session_id(cx);
-                        let mut content = content.child(context_menu_separator(&self.tokens));
+                        let mut section = div()
+                            .id("tab-context-menu-ssh-section")
+                            .flex()
+                            .flex_col()
+                            .when(has_merge_targets, |section| {
+                                section.on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                                    if *hovered {
+                                        this.set_tab_context_merge_submenu(None, cx);
+                                    }
+                                }))
+                            })
+                            .child(context_menu_separator(&self.tokens));
                         for (index, terminal_session_id) in ssh.terminals.iter().enumerate() {
                             let session_id = *terminal_session_id;
                             let active = active_session == Some(session_id);
@@ -1769,7 +1943,7 @@ impl WorkspaceApp {
                             } else {
                                 item
                             };
-                            content = content.child(item.on_mouse_down(
+                            section = section.child(item.on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(move |this, _event, window, cx| {
                                     this.close_tab_context_menu();
@@ -1779,9 +1953,9 @@ impl WorkspaceApp {
                             ));
                         }
                         if !ssh.terminals.is_empty() {
-                            content = content.child(context_menu_separator(&self.tokens));
+                            section = section.child(context_menu_separator(&self.tokens));
                         }
-                        content = content.child(
+                        section = section.child(
                             context_menu_item_with_icon(
                                 &self.tokens,
                                 "lucide/plus.svg",
@@ -1807,7 +1981,7 @@ impl WorkspaceApp {
                                 }),
                             ),
                         );
-                        content = content.child(
+                        section = section.child(
                             context_menu_item_with_icon(
                                 &self.tokens,
                                 "lucide/folder-open.svg",
@@ -1827,7 +2001,7 @@ impl WorkspaceApp {
                                 }),
                             ),
                         );
-                        content = content.child(
+                        section = section.child(
                             context_menu_item_with_icon(
                                 &self.tokens,
                                 "lucide/code-2.svg",
@@ -1851,7 +2025,7 @@ impl WorkspaceApp {
                                 }),
                             ),
                         );
-                        content = content.child(
+                        section = section.child(
                             context_menu_item_with_icon(
                                 &self.tokens,
                                 "lucide/arrow-left-right.svg",
@@ -1871,7 +2045,7 @@ impl WorkspaceApp {
                                 }),
                             ),
                         );
-                        content = content.child(
+                        section = section.child(
                             context_menu_item_with_icon(
                                 &self.tokens,
                                 "lucide/arrow-down-right.svg",
@@ -1891,7 +2065,7 @@ impl WorkspaceApp {
                                 }),
                             ),
                         );
-                        content.child(context_menu_separator(&self.tokens)).child(
+                        section = section.child(context_menu_separator(&self.tokens)).child(
                             context_menu_item_with_icon(
                                 &self.tokens,
                                 "lucide/wifi-off.svg",
@@ -1910,16 +2084,21 @@ impl WorkspaceApp {
                                     }
                                 }),
                             ),
-                        )
+                        );
+                        content.child(section)
                     })
                     .when(is_session_manager, |content| {
                         content.child(
-                            context_menu_item_with_icon(
-                                &self.tokens,
-                                "lucide/panel-left.svg",
-                                self.i18n.t("tabbar.switch_to_sidebar"),
-                                false,
-                                false,
+                            clear_merge_submenu(
+                                "tab-context-menu-switch-sidebar",
+                                context_menu_item_with_icon(
+                                    &self.tokens,
+                                    "lucide/panel-left.svg",
+                                    self.i18n.t("tabbar.switch_to_sidebar"),
+                                    false,
+                                    false,
+                                ),
+                                cx,
                             )
                             .on_mouse_down(
                                 MouseButton::Left,
@@ -1945,12 +2124,16 @@ impl WorkspaceApp {
                     })
                     .child(context_menu_separator(&self.tokens))
                     .child(
-                        context_menu_item_with_icon(
-                            &self.tokens,
-                            "lucide/x.svg",
-                            self.i18n.t("tabbar.close_tab"),
-                            true,
-                            false,
+                        clear_merge_submenu(
+                            "tab-context-menu-close",
+                            context_menu_item_with_icon(
+                                &self.tokens,
+                                "lucide/x.svg",
+                                self.i18n.t("tabbar.close_tab"),
+                                true,
+                                false,
+                            ),
+                            cx,
                         )
                         .on_mouse_down(
                             MouseButton::Left,
@@ -1965,22 +2148,26 @@ impl WorkspaceApp {
         );
         let menu_body = overlay_content_boundary(menu_body);
 
+        let menu_layer = div()
+            .child(
+                anchored()
+                    .anchor(Corner::TopLeft)
+                    .position(gpui::point(px(placement.x), px(placement.y)))
+                    .position_mode(AnchoredPositionMode::Window)
+                    .child(oxideterm_gpui_ui::motion::popover_zoom_enter(
+                        &self.tokens,
+                        ("tab-context-menu-motion", menu.tab_id.0),
+                        div().child(menu_body),
+                        -4.0,
+                        gpui::point(0.0, 0.0),
+                    )),
+            )
+            .when_some(merge_submenu_overlay, |layer, submenu| layer.child(submenu));
+
         Some(
             self.workspace_context_menu_backdrop(
-                deferred(
-                    anchored()
-                        .anchor(Corner::TopLeft)
-                        .position(gpui::point(px(placement.x), px(placement.y)))
-                        .position_mode(AnchoredPositionMode::Window)
-                        .child(oxideterm_gpui_ui::motion::popover_zoom_enter(
-                            &self.tokens,
-                            ("tab-context-menu-motion", menu.tab_id.0),
-                            div().child(menu_body),
-                            -4.0,
-                            gpui::point(0.0, 0.0),
-                        )),
-                )
-                .with_priority(oxideterm_gpui_ui::modal::TAURI_POPOVER_LAYER_PRIORITY),
+                deferred(menu_layer)
+                    .with_priority(oxideterm_gpui_ui::modal::TAURI_POPOVER_LAYER_PRIORITY),
                 cx,
             )
             .into_any_element(),
@@ -3058,4 +3245,34 @@ mod tests {
         });
     }
 
+    #[test]
+    fn tab_context_merge_submenu_placement_flips_left_and_clamps_bottom() {
+        let normal = place_tab_context_submenu(
+            BrowserOverlayPlacement { x: 120.0, y: 80.0 },
+            228.0,
+            64.0,
+            200.0,
+            120.0,
+            1200.0,
+            800.0,
+            8.0,
+        );
+        assert_eq!(normal.x, 120.0 + 228.0 - TAB_CONTEXT_SUBMENU_OVERLAP);
+        assert_eq!(normal.y, 144.0);
+
+        // Near the right and bottom viewport edges, flip to the left of the
+        // parent menu and clamp vertically within the viewport margin.
+        let flipped = place_tab_context_submenu(
+            BrowserOverlayPlacement { x: 940.0, y: 680.0 },
+            228.0,
+            96.0,
+            200.0,
+            160.0,
+            1200.0,
+            800.0,
+            8.0,
+        );
+        assert_eq!(flipped.x, 940.0 - 200.0 + TAB_CONTEXT_SUBMENU_OVERLAP);
+        assert_eq!(flipped.y, 800.0 - 160.0 - 8.0);
+    }
 }

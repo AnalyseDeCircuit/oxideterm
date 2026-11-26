@@ -1375,6 +1375,8 @@
     "workspace": "Área de trabalho",
     "merge_into_horizontal": "Mesclar com “{{title}}” (lado a lado)",
     "merge_into_vertical": "Mesclar com “{{title}}” (empilhado)",
+    "merge_side_by_side_into": "Mesclar lado a lado com",
+    "merge_stacked_into": "Mesclar empilhado com",
     "move_pane_to_tab": "Mover para nova aba",
     "move_pane_to_window": "Mover para nova janela",
     "offline": "Offline",

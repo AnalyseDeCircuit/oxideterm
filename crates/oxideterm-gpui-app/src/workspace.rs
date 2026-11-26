@@ -338,6 +338,7 @@ struct TabContextMenu {
     tab_id: TabId,
     x: f32,
     y: f32,
+    merge_submenu: Option<SplitDirection>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

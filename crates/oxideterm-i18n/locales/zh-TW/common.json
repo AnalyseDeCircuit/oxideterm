@@ -1375,6 +1375,8 @@
     "workspace": "工作區",
     "merge_into_horizontal": "併入「{{title}}」（左右分割）",
     "merge_into_vertical": "併入「{{title}}」（上下分割）",
+    "merge_side_by_side_into": "左右分割併入",
+    "merge_stacked_into": "上下分割併入",
     "move_pane_to_tab": "移至新分頁",
     "move_pane_to_window": "移至新視窗",
     "offline": "離線",

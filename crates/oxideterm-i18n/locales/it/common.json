@@ -1375,6 +1375,8 @@
     "workspace": "Area di lavoro",
     "merge_into_horizontal": "Unisci a «{{title}}» (affiancati)",
     "merge_into_vertical": "Unisci a «{{title}}» (sovrapposti)",
+    "merge_side_by_side_into": "Unisci affiancati con",
+    "merge_stacked_into": "Unisci sovrapposti con",
     "move_pane_to_tab": "Sposta in una nuova scheda",
     "move_pane_to_window": "Sposta in una nuova finestra",
     "offline": "Offline",

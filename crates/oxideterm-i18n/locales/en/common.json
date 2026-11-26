@@ -1375,6 +1375,8 @@
     "workspace": "Workspace",
     "merge_into_horizontal": "Merge into “{{title}}” (side by side)",
     "merge_into_vertical": "Merge into “{{title}}” (stacked)",
+    "merge_side_by_side_into": "Merge side by side into",
+    "merge_stacked_into": "Merge stacked into",
     "move_pane_to_tab": "Move to new tab",
     "move_pane_to_window": "Move to new window",
     "offline": "Offline",

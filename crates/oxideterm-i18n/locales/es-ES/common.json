@@ -1375,6 +1375,8 @@
     "workspace": "Espacio de trabajo",
     "merge_into_horizontal": "Combinar con «{{title}}» (lado a lado)",
     "merge_into_vertical": "Combinar con «{{title}}» (apilado)",
+    "merge_side_by_side_into": "Combinar lado a lado con",
+    "merge_stacked_into": "Combinar apilado con",
     "move_pane_to_tab": "Mover a nueva pestaña",
     "move_pane_to_window": "Mover a nueva ventana",
     "offline": "Sin conexión",

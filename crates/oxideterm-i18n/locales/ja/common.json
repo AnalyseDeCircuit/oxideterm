@@ -1375,6 +1375,8 @@
     "workspace": "ワークスペース",
     "merge_into_horizontal": "「{{title}}」に結合（左右分割）",
     "merge_into_vertical": "「{{title}}」に結合（上下分割）",
+    "merge_side_by_side_into": "左右分割で結合",
+    "merge_stacked_into": "上下分割で結合",
     "move_pane_to_tab": "新しいタブに移動",
     "move_pane_to_window": "新しいウィンドウに移動",
     "offline": "オフライン",

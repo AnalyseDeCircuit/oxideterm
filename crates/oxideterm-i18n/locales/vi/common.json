@@ -1375,6 +1375,8 @@
     "workspace": "Không gian làm việc",
     "merge_into_horizontal": "Ghép vào “{{title}}” (cạnh nhau)",
     "merge_into_vertical": "Ghép vào “{{title}}” (trên dưới)",
+    "merge_side_by_side_into": "Ghép cạnh nhau vào",
+    "merge_stacked_into": "Ghép trên dưới vào",
     "move_pane_to_tab": "Chuyển sang thẻ mới",
     "move_pane_to_window": "Chuyển sang cửa sổ mới",
     "offline": "Ngoại tuyến",

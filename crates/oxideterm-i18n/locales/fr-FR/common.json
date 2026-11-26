@@ -1375,6 +1375,8 @@
     "workspace": "Espace de travail",
     "merge_into_horizontal": "Fusionner avec « {{title}} » (côte à côte)",
     "merge_into_vertical": "Fusionner avec « {{title}} » (superposés)",
+    "merge_side_by_side_into": "Fusionner côte à côte avec",
+    "merge_stacked_into": "Fusionner empilé avec",
     "move_pane_to_tab": "Déplacer vers un nouvel onglet",
     "move_pane_to_window": "Déplacer vers une nouvelle fenêtre",
     "offline": "Hors ligne",

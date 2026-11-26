@@ -1375,6 +1375,8 @@
     "workspace": "Arbeitsbereich",
     "merge_into_horizontal": "Mit „{{title}}“ zusammenführen (nebeneinander)",
     "merge_into_vertical": "Mit „{{title}}“ zusammenführen (übereinander)",
+    "merge_side_by_side_into": "Nebeneinander zusammenführen mit",
+    "merge_stacked_into": "Übereinander zusammenführen mit",
     "move_pane_to_tab": "In neuen Tab verschieben",
     "move_pane_to_window": "In neues Fenster verschieben",
     "offline": "Offline",
