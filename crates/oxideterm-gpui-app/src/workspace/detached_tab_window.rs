@@ -89,6 +89,26 @@ impl DetachedTabWindow {
     }
 }
 
+fn handle_detached_ime_text_keys(
+    session: &mut WorkspaceApp,
+    event: &KeyDownEvent,
+    window: &Window,
+    cx: &mut Context<WorkspaceApp>,
+) -> Option<bool> {
+    if session.defer_active_ime_key(&event.keystroke, window, cx) {
+        return Some(false);
+    }
+    if session.handle_active_text_input_edit_shortcut(&event.keystroke, cx)
+        || session.handle_active_text_input_delete_selection(&event.keystroke, cx)
+        || session.handle_active_text_input_newline(&event.keystroke, cx)
+        || session.handle_active_text_input_transpose(&event.keystroke, cx)
+        || session.handle_active_text_input_navigation(&event.keystroke, cx)
+    {
+        return Some(true);
+    }
+    None
+}
+
 impl Focusable for DetachedTabWindow {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus_handle.clone()
@@ -127,12 +147,26 @@ impl Render for DetachedTabWindow {
             .on_mouse_move(cx.listener(|detached, event: &MouseMoveEvent, window, cx| {
                 detached.session.update(cx, |session, cx| {
                     session.update_file_manager_bookmarks_resize(event, window, cx);
+                    session.update_settings_slider_drag(event, cx);
+                    session.update_ime_selection_drag_from_mouse_move(event, window, cx);
                     session.update_detached_tab_return_drag(detached.tab_id, event, window, cx);
                     if session.split_drag_belongs_to_tab(detached.tab_id) {
                         session.update_split_drag(event, window, cx);
                     }
                 });
             }))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|detached, _event: &MouseDownEvent, window, cx| {
+                    detached.session.update(cx, |session, cx| {
+                        session.dismiss_transient_workspace_overlays_from_outside_pointer(
+                            window, cx,
+                        );
+                        session.blur_text_inputs(cx);
+                        session.clear_read_only_ime_selection(cx);
+                    });
+                }),
+            )
             .on_mouse_up(
                 MouseButton::Left,
                 cx.listener(|detached, event: &MouseUpEvent, window, cx| {
@@ -141,6 +175,8 @@ impl Render for DetachedTabWindow {
                             window.window_handle().window_id(),
                             cx,
                         );
+                        session.finish_settings_slider_drag(cx);
+                        session.finish_ime_selection_drag(cx);
                         session.finish_detached_tab_return_drag(detached.tab_id, event, window, cx);
                         if session.split_drag_belongs_to_tab(detached.tab_id) {
                             session.finish_split_drag(cx);
@@ -307,6 +343,78 @@ impl Render for DetachedTabWindow {
                             return true;
                         }
                         return session.handle_forwards_key(event, cx);
+                    }
+                    if kind == Some(TabKind::Settings)
+                        && session
+                            .settings_workspace
+                            .read(cx)
+                            .keybinding_recording_action_id()
+                            .is_some()
+                        && session.settings_workspace.read(cx).route_snapshot().active_tab
+                            == SettingsTab::Keybindings
+                    {
+                        session.handle_keybinding_recording_key(event, cx);
+                        return true;
+                    }
+                    let has_settings_input = session.focused_settings_input.is_some()
+                        || session
+                            .settings_workspace
+                            .read(cx)
+                            .settings_entity_focused_input()
+                            .is_some()
+                        || session
+                            .knowledge_page(cx)
+                            .read(cx)
+                            .focused_settings_input()
+                            .is_some();
+                    if matches!(
+                        kind,
+                        Some(TabKind::Settings | TabKind::CloudSync | TabKind::PluginManager)
+                    ) {
+                        if has_settings_input {
+                            if let Some(handled) =
+                                handle_detached_ime_text_keys(session, event, window, cx)
+                            {
+                                return handled;
+                            }
+                            return session.handle_settings_input_key(event, cx);
+                        }
+                        if kind == Some(TabKind::CloudSync)
+                            && session.handle_cloud_sync_select_key(event, cx)
+                        {
+                            return true;
+                        }
+                    }
+                    if kind == Some(TabKind::FileManager)
+                        && (session.file_manager.read(cx).focused_input.is_some()
+                            || session.file_manager.read(cx).dialog.is_some())
+                    {
+                        if let Some(handled) =
+                            handle_detached_ime_text_keys(session, event, window, cx)
+                        {
+                            return handled;
+                        }
+                        return session.handle_file_manager_key(event, cx);
+                    }
+                    if kind == Some(TabKind::Graphics)
+                        && session.graphics.read(cx).focused_input().is_some()
+                    {
+                        if let Some(handled) =
+                            handle_detached_ime_text_keys(session, event, window, cx)
+                        {
+                            return handled;
+                        }
+                        return session.handle_graphics_key(event, cx);
+                    }
+                    if kind == Some(TabKind::SessionManager)
+                        && session.active_session_manager_input(cx).is_some()
+                    {
+                        if let Some(handled) =
+                            handle_detached_ime_text_keys(session, event, window, cx)
+                        {
+                            return handled;
+                        }
+                        return session.handle_session_manager_key(event, cx);
                     }
                     let is_knowledge_window = kind == Some(TabKind::Knowledge);
                     if is_knowledge_window && session.knowledge_leave_confirmation_open(cx) {

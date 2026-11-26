@@ -2504,4 +2504,133 @@ mod tests {
             );
         });
     }
+
+    #[gpui::test]
+    fn detached_settings_window_handles_text_input_edit_keys_and_shortcuts(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let Some((workspace, main_cx)) = detach_workspace_fixture(cx) else {
+            return;
+        };
+
+        let (settings_tab_id, detached_handle) = main_cx.update(|window, cx| {
+            workspace.update(cx, |workspace, cx| {
+                workspace.open_settings_tab(window, cx);
+                let tab_id = workspace
+                    .tabs(cx)
+                    .iter()
+                    .find(|tab| tab.kind == TabKind::Settings)
+                    .map(|tab| tab.id)
+                    .expect("settings tab should open");
+                workspace.detach_tab_to_window(tab_id, None, window, cx);
+                let handle = workspace
+                    .tab_host
+                    .read(cx)
+                    .detached_window_handle(tab_id)
+                    .expect("detached settings window handle");
+                (tab_id, handle)
+            })
+        });
+        main_cx.run_until_parked();
+
+        let mut detached_cx = gpui::VisualTestContext::from_window(detached_handle, cx);
+        // Test windows have no platform frame loop; deliver the next-frame
+        // callback so `DetachedTabWindow::ready` flips true and mounts content.
+        detached_cx.update(|window, cx| {
+            assert!(window.simulate_next_frame(cx) > 0);
+        });
+        detached_cx.update(|window, cx| window.draw(cx).clear(cx));
+
+        let input = SettingsInput::TerminalCjkFontFamily;
+        detached_cx.update(|window, cx| {
+            window.activate_window();
+            workspace.update(cx, |workspace, cx| {
+                window.focus(&workspace.focus_handle, cx);
+                workspace.focus_settings_input(input, "JetBrains Mono".to_string(), cx);
+                workspace.apply_settings_input_draft(input, cx);
+            });
+        });
+        detached_cx.update(|window, cx| window.draw(cx).clear(cx));
+
+        let read_input = |detached_cx: &mut gpui::VisualTestContext| {
+            detached_cx.update(|_, cx| {
+                workspace.update(cx, |workspace, cx| {
+                    workspace.current_settings_input_value(input, cx)
+                })
+            })
+        };
+
+        let modifier = if cfg!(target_os = "macos") {
+            "cmd"
+        } else {
+            "ctrl"
+        };
+
+        detached_cx.simulate_keystrokes("backspace");
+        detached_cx.run_until_parked();
+        assert_eq!(read_input(&mut detached_cx), "JetBrains Mon");
+
+        detached_cx.simulate_keystrokes(&format!("{modifier}-a {modifier}-c"));
+        detached_cx.run_until_parked();
+        assert_eq!(
+            detached_cx
+                .read_from_clipboard()
+                .and_then(|item| item.text()),
+            Some("JetBrains Mon".to_string())
+        );
+
+        detached_cx.simulate_keystrokes(&format!("{modifier}-x"));
+        detached_cx.run_until_parked();
+        assert_eq!(read_input(&mut detached_cx), "");
+
+        detached_cx.simulate_keystrokes(&format!("{modifier}-v"));
+        detached_cx.run_until_parked();
+        assert_eq!(read_input(&mut detached_cx), "JetBrains Mon");
+
+        detached_cx.simulate_keystrokes("escape");
+        detached_cx.run_until_parked();
+        assert_eq!(
+            detached_cx.read(|cx| workspace.read(cx).focused_settings_input),
+            None
+        );
+
+        // Entity-owned settings inputs (such as SettingsSearch) must also route
+        // edit keys through the detached Settings window.
+        let search_input = SettingsInput::SettingsSearch;
+        detached_cx.update(|window, cx| {
+            workspace.update(cx, |workspace, cx| {
+                window.focus(&workspace.focus_handle, cx);
+                workspace.settings_workspace.update(cx, |settings, cx| {
+                    settings.open_settings_search(cx);
+                    assert!(settings.focus_settings_entity_input(search_input, cx));
+                    assert!(settings.replace_settings_entity_input(search_input, None, "proxy", cx));
+                });
+            });
+        });
+        detached_cx.run_until_parked();
+        detached_cx.simulate_keystrokes("backspace");
+        detached_cx.run_until_parked();
+        assert_eq!(
+            detached_cx.update(|_, cx| {
+                workspace.update(cx, |workspace, cx| {
+                    workspace.current_settings_input_value(search_input, cx)
+                })
+            }),
+            "prox"
+        );
+        detached_cx.simulate_keystrokes("escape");
+        detached_cx.run_until_parked();
+        assert_eq!(
+            detached_cx.read(|cx| {
+                workspace
+                    .read(cx)
+                    .settings_workspace
+                    .read(cx)
+                    .settings_entity_focused_input()
+            }),
+            None
+        );
+
+        let _ = settings_tab_id;
+    }
 }
