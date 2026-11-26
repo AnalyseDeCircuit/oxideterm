@@ -477,7 +477,13 @@ impl TerminalCommandSenderEntity {
         cx: &mut Context<Self>,
     ) -> TerminalCommandSenderId {
         if !self.is_expanded() {
-            return self.replace_active_compact_text(text, cx);
+            if contains_line_break(&text) {
+                // Single-line compact input cannot display or edit multiline commands;
+                // promote to the multiline sender editor automatically.
+                self.set_expanded(true, cx);
+            } else {
+                return self.replace_active_compact_text(text, cx);
+            }
         }
         let (sender_id, editor) = self.editable_active_editor(cx);
         editor.update(cx, |editor, cx| {
@@ -494,23 +500,27 @@ impl TerminalCommandSenderEntity {
         cx: &mut Context<Self>,
     ) -> TerminalCommandSenderId {
         if !self.is_expanded() {
-            let sender_id = self.editable_active_document_id(cx);
-            if let Some(document) = self.document_mut(sender_id) {
-                if separate_with_space
-                    && document
-                        .compact_draft
-                        .chars()
-                        .next_back()
-                        .is_some_and(|last| !last.is_whitespace())
-                {
-                    document.compact_draft.push(' ');
+            if contains_line_break(suffix) {
+                self.set_expanded(true, cx);
+            } else {
+                let sender_id = self.editable_active_document_id(cx);
+                if let Some(document) = self.document_mut(sender_id) {
+                    if separate_with_space
+                        && document
+                            .compact_draft
+                            .chars()
+                            .next_back()
+                            .is_some_and(|last| !last.is_whitespace())
+                    {
+                        document.compact_draft.push(' ');
+                    }
+                    document.compact_draft.push_str(suffix);
+                    document.failure = None;
+                    self.dismiss_compact_suggestions();
+                    cx.notify();
                 }
-                document.compact_draft.push_str(suffix);
-                document.failure = None;
-                self.dismiss_compact_suggestions();
-                cx.notify();
+                return sender_id;
             }
-            return sender_id;
         }
         let (sender_id, editor) = self.editable_active_editor(cx);
         let mut text = Zeroizing::new(editor.read(cx).buffer().text());
@@ -1255,6 +1265,10 @@ fn plan_failure(error: TerminalSenderPlanError) -> TerminalCommandSenderFailure 
     }
 }
 
+fn contains_line_break(text: &str) -> bool {
+    text.contains('\n') || text.contains('\r')
+}
+
 fn adjusted_sender_panel_height(start_height: f32, delta_y: f32, available_height: f32) -> f32 {
     // Moving the divider upward grows the bottom sender panel.
     let ratio_limit = available_height * TERMINAL_SENDER_MAX_VIEWPORT_RATIO;
@@ -1358,6 +1372,54 @@ mod tests {
         sender.read_with(cx, |sender, _cx| {
             assert_eq!(sender.active_compact_draft(), Some("echo expanded"));
         });
+    }
+
+    #[gpui::test]
+    fn multiline_text_auto_expands_compact_sender_and_preserves_lines(cx: &mut TestAppContext) {
+        let sender = cx.new(|cx| {
+            TerminalCommandSenderEntity::new(
+                default_tokens(),
+                "Command".to_string(),
+                "Commands".to_string(),
+                test_context_menu_labels(),
+                cx,
+            )
+        });
+
+        sender.update(cx, |sender, cx| {
+            sender.replace_active_text("echo single".to_string(), cx);
+            assert!(!sender.is_expanded());
+            assert_eq!(sender.active_compact_draft(), Some("echo single"));
+        });
+
+        let multiline = "vllm serve /models/qwen \\\n  --host 0.0.0.0 \\\n  --port 1234";
+        sender.update(cx, |sender, cx| {
+            sender.replace_active_text(multiline.to_string(), cx);
+            assert!(sender.is_expanded());
+        });
+        let editor = sender
+            .read_with(cx, |sender, _cx| {
+                sender
+                    .active_document_snapshot()
+                    .map(|snapshot| snapshot.editor)
+            })
+            .expect("active sender editor");
+        assert_eq!(
+            editor.read_with(cx, |editor, _cx| editor.buffer().text()),
+            multiline
+        );
+
+        sender.update(cx, |sender, cx| {
+            sender.set_expanded(false, cx);
+            sender.replace_active_text("docker run".to_string(), cx);
+            assert!(!sender.is_expanded());
+            sender.append_active_text("--rm \\\n  alpine", true, cx);
+            assert!(sender.is_expanded());
+        });
+        assert_eq!(
+            editor.read_with(cx, |editor, _cx| editor.buffer().text()),
+            "docker run --rm \\\n  alpine"
+        );
     }
 
     #[gpui::test]

@@ -529,6 +529,12 @@ impl WorkspaceApp {
                 if active_ime_target.is_some()
                     && this.handle_active_text_input_edit_shortcut(&event.keystroke, cx)
                 {
+                    if active_ime_target == Some(WorkspaceImeTarget::TerminalCommandSenderCompact)
+                        && this.terminal_command_sender.read(cx).is_expanded()
+                    {
+                        let sender_id = this.terminal_command_sender.read(cx).active_document_id();
+                        this.focus_terminal_command_sender_editor(sender_id, window, cx);
+                    }
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if active_ime_target.is_some()
@@ -1023,7 +1029,16 @@ impl WorkspaceApp {
                     if this.handle_ide_modal_edit_action("v", window, cx) {
                         return;
                     }
+                    let active_ime_target = this.active_ime_target(cx);
                     if this.paste_active_text_input(cx) {
+                        if active_ime_target
+                            == Some(WorkspaceImeTarget::TerminalCommandSenderCompact)
+                            && this.terminal_command_sender.read(cx).is_expanded()
+                        {
+                            let sender_id =
+                                this.terminal_command_sender.read(cx).active_document_id();
+                            this.focus_terminal_command_sender_editor(sender_id, window, cx);
+                        }
                         return;
                     }
                     if this.paste_into_active_ide_editor(cx) {

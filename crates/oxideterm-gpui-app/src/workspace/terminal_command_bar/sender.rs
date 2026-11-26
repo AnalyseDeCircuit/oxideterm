@@ -10,7 +10,7 @@ use crate::workspace::terminal_command_sender::{
     TerminalCommandSenderDocumentSnapshot, TerminalCommandSenderFailure, TerminalCommandSenderId,
     TerminalCommandSenderStatus, TerminalCommandSenderTarget, TerminalCommandSenderTargetScope,
 };
-use oxideterm_editor_core::utf16::byte_index_for_utf16;
+use oxideterm_editor_core::utf16::{byte_index_for_utf16, replace_utf16};
 use oxideterm_terminal::{TerminalSenderInputMode, TerminalSenderPacing};
 use zeroize::Zeroizing;
 
@@ -1388,8 +1388,14 @@ impl WorkspaceApp {
         text: String,
         cx: &mut Context<Self>,
     ) -> TerminalCommandSenderId {
-        self.terminal_command_sender
-            .update(cx, |sender, cx| sender.replace_active_text(text, cx))
+        let was_expanded = self.terminal_command_sender.read(cx).is_expanded();
+        let sender_id = self
+            .terminal_command_sender
+            .update(cx, |sender, cx| sender.replace_active_text(text, cx));
+        if !was_expanded && self.terminal_command_sender.read(cx).is_expanded() {
+            self.cleanup_after_terminal_command_sender_expand(cx);
+        }
+        sender_id
     }
 
     pub(in crate::workspace) fn append_terminal_command_sender_text(
@@ -1398,9 +1404,24 @@ impl WorkspaceApp {
         separate_with_space: bool,
         cx: &mut Context<Self>,
     ) -> TerminalCommandSenderId {
-        self.terminal_command_sender.update(cx, |sender, cx| {
+        let was_expanded = self.terminal_command_sender.read(cx).is_expanded();
+        let sender_id = self.terminal_command_sender.update(cx, |sender, cx| {
             sender.append_active_text(text, separate_with_space, cx)
-        })
+        });
+        if !was_expanded && self.terminal_command_sender.read(cx).is_expanded() {
+            self.cleanup_after_terminal_command_sender_expand(cx);
+        }
+        sender_id
+    }
+
+    pub(in crate::workspace) fn cleanup_after_terminal_command_sender_expand(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        self.close_terminal_quick_commands_panel(cx);
+        self.close_terminal_command_overlays(cx);
+        self.ime_marked_text = None;
+        self.clear_ime_selection();
     }
 
     pub(in crate::workspace) fn focus_terminal_command_sender_editor(
@@ -1531,6 +1552,27 @@ impl WorkspaceApp {
                     });
                     self.clear_ime_selection();
                 }
+                true
+            }
+            "enter"
+                if !modifiers.platform
+                    && !modifiers.control
+                    && !modifiers.alt
+                    && modifiers.shift =>
+            {
+                let target = WorkspaceImeTarget::TerminalCommandSenderCompact;
+                let mut draft = Zeroizing::new(
+                    self.terminal_command_sender
+                        .read(cx)
+                        .active_compact_draft()
+                        .unwrap_or_default()
+                        .to_string(),
+                );
+                let replacement_range = self.ime_selection_range_for_target(target, cx);
+                replace_utf16(&mut draft, replacement_range, "\n");
+                let sender_id =
+                    self.replace_terminal_command_sender_text(std::mem::take(&mut *draft), cx);
+                self.focus_terminal_command_sender_input(sender_id, window, cx);
                 true
             }
             "up" | "arrowup" | "down" | "arrowdown"

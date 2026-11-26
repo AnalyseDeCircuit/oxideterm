@@ -3254,7 +3254,10 @@ impl WorkspaceApp {
             .map(|range| range.start + text.encode_utf16().count());
         self.replace_ime_target_text(target, replacement_range, &text, caret, cx);
         self.clear_ime_selection();
-        if let Some(caret) = caret {
+        if let Some(caret) = caret
+            && !(target == WorkspaceImeTarget::TerminalCommandSenderCompact
+                && self.terminal_command_sender.read(cx).is_expanded())
+        {
             self.set_ime_selection_from_anchor(target, caret, caret);
         }
         if matches!(target, WorkspaceImeTarget::Sftp(..)) {
@@ -3571,9 +3574,13 @@ impl WorkspaceApp {
                         .to_string(),
                 );
                 replace_utf16(&mut draft, replacement_range, text);
-                self.terminal_command_sender.update(cx, |sender, cx| {
-                    sender.replace_active_compact_text(std::mem::take(&mut *draft), cx);
-                });
+                if draft.contains('\n') || draft.contains('\r') {
+                    self.replace_terminal_command_sender_text(std::mem::take(&mut *draft), cx);
+                } else {
+                    self.terminal_command_sender.update(cx, |sender, cx| {
+                        sender.replace_active_compact_text(std::mem::take(&mut *draft), cx);
+                    });
+                }
                 self.show_active_input_caret(cx);
                 cx.notify();
             }
@@ -4093,7 +4100,9 @@ fn normalize_clipboard_text_for_ime_target(
             normalized.push(character);
         }
     }
-    if ime_target_accepts_newline(target) {
+    if ime_target_accepts_newline(target)
+        || target == WorkspaceImeTarget::TerminalCommandSenderCompact
+    {
         normalized
     } else {
         Zeroizing::new(normalized.lines().collect::<Vec<_>>().join(" "))
@@ -4885,6 +4894,11 @@ mod tests {
                 WorkspaceImeTarget::QuickCommand(QuickCommandInput::CommandText),
                 "first\r\nsecond\rthird",
                 "first\nsecond\nthird",
+            ),
+            (
+                WorkspaceImeTarget::TerminalCommandSenderCompact,
+                "vllm serve \\\r\n  --port 1234",
+                "vllm serve \\\n  --port 1234",
             ),
             (
                 WorkspaceImeTarget::Settings(SettingsInput::ManagedKeyPastePassphrase),
