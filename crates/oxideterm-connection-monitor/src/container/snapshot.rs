@@ -19,7 +19,7 @@ pub fn snapshot_command(os_type: &str, instance: &ContainerInstance) -> String {
             "CONTAINER",
             "Git Bash (bash.exe) not found",
         ),
-        _ => posix_snapshot(instance),
+        _ => crate::shell::posix_shell_command(&posix_snapshot(instance)),
     }
 }
 
@@ -165,14 +165,14 @@ mod tests {
 
     #[test]
     fn docker_snapshots_carry_a_batched_host_pid_map() {
-        let script = snapshot_command(
+        let script = crate::shell::decoded_posix_script(&snapshot_command(
             "Linux",
             &instance(ContainerEngine::Docker, ContainerTransport::Cli),
-        );
+        ));
         assert!(script.contains("inspect --format '{{.Id}} {{.State.Pid}}'"));
         assert!(script.contains("PID\\t"));
         // Podman reads the pid from the ps template instead of inspecting.
-        let podman = snapshot_command(
+        let podman = crate::shell::decoded_posix_script(&snapshot_command(
             "Linux",
             &instance(
                 ContainerEngine::Podman,
@@ -180,7 +180,7 @@ mod tests {
                     endpoint: "unix:///run/user/1000/podman/podman.sock".into(),
                 },
             ),
-        );
+        ));
         assert!(podman.contains("\\t{{.Pid}}'"));
         assert!(!podman.contains("inspect --format"));
     }
@@ -220,7 +220,7 @@ mod tests {
 
     #[test]
     fn docker_snapshot_uses_the_json_projection_and_socket_endpoint() {
-        let script = snapshot_command(
+        let script = crate::shell::decoded_posix_script(&snapshot_command(
             "Linux",
             &instance(
                 ContainerEngine::Docker,
@@ -228,7 +228,7 @@ mod tests {
                     endpoint: "unix:///var/run/docker.sock".into(),
                 },
             ),
-        );
+        ));
         // Docker keeps the explicit template: the `json` keyword needs CLI 23.0.
         assert!(script.contains(
             "docker -H 'unix:///var/run/docker.sock' ps -a --no-trunc --format '{{json .}}'"
@@ -243,7 +243,7 @@ mod tests {
 
     #[test]
     fn podman_snapshot_uses_compact_rows_and_pods() {
-        let script = snapshot_command(
+        let script = crate::shell::decoded_posix_script(&snapshot_command(
             "Linux",
             &instance(
                 ContainerEngine::Podman,
@@ -251,7 +251,7 @@ mod tests {
                     endpoint: "unix:///run/user/1000/podman/podman.sock".into(),
                 },
             ),
-        );
+        ));
         assert!(script.contains(
             "podman --url 'unix:///run/user/1000/podman/podman.sock' ps -a --no-trunc --format '{{json .}}\\t{{.Status}}\\t{{.Ports}}\\t{{.RunningFor}}\\t{{.Pid}}'"
         ));

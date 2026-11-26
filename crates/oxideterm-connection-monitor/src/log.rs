@@ -248,7 +248,7 @@ fn build_linux_log_snapshot_command(preset: LogPreset, limit: usize) -> String {
     } else {
         format!(" | grep -E -i {}", shell_quote(grep_filter))
     };
-    format!(
+    posix_shell_command(&format!(
         concat!(
             "echo '===HOST_LOGS==='; ",
             "if command -v journalctl >/dev/null 2>&1; then ",
@@ -281,15 +281,15 @@ fn build_linux_log_snapshot_command(preset: LogPreset, limit: usize) -> String {
         limit = limit,
         file_candidates = file_candidates,
         file_filter = file_filter,
-    )
+    ))
 }
 
 fn build_linux_log_follow_command(preset: LogPreset) -> String {
     let journal_args = linux_journalctl_preset_args(preset);
     let file_candidates = linux_log_file_candidates(preset).join(" ");
-    format!(
+    posix_shell_command(&format!(
         "if command -v journalctl >/dev/null 2>&1; then journalctl {journal_args} -f --no-pager; else tail -f {file_candidates}; fi"
-    )
+    ))
 }
 
 fn build_macos_log_snapshot_command(preset: LogPreset, limit: usize) -> String {
@@ -323,7 +323,7 @@ fn build_bsd_log_snapshot_command(preset: LogPreset, limit: usize) -> String {
     } else {
         format!(" | grep -E -i {}", shell_quote(grep_filter))
     };
-    format!(
+    posix_shell_command(&format!(
         concat!(
             "echo '===HOST_LOGS==='; ",
             "if [ -r /var/log/messages ]; then ",
@@ -334,7 +334,7 @@ fn build_bsd_log_snapshot_command(preset: LogPreset, limit: usize) -> String {
         ),
         limit = limit,
         file_filter = file_filter,
-    )
+    ))
 }
 
 fn build_bsd_log_follow_command(preset: LogPreset) -> String {
@@ -970,12 +970,29 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn journal_field_selection_preserves_entries_on_new_and_old_hosts() {
-        let fixture = r#"journalctl() {
-            if [ "$1" = --help ]; then printf '%s\n' "$JOURNAL_HELP"; return; fi
-            fields=''; for arg; do case "$arg" in --output-fields=*) fields=$arg;; esac; done
-            [ "$fields" = "$EXPECTED_FIELDS" ] || return 1
-            printf '%s\n' '{"MESSAGE":"service started","PRIORITY":"6","_COMM":"worker","UNIT":"worker.service","_SOURCE_REALTIME_TIMESTAMP":"123456"}'
-        }; "#;
+        use std::os::unix::fs::PermissionsExt;
+        let stub_dir = std::env::temp_dir().join(format!("oxide-log-stub-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&stub_dir);
+        std::fs::create_dir_all(&stub_dir).unwrap();
+        let stub = stub_dir.join("journalctl");
+        std::fs::write(
+            &stub,
+            r#"#!/bin/sh
+if [ "$1" = --help ]; then printf '%s\n' "$JOURNAL_HELP"; exit 0; fi
+fields=''; for arg; do case "$arg" in --output-fields=*) fields=$arg;; esac; done
+[ "$fields" = "$EXPECTED_FIELDS" ] || exit 1
+printf '%s\n' '{"MESSAGE":"service started","PRIORITY":"6","_COMM":"worker","UNIT":"worker.service","_SOURCE_REALTIME_TIMESTAMP":"123456"}'
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let path = format!(
+            "{}:{}",
+            stub_dir.display(),
+            std::env::var_os("PATH")
+                .unwrap_or_default()
+                .to_string_lossy()
+        );
         let command = build_log_snapshot_command("Linux", LogPreset::All, 300).unwrap();
         for supported in [true, false] {
             let expected = if supported {
@@ -984,7 +1001,8 @@ mod tests {
                 ""
             };
             let output = std::process::Command::new("sh")
-                .args(["-c", &format!("{fixture}{}", command.command)])
+                .args(["-c", &command.command])
+                .env("PATH", &path)
                 .env(
                     "JOURNAL_HELP",
                     if supported {
@@ -1013,5 +1031,6 @@ mod tests {
                 }]
             );
         }
+        let _ = std::fs::remove_dir_all(&stub_dir);
     }
 }

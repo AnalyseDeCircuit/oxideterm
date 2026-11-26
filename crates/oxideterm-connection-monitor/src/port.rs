@@ -3,6 +3,8 @@ use std::hash::{Hash, Hasher};
 
 use serde::{Deserialize, Serialize};
 
+use crate::shell::posix_shell_command;
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResourcePortEntry {
@@ -79,15 +81,15 @@ pub fn build_port_snapshot_command(os_type: &str) -> PortCaptureCommand {
             PortCommandCapability::Partial,
         ),
         PortOs::MacOs => (
-            build_macos_port_snapshot_command(),
+            posix_shell_command(&build_macos_port_snapshot_command()),
             PortCommandCapability::Partial,
         ),
         PortOs::Bsd => (
-            build_bsd_port_snapshot_command(),
+            posix_shell_command(&build_bsd_port_snapshot_command()),
             PortCommandCapability::Partial,
         ),
         PortOs::Linux | PortOs::Unknown => (
-            build_linux_port_snapshot_command(),
+            posix_shell_command(&build_linux_port_snapshot_command()),
             PortCommandCapability::Full,
         ),
     };
@@ -106,14 +108,13 @@ pub fn build_port_diagnostic_command(os_type: &str) -> String {
             "\""
         )
         .to_string(),
-        PortOs::MacOs => "lsof -nP -iTCP -iUDP || netstat -anv".to_string(),
-        PortOs::Bsd => "sockstat -4 -6 -l || netstat -an".to_string(),
-        PortOs::Linux | PortOs::Unknown => concat!(
+        PortOs::MacOs => posix_shell_command("lsof -nP -iTCP -iUDP || netstat -anv"),
+        PortOs::Bsd => posix_shell_command("sockstat -4 -6 -l || netstat -an"),
+        PortOs::Linux | PortOs::Unknown => posix_shell_command(concat!(
             "if command -v ss >/dev/null 2>&1; then ss -tulpen; ss -tanp; ",
             "elif command -v lsof >/dev/null 2>&1; then lsof -nP -iTCP -iUDP; ",
             "else netstat -tunlp; fi"
-        )
-        .to_string(),
+        )),
     }
 }
 
@@ -1027,13 +1028,76 @@ mod tests {
         let bsd = build_port_snapshot_command("FreeBSD");
         let windows = build_port_snapshot_command("Windows");
 
+        assert!(linux.command.starts_with("/bin/sh -c "));
         assert!(linux.command.contains("ss -H -tunlp"));
         assert_eq!(linux.capability, PortCommandCapability::Full);
+        assert!(mac.command.starts_with("/bin/sh -c "));
         assert!(mac.command.contains("lsof -nP"));
         assert_eq!(mac.capability, PortCommandCapability::Partial);
+        assert!(bsd.command.starts_with("/bin/sh -c "));
         assert!(bsd.command.contains("sockstat"));
         assert_eq!(bsd.capability, PortCommandCapability::Partial);
         assert!(windows.command.contains("Get-NetTCPConnection"));
         assert_eq!(windows.capability, PortCommandCapability::Partial);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn port_snapshot_command_runs_under_fish_login_shell() {
+        use std::os::unix::fs::PermissionsExt;
+        let stub_dir =
+            std::env::temp_dir().join(format!("oxide-port-fish-stub-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&stub_dir);
+        std::fs::create_dir_all(&stub_dir).unwrap();
+        let ss_stub = stub_dir.join("ss");
+        std::fs::write(
+            &ss_stub,
+            "#!/bin/sh\n\
+             if [ \"$2\" = -tunlp ]; then\n\
+             printf '%s\\n' 'tcp LISTEN 0 128 0.0.0.0:22 0.0.0.0:* users:((\"sshd\",pid=42,fd=3))'\n\
+             fi\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&ss_stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let path = format!(
+            "{}:{}",
+            stub_dir.display(),
+            std::env::var_os("PATH")
+                .unwrap_or_default()
+                .to_string_lossy()
+        );
+        let command = build_port_snapshot_command("Linux").command;
+
+        for shell in ["/bin/sh", "fish"] {
+            let mut process = std::process::Command::new(shell);
+            if shell == "fish" {
+                process.arg("--no-config");
+            }
+            let output = match process.args(["-c", &command]).env("PATH", &path).output() {
+                Err(error) if shell == "fish" && error.kind() == std::io::ErrorKind::NotFound => {
+                    continue;
+                }
+                result => result.unwrap(),
+            };
+            assert!(
+                output.status.success(),
+                "{shell}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let stdout = String::from_utf8(output.stdout).unwrap();
+            let snapshot = parse_port_snapshot(&stdout);
+            assert_eq!(
+                snapshot.status,
+                ResourcePortStatus::Available {
+                    capability: PortCommandCapability::Full,
+                    platform: "linux_ss".to_string(),
+                },
+                "{shell}: {stdout}"
+            );
+            assert_eq!(snapshot.entries.len(), 1, "{shell}: {stdout}");
+            assert_eq!(snapshot.entries[0].local_port, "22", "{shell}");
+            assert_eq!(snapshot.entries[0].process_name, "sshd", "{shell}");
+        }
+        let _ = std::fs::remove_dir_all(&stub_dir);
     }
 }

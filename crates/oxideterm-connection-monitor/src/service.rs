@@ -206,7 +206,7 @@ pub fn service_sample_command(os_type: &str) -> &'static str {
 pub fn build_service_snapshot_command(os_type: &str) -> ServiceCaptureCommand {
     let (command, capability) = match normalized_service_os(os_type) {
         ServiceOs::LinuxSystemd => (
-            SERVICE_SAMPLE_COMMAND_LINUX_SYSTEMD.to_string(),
+            posix_shell_command(SERVICE_SAMPLE_COMMAND_LINUX_SYSTEMD),
             ServiceCommandCapability::Full,
         ),
         ServiceOs::MacLaunchctl => (
@@ -214,7 +214,7 @@ pub fn build_service_snapshot_command(os_type: &str) -> ServiceCaptureCommand {
             ServiceCommandCapability::Partial,
         ),
         ServiceOs::Bsd => (
-            SERVICE_SAMPLE_COMMAND_BSD.to_string(),
+            posix_shell_command(SERVICE_SAMPLE_COMMAND_BSD),
             ServiceCommandCapability::Partial,
         ),
         ServiceOs::Windows => (
@@ -651,10 +651,10 @@ fn build_systemd_service_action_command(service_id: &str, action: &ServiceAction
     };
     let service = shell_quote(service_id);
     let success = service_action_success_text(service_id, action);
-    format!(
+    posix_shell_command(&format!(
         "if systemctl {verb} {service} 2>&1 || sudo -n systemctl {verb} {service} 2>&1; then echo {}; else status=$?; echo 'Service action failed' >&2; exit $status; fi",
         shell_quote(&success)
-    )
+    ))
 }
 
 fn build_launchctl_service_action_command(
@@ -707,10 +707,10 @@ fn build_bsd_service_action_command(service_id: &str, action: &ServiceActionKind
         ),
     };
     let success = service_action_success_text(service_id, action);
-    format!(
+    posix_shell_command(&format!(
         "if {operation} 2>&1; then echo {}; else status=$?; echo 'Service action failed' >&2; exit $status; fi",
         shell_quote(&success)
-    )
+    ))
 }
 
 fn build_windows_service_action_command(service_id: &str, action: &ServiceActionKind) -> String {
@@ -886,12 +886,16 @@ mod tests {
     fn unix_snapshot_commands_have_valid_posix_shell_syntax() {
         for os_type in ["Linux", "Darwin", "FreeBSD"] {
             let command = build_service_snapshot_command(os_type);
-            let status = std::process::Command::new("sh")
-                .args(["-n", "-c", &command.command])
-                .status()
-                .expect("run POSIX shell syntax check");
+            assert!(command.command.starts_with("/bin/sh -c "), "{os_type}");
+            let inner = crate::shell::decoded_posix_script(&command.command);
+            for script in [command.command.as_str(), inner.as_str()] {
+                let status = std::process::Command::new("sh")
+                    .args(["-n", "-c", script])
+                    .status()
+                    .expect("run POSIX shell syntax check");
 
-            assert!(status.success(), "{os_type} snapshot command should parse");
+                assert!(status.success(), "{os_type} snapshot command should parse");
+            }
         }
     }
 
@@ -997,7 +1001,10 @@ mod tests {
             build_service_action_command("Linux", "sshd.service", ServiceActionKind::Restart)
                 .unwrap();
         assert_eq!(linux.capability, ServiceCommandCapability::Full);
-        assert!(linux.command.contains("systemctl restart 'sshd.service'"));
+        assert!(
+            crate::shell::decoded_posix_script(&linux.command)
+                .contains("systemctl restart 'sshd.service'")
+        );
 
         let mac = build_service_action_command(
             "macOS",

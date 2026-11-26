@@ -7,10 +7,9 @@ use oxideterm_connection_monitor::{
     build_port_snapshot_command, build_process_action_command, build_sample_command_for,
     build_scheduled_task_action_command, build_scheduled_task_snapshot_command,
     build_service_action_command, build_service_snapshot_command, build_tmux_action_command,
-    build_tmux_snapshot_command, docker_sample_command, parse_docker_snapshot,
-    parse_filesystem_snapshot, parse_log_snapshot, parse_package_snapshot, parse_port_snapshot,
-    parse_resource_metrics, parse_scheduled_task_snapshot, parse_service_snapshot,
-    parse_tmux_snapshot,
+    build_tmux_snapshot_command, parse_docker_snapshot, parse_filesystem_snapshot,
+    parse_log_snapshot, parse_package_snapshot, parse_port_snapshot, parse_resource_metrics,
+    parse_scheduled_task_snapshot, parse_service_snapshot, parse_tmux_snapshot,
 };
 use oxideterm_public_mcp::{
     DomainRequest, HostToolLogPreset, HostToolOperation, HostToolResource, PublicToolCall,
@@ -242,7 +241,15 @@ fn host_tools_capture_command(
                 docker: false,
             },
         ),
-        HostToolResource::Docker => docker_sample_command(os_type).to_owned(),
+        HostToolResource::Docker => build_sample_command_for(
+            os_type,
+            ResourceSamplingConfig {
+                system: false,
+                gpu: false,
+                processes: false,
+                docker: true,
+            },
+        ),
         HostToolResource::Services => build_service_snapshot_command(os_type).command,
         HostToolResource::Logs => {
             build_log_snapshot_command(os_type, mapped_log_preset(log_preset), limit)?.command

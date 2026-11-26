@@ -287,9 +287,9 @@ fn build_unix_process_action_command(
         ProcessActionKind::Cont => format!("Sent CONT to PID {pid}"),
         ProcessActionKind::Renice { nice } => format!("Set PID {pid} nice value to {nice}"),
     };
-    format!(
+    crate::shell::posix_shell_command(&format!(
         "{existence_check} if {action_command}; then echo '{success}'; else status=$?; echo 'Process action failed' >&2; exit $status; fi"
-    )
+    ))
 }
 
 fn build_windows_process_action_command(

@@ -111,7 +111,9 @@ pub fn registries_command(os_type: &str, instance: &ContainerInstance) -> String
             "CONTAINER_REGISTRIES",
             "Git Bash (bash.exe) not found",
         ),
-        _ => posix_registries(instance),
+        // The embedded AWK lexer uses literal double-backslashes and newlines,
+        // so encode the script to keep Fish from rewriting `\\` inside quotes.
+        _ => crate::shell::encoded_posix_shell_command(&posix_registries(instance)),
     }
 }
 
@@ -386,17 +388,25 @@ mod tests {
         // Dropping the backslash here would hand the reader a valid-looking but
         // different host, so the raw escape must survive to `decode_json_escapes`.
         let command = registries_command("Linux", &instance(ContainerEngine::Docker));
-        assert!(command.contains("token = token \"\\\\\" c"));
+        assert!(command.starts_with("/bin/sh -c "));
+        let decoded = crate::shell::decoded_posix_script(&command);
+        assert!(decoded.contains("token = token \"\\\\\" c"));
     }
 
     #[test]
     fn commands_read_only_the_engine_auth_files() {
-        let podman = registries_command("Linux", &instance(ContainerEngine::Podman));
+        let podman = crate::shell::decoded_posix_script(&registries_command(
+            "Linux",
+            &instance(ContainerEngine::Podman),
+        ));
         assert!(podman.contains("$REGISTRY_AUTH_FILE"));
         assert!(podman.contains("$HOME/.config/containers/auth.json"));
         assert!(podman.contains("$HOME/.docker/config.json"));
         assert!(!podman.contains("auth\":"));
-        let docker = registries_command("Linux", &instance(ContainerEngine::Docker));
+        let docker = crate::shell::decoded_posix_script(&registries_command(
+            "Linux",
+            &instance(ContainerEngine::Docker),
+        ));
         // DOCKER_CONFIG replaces the home config entirely instead of being a
         // first candidate.
         assert!(docker.contains("\"${DOCKER_CONFIG:-$HOME/.docker}/config.json\""));

@@ -59,7 +59,7 @@ pub fn discovery_command(os_type: &str) -> String {
             "CONTAINER_DISCOVER",
             "Git Bash (bash.exe) not found",
         ),
-        _ => posix_discovery(),
+        _ => crate::shell::posix_shell_command(&posix_discovery()),
     }
 }
 
@@ -363,16 +363,18 @@ mod tests {
     #[test]
     fn discovery_commands_cover_every_transport_per_engine() {
         let posix = discovery_command("Linux");
-        assert!(posix.contains("unix:///var/run/docker.sock"));
-        assert!(posix.contains("tcp://127.0.0.1:2375"));
-        assert!(posix.contains("tcp://127.0.0.1:2376"));
-        assert!(posix.contains("podman --url"));
-        assert!(posix.contains("wslc version --format json"));
-        assert!(posix.starts_with("echo '===CONTAINER_DISCOVER==='; "));
-        assert!(posix.ends_with("echo '===CONTAINER_DISCOVER_END==='"));
-        assert!(posix.contains("timeout --version"));
+        assert!(posix.starts_with("/bin/sh -c "));
+        let decoded = crate::shell::decoded_posix_script(&posix);
+        assert!(decoded.contains("unix:///var/run/docker.sock"));
+        assert!(decoded.contains("tcp://127.0.0.1:2375"));
+        assert!(decoded.contains("tcp://127.0.0.1:2376"));
+        assert!(decoded.contains("podman --url"));
+        assert!(decoded.contains("wslc version --format json"));
+        assert!(decoded.starts_with("echo '===CONTAINER_DISCOVER==='; "));
+        assert!(decoded.ends_with("echo '===CONTAINER_DISCOVER_END==='"));
+        assert!(decoded.contains("timeout --version"));
         // Only the dedicated TLS probe may ask for `--tlsverify`.
-        assert_eq!(posix.matches("--tlsverify").count(), 1);
+        assert_eq!(decoded.matches("--tlsverify").count(), 1);
 
         // Windows hosts run the same POSIX probe through Git Bash, wrapped so
         // cmd.exe can start it.

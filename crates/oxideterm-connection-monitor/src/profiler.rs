@@ -629,7 +629,13 @@ fn build_sample_command_with_system_info(
         commands.push(docker_sample_command(os_type).to_string());
     }
     commands.push("echo '===END==='".to_string());
-    format!("{}\n", commands.join("; "))
+    // Select /bin/sh explicitly so non-POSIX login shells such as Fish do not
+    // parse POSIX assignments, functions, or conditionals directly, while
+    // keeping the trailing newline required by persistent sampling channels.
+    format!(
+        "{}\n",
+        crate::shell::posix_shell_command(&commands.join("; "))
+    )
 }
 
 // Total CPU rate from the raw PerfOS counters. `Win32_Processor.LoadPercentage`
@@ -1460,12 +1466,111 @@ function Get-Counter {{ {counter} }}
     #[test]
     fn unix_sampling_commands_have_valid_posix_shell_syntax() {
         for os_type in ["Linux", "Darwin", "FreeBSD"] {
-            let status = std::process::Command::new("sh")
-                .args(["-n", "-c", &build_sample_command(os_type)])
-                .status()
-                .expect("run POSIX shell syntax check");
-            assert!(status.success(), "{os_type} sample command should parse");
+            let command = build_sample_command(os_type);
+            assert!(command.starts_with("/bin/sh -c "), "{os_type}");
+            assert!(command.ends_with('\n'), "{os_type}");
+            let inner = crate::shell::decoded_posix_script(command.trim_end_matches('\n'));
+            for script in [command.as_str(), inner.as_str()] {
+                let status = std::process::Command::new("sh")
+                    .args(["-n", "-c", script])
+                    .status()
+                    .expect("run POSIX shell syntax check");
+                assert!(status.success(), "{os_type} sample command should parse");
+            }
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sampling_command_runs_repeatedly_under_persistent_fish_shell() {
+        use std::io::Write as _;
+        use std::os::unix::fs::PermissionsExt;
+
+        let stub_dir =
+            std::env::temp_dir().join(format!("oxide-profiler-fish-stub-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&stub_dir);
+        std::fs::create_dir_all(&stub_dir).unwrap();
+        let docker_stub = stub_dir.join("docker");
+        std::fs::write(
+            &docker_stub,
+            r#"#!/bin/sh
+if [ "$1" = ps ] && [ "$2" = -a ]; then
+  printf '%s\n' '{"ID":"abc123def456","Names":"web","Image":"nginx:alpine","Status":"Up 2 hours","Ports":"80/tcp"}'
+elif [ "$1" = ps ] && [ "$2" = -aq ]; then
+  printf '%s\n' 'abc123def456'
+elif [ "$1" = inspect ]; then
+  printf '%s\n' '{"Id":"abc123def456","Name":"/web","Config":{"Image":"nginx:alpine"},"State":{"Status":"running"}}'
+fi
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&docker_stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let path = format!(
+            "{}:{}",
+            stub_dir.display(),
+            std::env::var_os("PATH")
+                .unwrap_or_default()
+                .to_string_lossy()
+        );
+        let first = build_sample_command_for("Linux", ResourceSamplingConfig::default());
+        let second = build_sample_command_with_system_info(
+            "Linux",
+            ResourceSamplingConfig::default(),
+            false,
+        );
+        let session_input = format!(
+            "{}exit\n",
+            format!("{}{first}{second}", shell_init_command("Linux"))
+        );
+
+        for shell in ["/bin/sh", "fish"] {
+            let mut process = std::process::Command::new(shell);
+            if shell == "fish" {
+                process.arg("--no-config");
+            }
+            let mut child = match process
+                .env("PATH", &path)
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+            {
+                Err(error) if shell == "fish" && error.kind() == std::io::ErrorKind::NotFound => {
+                    continue;
+                }
+                result => result.unwrap(),
+            };
+            child
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(session_input.as_bytes())
+                .unwrap();
+            let output = child.wait_with_output().unwrap();
+            assert!(
+                output.status.success(),
+                "{shell}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let stdout = String::from_utf8(output.stdout).unwrap();
+            let samples: Vec<&str> = stdout
+                .split("===END===")
+                .filter(|chunk| chunk.contains("===DOCKER==="))
+                .collect();
+            assert_eq!(samples.len(), 2, "{shell}: {stdout}");
+            for (sample_index, chunk) in samples.into_iter().enumerate() {
+                let docker = crate::parse_docker_snapshot(chunk);
+                assert_eq!(
+                    docker.status,
+                    crate::ResourceDockerStatus::Available,
+                    "{shell} sample {sample_index}: {chunk}"
+                );
+                assert_eq!(docker.containers.len(), 1, "{shell} sample {sample_index}");
+                assert_eq!(docker.containers[0].name, "web", "{shell}");
+                assert_eq!(docker.containers[0].state, "running", "{shell}");
+            }
+        }
+        let _ = std::fs::remove_dir_all(&stub_dir);
     }
 
     #[test]

@@ -34,11 +34,22 @@ pub(super) struct ProviderSnapshot {
 /// Builds one bounded probe that can collect every supported accelerator vendor.
 pub fn build_gpu_sample_command(os_type: &str) -> String {
     if !gpu_os_supported(os_type) {
-        return format!("echo '===GPU_NPU_STATUS==='; echo unsupported; echo '{GPU_END_MARKER}'\n");
+        return format!(
+            "{}\n",
+            crate::shell::posix_shell_command(&format!(
+                "echo '===GPU_NPU_STATUS==='; echo unsupported; echo '{GPU_END_MARKER}'"
+            ))
+        );
     }
 
     if matches!(os_type, "macOS" | "macos" | "Darwin") {
-        return format!("{}echo '{GPU_END_MARKER}'\n", apple::sample_command());
+        return format!(
+            "{}\n",
+            crate::shell::posix_shell_command(&format!(
+                "{}echo '{GPU_END_MARKER}'",
+                apple::sample_command()
+            ))
+        );
     }
     let mut command = nvidia::sample_command();
     if matches!(os_type, "Linux" | "linux") {
@@ -49,8 +60,8 @@ pub fn build_gpu_sample_command(os_type: &str) -> String {
         command.push_str(&intel::sample_command());
         command.push_str(&mthreads::sample_command());
     }
-    command.push_str(&format!("echo '{GPU_END_MARKER}'\n"));
-    command
+    command.push_str(&format!("echo '{GPU_END_MARKER}'"));
+    format!("{}\n", crate::shell::posix_shell_command(&command))
 }
 
 /// Parses all vendor sections into one provider-neutral snapshot.
@@ -462,13 +473,18 @@ esac
     #[test]
     fn linux_command_is_valid_posix_shell_syntax() {
         let command = build_gpu_sample_command("Linux");
-        // Validate the composed provider protocol without executing vendor tools.
-        let status = std::process::Command::new("sh")
-            .args(["-n", "-c", &command])
-            .status()
-            .expect("POSIX shell should be available on Unix test hosts");
+        assert!(command.starts_with("/bin/sh -c "));
+        assert!(command.ends_with('\n'));
+        let inner = crate::shell::decoded_posix_script(command.trim_end_matches('\n'));
+        // Validate both the outer wrapper and the composed provider protocol.
+        for script in [command.as_str(), inner.as_str()] {
+            let status = std::process::Command::new("sh")
+                .args(["-n", "-c", script])
+                .status()
+                .expect("POSIX shell should be available on Unix test hosts");
 
-        assert!(status.success());
+            assert!(status.success());
+        }
     }
 
     #[test]

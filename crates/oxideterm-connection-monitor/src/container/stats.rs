@@ -66,7 +66,7 @@ pub fn stats_command(os_type: &str, instance: &ContainerInstance) -> String {
             "CONTAINER_STATS",
             "Git Bash (bash.exe) not found",
         ),
-        _ => posix,
+        _ => crate::shell::posix_shell_command(&posix),
     }
 }
 

@@ -8,15 +8,15 @@ use std::{sync::mpsc, time::Duration};
 use std::collections::HashMap;
 
 use oxideterm_connection_monitor::{
-    DockerActionKind, LogPreset, ProcessActionKind, ProfilerRegistry, ScheduledTaskActionKind,
-    ServiceActionKind, TmuxActionKind, build_docker_action_command,
+    DockerActionKind, LogPreset, ProcessActionKind, ProfilerRegistry, ResourceSamplingConfig,
+    ScheduledTaskActionKind, ServiceActionKind, TmuxActionKind, build_docker_action_command,
     build_filesystem_snapshot_command, build_log_snapshot_command, build_package_snapshot_command,
-    build_port_snapshot_command, build_process_action_command, build_scheduled_task_action_command,
-    build_scheduled_task_snapshot_command, build_service_action_command, build_tmux_action_command,
-    build_tmux_snapshot_command, docker_sample_command, parse_docker_snapshot,
-    parse_filesystem_snapshot, parse_log_snapshot, parse_package_snapshot, parse_port_snapshot,
-    parse_scheduled_task_snapshot, parse_service_snapshot, parse_tmux_snapshot,
-    service_sample_command,
+    build_port_snapshot_command, build_process_action_command, build_sample_command_for,
+    build_scheduled_task_action_command, build_scheduled_task_snapshot_command,
+    build_service_action_command, build_service_snapshot_command, build_tmux_action_command,
+    build_tmux_snapshot_command, parse_docker_snapshot, parse_filesystem_snapshot,
+    parse_log_snapshot, parse_package_snapshot, parse_port_snapshot, parse_scheduled_task_snapshot,
+    parse_service_snapshot, parse_tmux_snapshot,
 };
 use oxideterm_plugin_protocol as plugin_runtime;
 #[cfg(test)]
@@ -249,8 +249,16 @@ async fn native_plugin_host_tools_result(
 
 fn capture_command(resource: &str, os_type: &str, args: &Value) -> Result<String, String> {
     match resource {
-        "docker" => Ok(docker_sample_command(os_type).to_string()),
-        "services" => Ok(service_sample_command(os_type).to_string()),
+        "docker" => Ok(build_sample_command_for(
+            os_type,
+            ResourceSamplingConfig {
+                system: false,
+                gpu: false,
+                processes: false,
+                docker: true,
+            },
+        )),
+        "services" => Ok(build_service_snapshot_command(os_type).command),
         "logs" => {
             let preset = match args.get("preset").and_then(Value::as_str).unwrap_or("all") {
                 "all" => LogPreset::All,
