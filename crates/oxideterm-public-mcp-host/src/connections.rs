@@ -326,6 +326,12 @@ fn save_profile(
                 connect_timeout_seconds: profile
                     .connect_timeout_seconds
                     .unwrap_or(DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS),
+                keep_alive_interval_seconds: existing
+                    .map(|connection| connection.options.effective_keep_alive_interval_seconds())
+                    .unwrap_or(oxideterm_connections::DEFAULT_SSH_KEEP_ALIVE_INTERVAL_SECONDS),
+                keep_alive_count_max: existing
+                    .map(|connection| connection.options.effective_keep_alive_count_max())
+                    .unwrap_or(oxideterm_connections::DEFAULT_SSH_KEEP_ALIVE_COUNT_MAX),
                 agent_forwarding: profile.agent_forwarding,
                 identity_agent: profile.identity_agent.clone(),
                 agent_forwarding_socket: profile.agent_forwarding_socket.clone(),

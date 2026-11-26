@@ -1077,9 +1077,14 @@ impl SshTransportClient {
             let mut target = tokio::time::timeout(
                 Duration::from_secs(self.config.timeout_secs),
                 client::connect_stream(
-                    Arc::new(ssh_client_config(
+                    Arc::new(ssh_client_config_with_keepalive(
                         self.config.legacy_ssh_compatibility,
                         &self.config.ssh_algorithms,
+                        self.config.keep_alive_interval_secs,
+                        self.config.keep_alive_count_max,
+                        self.config
+                            .ssh_channel_strategy
+                            .requires_dedicated_consumers(),
                     )?),
                     stream,
                     handler,
@@ -1249,8 +1254,13 @@ impl SshTransportClient {
             "SSH TCP stream established"
         );
 
-        let client_config =
-            ssh_client_config(config.legacy_ssh_compatibility, &config.ssh_algorithms)?;
+        let client_config = ssh_client_config_with_keepalive(
+            config.legacy_ssh_compatibility,
+            &config.ssh_algorithms,
+            config.keep_alive_interval_secs,
+            config.keep_alive_count_max,
+            config.ssh_channel_strategy.requires_dedicated_consumers(),
+        )?;
         let handler = NativeClientHandler::new(
             config.host.clone(),
             config.port,
@@ -1436,9 +1446,12 @@ impl SshTransportClient {
         let mut handle = tokio::time::timeout(
             Duration::from_secs(self.config.timeout_secs),
             client::connect_stream(
-                Arc::new(ssh_client_config(
+                Arc::new(ssh_client_config_with_keepalive(
                     hop.legacy_ssh_compatibility,
                     &hop.ssh_algorithms,
+                    self.config.keep_alive_interval_secs,
+                    self.config.keep_alive_count_max,
+                    false,
                 )?),
                 stream,
                 handler,
@@ -1482,9 +1495,12 @@ impl SshTransportClient {
         let mut handle = tokio::time::timeout(
             Duration::from_secs(self.config.timeout_secs),
             client::connect_stream(
-                Arc::new(ssh_client_config(
+                Arc::new(ssh_client_config_with_keepalive(
                     hop.legacy_ssh_compatibility,
                     &hop.ssh_algorithms,
+                    self.config.keep_alive_interval_secs,
+                    self.config.keep_alive_count_max,
+                    false,
                 )?),
                 stream,
                 handler,
@@ -1557,9 +1573,14 @@ impl SshTransportClient {
         let mut handle = tokio::time::timeout(
             Duration::from_secs(timeout_secs),
             client::connect_stream(
-                Arc::new(ssh_client_config(
+                Arc::new(ssh_client_config_with_keepalive(
                     self.config.legacy_ssh_compatibility,
                     &self.config.ssh_algorithms,
+                    self.config.keep_alive_interval_secs,
+                    self.config.keep_alive_count_max,
+                    self.config
+                        .ssh_channel_strategy
+                        .requires_dedicated_consumers(),
                 )?),
                 stream,
                 handler,

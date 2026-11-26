@@ -249,11 +249,25 @@ impl ConnectionStore {
             options.connect_timeout_seconds = (request.connect_timeout_seconds
                 != DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS)
                 .then_some(request.connect_timeout_seconds.max(1));
+            options.keep_alive_interval =
+                if request.keep_alive_interval_seconds == DEFAULT_SSH_KEEP_ALIVE_INTERVAL_SECONDS {
+                    0
+                } else {
+                    request.keep_alive_interval_seconds.max(1)
+                };
+            options.keep_alive_count_max = (request.keep_alive_count_max
+                != DEFAULT_SSH_KEEP_ALIVE_COUNT_MAX)
+                .then_some(request.keep_alive_count_max.max(1));
             options.agent_forwarding = request.agent_forwarding;
             options.identity_agent = request.identity_agent;
             options.agent_forwarding_socket = request.agent_forwarding_socket;
             options.legacy_ssh_compatibility = request.legacy_ssh_compatibility;
             request.ssh_algorithms.validate()?;
+            options.compression = request
+                .ssh_algorithms
+                .compression
+                .first()
+                .is_some_and(|name| name != "none");
             options.ssh_algorithms = request.ssh_algorithms;
             options.totp_credential_id = request.totp_credential_id;
             options.dedicated_new_terminal_connection = request.dedicated_new_terminal_connection;

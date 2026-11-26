@@ -34,12 +34,16 @@ use crate::router::NodeEventEmitter;
 
 pub const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15);
-pub const HEARTBEAT_FAIL_THRESHOLD: u8 = 2;
+pub const HEARTBEAT_FAIL_THRESHOLD: u8 = 3;
 pub const WS_BRIDGE_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
 pub const WS_BRIDGE_HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(300);
-const REMOTE_ENV_TOTAL_TIMEOUT: Duration = Duration::from_secs(8);
-const REMOTE_ENV_PHASE_A_TIMEOUT: Duration = Duration::from_secs(3);
-const REMOTE_ENV_PHASE_B_TIMEOUT: Duration = Duration::from_secs(5);
+const ACTIVE_PROBE_RTT_MAX_AGE: Duration = Duration::from_secs(60);
+const ACTIVE_PROBE_MAX_TIMEOUT: Duration = Duration::from_secs(12);
+const REMOTE_ENV_PHASE_A_TIMEOUT: Duration = Duration::from_secs(6);
+const REMOTE_ENV_PHASE_B_TIMEOUT: Duration = Duration::from_secs(9);
+const REMOTE_ENV_CLOSE_TIMEOUT: Duration = Duration::from_secs(3);
+const REMOTE_ENV_RTT_MAX_AGE: Duration = Duration::from_secs(60);
+const REMOTE_ENV_MAX_RTT_SLACK: Duration = Duration::from_secs(3);
 const REMOTE_ENV_MAX_OUTPUT_SIZE: usize = 8192;
 // SSH exec uses the login shell, which may not understand POSIX conditionals.
 const REMOTE_ENV_PHASE_A_CMD: &str = r#"sh -c 'echo "===DETECT==="; if [ -n "$PSModulePath" ]; then echo "PLATFORM=windows"; else echo "PLATFORM=$(uname -s 2>/dev/null || echo unknown)"; fi; echo "===END==="'"#;
@@ -289,6 +293,7 @@ struct ConnectionEntry {
     remote_env_detection_started: AtomicBool,
     first_visible_terminal_started: AtomicBool,
     heartbeat_failures: AtomicU64,
+    last_active_probe_at: ParkingMutex<Option<std::time::Instant>>,
     idle_generation: AtomicU64,
     idle_timer_cancel: ParkingMutex<Option<oneshot::Sender<()>>>,
     last_emitted_status: RwLock<Option<String>>,
@@ -338,6 +343,7 @@ impl ConnectionEntry {
             remote_env_detection_started: AtomicBool::new(false),
             first_visible_terminal_started: AtomicBool::new(false),
             heartbeat_failures: AtomicU64::new(0),
+            last_active_probe_at: ParkingMutex::new(None),
             idle_generation: AtomicU64::new(0),
             idle_timer_cancel: ParkingMutex::new(None),
             last_emitted_status: RwLock::new(None),
@@ -1474,6 +1480,15 @@ impl SshConnectionRegistry {
     }
 
     pub async fn probe_active_connections(&self, timeout: Duration) -> Vec<ConnectionInfo> {
+        self.probe_active_connections_with_force(timeout, true)
+            .await
+    }
+
+    pub async fn probe_active_connections_with_force(
+        &self,
+        timeout: Duration,
+        force: bool,
+    ) -> Vec<ConnectionInfo> {
         let connection_ids = self
             .list()
             .into_iter()
@@ -1483,7 +1498,8 @@ impl SshConnectionRegistry {
         let mut changed = Vec::new();
         for connection_id in connection_ids {
             if matches!(
-                self.probe_active_connection(&connection_id, timeout).await,
+                self.probe_active_connection(&connection_id, timeout, force)
+                    .await,
                 ProbeConnectionStatus::Dead
             ) {
                 changed.extend(
@@ -1499,6 +1515,7 @@ impl SshConnectionRegistry {
         &self,
         connection_id: &str,
         timeout: Duration,
+        force: bool,
     ) -> ProbeConnectionStatus {
         let Some(handle) = self.get(connection_id) else {
             return ProbeConnectionStatus::NotFound;
@@ -1519,7 +1536,28 @@ impl SshConnectionRegistry {
             return ProbeConnectionStatus::NotApplicable;
         }
 
-        match handle.probe_alive(timeout).await {
+        let custom_interval_secs = handle.config().keep_alive_interval_secs;
+        if !force
+            && custom_interval_secs
+                != oxideterm_connections::DEFAULT_SSH_KEEP_ALIVE_INTERVAL_SECONDS
+        {
+            let interval = Duration::from_secs(u64::from(custom_interval_secs.max(1)));
+            if handle
+                .entry
+                .last_active_probe_at
+                .lock()
+                .is_some_and(|last| last.elapsed() < interval)
+            {
+                return ProbeConnectionStatus::Alive;
+            }
+        }
+        *handle.entry.last_active_probe_at.lock() = Some(std::time::Instant::now());
+
+        let effective_timeout =
+            effective_active_probe_timeout(timeout, handle.recent_rtt(ACTIVE_PROBE_RTT_MAX_AGE));
+        let fail_threshold = u64::from(handle.config().keep_alive_count_max.max(1));
+
+        match handle.probe_alive(effective_timeout).await {
             KeepaliveProbeResult::Ok => {
                 handle.entry.reset_heartbeat_failures();
                 handle.entry.touch();
@@ -1527,7 +1565,7 @@ impl SshConnectionRegistry {
             }
             KeepaliveProbeResult::Timeout => {
                 let failures = handle.entry.increment_heartbeat_failures();
-                if failures < HEARTBEAT_FAIL_THRESHOLD as u64 {
+                if failures < fail_threshold {
                     return ProbeConnectionStatus::Alive;
                 }
                 ProbeConnectionStatus::Dead
@@ -1548,7 +1586,7 @@ impl SshConnectionRegistry {
                 ) {
                     return ProbeConnectionStatus::NotApplicable;
                 }
-                match handle.probe_alive(timeout).await {
+                match handle.probe_alive(effective_timeout).await {
                     KeepaliveProbeResult::Ok => {
                         handle.entry.reset_heartbeat_failures();
                         handle.entry.touch();
@@ -1986,10 +2024,43 @@ fn topology_consumer_summary(
     summary
 }
 
+fn effective_active_probe_timeout(base: Duration, recent_rtt: Option<Duration>) -> Duration {
+    // Allow at least 3x recent RTT (capped below the keepalive interval) so
+    // transient retransmission spikes on high-latency links do not flap into
+    // false reconnects while never shrinking below the configured base timeout.
+    let rtt_budget = recent_rtt
+        .map(|rtt| rtt.saturating_mul(3).min(ACTIVE_PROBE_MAX_TIMEOUT))
+        .unwrap_or(Duration::ZERO);
+    base.max(rtt_budget)
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct RemoteEnvTimeouts {
+    phase_a: Duration,
+    phase_b: Duration,
+    total: Duration,
+}
+
+fn remote_env_timeouts_for_rtt(rtt: Option<Duration>) -> RemoteEnvTimeouts {
+    // Only stretch detection budgets when this transport already has a fresh
+    // RTT sample; never spawn an extra probe channel just to size timeouts.
+    let extra = rtt
+        .map(|sample| sample.min(REMOTE_ENV_MAX_RTT_SLACK))
+        .unwrap_or(Duration::ZERO);
+    let phase_a = REMOTE_ENV_PHASE_A_TIMEOUT + extra;
+    let phase_b = REMOTE_ENV_PHASE_B_TIMEOUT + extra;
+    RemoteEnvTimeouts {
+        phase_a,
+        phase_b,
+        total: phase_a + phase_b,
+    }
+}
+
 pub(crate) async fn detect_remote_env_for_handle(handle: &SshConnectionHandle) -> RemoteEnvInfo {
+    let timeouts = remote_env_timeouts_for_rtt(handle.recent_rtt(REMOTE_ENV_RTT_MAX_AGE));
     let env = tokio::time::timeout(
-        REMOTE_ENV_TOTAL_TIMEOUT,
-        detect_remote_env_inner(handle, None),
+        timeouts.total,
+        detect_remote_env_inner(handle, None, timeouts),
     )
     .await
     .unwrap_or_else(|_| RemoteEnvInfo::unknown());
@@ -2000,19 +2071,19 @@ pub(crate) async fn detect_remote_env_for_handle(handle: &SshConnectionHandle) -
     // without borrowing terminal input or triggering another authentication.
     for with_pty in [false, true] {
         let opened = handle
-            .open_sampling_shell_channel("", with_pty, REMOTE_ENV_TOTAL_TIMEOUT)
+            .open_sampling_shell_channel("", with_pty, timeouts.total)
             .await;
         let Ok(mut shell) = opened else {
             continue;
         };
         let detected = tokio::time::timeout(
-            REMOTE_ENV_TOTAL_TIMEOUT,
-            detect_remote_env_inner(handle, Some(&mut shell)),
+            timeouts.total,
+            detect_remote_env_inner(handle, Some(&mut shell), timeouts),
         )
         .await
         .unwrap_or_else(|_| RemoteEnvInfo::unknown());
         // Retain the channel outside the timeout so cancellation still closes it.
-        let _ = tokio::time::timeout(REMOTE_ENV_PHASE_A_TIMEOUT, shell.close()).await;
+        let _ = tokio::time::timeout(REMOTE_ENV_CLOSE_TIMEOUT, shell.close()).await;
         if !detected.os_type.eq_ignore_ascii_case("unknown") {
             return detected;
         }
@@ -2048,28 +2119,25 @@ async fn run_remote_env_probe(
 async fn detect_remote_env_inner(
     handle: &SshConnectionHandle,
     mut shell: Option<&mut crate::SshShellChannel>,
+    timeouts: RemoteEnvTimeouts,
 ) -> RemoteEnvInfo {
-    let phase_a_output = match run_remote_env_probe(
-        handle,
-        &mut shell,
-        REMOTE_ENV_PHASE_A_CMD,
-        REMOTE_ENV_PHASE_A_TIMEOUT,
-    )
-    .await
-    {
-        Ok(output) => output,
-        Err(_) => {
-            return run_remote_env_probe(
-                handle,
-                &mut shell,
-                REMOTE_ENV_PHASE_B_WINDOWS_CMD,
-                REMOTE_ENV_PHASE_B_TIMEOUT,
-            )
+    let phase_a_output =
+        match run_remote_env_probe(handle, &mut shell, REMOTE_ENV_PHASE_A_CMD, timeouts.phase_a)
             .await
-            .map(|output| parse_remote_windows_env(&output))
-            .unwrap_or_else(|_| RemoteEnvInfo::unknown());
-        }
-    };
+        {
+            Ok(output) => output,
+            Err(_) => {
+                return run_remote_env_probe(
+                    handle,
+                    &mut shell,
+                    REMOTE_ENV_PHASE_B_WINDOWS_CMD,
+                    timeouts.phase_b,
+                )
+                .await
+                .map(|output| parse_remote_windows_env(&output))
+                .unwrap_or_else(|_| RemoteEnvInfo::unknown());
+            }
+        };
 
     let raw_platform = parse_remote_platform(&phase_a_output).unwrap_or_default();
     let is_windows = raw_platform.eq_ignore_ascii_case("windows");
@@ -2079,14 +2147,7 @@ async fn detect_remote_env_inner(
         REMOTE_ENV_PHASE_B_UNIX_CMD
     };
 
-    match run_remote_env_probe(
-        handle,
-        &mut shell,
-        phase_b_command,
-        REMOTE_ENV_PHASE_B_TIMEOUT,
-    )
-    .await
-    {
+    match run_remote_env_probe(handle, &mut shell, phase_b_command, timeouts.phase_b).await {
         Ok(output) if is_windows => parse_remote_windows_env(&output),
         Ok(output) => parse_remote_unix_env(&output, raw_platform),
         Err(_) => RemoteEnvInfo {
@@ -3567,5 +3628,65 @@ mod tests {
         assert_ne!(second.connection_id(), first_id);
         assert!(registry.get(&first_id).is_none());
         assert!(registry.get(second.connection_id()).is_some());
+    }
+
+    #[test]
+    fn remote_env_timeouts_scale_mildly_with_rtt_and_cap() {
+        for (rtt, expected) in [
+            (
+                None,
+                RemoteEnvTimeouts {
+                    phase_a: Duration::from_secs(6),
+                    phase_b: Duration::from_secs(9),
+                    total: Duration::from_secs(15),
+                },
+            ),
+            (
+                Some(Duration::from_millis(500)),
+                RemoteEnvTimeouts {
+                    phase_a: Duration::from_millis(6_500),
+                    phase_b: Duration::from_millis(9_500),
+                    total: Duration::from_secs(16),
+                },
+            ),
+            (
+                Some(Duration::from_secs(2)),
+                RemoteEnvTimeouts {
+                    phase_a: Duration::from_secs(8),
+                    phase_b: Duration::from_secs(11),
+                    total: Duration::from_secs(19),
+                },
+            ),
+            (
+                Some(Duration::from_secs(10)),
+                RemoteEnvTimeouts {
+                    phase_a: Duration::from_secs(9),
+                    phase_b: Duration::from_secs(12),
+                    total: Duration::from_secs(21),
+                },
+            ),
+        ] {
+            assert_eq!(remote_env_timeouts_for_rtt(rtt), expected, "rtt={rtt:?}");
+        }
+    }
+
+    #[test]
+    fn active_probe_timeout_scales_for_high_rtt_and_respects_cap() {
+        let base = Duration::from_secs(8);
+        for (rtt, expected) in [
+            (None, Duration::from_secs(8)),
+            (Some(Duration::from_millis(200)), Duration::from_secs(8)),
+            (
+                Some(Duration::from_millis(3_500)),
+                Duration::from_millis(10_500),
+            ),
+            (Some(Duration::from_secs(6)), Duration::from_secs(12)),
+        ] {
+            assert_eq!(
+                effective_active_probe_timeout(base, rtt),
+                expected,
+                "rtt={rtt:?}"
+            );
+        }
     }
 }

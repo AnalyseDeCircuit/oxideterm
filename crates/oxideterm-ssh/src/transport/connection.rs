@@ -9,6 +9,7 @@ struct PooledSshConnection {
     auth_banners: AuthBannerSink,
     agent_forwarding_accepted: Arc<AtomicBool>,
     agent_forwarding_request: tokio::sync::Mutex<()>,
+    last_rtt: RwLock<Option<(Duration, Instant)>>,
 }
 
 fn append_limited_command_output(
@@ -54,6 +55,7 @@ impl PooledSshConnection {
             auth_banners,
             agent_forwarding_accepted,
             agent_forwarding_request: tokio::sync::Mutex::new(()),
+            last_rtt: RwLock::new(None),
         }
     }
 
@@ -78,7 +80,17 @@ impl PooledSshConnection {
             auth_banners,
             agent_forwarding_accepted,
             agent_forwarding_request: tokio::sync::Mutex::new(()),
+            last_rtt: RwLock::new(None),
         }
+    }
+
+    pub(super) fn record_rtt(&self, rtt: Duration, measured_at: Instant) {
+        *self.last_rtt.write() = Some((rtt, measured_at));
+    }
+
+    pub(super) fn recent_rtt(&self, max_age: Duration) -> Option<Duration> {
+        let (rtt, measured_at) = (*self.last_rtt.read())?;
+        (measured_at.elapsed() <= max_age).then_some(rtt)
     }
 
     async fn is_closed(&self) -> bool {
@@ -158,6 +170,14 @@ impl SshConnectionHandle {
         }
     }
 
+    pub(crate) fn recent_rtt(&self, max_age: Duration) -> Option<Duration> {
+        let pooled = self.physical::<PooledSshConnection>()?;
+        if pooled.target.is_closed() {
+            return None;
+        }
+        pooled.recent_rtt(max_age)
+    }
+
     pub async fn probe_alive(&self, probe_timeout: Duration) -> KeepaliveProbeResult {
         let Some(pooled) = self.physical::<PooledSshConnection>() else {
             return KeepaliveProbeResult::IoError;
@@ -167,18 +187,42 @@ impl SshConnectionHandle {
         }
 
         let handle = &pooled.target;
-        // Tauri's app-level heartbeat calls russh `send_keepalive(true)`.
-        // Use the same API and frame (`keepalive@openssh.com` with
-        // want_reply=true) so native preserves Tauri's timeout/error surface
-        // instead of using the stricter local `send_ping()` helper.
-        match timeout(probe_timeout, handle.send_keepalive(true)).await {
-            Ok(Ok(())) => KeepaliveProbeResult::Ok,
+        let started = Instant::now();
+        // russh's `send_keepalive(true)` only waits for local command-queue
+        // insertion and succeeds immediately on silent half-open sockets.
+        // `send_global_request` awaits the peer's reply (either success or
+        // `RequestDenied` proves a live round-trip).
+        match timeout(
+            probe_timeout,
+            handle.send_global_request("keepalive@openssh.com", &[], true),
+        )
+        .await
+        {
+            Ok(Ok(_)) | Ok(Err(russh::Error::RequestDenied)) => {
+                pooled.record_rtt(
+                    started.elapsed().max(Duration::from_millis(1)),
+                    Instant::now(),
+                );
+                KeepaliveProbeResult::Ok
+            }
             Ok(Err(error)) => {
-                let error = format!("{error:?}");
-                if error.contains("Disconnect") || error.contains("disconnect") {
+                if pooled.is_closed().await
+                    || matches!(
+                        error,
+                        russh::Error::Disconnect
+                            | russh::Error::SendError
+                            | russh::Error::RecvError
+                            | russh::Error::IO(_)
+                    )
+                {
                     KeepaliveProbeResult::IoError
                 } else {
-                    KeepaliveProbeResult::Timeout
+                    let error = format!("{error:?}");
+                    if error.contains("Disconnect") || error.contains("disconnect") {
+                        KeepaliveProbeResult::IoError
+                    } else {
+                        KeepaliveProbeResult::Timeout
+                    }
                 }
             }
             Err(_) => KeepaliveProbeResult::Timeout,
@@ -538,9 +582,15 @@ impl SshConnectionHandle {
                 "SSH connection is closed and cannot execute remote commands".to_string(),
             ));
         }
-        let output =
-            Self::capture_exec_on(&pooled, command, timeout, max_output_size, None, Some(stdin))
-                .await?;
+        let output = Self::capture_exec_on(
+            &pooled,
+            command,
+            timeout,
+            max_output_size,
+            None,
+            Some(stdin),
+        )
+        .await?;
         Ok(SshSecretCommandOutput {
             stdout: Zeroizing::new(output.stdout),
             stderr: Zeroizing::new(output.stderr),
@@ -548,7 +598,6 @@ impl SshConnectionHandle {
             truncated: output.truncated,
         })
     }
-
 
     async fn capture_exec_on(
         pooled: &PooledSshConnection,
@@ -898,5 +947,136 @@ mod remote_forward_port_tests {
                 "{requested}/{returned}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn probe_alive_requires_peer_reply_and_times_out_on_silent_socket() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        struct Peer;
+        impl russh::server::Handler for Peer {
+            type Error = russh::Error;
+            async fn auth_none(&mut self, _: &str) -> Result<russh::server::Auth, Self::Error> {
+                Ok(russh::server::Auth::Accept)
+            }
+        }
+
+        let server_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let server_addr = server_listener.local_addr().unwrap();
+        let proxy_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let proxy_port = proxy_listener.local_addr().unwrap().port();
+        let key =
+            russh::keys::PrivateKey::random(&mut rand10::rng(), russh::keys::Algorithm::Ed25519)
+                .unwrap();
+        let fingerprint = key
+            .public_key()
+            .fingerprint(russh::keys::HashAlg::Sha256)
+            .to_string();
+        let blackhole = Arc::new(AtomicBool::new(false));
+        let blackhole_proxy = blackhole.clone();
+
+        let server_task = tokio::spawn(async move {
+            let (stream, _) = server_listener.accept().await.unwrap();
+            let session = russh::server::run_stream(
+                Arc::new(russh::server::Config {
+                    keys: vec![key],
+                    ..Default::default()
+                }),
+                stream,
+                Peer,
+            )
+            .await
+            .unwrap();
+            let _ = session.await;
+        });
+
+        let proxy_task = tokio::spawn(async move {
+            let (client_stream, _) = proxy_listener.accept().await.unwrap();
+            let server_stream = tokio::net::TcpStream::connect(server_addr).await.unwrap();
+            let (mut c_read, mut c_write) = client_stream.into_split();
+            let (mut s_read, mut s_write) = server_stream.into_split();
+            let bh_c2s = blackhole_proxy.clone();
+            let c2s = tokio::spawn(async move {
+                let mut buf = [0u8; 4096];
+                loop {
+                    let n = match c_read.read(&mut buf).await {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => n,
+                    };
+                    if bh_c2s.load(Ordering::Acquire) {
+                        continue;
+                    }
+                    if s_write.write_all(&buf[..n]).await.is_err() {
+                        break;
+                    }
+                }
+            });
+            let bh_s2c = blackhole_proxy;
+            let s2c = tokio::spawn(async move {
+                let mut buf = [0u8; 4096];
+                loop {
+                    let n = match s_read.read(&mut buf).await {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => n,
+                    };
+                    if bh_s2c.load(Ordering::Acquire) {
+                        continue;
+                    }
+                    if c_write.write_all(&buf[..n]).await.is_err() {
+                        break;
+                    }
+                }
+            });
+            let _ = tokio::join!(c2s, s2c);
+        });
+
+        let registry = SshConnectionRegistry::default();
+        let mut config = SshConfig::password("127.0.0.1", proxy_port, "fixture", "pw");
+        config.expected_host_key_fingerprint = Some(fingerprint);
+        config.trust_host_key = Some(false);
+        let handle = timeout(
+            Duration::from_secs(5),
+            SshTransportClient::new(config).connect_node_with_registry(
+                registry.clone(),
+                ConnectionConsumer::Terminal("probe-test".into()),
+            ),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        registry.mark_state(handle.connection_id(), ConnectionState::Active);
+
+        assert_eq!(
+            handle.probe_alive(Duration::from_secs(2)).await,
+            KeepaliveProbeResult::Ok
+        );
+        assert!(handle.recent_rtt(Duration::from_secs(60)).is_some());
+
+        // Drop all forwarded packets while keeping the TCP sockets open to
+        // emulate a half-open network blackout.
+        blackhole.store(true, Ordering::Release);
+        assert_eq!(
+            handle.probe_alive(Duration::from_millis(150)).await,
+            KeepaliveProbeResult::Timeout
+        );
+
+        // Two consecutive sweep timeouts must tolerate brief weak-network
+        // stalls; the third marks the connection LinkDown.
+        for _ in 0..(crate::HEARTBEAT_FAIL_THRESHOLD - 1) {
+            let changed = registry
+                .probe_active_connections(Duration::from_millis(100))
+                .await;
+            assert!(changed.is_empty());
+            assert_eq!(handle.state(), ConnectionState::Active);
+        }
+        let changed = registry
+            .probe_active_connections(Duration::from_millis(100))
+            .await;
+        assert_eq!(changed.len(), 1);
+        assert_eq!(changed[0].connection_id, handle.connection_id());
+        assert_eq!(handle.state(), ConnectionState::LinkDown);
+
+        proxy_task.abort();
+        server_task.abort();
     }
 }

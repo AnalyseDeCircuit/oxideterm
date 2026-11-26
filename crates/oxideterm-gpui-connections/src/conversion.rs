@@ -270,6 +270,8 @@ pub fn build_ssh_config(
         username: username.clone(),
         auth,
         timeout_secs: form.connect_timeout_seconds,
+        keep_alive_interval_secs: form.keep_alive_interval_seconds,
+        keep_alive_count_max: form.keep_alive_count_max,
         agent_forwarding: !form.ssh_channel_strategy.requires_dedicated_consumers()
             && form.agent_forwarding,
         identity_agent: identity_agent_from_form(&form.identity_agent),
@@ -521,6 +523,10 @@ pub fn form_from_runtime_config(
     form.ssh_channel_strategy = config.ssh_channel_strategy;
     form.connect_timeout_seconds = config.timeout_secs;
     form.connect_timeout_seconds_text = config.timeout_secs.to_string();
+    form.keep_alive_interval_seconds = config.keep_alive_interval_secs;
+    form.keep_alive_interval_seconds_text = config.keep_alive_interval_secs.to_string();
+    form.keep_alive_count_max = config.keep_alive_count_max;
+    form.keep_alive_count_max_text = config.keep_alive_count_max.to_string();
     form.x11_forwarding = connection_x11_options(config.x11_forwarding);
     form.save_password = auth_fields.save_password;
 

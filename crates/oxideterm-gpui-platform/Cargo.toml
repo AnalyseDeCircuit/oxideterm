@@ -26,13 +26,26 @@ gpui_platform = { workspace = true, features = ["font-kit"] }
 gpui_web = { package = "gpui-pre-web", version = "=0.3.12", default-features = false }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "0.9"
 objc2-app-kit = { version = "0.3.2", features = ["NSResponder", "NSView", "NSWindow"] }
 objc2-service-management = { version = "0.3.2", default-features = false, features = ["std", "SMAppService", "objc2", "objc2-foundation"] }
 raw-window-handle.workspace = true
+system-configuration = "0.7"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 raw-window-handle.workspace = true
-windows = { workspace = true, features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_System_Registry", "Win32_UI_WindowsAndMessaging"] }
+windows = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Dwm",
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_NetworkManagement_Ndis",
+    "Win32_Networking_WinSock",
+    "Win32_System_Registry",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
 
 [target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies]
 raw-window-handle.workspace = true

@@ -406,6 +406,7 @@ mod tests {
                 totp_credential_id: None,
                 connect_timeout_seconds: Some(120),
                 keep_alive_interval: 30,
+                keep_alive_count_max: Some(5),
                 compression: true,
                 jump_host: None,
                 term_type: Some("xterm-256color".to_string()),

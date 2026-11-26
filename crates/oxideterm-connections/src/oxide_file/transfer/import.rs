@@ -1385,6 +1385,9 @@ fn merge_options(
     if imported.keep_alive_interval != 0 {
         existing.keep_alive_interval = imported.keep_alive_interval;
     }
+    if imported.keep_alive_count_max.is_some() {
+        existing.keep_alive_count_max = imported.keep_alive_count_max;
+    }
     existing.compression |= imported.compression;
     if imported.term_type.is_some() {
         existing.term_type = imported.term_type;

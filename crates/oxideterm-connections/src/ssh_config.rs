@@ -19,6 +19,9 @@ pub struct SshConfigHost {
     pub user: Option<String>,
     pub port: Option<u16>,
     pub connect_timeout_seconds: Option<u64>,
+    pub keep_alive_interval_seconds: Option<u32>,
+    pub keep_alive_count_max: Option<u32>,
+    pub compression: Option<bool>,
     pub identity_file: Option<String>,
     pub certificate_file: Option<String>,
     pub gssapi_authentication: bool,
@@ -74,6 +77,9 @@ struct SshHostOptions {
     user: Option<String>,
     port: Option<u16>,
     connect_timeout_seconds: Option<u64>,
+    keep_alive_interval_seconds: Option<u32>,
+    keep_alive_count_max: Option<u32>,
+    compression: Option<String>,
     identity_file: Option<String>,
     certificate_file: Option<String>,
     gssapi_authentication: Option<String>,
@@ -328,6 +334,14 @@ fn apply_option(options: &mut SshHostOptions, key: &str, values: &[String]) {
             options.connect_timeout_seconds =
                 value.parse::<u64>().ok().filter(|seconds| *seconds > 0)
         }
+        "serveraliveinterval" if options.keep_alive_interval_seconds.is_none() => {
+            options.keep_alive_interval_seconds =
+                value.parse::<u32>().ok().filter(|seconds| *seconds > 0)
+        }
+        "serveralivecountmax" if options.keep_alive_count_max.is_none() => {
+            options.keep_alive_count_max = value.parse::<u32>().ok().filter(|count| *count > 0)
+        }
+        "compression" if options.compression.is_none() => options.compression = Some(value.clone()),
         "identityfile" if options.identity_file.is_none() => {
             options.identity_file = Some(value.clone())
         }
@@ -379,6 +393,14 @@ fn merge_first_options(base: &mut SshHostOptions, update: &SshHostOptions) {
     base.connect_timeout_seconds = base
         .connect_timeout_seconds
         .or(update.connect_timeout_seconds);
+    base.keep_alive_interval_seconds = base
+        .keep_alive_interval_seconds
+        .or(update.keep_alive_interval_seconds);
+    base.keep_alive_count_max = base.keep_alive_count_max.or(update.keep_alive_count_max);
+    base.compression = base
+        .compression
+        .clone()
+        .or_else(|| update.compression.clone());
     base.identity_file = base
         .identity_file
         .clone()
@@ -551,12 +573,21 @@ fn resolve_ssh_config_host(alias: &str, blocks: &[SshHostBlock]) -> Result<SshCo
         }
     });
 
+    let compression = options
+        .compression
+        .as_deref()
+        .map(parse_yes_no)
+        .transpose()?;
+
     Ok(SshConfigHost {
         alias: alias.to_string(),
         hostname,
         user: options.user,
         port: options.port,
         connect_timeout_seconds: options.connect_timeout_seconds,
+        keep_alive_interval_seconds: options.keep_alive_interval_seconds,
+        keep_alive_count_max: options.keep_alive_count_max,
+        compression,
         identity_file,
         certificate_file,
         gssapi_authentication,
@@ -1354,12 +1385,18 @@ mod tests {
                 "HostName=prod.example.com\n",
                 "Port=2200\n",
                 "ConnectTimeout=120\n",
+                "ServerAliveInterval=45\n",
+                "ServerAliveCountMax=5\n",
+                "Compression yes\n",
                 "  User deploy\n",
                 "  GSSAPIAuthentication yes\n",
                 "  GSSAPIServerIdentity host/service.example.com@EXAMPLE.COM\n",
                 "  GSSAPIDelegateCredentials yes\n",
                 "  RemoteCommand printf '\"%h\" %n %p %r %% # preserved'\n",
                 "Host *\n",
+                "  ServerAliveInterval 90\n",
+                "  ServerAliveCountMax 9\n",
+                "  Compression no\n",
                 "  RemoteCommand echo ignored\n",
             ),
         )
@@ -1372,6 +1409,17 @@ mod tests {
         assert_eq!(host.hostname.as_deref(), Some("prod.example.com"));
         assert_eq!(host.port, Some(2200));
         assert_eq!(host.connect_timeout_seconds, Some(120));
+        assert_eq!(host.keep_alive_interval_seconds, Some(45));
+        assert_eq!(host.keep_alive_count_max, Some(5));
+        assert_eq!(host.compression, Some(true));
+        let saved = saved_connection_from_ssh_host(host.clone()).unwrap();
+        assert_eq!(saved.options.effective_keep_alive_interval_seconds(), 45);
+        assert_eq!(saved.options.effective_keep_alive_count_max(), 5);
+        assert!(saved.options.compression);
+        assert_eq!(
+            saved.options.effective_ssh_algorithms().compression,
+            vec!["zlib@openssh.com", "zlib", "none"]
+        );
         assert!(host.gssapi_authentication);
         assert_eq!(
             host.gssapi_server_identity.as_deref(),

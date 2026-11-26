@@ -229,10 +229,14 @@ pub fn form_from_saved_connection(
         oxideterm_ssh::ssh_agent_available(identity_agent_selector(&form.identity_agent));
     // Preserve compatibility settings when an existing connection enters edit mode.
     form.legacy_ssh_compatibility = conn.options.legacy_ssh_compatibility;
-    form.ssh_algorithms = conn.options.ssh_algorithms.clone();
+    form.ssh_algorithms = conn.options.effective_ssh_algorithms();
     form.totp_credential_id = conn.options.totp_credential_id.clone();
     form.connect_timeout_seconds = conn.options.effective_connect_timeout_seconds();
     form.connect_timeout_seconds_text = form.connect_timeout_seconds.to_string();
+    form.keep_alive_interval_seconds = conn.options.effective_keep_alive_interval_seconds();
+    form.keep_alive_interval_seconds_text = form.keep_alive_interval_seconds.to_string();
+    form.keep_alive_count_max = conn.options.effective_keep_alive_count_max();
+    form.keep_alive_count_max_text = form.keep_alive_count_max.to_string();
     form.dedicated_new_terminal_connection = conn.options.dedicated_new_terminal_connection;
     form.open_sftp_on_connect = conn.options.open_sftp_on_connect;
     form.ssh_channel_strategy = conn.options.ssh_channel_strategy;
@@ -647,6 +651,8 @@ fn connection_draft_from_form_with_proxy_hop_prefix(
         legacy_ssh_compatibility: form.legacy_ssh_compatibility,
         ssh_algorithms: form.ssh_algorithms.clone(),
         connect_timeout_seconds: form.connect_timeout_seconds,
+        keep_alive_interval_seconds: form.keep_alive_interval_seconds,
+        keep_alive_count_max: form.keep_alive_count_max,
         dedicated_new_terminal_connection: form.dedicated_new_terminal_connection,
         open_sftp_on_connect: form.open_sftp_on_connect,
         ssh_channel_strategy: form.ssh_channel_strategy,

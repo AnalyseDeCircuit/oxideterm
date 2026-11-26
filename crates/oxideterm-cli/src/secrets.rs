@@ -566,6 +566,8 @@ fn write_connection_secret(
             icon: connection.icon,
             tags: connection.tags,
             connect_timeout_seconds: connection.options.effective_connect_timeout_seconds(),
+            keep_alive_interval_seconds: connection.options.effective_keep_alive_interval_seconds(),
+            keep_alive_count_max: connection.options.effective_keep_alive_count_max(),
             agent_forwarding: connection.options.agent_forwarding,
             identity_agent: connection.options.identity_agent,
             agent_forwarding_socket: connection.options.agent_forwarding_socket,

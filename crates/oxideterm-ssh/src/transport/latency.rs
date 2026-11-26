@@ -200,6 +200,7 @@ impl SshLatencyMonitor {
             }
             entry.started_at = Some(now);
             let sample = entry.sample.clone();
+            let transport_for_rtt = transport.clone();
             entry.task = Some(runtime.spawn(async move {
                 measure_reply(
                     async {
@@ -215,6 +216,7 @@ impl SshLatencyMonitor {
                         }
                     },
                     sample,
+                    Some(transport_for_rtt),
                 )
                 .await;
             }));
@@ -232,6 +234,7 @@ impl SshLatencyMonitor {
 async fn measure_reply(
     reply: impl Future<Output = Result<(), russh::Error>>,
     sample: Arc<RwLock<SshLatencySnapshot>>,
+    transport: Option<Arc<PooledSshConnection>>,
 ) {
     let started = Instant::now();
     tokio::pin!(reply);
@@ -245,10 +248,17 @@ async fn measure_reply(
         }
     };
     *sample.write() = match result {
-        Ok(()) => SshLatencySnapshot::Measured {
-            millis: (started.elapsed().as_millis() as u64).max(1),
-            measured_at: Instant::now(),
-        },
+        Ok(()) => {
+            let millis = (started.elapsed().as_millis() as u64).max(1);
+            let measured_at = Instant::now();
+            if let Some(transport) = transport {
+                transport.record_rtt(Duration::from_millis(millis), measured_at);
+            }
+            SshLatencySnapshot::Measured {
+                millis,
+                measured_at,
+            }
+        }
         Err(_) => SshLatencySnapshot::Unavailable,
     };
 }
@@ -393,6 +403,7 @@ mod tests {
         let task = tokio::spawn(measure_reply(
             async move { receive.await.map_err(|_| russh::Error::Disconnect) },
             sample.clone(),
+            None,
         ));
         tokio::task::yield_now().await;
         tokio::time::advance(Duration::from_millis(128)).await;
@@ -408,6 +419,7 @@ mod tests {
         let task = tokio::spawn(measure_reply(
             async move { receive.await.map_err(|_| russh::Error::Disconnect) },
             sample.clone(),
+            None,
         ));
         tokio::task::yield_now().await;
         tokio::time::advance(SSH_LATENCY_TIMEOUT).await;
@@ -422,6 +434,7 @@ mod tests {
         let task = tokio::spawn(measure_reply(
             async move { receive.await.map_err(|_| russh::Error::Disconnect) },
             sample.clone(),
+            None,
         ));
         tokio::task::yield_now().await;
         tokio::time::advance(Duration::from_secs(16)).await;
@@ -448,6 +461,7 @@ mod tests {
         entry.task = Some(tokio::spawn(measure_reply(
             async move { receive.await.map_err(|_| russh::Error::Disconnect) },
             entry.sample.clone(),
+            None,
         )));
         tokio::task::yield_now().await;
         let mut monitor = SshLatencyMonitor::default();

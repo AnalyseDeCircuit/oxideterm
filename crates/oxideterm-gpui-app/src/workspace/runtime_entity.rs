@@ -10,6 +10,7 @@ use oxideterm_ssh::{
 };
 
 const ACTIVE_PROBE_START_DELAY: Duration = Duration::from_millis(530);
+const IMMEDIATE_ACTIVE_PROBE_COOLDOWN: Duration = Duration::from_secs(2);
 const RECONNECT_DEBOUNCE_DELAY: Duration = Duration::from_millis(500);
 const RECONNECT_MAX_REQUEUE: u32 = 120;
 
@@ -318,9 +319,16 @@ pub(in crate::workspace) struct WorkspaceRuntimeEntity {
     task_runtime: Arc<tokio::runtime::Runtime>,
     reconnect_timing: ReconnectTiming,
     ssh_active_probe_in_flight: bool,
+    pending_immediate_active_probe: bool,
+    active_probe_immediate_scheduled: bool,
+    last_immediate_active_probe_at: Option<std::time::Instant>,
     active_probe_task: Option<tokio::task::AbortHandle>,
     active_probe_timer_generation: u64,
     active_probe_timer_task: Option<Task<()>>,
+    network_change_pending: Arc<AtomicBool>,
+    _system_wake_subscription: Option<gpui::Subscription>,
+    _network_change_subscription:
+        Option<oxideterm_gpui_platform::network_monitor::NetworkChangeSubscription>,
     latency_monitor: oxideterm_ssh::SshLatencyMonitor,
     latency_timer: Option<Task<()>>,
     reconnect_grace_probe_tasks: HashMap<NodeId, (String, tokio::task::AbortHandle)>,
@@ -383,10 +391,26 @@ impl WorkspaceRuntimeEntity {
         // Node state is a latest-value stream. Its bounded mailbox may retain
         // reliable lifecycle events beyond capacity, while the shared wake
         // lets this Entity drain every runtime source without a root waiter.
-        let emitter_wake = runtime_wake;
+        let emitter_wake = runtime_wake.clone();
         let (node_event_subscription, node_event_rx) = node_router
             .emitter()
             .subscribe_bounded_with_wake(256, Some(Arc::new(move || emitter_wake.mark())));
+        let network_change_pending = Arc::new(AtomicBool::new(false));
+        let network_change_subscription =
+            oxideterm_gpui_platform::network_monitor::subscribe_network_changes({
+                let pending = Arc::clone(&network_change_pending);
+                let wake = runtime_wake;
+                Arc::new(move || {
+                    pending.store(true, Ordering::Release);
+                    wake.mark();
+                })
+            });
+        let weak_entity = cx.weak_entity();
+        let system_wake_subscription = cx.on_system_wake(move |cx| {
+            let _ = weak_entity.update(cx, |entity, cx| {
+                entity.request_immediate_active_ssh_probe(cx);
+            });
+        });
         let mut entity = Self {
             ssh_worker_tx,
             reconnect_worker_tx,
@@ -434,9 +458,15 @@ impl WorkspaceRuntimeEntity {
             task_runtime,
             reconnect_timing,
             ssh_active_probe_in_flight: false,
+            pending_immediate_active_probe: false,
+            active_probe_immediate_scheduled: false,
+            last_immediate_active_probe_at: None,
             active_probe_task: None,
             active_probe_timer_generation: 0,
             active_probe_timer_task: None,
+            network_change_pending,
+            _system_wake_subscription: Some(system_wake_subscription),
+            _network_change_subscription: Some(network_change_subscription),
             latency_monitor: oxideterm_ssh::SshLatencyMonitor::default(),
             latency_timer: None,
             reconnect_grace_probe_tasks: HashMap::new(),
@@ -1224,6 +1254,12 @@ impl WorkspaceRuntimeEntity {
         self.clear_reconnect_cascade();
         self.active_probe_timer_generation = self.active_probe_timer_generation.wrapping_add(1);
         self.active_probe_timer_task = None;
+        self._system_wake_subscription = None;
+        self._network_change_subscription = None;
+        self.network_change_pending.store(false, Ordering::Release);
+        self.pending_immediate_active_probe = false;
+        self.active_probe_immediate_scheduled = false;
+        self.last_immediate_active_probe_at = None;
         self.pending_reconnect_node_ids.clear();
         self.reconnect_requeue_states.clear();
         self.reconnect_requeue_tasks.clear();
@@ -2799,7 +2835,42 @@ impl WorkspaceRuntimeEntity {
         }));
     }
 
+    fn immediate_active_probe_delay(&self, now: std::time::Instant) -> Duration {
+        self.last_immediate_active_probe_at
+            .map(|last| {
+                IMMEDIATE_ACTIVE_PROBE_COOLDOWN.saturating_sub(now.saturating_duration_since(last))
+            })
+            .unwrap_or(Duration::ZERO)
+    }
+
+    /// Coalesces system-wake and network-interface change events into at most
+    /// one immediate active SSH keepalive sweep (or one follow-up sweep after an
+    /// in-flight sweep finishes).
+    pub(in crate::workspace) fn request_immediate_active_ssh_probe(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        if self.lifecycle != WorkspaceRuntimeLifecycle::Running {
+            return;
+        }
+        let registry_stats = self.ssh_registry.stats();
+        if registry_stats.active == 0 && registry_stats.idle == 0 {
+            return;
+        }
+        if self.ssh_active_probe_in_flight {
+            self.pending_immediate_active_probe = true;
+            return;
+        }
+        if self.active_probe_immediate_scheduled {
+            return;
+        }
+        let delay = self.immediate_active_probe_delay(std::time::Instant::now());
+        self.schedule_active_probe_after(delay, cx);
+        self.active_probe_immediate_scheduled = true;
+    }
+
     fn schedule_active_probe_after(&mut self, delay: Duration, cx: &mut Context<Self>) {
+        self.active_probe_immediate_scheduled = false;
         self.active_probe_timer_generation = self.active_probe_timer_generation.wrapping_add(1);
         let generation = self.active_probe_timer_generation;
         // Only the runtime entity owns the keepalive timer. Replacing or
@@ -2816,7 +2887,12 @@ impl WorkspaceRuntimeEntity {
     }
 
     fn start_active_ssh_probe(&mut self, cx: &mut Context<Self>) {
+        let was_immediate = std::mem::take(&mut self.active_probe_immediate_scheduled);
         if self.ssh_active_probe_in_flight {
+            if was_immediate {
+                self.pending_immediate_active_probe = true;
+                return;
+            }
             // A settings change can reschedule while a previous probe is still running.
             self.schedule_active_probe_after(ACTIVE_PROBE_START_DELAY, cx);
             return;
@@ -2827,12 +2903,18 @@ impl WorkspaceRuntimeEntity {
             return;
         }
 
+        if was_immediate {
+            self.last_immediate_active_probe_at = Some(std::time::Instant::now());
+        }
         self.ssh_active_probe_in_flight = true;
         let ssh_registry = self.ssh_registry.clone();
         let timeout = self.reconnect_timing.proactive_keepalive_timeout;
         let result_sender = self.active_probe_tx.clone();
         let task = self.task_runtime.spawn(async move {
-            let changed = ssh_registry.probe_active_connections(timeout).await.len();
+            let changed = ssh_registry
+                .probe_active_connections_with_force(timeout, was_immediate)
+                .await
+                .len();
             let _ = result_sender.send(changed);
         });
         // Workspace shutdown aborts the in-flight probe before retiring its registry.
@@ -2873,7 +2955,25 @@ impl WorkspaceRuntimeEntity {
         if active_probe_completed {
             self.ssh_active_probe_in_flight = false;
             self.active_probe_task = None;
-            self.schedule_active_probe_after(self.reconnect_timing.ssh_keepalive_interval, cx);
+            let follow_up_needed = std::mem::take(&mut self.pending_immediate_active_probe);
+            if follow_up_needed {
+                let registry_stats = self.ssh_registry.stats();
+                if registry_stats.active > 0 || registry_stats.idle > 0 {
+                    let delay = self.immediate_active_probe_delay(std::time::Instant::now());
+                    self.schedule_active_probe_after(delay, cx);
+                    self.active_probe_immediate_scheduled = true;
+                } else {
+                    self.schedule_active_probe_after(
+                        self.reconnect_timing.ssh_keepalive_interval,
+                        cx,
+                    );
+                }
+            } else {
+                self.schedule_active_probe_after(self.reconnect_timing.ssh_keepalive_interval, cx);
+            }
+        }
+        if self.network_change_pending.swap(false, Ordering::AcqRel) {
+            self.request_immediate_active_ssh_probe(cx);
         }
         if active_connections_changed {
             self.push_runtime_effect(WorkspaceRuntimeEffect::ActiveConnectionsChanged, cx);
@@ -3788,6 +3888,74 @@ mod tests {
                 entity.reconnect_timing.ssh_keepalive_interval,
                 Duration::from_secs(37)
             );
+        });
+    }
+
+    #[gpui::test]
+    fn immediate_active_probe_coalesces_bursts_and_queues_follow_up_when_in_flight(
+        cx: &mut TestAppContext,
+    ) {
+        let entity = test_runtime_entity(cx);
+        let active_probe_sender = entity.update(cx, |entity, cx| {
+            let handle = entity.ssh_registry.acquire(
+                SshConfig::password("weak-net.example", 22, "alice", "pw"),
+                ConnectionConsumer::Terminal("term-weak-net".into()),
+            );
+            handle.set_physical(Arc::new(()));
+            entity
+                .ssh_registry
+                .mark_state(handle.connection_id(), ConnectionState::Active);
+
+            // Duplicate wake/network events before the scheduled probe fires
+            // must coalesce onto the same pending immediate timer.
+            entity.request_immediate_active_ssh_probe(cx);
+            assert!(entity.active_probe_immediate_scheduled);
+            let scheduled_generation = entity.active_probe_timer_generation;
+            entity.request_immediate_active_ssh_probe(cx);
+            assert_eq!(entity.active_probe_timer_generation, scheduled_generation);
+            assert!(!entity.pending_immediate_active_probe);
+
+            // An event arriving while a sweep is already in flight must record
+            // a single pending follow-up instead of launching a second sweep.
+            entity.active_probe_immediate_scheduled = false;
+            entity.ssh_active_probe_in_flight = true;
+            entity.last_immediate_active_probe_at = Some(std::time::Instant::now());
+            entity.request_immediate_active_ssh_probe(cx);
+            assert!(entity.pending_immediate_active_probe);
+            entity.active_probe_tx.clone()
+        });
+
+        active_probe_sender.send(0).expect("probe completion");
+        cx.run_until_parked();
+
+        entity.update(cx, |entity, cx| {
+            assert!(!entity.ssh_active_probe_in_flight);
+            assert!(!entity.pending_immediate_active_probe);
+            assert!(entity.active_probe_immediate_scheduled);
+            assert!(entity.active_probe_timer_task.is_some());
+
+            // Background network-change signal wakes the runtime entity and
+            // feeds into the same coalesced immediate-probe path.
+            entity.active_probe_immediate_scheduled = false;
+            entity.ssh_active_probe_in_flight = true;
+            entity.network_change_pending.store(true, Ordering::Release);
+            entity.reconnect_worker_tx.wake().mark();
+            let _ = cx;
+        });
+
+        cx.run_until_parked();
+
+        entity.update(cx, |entity, cx| {
+            assert!(!entity.network_change_pending.load(Ordering::Acquire));
+            assert!(entity.pending_immediate_active_probe);
+
+            entity.shutdown_workspace_runtime();
+            assert!(entity._system_wake_subscription.is_none());
+            assert!(entity._network_change_subscription.is_none());
+            assert!(!entity.pending_immediate_active_probe);
+            assert!(!entity.active_probe_immediate_scheduled);
+            entity.request_immediate_active_ssh_probe(cx);
+            assert!(!entity.active_probe_immediate_scheduled);
         });
     }
 

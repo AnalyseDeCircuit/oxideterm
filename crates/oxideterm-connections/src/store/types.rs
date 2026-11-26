@@ -263,6 +263,8 @@ impl ConnectionTerminalOptions {
 
 pub const DEFAULT_X11_UNTRUSTED_TIMEOUT_SECONDS: u32 = 20 * 60;
 pub const DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS: u64 = 30;
+pub const DEFAULT_SSH_KEEP_ALIVE_INTERVAL_SECONDS: u32 = 30;
+pub const DEFAULT_SSH_KEEP_ALIVE_COUNT_MAX: u32 = 3;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -369,6 +371,9 @@ pub struct ConnectionOptions {
     pub connect_timeout_seconds: Option<u64>,
     #[serde(default)]
     pub keep_alive_interval: u32,
+    /// Overrides the maximum missed keepalive probes before disconnecting.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keep_alive_count_max: Option<u32>,
     #[serde(default)]
     pub compression: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -437,6 +442,35 @@ impl ConnectionOptions {
         self.connect_timeout_seconds
             .filter(|seconds| *seconds > 0)
             .unwrap_or(DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS)
+    }
+
+    pub fn effective_keep_alive_interval_seconds(&self) -> u32 {
+        if self.keep_alive_interval > 0 {
+            self.keep_alive_interval
+        } else {
+            DEFAULT_SSH_KEEP_ALIVE_INTERVAL_SECONDS
+        }
+    }
+
+    pub fn effective_keep_alive_count_max(&self) -> u32 {
+        self.keep_alive_count_max
+            .filter(|count| *count > 0)
+            .unwrap_or(DEFAULT_SSH_KEEP_ALIVE_COUNT_MAX)
+    }
+
+    /// Resolves effective SSH algorithm preferences, translating the legacy
+    /// `compression` flag into a delayed-compression offer only when the
+    /// explicit compression algorithm list is unset.
+    pub fn effective_ssh_algorithms(&self) -> SshAlgorithmPreferences {
+        let mut algorithms = self.ssh_algorithms.clone();
+        if algorithms.compression.is_empty() && self.compression {
+            algorithms.compression = vec![
+                "zlib@openssh.com".to_string(),
+                "zlib".to_string(),
+                "none".to_string(),
+            ];
+        }
+        algorithms
     }
 }
 
@@ -2284,6 +2318,8 @@ pub struct SaveConnectionRequest {
     pub icon: Option<String>,
     pub tags: Vec<String>,
     pub connect_timeout_seconds: u64,
+    pub keep_alive_interval_seconds: u32,
+    pub keep_alive_count_max: u32,
     pub agent_forwarding: bool,
     pub identity_agent: Option<String>,
     pub agent_forwarding_socket: Option<String>,

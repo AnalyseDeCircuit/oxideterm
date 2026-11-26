@@ -110,6 +110,8 @@ pub(crate) fn field_value(form: &NewConnectionForm, field: NewConnectionField) -
         NewConnectionField::MoshLocale => &form.mosh_locale,
         NewConnectionField::InitialRemotePath => &form.sftp_initial_remote_path,
         NewConnectionField::ConnectTimeoutSeconds => &form.connect_timeout_seconds_text,
+        NewConnectionField::KeepAliveIntervalSeconds => &form.keep_alive_interval_seconds_text,
+        NewConnectionField::KeepAliveCountMax => &form.keep_alive_count_max_text,
         NewConnectionField::StandaloneSftpSecondaryHost => &form.standalone_sftp_secondary.host,
         NewConnectionField::StandaloneSftpSecondaryPort => &form.standalone_sftp_secondary.port,
         NewConnectionField::StandaloneSftpSecondaryUsername => {
@@ -218,6 +220,8 @@ fn connection_field_value_mut(
         NewConnectionField::MoshLocale => &mut form.mosh_locale,
         NewConnectionField::InitialRemotePath => &mut form.sftp_initial_remote_path,
         NewConnectionField::ConnectTimeoutSeconds => &mut form.connect_timeout_seconds_text,
+        NewConnectionField::KeepAliveIntervalSeconds => &mut form.keep_alive_interval_seconds_text,
+        NewConnectionField::KeepAliveCountMax => &mut form.keep_alive_count_max_text,
         NewConnectionField::StandaloneSftpSecondaryHost => &mut form.standalone_sftp_secondary.host,
         NewConnectionField::StandaloneSftpSecondaryPort => &mut form.standalone_sftp_secondary.port,
         NewConnectionField::StandaloneSftpSecondaryUsername => {

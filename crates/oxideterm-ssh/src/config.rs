@@ -123,6 +123,10 @@ pub struct SshConfig {
     pub auth: AuthMethod,
     #[serde(default = "default_timeout")]
     pub timeout_secs: u64,
+    #[serde(default = "default_keep_alive_interval_secs")]
+    pub keep_alive_interval_secs: u32,
+    #[serde(default = "default_keep_alive_count_max")]
+    pub keep_alive_count_max: u32,
     #[serde(default = "default_cols")]
     pub cols: u32,
     #[serde(default = "default_rows")]
@@ -176,6 +180,8 @@ impl fmt::Debug for SshConfig {
             .field("username", &self.username)
             .field("auth", &self.auth)
             .field("timeout_secs", &self.timeout_secs)
+            .field("keep_alive_interval_secs", &self.keep_alive_interval_secs)
+            .field("keep_alive_count_max", &self.keep_alive_count_max)
             .field("cols", &self.cols)
             .field("rows", &self.rows)
             .field("proxy_chain", &self.proxy_chain)
@@ -403,8 +409,18 @@ impl SshConfig {
         } else {
             ""
         };
+        let keep_alive_key = if self.keep_alive_interval_secs != default_keep_alive_interval_secs()
+            || self.keep_alive_count_max != default_keep_alive_count_max()
+        {
+            format!(
+                "|keepalive={}:{}",
+                self.keep_alive_interval_secs, self.keep_alive_count_max
+            )
+        } else {
+            String::new()
+        };
         format!(
-            "{}@{}:{}|{}{}{}{}{}{}{}{}{}{}{host_key_suffix}",
+            "{}@{}:{}|{}{}{}{}{}{}{}{}{}{}{keep_alive_key}{host_key_suffix}",
             self.username,
             self.host,
             self.port,
@@ -659,6 +675,8 @@ impl Default for SshConfig {
             username: String::new(),
             auth: AuthMethod::password(""),
             timeout_secs: default_timeout(),
+            keep_alive_interval_secs: default_keep_alive_interval_secs(),
+            keep_alive_count_max: default_keep_alive_count_max(),
             cols: default_cols(),
             rows: default_rows(),
             proxy_chain: None,
@@ -688,6 +706,14 @@ const fn default_port() -> u16 {
 
 const fn default_timeout() -> u64 {
     30
+}
+
+const fn default_keep_alive_interval_secs() -> u32 {
+    oxideterm_connections::DEFAULT_SSH_KEEP_ALIVE_INTERVAL_SECONDS
+}
+
+const fn default_keep_alive_count_max() -> u32 {
+    oxideterm_connections::DEFAULT_SSH_KEEP_ALIVE_COUNT_MAX
 }
 
 const fn default_cols() -> u32 {

@@ -344,6 +344,16 @@ mod tests {
         assert_eq!(explicit_sha256.gex.min_group_size(), 2048);
         assert_eq!(explicit_sha256.gex.preferred_group_size(), 3072);
         assert_eq!(explicit_sha256.gex.max_group_size(), 8192);
+        let custom_keepalive =
+            ssh_client_config_with_keepalive(false, &preferences, 45, 5, false).unwrap();
+        assert_eq!(
+            custom_keepalive.keepalive_interval,
+            Some(Duration::from_secs(45))
+        );
+        assert_eq!(custom_keepalive.keepalive_max, 5);
+        let single_channel =
+            ssh_client_config_with_keepalive(false, &preferences, 45, 5, true).unwrap();
+        assert_eq!(single_channel.keepalive_interval, None);
         assert_eq!(
             auth_algorithm_attempt_order(true, None, false),
             vec![Some(HashAlg::Sha512), Some(HashAlg::Sha256), None]

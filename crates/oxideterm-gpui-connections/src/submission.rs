@@ -1002,6 +1002,16 @@ fn plan_form_submission(
         form.error = Some(i18n.t("ssh.form.connect_timeout_invalid"));
         return None;
     }
+    if transport == NewConnectionTransport::Ssh {
+        if !crate::form_state::connection_keep_alive_interval_valid(form) {
+            form.error = Some(i18n.t("ssh.form.keep_alive_interval_invalid"));
+            return None;
+        }
+        if !crate::form_state::connection_keep_alive_count_max_valid(form) {
+            form.error = Some(i18n.t("ssh.form.keep_alive_count_max_invalid"));
+            return None;
+        }
+    }
     match transport {
         NewConnectionTransport::Ftp => return Some(FormSubmission::Ftp),
         NewConnectionTransport::StandaloneSftp if parent.is_none() => {

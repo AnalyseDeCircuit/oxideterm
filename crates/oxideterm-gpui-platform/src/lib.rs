@@ -5,6 +5,7 @@ pub mod http_client;
 pub mod http_client {
     pub use gpui_web::FetchHttpClient as AssetHttpClient;
 }
+pub mod network_monitor;
 pub mod rendering;
 pub mod vibrancy;
 pub mod window_opacity;

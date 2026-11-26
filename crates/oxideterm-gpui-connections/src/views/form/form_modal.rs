@@ -48,6 +48,8 @@ struct ConnectionFormModalSnapshot {
     mosh_udp_port: String,
     mosh_locale: String,
     connect_timeout_seconds_text: String,
+    keep_alive_interval_seconds_text: String,
+    keep_alive_count_max_text: String,
     active_drawer: Option<crate::form_state::ConnectionFormDrawer>,
     totp_picker_expanded: bool,
     totp_credential_id: Option<String>,
@@ -115,6 +117,8 @@ impl ConnectionFormModalSnapshot {
             mosh_udp_port: form.mosh_udp_port.clone(),
             mosh_locale: form.mosh_locale.clone(),
             connect_timeout_seconds_text: form.connect_timeout_seconds_text.clone(),
+            keep_alive_interval_seconds_text: form.keep_alive_interval_seconds_text.clone(),
+            keep_alive_count_max_text: form.keep_alive_count_max_text.clone(),
             active_drawer: form.active_drawer,
             totp_picker_expanded: form.totp_picker_expanded,
             totp_credential_id: form.totp_credential_id.clone(),
@@ -385,6 +389,16 @@ impl ConnectionFormView {
             .trim()
             .parse::<u64>()
             .is_ok_and(|seconds| seconds > 0);
+        let ssh_keepalive_valid = form
+            .keep_alive_interval_seconds_text
+            .trim()
+            .parse::<u32>()
+            .is_ok_and(|seconds| seconds > 0)
+            && form
+                .keep_alive_count_max_text
+                .trim()
+                .parse::<u32>()
+                .is_ok_and(|count| count > 0);
         let has_required_fields = if local_terminal_mode {
             true
         } else if serial_mode {
@@ -427,6 +441,7 @@ impl ConnectionFormView {
                 && !form.username.trim().is_empty()
                 && form.port.trim().parse::<u16>().is_ok()
                 && connect_timeout_valid
+                && ssh_keepalive_valid
         };
         let primary_disabled = form.pending || !has_required_fields;
         // Editing a saved BLE profile can persist metadata changes without a

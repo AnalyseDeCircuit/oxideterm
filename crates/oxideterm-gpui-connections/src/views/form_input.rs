@@ -91,6 +91,8 @@ fn is_mono_connection_field(field: crate::form_state::NewConnectionField) -> boo
             | Field::IdentityAgent
             | Field::InitialRemotePath
             | Field::ConnectTimeoutSeconds
+            | Field::KeepAliveIntervalSeconds
+            | Field::KeepAliveCountMax
             | Field::StandaloneSftpSecondaryHost
             | Field::StandaloneSftpSecondaryPort
             | Field::StandaloneSftpSecondaryUsername

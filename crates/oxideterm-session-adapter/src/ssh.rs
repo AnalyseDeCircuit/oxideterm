@@ -54,6 +54,8 @@ pub fn ssh_config_from_saved_connection_with_auth(
         username: conn.username.clone(),
         auth,
         timeout_secs: conn.options.effective_connect_timeout_seconds(),
+        keep_alive_interval_secs: conn.options.effective_keep_alive_interval_seconds(),
+        keep_alive_count_max: conn.options.effective_keep_alive_count_max(),
         proxy_chain: (!proxy_chain.is_empty()).then_some(proxy_chain),
         upstream_proxy,
         proxy_command,
@@ -66,7 +68,7 @@ pub fn ssh_config_from_saved_connection_with_auth(
         agent_forwarding_socket: conn.options.agent_forwarding_socket.clone(),
         legacy_ssh_compatibility: conn.options.legacy_ssh_compatibility,
         ssh_channel_strategy: conn.options.ssh_channel_strategy,
-        ssh_algorithms: conn.options.ssh_algorithms.clone(),
+        ssh_algorithms: conn.options.effective_ssh_algorithms(),
         x11_forwarding: (!conn
             .options
             .ssh_channel_strategy
@@ -154,6 +156,8 @@ pub fn ssh_config_from_saved_connection_with_runtime_secrets(
         username: conn.username.clone(),
         auth,
         timeout_secs: conn.options.effective_connect_timeout_seconds(),
+        keep_alive_interval_secs: conn.options.effective_keep_alive_interval_seconds(),
+        keep_alive_count_max: conn.options.effective_keep_alive_count_max(),
         proxy_chain: (!proxy_chain.is_empty()).then_some(proxy_chain),
         upstream_proxy,
         proxy_command,
@@ -166,7 +170,7 @@ pub fn ssh_config_from_saved_connection_with_runtime_secrets(
         agent_forwarding_socket: conn.options.agent_forwarding_socket.clone(),
         legacy_ssh_compatibility: conn.options.legacy_ssh_compatibility,
         ssh_channel_strategy: conn.options.ssh_channel_strategy,
-        ssh_algorithms: conn.options.ssh_algorithms.clone(),
+        ssh_algorithms: conn.options.effective_ssh_algorithms(),
         x11_forwarding: (!conn
             .options
             .ssh_channel_strategy
@@ -580,6 +584,10 @@ pub fn resolve_saved_connection_hop(
                 username: hop.username,
                 auth: hop.auth,
                 timeout_secs: connection.options.effective_connect_timeout_seconds(),
+                keep_alive_interval_secs: connection
+                    .options
+                    .effective_keep_alive_interval_seconds(),
+                keep_alive_count_max: connection.options.effective_keep_alive_count_max(),
                 proxy_chain: None,
                 upstream_proxy: target.upstream_proxy.clone(),
                 agent_forwarding: hop.agent_forwarding,

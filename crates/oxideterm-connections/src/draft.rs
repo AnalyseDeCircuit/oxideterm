@@ -122,6 +122,8 @@ pub struct ConnectionDraft {
     pub tags: Vec<String>,
     pub proxy_hops: Vec<ProxyHopDraft>,
     pub connect_timeout_seconds: u64,
+    pub keep_alive_interval_seconds: u32,
+    pub keep_alive_count_max: u32,
     pub agent_forwarding: bool,
     pub identity_agent: Option<String>,
     pub agent_forwarding_socket: Option<String>,
@@ -196,6 +198,21 @@ pub fn saved_connection_from_ssh_host(host: SshConfigHost) -> Result<SavedConnec
         proxy_command: None,
         options: ConnectionOptions {
             connect_timeout_seconds: host.connect_timeout_seconds,
+            keep_alive_interval: host.keep_alive_interval_seconds.unwrap_or(0),
+            keep_alive_count_max: host.keep_alive_count_max,
+            compression: host.compression.unwrap_or(false),
+            ssh_algorithms: if host.compression == Some(true) {
+                SshAlgorithmPreferences {
+                    compression: vec![
+                        "zlib@openssh.com".to_string(),
+                        "zlib".to_string(),
+                        "none".to_string(),
+                    ],
+                    ..SshAlgorithmPreferences::default()
+                }
+            } else {
+                SshAlgorithmPreferences::default()
+            },
             agent_forwarding: host.agent_forwarding,
             identity_agent: host.identity_agent,
             agent_forwarding_socket: host.agent_forwarding_socket,
@@ -288,6 +305,8 @@ pub fn save_request_from_draft(
         icon: (!draft.icon.trim().is_empty()).then(|| draft.icon.trim().to_string()),
         tags: draft.tags,
         connect_timeout_seconds: draft.connect_timeout_seconds,
+        keep_alive_interval_seconds: draft.keep_alive_interval_seconds,
+        keep_alive_count_max: draft.keep_alive_count_max,
         agent_forwarding: draft.agent_forwarding,
         identity_agent: draft.identity_agent,
         agent_forwarding_socket: draft.agent_forwarding_socket,
@@ -732,6 +751,8 @@ mod tests {
                 ssh_algorithms: SshAlgorithmPreferences::default(),
             }],
             connect_timeout_seconds: crate::DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS,
+            keep_alive_interval_seconds: crate::DEFAULT_SSH_KEEP_ALIVE_INTERVAL_SECONDS,
+            keep_alive_count_max: crate::DEFAULT_SSH_KEEP_ALIVE_COUNT_MAX,
             agent_forwarding: false,
             identity_agent: None,
             agent_forwarding_socket: None,

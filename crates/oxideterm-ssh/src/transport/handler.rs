@@ -1,6 +1,23 @@
+#[cfg(test)]
 fn ssh_client_config(
     legacy_ssh_compatibility: bool,
     ssh_algorithms: &oxideterm_connections::SshAlgorithmPreferences,
+) -> Result<client::Config, SshTransportError> {
+    ssh_client_config_with_keepalive(
+        legacy_ssh_compatibility,
+        ssh_algorithms,
+        oxideterm_connections::DEFAULT_SSH_KEEP_ALIVE_INTERVAL_SECONDS,
+        oxideterm_connections::DEFAULT_SSH_KEEP_ALIVE_COUNT_MAX,
+        false,
+    )
+}
+
+fn ssh_client_config_with_keepalive(
+    legacy_ssh_compatibility: bool,
+    ssh_algorithms: &oxideterm_connections::SshAlgorithmPreferences,
+    keep_alive_interval_secs: u32,
+    keep_alive_count_max: u32,
+    single_channel_device: bool,
 ) -> Result<client::Config, SshTransportError> {
     // Legacy embedded SSH servers (Cisco IOS, older Dropbear/Huawei/BMC) can reject
     // SSH_MSG_CHANNEL_OPEN when max_packet_size exceeds the RFC 4254 32 KiB baseline.
@@ -9,10 +26,12 @@ fn ssh_client_config(
     } else {
         (32 * 1024 * 1024, 256 * 1024)
     };
+    let keepalive_interval = (!single_channel_device)
+        .then(|| Duration::from_secs(u64::from(keep_alive_interval_secs.max(1))));
     let mut config = client::Config {
         inactivity_timeout: None,
-        keepalive_interval: Some(Duration::from_secs(30)),
-        keepalive_max: 3,
+        keepalive_interval,
+        keepalive_max: keep_alive_count_max.max(1) as usize,
         window_size,
         maximum_packet_size,
         gex: crate::algorithms::preferred_gex(legacy_ssh_compatibility, ssh_algorithms),

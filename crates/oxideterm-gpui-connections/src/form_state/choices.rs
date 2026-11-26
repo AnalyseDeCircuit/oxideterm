@@ -318,6 +318,8 @@ impl ConnectionTerminalOptions {
 
 pub const DEFAULT_X11_UNTRUSTED_TIMEOUT_SECONDS: u32 = 20 * 60;
 pub const DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS: u64 = 30;
+pub const DEFAULT_SSH_KEEP_ALIVE_INTERVAL_SECONDS: u32 = 30;
+pub const DEFAULT_SSH_KEEP_ALIVE_COUNT_MAX: u32 = 3;
 
 #[derive(Clone, Debug)]
 pub struct ConnectionInfo {

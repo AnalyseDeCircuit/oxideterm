@@ -146,8 +146,13 @@ fn edit_properties_optional_name_preserves_connection_identity_and_saved_passwor
 fn edit_properties_switch_from_agent_to_password_submits_new_password() {
     let existing = SavedAuth::Agent;
     let connect_timeout_seconds = 120;
+    let keep_alive_interval_seconds = 45;
+    let keep_alive_count_max = 6;
     let mut saved_connection = saved_connection_fixture(existing.clone());
     saved_connection.options.connect_timeout_seconds = Some(connect_timeout_seconds);
+    saved_connection.options.keep_alive_interval = keep_alive_interval_seconds;
+    saved_connection.options.keep_alive_count_max = Some(keep_alive_count_max);
+    saved_connection.options.compression = true;
     let mut form = form_from_saved_connection(&saved_connection, None);
     form.auth_tab = SshAuthTab::Password;
     form.password = "new-secret".to_string();
@@ -159,6 +164,15 @@ fn edit_properties_switch_from_agent_to_password_submits_new_password() {
     )
     .unwrap();
     assert_eq!(request.connect_timeout_seconds, connect_timeout_seconds);
+    assert_eq!(
+        request.keep_alive_interval_seconds,
+        keep_alive_interval_seconds
+    );
+    assert_eq!(request.keep_alive_count_max, keep_alive_count_max);
+    assert_eq!(
+        request.ssh_algorithms.compression,
+        vec!["zlib@openssh.com", "zlib", "none"]
+    );
 
     match request.auth {
         SavedAuth::Password {

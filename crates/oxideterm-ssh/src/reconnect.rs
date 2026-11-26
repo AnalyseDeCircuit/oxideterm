@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 pub const GRACE_PERIOD: Duration = Duration::from_secs(30);
-pub const PROACTIVE_KEEPALIVE_TIMEOUT: Duration = Duration::from_secs(5);
+pub const PROACTIVE_KEEPALIVE_TIMEOUT: Duration = Duration::from_secs(8);
 pub const WEBSOCKET_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
 pub const WEBSOCKET_HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(300);
 pub const SSH_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(15);

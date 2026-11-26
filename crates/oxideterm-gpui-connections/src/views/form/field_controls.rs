@@ -5224,6 +5224,8 @@ impl ConnectionFormView {
     ) -> AnyElement {
         let Some((
             connect_timeout_seconds_text,
+            keep_alive_interval_seconds_text,
+            keep_alive_count_max_text,
             x11_forwarding,
             ssh_channel_strategy,
             dedicated_new_terminal_connection,
@@ -5236,6 +5238,8 @@ impl ConnectionFormView {
         )) = self.connection_form_state(cx).form.as_ref().map(|form| {
             (
                 form.connect_timeout_seconds_text.clone(),
+                form.keep_alive_interval_seconds_text.clone(),
+                form.keep_alive_count_max_text.clone(),
                 form.x11_forwarding,
                 form.ssh_channel_strategy,
                 form.dedicated_new_terminal_connection,
@@ -5388,6 +5392,102 @@ impl ConnectionFormView {
                     ),
             );
 
+        let keep_alive_interval_row =
+            div()
+                .w_full()
+                .min_h(px(44.0))
+                .py(px(6.0))
+                .px(px(2.0))
+                .flex()
+                .flex_row()
+                .items_center()
+                .justify_between()
+                .gap(px(12.0))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .text_size(px(self.tokens.metrics.ui_text_sm))
+                        .text_color(rgb(theme.text))
+                        .child(self.render_connection_label_with_help(
+                            "new-connection-keep-alive-interval-help",
+                            "new-connection-keep-alive-interval",
+                            "ssh.form.keep_alive_interval",
+                            "ssh.form.keep_alive_interval_hint",
+                            cx,
+                        )),
+                )
+                .child(
+                    div()
+                        .flex_none()
+                        .flex()
+                        .flex_row()
+                        .items_center()
+                        .gap(px(6.0))
+                        .child(
+                            div().w(px(84.0)).child(
+                                self.render_connection_centered_mono_input(
+                                    &keep_alive_interval_seconds_text,
+                                    crate::form_model::DEFAULT_SSH_KEEP_ALIVE_INTERVAL_SECONDS
+                                        .to_string(),
+                                    NewConnectionField::KeepAliveIntervalSeconds,
+                                    cx,
+                                ),
+                            ),
+                        )
+                        .child(
+                            div()
+                                .font_family(SharedString::from(
+                                    self.tokens.metrics.markdown_code_font_family,
+                                ))
+                                .text_size(px(self.tokens.metrics.ui_text_xs))
+                                .text_color(rgb(theme.text_muted))
+                                .child("s"),
+                        ),
+                );
+
+        let keep_alive_count_max_row =
+            div()
+                .w_full()
+                .min_h(px(44.0))
+                .py(px(6.0))
+                .px(px(2.0))
+                .flex()
+                .flex_row()
+                .items_center()
+                .justify_between()
+                .gap(px(12.0))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .text_size(px(self.tokens.metrics.ui_text_sm))
+                        .text_color(rgb(theme.text))
+                        .child(self.render_connection_label_with_help(
+                            "new-connection-keep-alive-count-max-help",
+                            "new-connection-keep-alive-count-max",
+                            "ssh.form.keep_alive_count_max",
+                            "ssh.form.keep_alive_count_max_hint",
+                            cx,
+                        )),
+                )
+                .child(
+                    div()
+                        .flex_none()
+                        .flex()
+                        .flex_row()
+                        .items_center()
+                        .gap(px(6.0))
+                        .child(div().w(px(84.0)).child(
+                            self.render_connection_centered_mono_input(
+                                &keep_alive_count_max_text,
+                                crate::form_model::DEFAULT_SSH_KEEP_ALIVE_COUNT_MAX.to_string(),
+                                NewConnectionField::KeepAliveCountMax,
+                                cx,
+                            ),
+                        )),
+                );
+
         let algorithms_summary = if ssh_algorithms_custom_count > 0 {
             self.i18n
                 .t("ssh.form.ssh_algorithms_custom_count")
@@ -5401,6 +5501,10 @@ impl ConnectionFormView {
             .flex_col()
             .gap(px(2.0))
             .child(timeout_row)
+            .child(self.form_hairline())
+            .child(keep_alive_interval_row)
+            .child(self.form_hairline())
+            .child(keep_alive_count_max_row)
             .child(self.form_hairline())
             .child(self.render_connection_switch_row_with_help(
                 "new-connection-single-channel-help",

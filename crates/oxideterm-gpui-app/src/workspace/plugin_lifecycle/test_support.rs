@@ -197,6 +197,9 @@ pub(super) fn test_connection_store_with_agent_connection(
             icon: None,
             tags: Vec::new(),
             connect_timeout_seconds: oxideterm_connections::DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS,
+            keep_alive_interval_seconds:
+                oxideterm_connections::DEFAULT_SSH_KEEP_ALIVE_INTERVAL_SECONDS,
+            keep_alive_count_max: oxideterm_connections::DEFAULT_SSH_KEEP_ALIVE_COUNT_MAX,
             agent_forwarding: false,
             identity_agent: None,
             agent_forwarding_socket: None,

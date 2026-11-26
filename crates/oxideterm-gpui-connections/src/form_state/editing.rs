@@ -137,6 +137,8 @@ pub fn current_connection_field_mut(form: &mut NewConnectionForm) -> &mut String
         NewConnectionField::Notes => &mut form.notes,
         NewConnectionField::InitialRemotePath => &mut form.sftp_initial_remote_path,
         NewConnectionField::ConnectTimeoutSeconds => &mut form.connect_timeout_seconds_text,
+        NewConnectionField::KeepAliveIntervalSeconds => &mut form.keep_alive_interval_seconds_text,
+        NewConnectionField::KeepAliveCountMax => &mut form.keep_alive_count_max_text,
         NewConnectionField::StandaloneSftpSecondaryHost => &mut form.standalone_sftp_secondary.host,
         NewConnectionField::StandaloneSftpSecondaryPort => &mut form.standalone_sftp_secondary.port,
         NewConnectionField::StandaloneSftpSecondaryUsername => {
@@ -300,6 +302,8 @@ pub fn current_connection_field(form: &NewConnectionForm) -> &str {
         NewConnectionField::Notes => &form.notes,
         NewConnectionField::InitialRemotePath => &form.sftp_initial_remote_path,
         NewConnectionField::ConnectTimeoutSeconds => &form.connect_timeout_seconds_text,
+        NewConnectionField::KeepAliveIntervalSeconds => &form.keep_alive_interval_seconds_text,
+        NewConnectionField::KeepAliveCountMax => &form.keep_alive_count_max_text,
         NewConnectionField::StandaloneSftpSecondaryHost => &form.standalone_sftp_secondary.host,
         NewConnectionField::StandaloneSftpSecondaryPort => &form.standalone_sftp_secondary.port,
         NewConnectionField::StandaloneSftpSecondaryUsername => {
@@ -510,31 +514,61 @@ pub fn clear_current_connection_field(form: &mut NewConnectionForm) {
 }
 
 pub fn refresh_connection_timeout_seconds(form: &mut NewConnectionForm, field: NewConnectionField) {
-    // Invalid drafts map to zero so keyboard submission cannot reuse a stale valid timeout.
-    let parsed = match field {
-        NewConnectionField::ConnectTimeoutSeconds => form
-            .connect_timeout_seconds_text
-            .trim()
-            .parse::<u64>()
-            .ok()
-            .filter(|seconds| *seconds > 0),
-        NewConnectionField::StandaloneSftpSecondaryConnectTimeoutSeconds => form
-            .standalone_sftp_secondary
-            .connect_timeout_seconds_text
-            .trim()
-            .parse::<u64>()
-            .ok()
-            .filter(|seconds| *seconds > 0),
-        _ => return,
-    }
-    .unwrap_or(0);
+    // Invalid drafts map to zero so keyboard submission cannot reuse a stale valid value.
     match field {
-        NewConnectionField::ConnectTimeoutSeconds => form.connect_timeout_seconds = parsed,
+        NewConnectionField::ConnectTimeoutSeconds => {
+            form.connect_timeout_seconds = form
+                .connect_timeout_seconds_text
+                .trim()
+                .parse::<u64>()
+                .ok()
+                .filter(|seconds| *seconds > 0)
+                .unwrap_or(0);
+        }
+        NewConnectionField::KeepAliveIntervalSeconds => {
+            form.keep_alive_interval_seconds = form
+                .keep_alive_interval_seconds_text
+                .trim()
+                .parse::<u32>()
+                .ok()
+                .filter(|seconds| *seconds > 0)
+                .unwrap_or(0);
+        }
+        NewConnectionField::KeepAliveCountMax => {
+            form.keep_alive_count_max = form
+                .keep_alive_count_max_text
+                .trim()
+                .parse::<u32>()
+                .ok()
+                .filter(|count| *count > 0)
+                .unwrap_or(0);
+        }
         NewConnectionField::StandaloneSftpSecondaryConnectTimeoutSeconds => {
-            form.standalone_sftp_secondary.connect_timeout_seconds = parsed;
+            form.standalone_sftp_secondary.connect_timeout_seconds = form
+                .standalone_sftp_secondary
+                .connect_timeout_seconds_text
+                .trim()
+                .parse::<u64>()
+                .ok()
+                .filter(|seconds| *seconds > 0)
+                .unwrap_or(0);
         }
         _ => {}
     }
+}
+
+pub fn connection_keep_alive_interval_valid(form: &NewConnectionForm) -> bool {
+    form.keep_alive_interval_seconds_text
+        .trim()
+        .parse::<u32>()
+        .is_ok_and(|seconds| seconds > 0)
+}
+
+pub fn connection_keep_alive_count_max_valid(form: &NewConnectionForm) -> bool {
+    form.keep_alive_count_max_text
+        .trim()
+        .parse::<u32>()
+        .is_ok_and(|count| count > 0)
 }
 
 pub fn connection_timeout_drafts_valid(form: &NewConnectionForm) -> bool {

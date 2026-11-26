@@ -226,6 +226,10 @@ pub fn next_connection_field(
         fields.push(NewConnectionField::InitialRemotePath);
     }
     fields.push(NewConnectionField::ConnectTimeoutSeconds);
+    if transport == NewConnectionTransport::Ssh {
+        fields.push(NewConnectionField::KeepAliveIntervalSeconds);
+        fields.push(NewConnectionField::KeepAliveCountMax);
+    }
     if upstream_proxy_policy == NewConnectionUpstreamProxyPolicy::Custom
         && matches!(
             transport,
