@@ -63,6 +63,69 @@ pub fn cloud_sync_card(tokens: &ThemeTokens, has_background_image: bool) -> Div 
     .gap(px(tokens.metrics.settings_card_gap))
 }
 
+/// Wraps a Cloud Sync card with an external Settings-style section header
+/// (title, optional muted description, and optional trailing status/actions)
+/// sitting above the bordered inspector surface.
+pub fn cloud_sync_titled_card(
+    tokens: &ThemeTokens,
+    title: AnyElement,
+    description: Option<AnyElement>,
+    trailing: Option<AnyElement>,
+    card: Div,
+) -> AnyElement {
+    let has_description = description.is_some();
+    let heading = div()
+        .w_full()
+        .min_w(px(0.0))
+        .text_size(px(tokens.metrics.ui_text_sm))
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(rgb(tokens.ui.text_heading))
+        .child(title);
+
+    let left = div()
+        .flex_1()
+        .min_w(px(0.0))
+        .flex()
+        .flex_col()
+        .gap(px(4.0))
+        .child(heading)
+        .when_some(description, |col, description| {
+            col.child(
+                div()
+                    .text_size(px(tokens.metrics.ui_text_xs))
+                    .text_color(rgb(tokens.ui.text_muted))
+                    .child(description),
+            )
+        });
+
+    let header = div()
+        .w_full()
+        .min_w(px(0.0))
+        .px(px(2.0))
+        .flex()
+        .flex_row()
+        .flex_wrap()
+        .justify_between()
+        .gap(px(12.0));
+    let header = if has_description {
+        header.items_start()
+    } else {
+        header.items_center()
+    }
+    .child(left)
+    .when_some(trailing, |row, trailing| row.child(trailing));
+
+    div()
+        .w_full()
+        .min_w(px(0.0))
+        .flex()
+        .flex_col()
+        .gap(px(8.0))
+        .child(header)
+        .child(card)
+        .into_any_element()
+}
+
 pub fn cloud_sync_section_item(
     tokens: &ThemeTokens,
     index: usize,
@@ -209,7 +272,6 @@ pub fn cloud_sync_guide_card(
 ) -> AnyElement {
     let theme = tokens.ui;
     let mut card = cloud_sync_card(tokens, has_background_image)
-        .child(title)
         .child(
             div()
                 .text_size(px(tokens.metrics.ui_text_sm))
@@ -274,13 +336,13 @@ pub fn cloud_sync_guide_card(
                 .child(warning),
         );
     }
-    card.into_any_element()
+    cloud_sync_titled_card(tokens, title, None, None, card)
 }
 
 pub fn cloud_sync_section_title(tokens: &ThemeTokens, title: AnyElement) -> AnyElement {
     div()
-        .text_size(px(tokens.metrics.ui_text_xs))
-        .font_weight(FontWeight::MEDIUM)
+        .text_size(px(tokens.metrics.ui_text_sm))
+        .font_weight(FontWeight::SEMIBOLD)
         .text_color(rgb(tokens.ui.text_heading))
         .child(title)
         .into_any_element()
@@ -711,15 +773,7 @@ pub fn cloud_sync_preview_card(
 ) -> AnyElement {
     let theme = tokens.ui;
     let card = fact_rows.into_iter().fold(
-        cloud_sync_card(tokens, has_background_image)
-            .gap(px(8.0))
-            .child(
-                div()
-                    .text_size(px(tokens.metrics.ui_text_sm))
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(rgb(theme.text_heading))
-                    .child(title),
-            ),
+        cloud_sync_card(tokens, has_background_image).gap(px(8.0)),
         |card, row| card.child(row),
     );
     let card = warning.into_iter().fold(card, |card, warning| {
@@ -731,10 +785,11 @@ pub fn cloud_sync_preview_card(
                 .child(warning),
         )
     });
-    body.into_iter()
+    let card = body
+        .into_iter()
         .fold(card, |card, child| card.child(child))
-        .child(actions)
-        .into_any_element()
+        .child(actions);
+    cloud_sync_titled_card(tokens, title, None, None, card)
 }
 
 pub fn cloud_sync_preview_block(tokens: &ThemeTokens, title: AnyElement) -> Div {
@@ -929,17 +984,15 @@ pub fn cloud_sync_history_card(
     title: AnyElement,
     body: AnyElement,
 ) -> AnyElement {
-    cloud_sync_card(tokens, has_background_image)
-        .gap(px(8.0))
-        .child(
-            div()
-                .text_size(px(tokens.metrics.ui_text_sm))
-                .font_weight(FontWeight::MEDIUM)
-                .text_color(rgb(tokens.ui.text_heading))
-                .child(title),
-        )
-        .child(body)
-        .into_any_element()
+    cloud_sync_titled_card(
+        tokens,
+        title,
+        None,
+        None,
+        cloud_sync_card(tokens, has_background_image)
+            .gap(px(8.0))
+            .child(body),
+    )
 }
 
 pub fn cloud_sync_history_empty(tokens: &ThemeTokens, label: AnyElement) -> AnyElement {
@@ -999,23 +1052,21 @@ pub fn cloud_sync_notes_card(
     body: impl Into<gpui::SharedString>,
 ) -> AnyElement {
     let theme = tokens.ui;
-    cloud_sync_card(tokens, has_background_image)
-        .gap(px(8.0))
-        .child(
-            div()
-                .text_size(px(tokens.metrics.ui_text_sm))
-                .font_weight(FontWeight::MEDIUM)
-                .text_color(rgb(theme.text_heading))
-                .child(title),
-        )
-        .child(
-            div()
-                .text_size(px(tokens.metrics.ui_text_sm))
-                .line_height(px(20.0))
-                .text_color(rgb(theme.text_muted))
-                .child(body.into()),
-        )
-        .into_any_element()
+    cloud_sync_titled_card(
+        tokens,
+        title,
+        None,
+        None,
+        cloud_sync_card(tokens, has_background_image)
+            .gap(px(8.0))
+            .child(
+                div()
+                    .text_size(px(tokens.metrics.ui_text_sm))
+                    .line_height(px(20.0))
+                    .text_color(rgb(theme.text_muted))
+                    .child(body.into()),
+            ),
+    )
 }
 
 pub fn cloud_sync_field_row(

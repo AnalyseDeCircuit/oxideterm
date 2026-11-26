@@ -43,17 +43,14 @@ impl CloudSyncPageRenderer {
                 })
                 .into_any_element()
         };
-        self.cloud_sync_plugin_card(self.cloud_sync_has_background())
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .child(title)
-                    .when(!recent.is_empty(), |header| header.child(view_all)),
-            )
-            .child(body)
-            .into_any_element()
+        cloud_sync_titled_card(
+            &self.tokens,
+            title,
+            None,
+            (!recent.is_empty()).then_some(view_all),
+            self.cloud_sync_plugin_card(self.cloud_sync_has_background())
+                .child(body),
+        )
     }
 
     pub(super) fn render_cloud_sync_history_entry(
@@ -139,46 +136,42 @@ impl CloudSyncPageRenderer {
             })
             .filter(|sections| !sections.trim().is_empty())
             .unwrap_or_else(|| "—".to_string());
-        self.cloud_sync_plugin_card(self.cloud_sync_has_background())
-            .child(self.render_display_text_with_role(
-                SelectableTextRole::NonSelectable,
-                "cloud-sync-notes",
-                "title",
-                self.i18n.t("plugin.cloud_sync.sections.notes"),
-                theme.text_heading,
-                cx,
-            ))
-            .child(
-                div()
-                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                    .line_height(px(20.0))
-                    .text_color(rgb(theme.text_muted))
-                    .child(self.i18n_replace(
-                        "plugin.cloud_sync.native_scope_summary",
-                        &[("sections", sections)],
-                    )),
-            )
-            .into_any_element()
+        cloud_sync_titled_card(
+            &self.tokens,
+            self.render_cloud_sync_section_title("plugin.cloud_sync.sections.notes", cx),
+            None,
+            None,
+            self.cloud_sync_plugin_card(self.cloud_sync_has_background())
+                .child(
+                    div()
+                        .text_size(px(self.tokens.metrics.ui_text_sm))
+                        .line_height(px(20.0))
+                        .text_color(rgb(theme.text_muted))
+                        .child(self.i18n_replace(
+                            "plugin.cloud_sync.native_scope_summary",
+                            &[("sections", sections)],
+                        )),
+                ),
+        )
     }
 
     pub(super) fn render_cloud_sync_config_preflight_card(&self, cx: &mut App) -> AnyElement {
         if self.diff.upload_diff_items.is_empty() {
             return div().into_any_element();
         }
-        self.cloud_sync_plugin_card(self.cloud_sync_has_background())
-            .child(
-                self.render_cloud_sync_section_title(
-                    "plugin.cloud_sync.sections.sync_preflight",
+        cloud_sync_titled_card(
+            &self.tokens,
+            self.render_cloud_sync_section_title("plugin.cloud_sync.sections.sync_preflight", cx),
+            None,
+            None,
+            self.cloud_sync_plugin_card(self.cloud_sync_has_background())
+                .child(self.render_cloud_sync_section_diff_flat(
+                    "cloud-sync-upload-diff",
+                    "plugin.cloud_sync.preflight.upload_diff_title",
+                    &self.diff.upload_diff_items,
                     cx,
-                ),
-            )
-            .child(self.render_cloud_sync_section_diff_flat(
-                "cloud-sync-upload-diff",
-                "plugin.cloud_sync.preflight.upload_diff_title",
-                &self.diff.upload_diff_items,
-                cx,
-            ))
-            .into_any_element()
+                )),
+        )
     }
 
     pub(super) fn render_cloud_sync_health_card(&self, cx: &mut App) -> AnyElement {
@@ -194,34 +187,29 @@ impl CloudSyncPageRenderer {
             .collect::<Vec<_>>();
 
         let theme = self.tokens.ui;
-        self.cloud_sync_plugin_card(self.cloud_sync_has_background())
-            .child(
-                self.render_cloud_sync_section_title("plugin.cloud_sync.sections.sync_health", cx),
-            )
-            .child(
-                div()
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .text_color(rgb(theme.text_muted))
-                    .line_height(px(18.0))
-                    .child(self.render_selectable_text_scoped(
-                        "cloud-sync-health-title",
-                        "title",
-                        self.i18n.t("plugin.cloud_sync.health.title"),
-                        theme.text_muted,
-                        cx,
-                    )),
-            )
-            .child(
-                div()
-                    .w_full()
-                    .min_w(px(0.0))
-                    .flex()
-                    .flex_wrap()
-                    .gap_x(px(16.0))
-                    .gap_y(px(0.0))
-                    .children(rows),
-            )
-            .into_any_element()
+        cloud_sync_titled_card(
+            &self.tokens,
+            self.render_cloud_sync_section_title("plugin.cloud_sync.sections.sync_health", cx),
+            Some(self.render_selectable_text_scoped(
+                "cloud-sync-health-title",
+                "title",
+                self.i18n.t("plugin.cloud_sync.health.title"),
+                theme.text_muted,
+                cx,
+            )),
+            None,
+            self.cloud_sync_plugin_card(self.cloud_sync_has_background())
+                .child(
+                    div()
+                        .w_full()
+                        .min_w(px(0.0))
+                        .flex()
+                        .flex_wrap()
+                        .gap_x(px(16.0))
+                        .gap_y(px(0.0))
+                        .children(rows),
+                ),
+        )
     }
 
     pub(super) fn render_cloud_sync_health_row(
@@ -311,42 +299,20 @@ impl CloudSyncPageRenderer {
                 )
             })
             .collect::<Vec<_>>();
-        let theme = self.tokens.ui;
-        let coverage_title = self.render_selectable_text_scoped(
-            "cloud-sync-coverage-title",
-            "title",
-            self.i18n.t("plugin.cloud_sync.coverage.title"),
-            theme.text_heading,
-            cx,
-        );
         // The outer inspector surface owns the section chrome; this list only
         // provides hierarchy and spacing for its status rows.
         let coverage_list = rows.into_iter().fold(
-            div()
-                .w_full()
-                .min_w(px(0.0))
-                .flex()
-                .flex_col()
-                .gap(px(6.0))
-                .child(
-                    div()
-                        .pb(px(4.0))
-                        .text_size(px(self.tokens.metrics.ui_text_xs))
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(rgb(theme.text_heading))
-                        .child(coverage_title),
-                ),
+            div().w_full().min_w(px(0.0)).flex().flex_col().gap(px(6.0)),
             |list, row| list.child(row),
         );
-        self.cloud_sync_plugin_card(self.cloud_sync_has_background())
-            .child(
-                self.render_cloud_sync_section_title(
-                    "plugin.cloud_sync.sections.sync_coverage",
-                    cx,
-                ),
-            )
-            .child(coverage_list)
-            .into_any_element()
+        cloud_sync_titled_card(
+            &self.tokens,
+            self.render_cloud_sync_section_title("plugin.cloud_sync.sections.sync_coverage", cx),
+            None,
+            None,
+            self.cloud_sync_plugin_card(self.cloud_sync_has_background())
+                .child(coverage_list),
+        )
     }
 
     pub(super) fn render_cloud_sync_status_row(
@@ -474,7 +440,7 @@ impl CloudSyncListRenderProjection {
                 SelectableTextRole::NonSelectable,
                 "cloud-sync-section-title",
                 key,
-                self.i18n.t(key).to_uppercase(),
+                self.i18n.t(key),
                 self.tokens.ui.text_heading,
                 cx,
             ),
@@ -697,30 +663,26 @@ pub(in crate::panel) fn render_rollback_backup_list(
     let state = entity.view.rollback_backup_list_state.clone();
     let cloud_sync = cx.entity();
     let list_render = std::rc::Rc::clone(&render);
-    let header = div()
-        .flex()
-        .items_center()
-        .justify_between()
-        .gap(px(12.0))
-        .child(render.section_title("plugin.cloud_sync.sections.rollback_backups", cx))
-        .when(row_count != 0, |header| {
-            header.child(render.inline_button(
-                "plugin.cloud_sync.actions.clear_backups",
-                cx.listener(move |_cloud_sync, _event, _window, cx| {
-                    if !busy {
-                        cx.emit(CloudSyncWorkspaceEvent::UiIntent(
-                            CloudSyncUiIntent::ClearRollbackBackups,
-                        ));
-                    }
-                    cx.stop_propagation();
-                    cx.notify();
-                }),
-            ))
-        });
-    render
-        .plugin_card()
-        .child(header)
-        .child(
+    let clear_action = (row_count != 0).then(|| {
+        render.inline_button(
+            "plugin.cloud_sync.actions.clear_backups",
+            cx.listener(move |_cloud_sync, _event, _window, cx| {
+                if !busy {
+                    cx.emit(CloudSyncWorkspaceEvent::UiIntent(
+                        CloudSyncUiIntent::ClearRollbackBackups,
+                    ));
+                }
+                cx.stop_propagation();
+                cx.notify();
+            }),
+        )
+    });
+    cloud_sync_titled_card(
+        &render.tokens,
+        render.section_title("plugin.cloud_sync.sections.rollback_backups", cx),
+        None,
+        clear_action,
+        render.plugin_card().child(
             div()
                 .h(px(
                     row_count as f32 * CLOUD_SYNC_ROLLBACK_BACKUP_LIST_ESTIMATED_HEIGHT
@@ -742,8 +704,8 @@ pub(in crate::panel) fn render_rollback_backup_list(
                         })
                     },
                 )),
-        )
-        .into_any_element()
+        ),
+    )
 }
 
 pub(in crate::panel) fn render_recent_rollback_backups(
@@ -757,15 +719,19 @@ pub(in crate::panel) fn render_recent_rollback_backups(
     if row_count == 0 {
         return div().into_any_element();
     }
-    let mut card = render
-        .plugin_card()
-        .child(render.section_title("plugin.cloud_sync.sections.rollback_backups", cx));
+    let mut card = render.plugin_card();
     for index in 0..row_count.min(3) {
         card = card.child(render_rollback_backup_row(
             entity, index, busy, false, &render, cx,
         ));
     }
-    card.into_any_element()
+    cloud_sync_titled_card(
+        &render.tokens,
+        render.section_title("plugin.cloud_sync.sections.rollback_backups", cx),
+        None,
+        None,
+        card,
+    )
 }
 
 pub(in crate::panel) fn render_history_list(
@@ -808,36 +774,25 @@ pub(in crate::panel) fn render_history_list(
             ))
             .into_any_element()
     };
-    let header = div()
-        .flex()
-        .items_center()
-        .justify_between()
-        .gap(px(12.0))
-        .child(render.selectable_text(
-            SelectableTextRole::NonSelectable,
-            "cloud-sync-history",
-            "title",
-            render.i18n.t("plugin.cloud_sync.sections.sync_history"),
-            render.tokens.ui.text_heading,
-            cx,
-        ))
-        .when(row_count != 0, |header| {
-            header.child(render.inline_button(
-                "plugin.cloud_sync.actions.clear_history",
-                cx.listener(move |_cloud_sync, _event, _window, cx| {
-                    if !busy {
-                        cx.emit(CloudSyncWorkspaceEvent::UiIntent(
-                            CloudSyncUiIntent::ClearHistory,
-                        ));
-                    }
-                    cx.stop_propagation();
-                    cx.notify();
-                }),
-            ))
-        });
-    render
-        .plugin_card()
-        .child(header)
-        .child(body)
-        .into_any_element()
+    let clear_action = (row_count != 0).then(|| {
+        render.inline_button(
+            "plugin.cloud_sync.actions.clear_history",
+            cx.listener(move |_cloud_sync, _event, _window, cx| {
+                if !busy {
+                    cx.emit(CloudSyncWorkspaceEvent::UiIntent(
+                        CloudSyncUiIntent::ClearHistory,
+                    ));
+                }
+                cx.stop_propagation();
+                cx.notify();
+            }),
+        )
+    });
+    cloud_sync_titled_card(
+        &render.tokens,
+        render.section_title("plugin.cloud_sync.sections.sync_history", cx),
+        None,
+        clear_action,
+        render.plugin_card().child(body),
+    )
 }

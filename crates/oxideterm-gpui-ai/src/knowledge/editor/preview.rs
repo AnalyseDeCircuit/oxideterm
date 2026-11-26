@@ -221,7 +221,6 @@ impl KnowledgeDocumentEditor {
     ) {
         if self.is_markdown {
             self.mode = preferences.mode;
-            self.previous_mode = preferences.mode;
             self.source_ratio = if preferences.source_ratio.is_finite() {
                 preferences.source_ratio.clamp(0.2, 0.8)
             } else {

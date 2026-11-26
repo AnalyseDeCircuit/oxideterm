@@ -357,7 +357,6 @@ impl CloudSyncPageRenderer {
         cx: &mut App,
     ) -> AnyElement {
         let state = cloud_sync.controller.store.state();
-        let theme = self.tokens.ui;
         let settings = &state.settings;
         let local_snapshot = self.diff.local_snapshot.as_ref().ok().map(Arc::as_ref);
         let local_file = cloud_sync.view.local_file_mode;
@@ -391,162 +390,135 @@ impl CloudSyncPageRenderer {
             !local_file && matches!(settings.backend_type, BackendType::GoogleDrive);
         let google_oauth_disabled = busy || settings.google_oauth_client_id.trim().is_empty();
 
-        let mut card = self
-            .cloud_sync_plugin_card(self.has_background)
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .gap(px(12.0))
-                    .child(
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_sm))
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(rgb(theme.text))
-                            .child(
-                                self.i18n
-                                    .t("plugin.cloud_sync.tabs.overview")
-                                    .to_uppercase(),
-                            ),
-                    )
-                    .child(
-                        self.render_cloud_sync_status_chip(
-                            self.i18n
-                                .t(cloud_sync_status_label_key(state.status.clone())),
-                            CloudSyncTone::Accent,
-                        ),
-                    ),
-            )
-            .child(
-                div()
-                    .flex()
-                    .flex_wrap()
-                    .items_start()
-                    .gap(px(12.0))
-                    .child(
-                        div()
-                            .min_w(px(0.0))
-                            .flex_1()
-                            .flex()
-                            .flex_wrap()
-                            .gap(px(10.0))
-                            .child(self.render_cloud_sync_overview_fact(
-                                "lucide/server.svg",
-                                "plugin.cloud_sync.fields.backend",
-                                backend_label,
+        let mut card = self.cloud_sync_plugin_card(self.has_background).child(
+            div()
+                .flex()
+                .flex_wrap()
+                .items_start()
+                .gap(px(12.0))
+                .child(
+                    div()
+                        .min_w(px(0.0))
+                        .flex_1()
+                        .flex()
+                        .flex_wrap()
+                        .gap(px(10.0))
+                        .child(self.render_cloud_sync_overview_fact(
+                            "lucide/server.svg",
+                            "plugin.cloud_sync.fields.backend",
+                            backend_label,
+                            cx,
+                        ))
+                        .when(!local_file, |facts| {
+                            facts.child(self.render_cloud_sync_overview_fact(
+                                "lucide/hash.svg",
+                                "plugin.cloud_sync.fields.namespace",
+                                settings.namespace.clone(),
                                 cx,
                             ))
-                            .when(!local_file, |facts| {
-                                facts.child(self.render_cloud_sync_overview_fact(
-                                    "lucide/hash.svg",
-                                    "plugin.cloud_sync.fields.namespace",
-                                    settings.namespace.clone(),
-                                    cx,
-                                ))
-                            })
-                            .when(!local_file, |facts| {
-                                facts.child(self.render_cloud_sync_overview_fact(
-                                    "lucide/activity.svg",
-                                    "plugin.cloud_sync.fields.local_dirty",
-                                    local_dirty,
-                                    cx,
-                                ))
-                            })
-                            .when(!local_file, |facts| {
-                                facts.child(self.render_cloud_sync_overview_fact(
-                                    "lucide/clock.svg",
-                                    "plugin.cloud_sync.fields.last_sync",
-                                    last_sync,
-                                    cx,
-                                ))
-                            }),
-                    )
-                    .child(
-                        div()
-                            .min_w(px(300.0))
-                            .flex_1()
-                            .flex()
-                            .flex_wrap()
-                            .items_center()
-                            .justify_end()
-                            .gap(px(8.0))
-                            .when(show_github_oauth, |toolbar| {
-                                toolbar.child(self.render_cloud_sync_toolbar_button(
-                                    "lucide/key-round.svg",
-                                    "plugin.cloud_sync.actions.github_oauth_login",
-                                    CloudSyncActionTone::Muted,
-                                    github_oauth_disabled,
-                                    self.intent_listener(CloudSyncUiIntent::StartGithubOauth),
-                                ))
-                            })
-                            .when(show_microsoft_oauth, |toolbar| {
-                                toolbar.child(self.render_cloud_sync_toolbar_button(
-                                    "lucide/key-round.svg",
-                                    "plugin.cloud_sync.actions.microsoft_oauth_login",
-                                    CloudSyncActionTone::Muted,
-                                    microsoft_oauth_disabled,
-                                    self.intent_listener(CloudSyncUiIntent::StartMicrosoftOauth),
-                                ))
-                            })
-                            .when(show_google_oauth, |toolbar| {
-                                toolbar.child(self.render_cloud_sync_toolbar_button(
-                                    "lucide/key-round.svg",
-                                    "plugin.cloud_sync.actions.google_oauth_login",
-                                    CloudSyncActionTone::Muted,
-                                    google_oauth_disabled,
-                                    self.intent_listener(CloudSyncUiIntent::StartGoogleOauth),
-                                ))
-                            })
-                            .child(self.render_cloud_sync_toolbar_button(
-                                if local_file {
-                                    "lucide/upload.svg"
-                                } else {
-                                    "lucide/refresh-cw.svg"
-                                },
-                                if local_file {
-                                    "plugin.cloud_sync.actions.export_local"
-                                } else {
-                                    "plugin.cloud_sync.causal.sync"
-                                },
-                                CloudSyncActionTone::Accent,
-                                busy,
-                                self.intent_listener(CloudSyncUiIntent::StartUploadPreview),
+                        })
+                        .when(!local_file, |facts| {
+                            facts.child(self.render_cloud_sync_overview_fact(
+                                "lucide/activity.svg",
+                                "plugin.cloud_sync.fields.local_dirty",
+                                local_dirty,
+                                cx,
                             ))
-                            .when(!local_file, |toolbar| {
-                                toolbar.child(self.render_cloud_sync_toolbar_button(
-                                    "lucide/download.svg",
-                                    "plugin.cloud_sync.causal.view_remote",
-                                    CloudSyncActionTone::Muted,
-                                    busy,
-                                    self.intent_listener(CloudSyncUiIntent::ViewRemote),
-                                ))
-                            })
-                            .when(local_file, |toolbar| {
-                                toolbar.child(self.render_cloud_sync_toolbar_button(
-                                    "lucide/download.svg",
-                                    "plugin.cloud_sync.actions.import_local",
-                                    CloudSyncActionTone::Muted,
-                                    busy,
-                                    self.intent_listener(CloudSyncUiIntent::PullPreview),
-                                ))
-                            })
-                            .child(self.render_cloud_sync_toolbar_button(
-                                "lucide/rotate-ccw.svg",
-                                "plugin.cloud_sync.actions.restore_backup",
+                        })
+                        .when(!local_file, |facts| {
+                            facts.child(self.render_cloud_sync_overview_fact(
+                                "lucide/clock.svg",
+                                "plugin.cloud_sync.fields.last_sync",
+                                last_sync,
+                                cx,
+                            ))
+                        }),
+                )
+                .child(
+                    div()
+                        .min_w(px(300.0))
+                        .flex_1()
+                        .flex()
+                        .flex_wrap()
+                        .items_center()
+                        .justify_end()
+                        .gap(px(8.0))
+                        .when(show_github_oauth, |toolbar| {
+                            toolbar.child(self.render_cloud_sync_toolbar_button(
+                                "lucide/key-round.svg",
+                                "plugin.cloud_sync.actions.github_oauth_login",
                                 CloudSyncActionTone::Muted,
-                                busy || !has_rollback_backup,
-                                self.intent_listener(CloudSyncUiIntent::RestoreLatestBackup),
+                                github_oauth_disabled,
+                                self.intent_listener(CloudSyncUiIntent::StartGithubOauth),
                             ))
-                            .child(self.render_cloud_sync_toolbar_button(
-                                "lucide/save.svg",
-                                "plugin.cloud_sync.actions.save_settings",
+                        })
+                        .when(show_microsoft_oauth, |toolbar| {
+                            toolbar.child(self.render_cloud_sync_toolbar_button(
+                                "lucide/key-round.svg",
+                                "plugin.cloud_sync.actions.microsoft_oauth_login",
+                                CloudSyncActionTone::Muted,
+                                microsoft_oauth_disabled,
+                                self.intent_listener(CloudSyncUiIntent::StartMicrosoftOauth),
+                            ))
+                        })
+                        .when(show_google_oauth, |toolbar| {
+                            toolbar.child(self.render_cloud_sync_toolbar_button(
+                                "lucide/key-round.svg",
+                                "plugin.cloud_sync.actions.google_oauth_login",
+                                CloudSyncActionTone::Muted,
+                                google_oauth_disabled,
+                                self.intent_listener(CloudSyncUiIntent::StartGoogleOauth),
+                            ))
+                        })
+                        .child(self.render_cloud_sync_toolbar_button(
+                            if local_file {
+                                "lucide/upload.svg"
+                            } else {
+                                "lucide/refresh-cw.svg"
+                            },
+                            if local_file {
+                                "plugin.cloud_sync.actions.export_local"
+                            } else {
+                                "plugin.cloud_sync.causal.sync"
+                            },
+                            CloudSyncActionTone::Accent,
+                            busy,
+                            self.intent_listener(CloudSyncUiIntent::StartUploadPreview),
+                        ))
+                        .when(!local_file, |toolbar| {
+                            toolbar.child(self.render_cloud_sync_toolbar_button(
+                                "lucide/download.svg",
+                                "plugin.cloud_sync.causal.view_remote",
                                 CloudSyncActionTone::Muted,
                                 busy,
-                                self.intent_listener(CloudSyncUiIntent::SaveConfiguration),
-                            )),
-                    ),
-            );
+                                self.intent_listener(CloudSyncUiIntent::ViewRemote),
+                            ))
+                        })
+                        .when(local_file, |toolbar| {
+                            toolbar.child(self.render_cloud_sync_toolbar_button(
+                                "lucide/download.svg",
+                                "plugin.cloud_sync.actions.import_local",
+                                CloudSyncActionTone::Muted,
+                                busy,
+                                self.intent_listener(CloudSyncUiIntent::PullPreview),
+                            ))
+                        })
+                        .child(self.render_cloud_sync_toolbar_button(
+                            "lucide/rotate-ccw.svg",
+                            "plugin.cloud_sync.actions.restore_backup",
+                            CloudSyncActionTone::Muted,
+                            busy || !has_rollback_backup,
+                            self.intent_listener(CloudSyncUiIntent::RestoreLatestBackup),
+                        ))
+                        .child(self.render_cloud_sync_toolbar_button(
+                            "lucide/save.svg",
+                            "plugin.cloud_sync.actions.save_settings",
+                            CloudSyncActionTone::Muted,
+                            busy,
+                            self.intent_listener(CloudSyncUiIntent::SaveConfiguration),
+                        )),
+                ),
+        );
 
         if let Some(progress) = cloud_sync.controller.progress.as_ref() {
             card = card.child(self.render_cloud_sync_progress(progress, cx));
@@ -554,10 +526,22 @@ impl CloudSyncPageRenderer {
         if let Some(error) = state.last_error.as_ref() {
             card = card.child(self.render_cloud_sync_error(error));
         }
-        card.when(!local_file, |card| {
+        let card = card.when(!local_file, |card| {
             card.child(self.render_cloud_sync_meta(state, local_snapshot, cx))
-        })
-        .into_any_element()
+        });
+        cloud_sync_titled_card(
+            &self.tokens,
+            self.render_cloud_sync_section_title("plugin.cloud_sync.tabs.overview", cx),
+            None,
+            Some(
+                self.render_cloud_sync_status_chip(
+                    self.i18n
+                        .t(cloud_sync_status_label_key(state.status.clone())),
+                    CloudSyncTone::Accent,
+                ),
+            ),
+            card,
+        )
     }
 
     pub(super) fn render_cloud_sync_overview_fact(
@@ -729,7 +713,7 @@ impl CloudSyncPageRenderer {
                 SelectableTextRole::NonSelectable,
                 "cloud-sync-section-title",
                 key,
-                self.i18n.t(key).to_uppercase(),
+                self.i18n.t(key),
                 self.tokens.ui.text_heading,
                 cx,
             ),

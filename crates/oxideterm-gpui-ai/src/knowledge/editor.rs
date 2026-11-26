@@ -3,7 +3,7 @@ use std::{rc::Rc, sync::Arc, time::Duration};
 
 use gpui::{
     AnyElement, App, ClipboardItem, Context, Entity, EventEmitter, Focusable, MouseButton, Render,
-    Subscription, Task, Window, div, prelude::*, px, rgb, svg,
+    Subscription, Task, Window, div, prelude::*, px, rgb, rgba, svg,
 };
 use oxideterm_editor_syntax::LanguageId;
 use oxideterm_gpui_editor::{EditorContextMenuLabels, TextEditorView};
@@ -12,16 +12,17 @@ use oxideterm_gpui_markdown::{
     render::{MarkdownCodeBlockActions, MarkdownTextFragmentId, MarkdownTextLink},
 };
 use oxideterm_gpui_ui::{
-    SegmentedControlOptions, ToolbarButtonOptions,
-    button::{ButtonRadius, ButtonVariant},
+    ToolbarButtonOptions,
+    button::{ButtonRadius, ButtonVariant, IconButtonOptions, icon_button},
     icons::LucideIcon,
 };
 use oxideterm_theme::ThemeTokens;
 
 mod preview;
 
-const KNOWLEDGE_EDITOR_MODE_SWITCHER_WIDTH: f32 = 176.0;
 const KNOWLEDGE_PREVIEW_PADDING: f32 = 24.0;
+const KNOWLEDGE_MODE_BUTTON_SIZE: f32 = 26.0;
+const KNOWLEDGE_MODE_ICON_SIZE: f32 = 14.0;
 const KNOWLEDGE_AUTOSAVE_DELAY: Duration = Duration::from_millis(1_200);
 const KNOWLEDGE_INDEX_STATE_POLL_INTERVAL: Duration = Duration::from_secs(1);
 
@@ -236,8 +237,6 @@ pub struct KnowledgeDocumentEditor {
     draft: Arc<str>,
     saved_draft: Arc<str>,
     mode: KnowledgeEditorMode,
-    previous_mode: KnowledgeEditorMode,
-    mode_transition: Option<Task<()>>,
     save_state: KnowledgeDocumentSaveState,
     keyword_index: oxideterm_ai::RagKeywordIndexState,
     semantic_index: oxideterm_ai::RagSemanticIndexState,
@@ -301,10 +300,6 @@ impl KnowledgeDocumentEditor {
     pub fn set_theme(&mut self, tokens: ThemeTokens, cx: &mut Context<Self>) {
         if self.tokens != tokens {
             self.tokens = tokens;
-            if !tokens.motion.enabled {
-                self.mode_transition = None;
-                self.previous_mode = self.mode;
-            }
             cx.notify();
         }
     }
@@ -415,8 +410,6 @@ impl KnowledgeDocumentEditor {
             draft,
             saved_draft,
             mode: KnowledgeEditorMode::Source,
-            previous_mode: KnowledgeEditorMode::Source,
-            mode_transition: None,
             save_state: KnowledgeDocumentSaveState::Saved,
             keyword_index,
             semantic_index,
@@ -520,20 +513,8 @@ impl KnowledgeDocumentEditor {
 
     fn set_mode(&mut self, mode: KnowledgeEditorMode, window: &mut Window, cx: &mut Context<Self>) {
         if self.mode != mode {
-            self.previous_mode = self.mode;
             self.mode = mode;
             self.sync_render_caches(cx);
-            self.mode_transition = None;
-            if let Some(motion) = oxideterm_gpui_ui::segmented_control_motion(&self.tokens) {
-                self.mode_transition = Some(cx.spawn(async move |surface, cx| {
-                    cx.background_executor().timer(motion.duration).await;
-                    let _ = surface.update(cx, |surface, cx| {
-                        surface.previous_mode = surface.mode;
-                        surface.mode_transition = None;
-                        cx.notify();
-                    });
-                }));
-            }
             self.editor.update(cx, |editor, _cx| {
                 editor.set_read_only(mode == KnowledgeEditorMode::Preview);
             });
@@ -738,86 +719,83 @@ impl KnowledgeDocumentEditor {
     fn render_mode_button(
         &self,
         mode: KnowledgeEditorMode,
+        icon: LucideIcon,
         label: String,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let active = self.mode == mode;
-        oxideterm_gpui_ui::segmented_control_item(&self.tokens, label, active)
-            .id(match mode {
-                KnowledgeEditorMode::Source => "knowledge-editor-mode-source",
-                KnowledgeEditorMode::Preview => "knowledge-editor-mode-preview",
-                KnowledgeEditorMode::Split => "knowledge-editor-mode-split",
-            })
-            .cursor_pointer()
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |surface, _event, window, cx| {
-                    surface.set_mode(mode, window, cx);
-                    cx.stop_propagation();
-                }),
-            )
-            .into_any_element()
+        let tokens = self.tokens;
+        let tooltip_label = label.clone();
+        let mut options =
+            IconButtonOptions::opaque_toolbar(KNOWLEDGE_MODE_BUTTON_SIZE, ButtonRadius::Sm);
+        if active {
+            // Flat tinted selection keeps the note header quiet without card shadows or borders.
+            options.background = Some(rgba((tokens.ui.accent << 8) | 0x1a));
+            options.hover_background = Some(rgba((tokens.ui.accent << 8) | 0x24));
+        }
+        let icon_color = rgb(if active {
+            tokens.ui.accent
+        } else {
+            tokens.ui.text_muted
+        });
+        icon_button(
+            &tokens,
+            svg()
+                .path(icon.path())
+                .size(px(KNOWLEDGE_MODE_ICON_SIZE))
+                .text_color(icon_color)
+                .into_any_element(),
+            options,
+        )
+        .id(match mode {
+            KnowledgeEditorMode::Source => "knowledge-editor-mode-source",
+            KnowledgeEditorMode::Preview => "knowledge-editor-mode-preview",
+            KnowledgeEditorMode::Split => "knowledge-editor-mode-split",
+        })
+        .flex_none()
+        .role(gpui::Role::Button)
+        .aria_label(label)
+        .tooltip(move |_window, cx| {
+            oxideterm_gpui_ui::tooltip::tooltip_view(tokens, tooltip_label.clone(), None, cx)
+        })
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |surface, _event, window, cx| {
+                surface.set_mode(mode, window, cx);
+                cx.stop_propagation();
+            }),
+        )
+        .into_any_element()
     }
 
     fn render_mode_switcher(&self, cx: &mut Context<Self>) -> AnyElement {
-        let active_index = match self.mode {
-            KnowledgeEditorMode::Source => 0,
-            KnowledgeEditorMode::Preview => 1,
-            KnowledgeEditorMode::Split => 2,
-        };
-        let min_width = if self.is_markdown {
-            KNOWLEDGE_EDITOR_MODE_SWITCHER_WIDTH * 1.5
-        } else {
-            KNOWLEDGE_EDITOR_MODE_SWITCHER_WIDTH
-        };
-        let mut width_labels: Vec<(&str, Option<&str>)> = vec![
-            (self.labels.source.as_str(), None),
-            (self.labels.preview.as_str(), None),
-        ];
-        if self.is_markdown {
-            width_labels.push((self.labels.split.as_str(), None));
-        }
-        let switcher_width = oxideterm_gpui_ui::estimate_segmented_control_width(
-            &self.tokens,
-            min_width,
-            420.0,
-            false,
-            width_labels,
-        );
-        oxideterm_gpui_ui::segmented_control(
-            &self.tokens,
-            "knowledge-editor-mode-switcher",
-            SegmentedControlOptions::new(
-                active_index,
-                match self.previous_mode {
-                    KnowledgeEditorMode::Source => 0,
-                    KnowledgeEditorMode::Preview => 1,
-                    KnowledgeEditorMode::Split => 2,
-                },
-                if self.is_markdown { 3 } else { 2 },
-            )
-            .user_transition_active(self.mode_transition.is_some())
-            .has_background_image(self.has_background_image)
-            .compact(switcher_width),
-            vec![
-                self.render_mode_button(
-                    KnowledgeEditorMode::Source,
-                    self.labels.source.clone(),
+        div()
+            .id("knowledge-editor-mode-switcher")
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap(px(2.0))
+            .child(self.render_mode_button(
+                KnowledgeEditorMode::Source,
+                LucideIcon::Code2,
+                self.labels.source.clone(),
+                cx,
+            ))
+            .child(self.render_mode_button(
+                KnowledgeEditorMode::Preview,
+                LucideIcon::Eye,
+                self.labels.preview.clone(),
+                cx,
+            ))
+            .when(self.is_markdown, |group| {
+                group.child(self.render_mode_button(
+                    KnowledgeEditorMode::Split,
+                    LucideIcon::SplitSquareHorizontal,
+                    self.labels.split.clone(),
                     cx,
-                ),
-                self.render_mode_button(
-                    KnowledgeEditorMode::Preview,
-                    self.labels.preview.clone(),
-                    cx,
-                ),
-            ]
-            .into_iter()
-            .chain(self.is_markdown.then(|| {
-                self.render_mode_button(KnowledgeEditorMode::Split, self.labels.split.clone(), cx)
-            }))
-            .collect(),
-        )
-        .into_any_element()
+                ))
+            })
+            .into_any_element()
     }
 
     fn apply_format_action(&mut self, action: KnowledgeFormatAction, cx: &mut Context<Self>) {

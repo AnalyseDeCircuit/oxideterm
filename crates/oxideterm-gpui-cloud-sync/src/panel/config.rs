@@ -61,30 +61,22 @@ impl CloudSyncPageRenderer {
                 CloudSyncConfigRow::ConflictSelect => self.render_conflict_select(cx),
             });
         }
-        self.render
-            .plugin_card()
-            .child(
-                div()
-                    .w_full()
-                    .flex()
-                    .flex_wrap()
-                    .items_center()
-                    .justify_between()
-                    .gap(px(12.0))
-                    .child(
-                        self.render
-                            .section_title("plugin.cloud_sync.sections.connection_settings", cx),
-                    )
-                    .child(self.render_cloud_sync_toolbar_button(
-                        "lucide/save.svg",
-                        "plugin.cloud_sync.actions.save_settings",
-                        CloudSyncActionTone::Muted,
-                        busy,
-                        self.intent_listener(CloudSyncUiIntent::SaveConfiguration),
-                    )),
-            )
-            .child(cloud_sync_form_grid(connection_rows))
-            .into_any_element()
+        cloud_sync_titled_card(
+            &self.tokens,
+            self.render
+                .section_title("plugin.cloud_sync.sections.connection_settings", cx),
+            None,
+            Some(self.render_cloud_sync_toolbar_button(
+                "lucide/save.svg",
+                "plugin.cloud_sync.actions.save_settings",
+                CloudSyncActionTone::Muted,
+                busy,
+                self.intent_listener(CloudSyncUiIntent::SaveConfiguration),
+            )),
+            self.render
+                .plugin_card()
+                .child(cloud_sync_form_grid(connection_rows)),
+        )
     }
 
     pub(super) fn render_cloud_sync_scope_card(&self, cx: &mut App) -> AnyElement {
@@ -184,14 +176,16 @@ impl CloudSyncPageRenderer {
             cx,
         ));
 
-        self.render
-            .plugin_card()
-            .child(
-                self.render
-                    .section_title("plugin.cloud_sync.sections.sync_scope", cx),
-            )
-            .child(cloud_sync_toggle_grid(&self.tokens, toggles))
-            .into_any_element()
+        cloud_sync_titled_card(
+            &self.tokens,
+            self.render
+                .section_title("plugin.cloud_sync.sections.sync_scope", cx),
+            None,
+            None,
+            self.render
+                .plugin_card()
+                .child(cloud_sync_toggle_grid(&self.tokens, toggles)),
+        )
     }
 
     fn render_scope_bool_toggle(
