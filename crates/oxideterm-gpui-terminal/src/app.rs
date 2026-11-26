@@ -716,6 +716,7 @@ pub(crate) struct TerminalContextMenu {
     pub y: f32,
     pub serial_transfer_menu: bool,
     pub trigger: Option<trigger_interaction::TriggerMenu>,
+    pub link: Option<TerminalLinkRange>,
     pub target: TerminalPoint,
     pub has_selection: bool,
     pub reference_line: usize,
@@ -5550,6 +5551,98 @@ mod tests {
                 );
             });
         }
+    }
+
+    #[gpui::test]
+    fn context_menu_captures_openable_link_at_pointer_and_omits_plain_text(
+        cx: &mut TestAppContext,
+    ) {
+        let (pane, cx) = cx.add_window_view(|window, cx| {
+            TerminalPane::new_recording_playback(80, 24, Default::default(), window, cx).unwrap()
+        });
+        cx.simulate_resize(gpui::size(px(800.0), px(600.0)));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+
+        pane.update(cx, |pane, cx| {
+            pane.settings.detect_file_paths_as_links = true;
+            pane.feed_recording_output(
+                b"see https://ubuntu.com/esm and /tmp/archive.tar.gz here\r\n",
+                cx,
+            );
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+
+        pane.update(cx, |pane, cx| {
+            pane.bounds = Some(gpui::Bounds::new(
+                gpui::point(px(0.0), px(0.0)),
+                gpui::size(px(800.0), px(600.0)),
+            ));
+            let origin = pane.content_origin();
+            let padding_x = px(pane.terminal_content_padding_x());
+            let cell_width = pane.metrics.cell_width;
+            let cell_x = |col: usize| origin.x + padding_x + cell_width * (col as f32 + 0.5);
+            let cell_y = origin.y + px(TERMINAL_CONTENT_PADDING) + pane.metrics.line_height * 0.5;
+
+            // Right-clicking a URL exposes it for opening from the context menu.
+            pane.open_terminal_context_menu(
+                &gpui::MouseDownEvent {
+                    position: gpui::point(cell_x(10), cell_y),
+                    button: gpui::MouseButton::Right,
+                    ..Default::default()
+                },
+                cx,
+            );
+            let url_link = pane
+                .context_menu
+                .as_ref()
+                .and_then(|menu| menu.link.clone())
+                .expect("right-clicking a URL must capture an openable link");
+            assert_eq!(url_link.kind, TerminalLinkKind::Url);
+            assert_eq!(url_link.target, "https://ubuntu.com/esm");
+
+            // Right-clicking an openable path link captures it and activates through
+            // the same link-opening path as click activation.
+            pane.open_terminal_context_menu(
+                &gpui::MouseDownEvent {
+                    position: gpui::point(cell_x(35), cell_y),
+                    button: gpui::MouseButton::Right,
+                    ..Default::default()
+                },
+                cx,
+            );
+            let path_link = pane
+                .context_menu
+                .as_ref()
+                .and_then(|menu| menu.link.clone())
+                .expect("right-clicking an archive path must capture an openable link");
+            assert_eq!(path_link.kind, TerminalLinkKind::Path);
+            assert_eq!(path_link.target, "/tmp/archive.tar.gz");
+            pane.activate_terminal_link(&path_link, cx);
+            assert_eq!(
+                pane.context_action_requested,
+                Some(TerminalContextAction::PreviewArchiveCommand)
+            );
+            assert_eq!(
+                pane.archive_path_requested.as_deref().map(String::as_str),
+                Some("/tmp/archive.tar.gz")
+            );
+
+            // Right-clicking ordinary non-link text omits the open-link entry.
+            pane.open_terminal_context_menu(
+                &gpui::MouseDownEvent {
+                    position: gpui::point(cell_x(1), cell_y),
+                    button: gpui::MouseButton::Right,
+                    ..Default::default()
+                },
+                cx,
+            );
+            assert_eq!(
+                pane.context_menu
+                    .as_ref()
+                    .and_then(|menu| menu.link.as_ref()),
+                None
+            );
+        });
     }
 
     #[cfg(unix)]

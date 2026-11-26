@@ -2567,6 +2567,7 @@ impl TerminalPane {
         // Preserve the pointer as the anchor. GPUI fits the measured menu to the
         // window; pre-clamping an estimated height makes it flip a second time.
         let position = origin + point(px(menu.x), px(menu.y));
+        let open_link_label = self.preferences.command_selection_labels.open_link.clone();
         let copy_label = self.preferences.command_selection_labels.copy.clone();
         let copy_command_label = self
             .preferences
@@ -2687,6 +2688,9 @@ impl TerminalPane {
                     clear_screen_shortcut.as_deref(),
                 ),
             ];
+            if menu.link.is_some() {
+                label_rows.push((open_link_label.as_str(), None));
+            }
             if self.session_kind == TerminalSessionKind::SshPty {
                 label_rows.push((
                     self.preferences.command_selection_labels.shell_ide.as_str(),
@@ -2718,6 +2722,20 @@ impl TerminalPane {
             context_menu_event_boundary(
                 context_menu_content(tokens)
                     .w(px(menu_width))
+                    .when_some(menu.link.clone(), |menu_el, link| {
+                        menu_el
+                            .child(self.render_terminal_context_menu_item(
+                                "lucide/external-link.svg",
+                                open_link_label.clone(),
+                                false,
+                                move |this, _, _, cx| {
+                                    this.dismiss_terminal_context_menu(cx);
+                                    this.activate_terminal_link(&link, cx);
+                                },
+                                cx,
+                            ))
+                            .child(context_menu_separator(tokens))
+                    })
                     .children(self.plugin_text_actions.iter().cloned().map(|action| {
                         self.render_terminal_context_menu_item(
                             "lucide/puzzle.svg",

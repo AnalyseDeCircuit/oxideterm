@@ -122,6 +122,7 @@
       "copy": "複製",
       "copy_title": "複製命令輸出",
       "copy_command": "複製命令",
+      "open_link": "開啟連結",
       "send_to_ai": "傳送到 OxideSens",
       "fill_command_bar": "填入命令欄",
       "insert_selection_into_command": "在此插入選取內容",

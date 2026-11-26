@@ -1602,6 +1602,7 @@ impl WorkspaceApp {
             },
             command_selection_labels: TerminalCommandSelectionLabels {
                 actions: self.i18n.t("terminal.command_selection.actions"),
+                open_link: self.i18n.t("terminal.command_selection.open_link"),
                 copy: self.i18n.t("terminal.command_selection.copy"),
                 copy_title: self.i18n.t("terminal.command_selection.copy_title"),
                 copy_command: self.i18n.t("terminal.command_selection.copy_command"),

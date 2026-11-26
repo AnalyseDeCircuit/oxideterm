@@ -213,6 +213,7 @@
       "copy": "复制",
       "copy_title": "复制命令输出",
       "copy_command": "复制命令",
+      "open_link": "打开链接",
       "send_to_ai": "发送到 OxideSens",
       "fill_command_bar": "填入命令栏",
       "insert_selection_into_command": "在此插入选区",

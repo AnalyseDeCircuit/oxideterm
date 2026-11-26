@@ -122,6 +122,7 @@
       "copy": "Copia",
       "copy_title": "Copia output del comando",
       "copy_command": "Copia comando",
+      "open_link": "Apri collegamento",
       "send_to_ai": "Invia a OxideSens",
       "fill_command_bar": "Riempi barra comandi",
       "insert_selection_into_command": "Inserisci selezione qui",

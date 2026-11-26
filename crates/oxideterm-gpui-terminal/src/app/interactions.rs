@@ -1723,25 +1723,7 @@ impl TerminalPane {
             )
             && let Some(link) = self.link_at_position(event.position)
         {
-            match link.kind {
-                TerminalLinkKind::Url => cx.open_url(&link.target),
-                TerminalLinkKind::Trigger => {}
-                TerminalLinkKind::Path => {
-                    let path = link.target.trim_matches(['\'', '"', '`']);
-                    if oxideterm_environment::archive::is_archive_path(path) {
-                        self.archive_path_requested = Some(Zeroizing::new(path.to_string()));
-                        self.context_action_requested =
-                            Some(TerminalContextAction::PreviewArchiveCommand);
-                        cx.emit(TerminalPaneEvent::ContextActionRequested);
-                        return;
-                    }
-                    if let Ok(base_dir) = env::current_dir()
-                        && let Some(url) = path_link_to_file_url(&link.target, &base_dir)
-                    {
-                        cx.open_url(&url);
-                    }
-                }
-            }
+            self.activate_terminal_link(&link, cx);
             return;
         }
 
@@ -1856,6 +1838,47 @@ impl TerminalPane {
         }
     }
 
+    fn is_link_openable(link: &TerminalLinkRange) -> bool {
+        match link.kind {
+            TerminalLinkKind::Url => true,
+            TerminalLinkKind::Path => {
+                let path = link.target.trim_matches(['\'', '"', '`']);
+                oxideterm_environment::archive::is_archive_path(path)
+                    || env::current_dir()
+                        .ok()
+                        .and_then(|base_dir| path_link_to_file_url(&link.target, &base_dir))
+                        .is_some()
+            }
+            TerminalLinkKind::Trigger => false,
+        }
+    }
+
+    pub(super) fn activate_terminal_link(
+        &mut self,
+        link: &TerminalLinkRange,
+        cx: &mut Context<Self>,
+    ) {
+        match link.kind {
+            TerminalLinkKind::Url => cx.open_url(&link.target),
+            TerminalLinkKind::Trigger => {}
+            TerminalLinkKind::Path => {
+                let path = link.target.trim_matches(['\'', '"', '`']);
+                if oxideterm_environment::archive::is_archive_path(path) {
+                    self.archive_path_requested = Some(Zeroizing::new(path.to_string()));
+                    self.context_action_requested =
+                        Some(TerminalContextAction::PreviewArchiveCommand);
+                    cx.emit(TerminalPaneEvent::ContextActionRequested);
+                    return;
+                }
+                if let Ok(base_dir) = env::current_dir()
+                    && let Some(url) = path_link_to_file_url(&link.target, &base_dir)
+                {
+                    cx.open_url(&url);
+                }
+            }
+        }
+    }
+
     pub(crate) fn open_terminal_context_menu(
         &mut self,
         event: &MouseDownEvent,
@@ -1865,6 +1888,9 @@ impl TerminalPane {
             return;
         };
 
+        let link = self
+            .link_at_position(event.position)
+            .filter(Self::is_link_openable);
         let reference_line = self.absolute_line_for_position(event.position);
         let terminal_mode = self.terminal.lock().mode();
         let command_mark_ui_visible = self.command_actions_available(terminal_mode);
@@ -1883,6 +1909,7 @@ impl TerminalPane {
             y: f32::from(event.position.y - bounds.origin.y),
             serial_transfer_menu: false,
             trigger: None,
+            link,
             target: self.terminal_point_for_position(event.position),
             has_selection: self.selected_text_snapshot().is_some(),
             reference_line: navigation_line,

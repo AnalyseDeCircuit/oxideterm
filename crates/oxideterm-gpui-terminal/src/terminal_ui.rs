@@ -407,6 +407,7 @@ impl Default for TerminalAutosuggestLabels {
 #[derive(Clone, Debug)]
 pub struct TerminalCommandSelectionLabels {
     pub actions: String,
+    pub open_link: String,
     pub copy: String,
     pub copy_title: String,
     pub copy_command: String,
@@ -433,6 +434,7 @@ impl Default for TerminalCommandSelectionLabels {
     fn default() -> Self {
         Self {
             actions: "Command selection actions".to_string(),
+            open_link: "Open link".to_string(),
             copy: "Copy".to_string(),
             copy_title: "Copy command output".to_string(),
             copy_command: "Copy command".to_string(),

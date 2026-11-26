@@ -122,6 +122,7 @@
       "copy": "Sao chép",
       "copy_title": "Sao chép đầu ra lệnh",
       "copy_command": "Sao chép lệnh",
+      "open_link": "Mở liên kết",
       "send_to_ai": "Gửi tới OxideSens",
       "fill_command_bar": "Điền vào thanh lệnh",
       "insert_selection_into_command": "Chèn vùng chọn tại đây",
