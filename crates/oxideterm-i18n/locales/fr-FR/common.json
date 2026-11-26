@@ -1381,6 +1381,7 @@
     "cancel_reconnect": "Annuler la reconnexion",
     "reconnect": "Reconnecter",
     "rename_tab": "Renommer l'onglet",
+    "edit_connection": "Modifier la connexion",
     "rename_tab_description": "Saisissez un nom pour identifier cet onglet de terminal.",
     "rename_tab_placeholder": "Nom de l'onglet",
     "rename_tab_action": "Renommer",

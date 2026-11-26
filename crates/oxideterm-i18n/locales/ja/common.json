@@ -1381,6 +1381,7 @@
     "cancel_reconnect": "再接続をキャンセル",
     "reconnect": "再接続",
     "rename_tab": "タブ名を変更",
+    "edit_connection": "接続を編集",
     "rename_tab_description": "このターミナルタブを識別する名前を入力します。",
     "rename_tab_placeholder": "タブ名",
     "rename_tab_action": "名前を変更",

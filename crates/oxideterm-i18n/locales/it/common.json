@@ -1381,6 +1381,7 @@
     "cancel_reconnect": "Annulla riconnessione",
     "reconnect": "Riconnetti",
     "rename_tab": "Rinomina scheda",
+    "edit_connection": "Modifica connessione",
     "rename_tab_description": "Inserisci un nome per identificare questa scheda del terminale.",
     "rename_tab_placeholder": "Nome scheda",
     "rename_tab_action": "Rinomina",

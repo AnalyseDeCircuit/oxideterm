@@ -1,6 +1,8 @@
 use super::navigation::TAB_DRAG_THRESHOLD_PX;
 use super::*;
 
+use oxideterm_gpui_connections::session_manager::SessionManagerOpenTarget;
+
 use oxideterm_gpui_ui::button::ButtonVariant;
 use oxideterm_gpui_ui::context_menu::{
     context_menu_content, context_menu_event_boundary, context_menu_item_height_estimate,
@@ -204,6 +206,149 @@ impl WorkspaceApp {
             node_id,
             terminals: node.terminal_ids.clone(),
         })
+    }
+
+    /// Resolves the saved connection or profile backing `tab_id` so the tab
+    /// context menu can open its properties editor directly. Unlike
+    /// `ssh_node_menu_for_tab`, this stays available while a node is
+    /// disconnected or reconnecting so notes and host settings remain editable.
+    fn editable_saved_target_for_tab(
+        &self,
+        tab_id: TabId,
+        cx: &App,
+    ) -> Option<SessionManagerOpenTarget> {
+        let tab = self.tab_by_id(tab_id, cx)?;
+        let saved_ssh_target = |node_id: &NodeId| {
+            let saved_id = self
+                .ssh_nodes
+                .get(node_id)?
+                .saved_connection_id
+                .as_deref()?;
+            self.connection_store
+                .get(saved_id)
+                .map(|_| SessionManagerOpenTarget::Connection(saved_id.to_string()))
+        };
+        let saved_standalone_target =
+            |surface: standalone_connections::StandaloneConnectionSurface| {
+                let connection_id = self
+                    .standalone_connections
+                    .connection_id_for_surface(surface)?;
+                let record = self.standalone_connections.record(&connection_id)?;
+                match &record.launch {
+                    standalone_connections::StandaloneConnectionLaunch::SavedMosh {
+                        profile_id,
+                    } => self
+                        .connection_store
+                        .get_mosh_profile(profile_id)
+                        .map(|_| SessionManagerOpenTarget::Mosh(profile_id.clone())),
+                    standalone_connections::StandaloneConnectionLaunch::SavedSerial {
+                        profile_id,
+                        ..
+                    } => self
+                        .connection_store
+                        .serial_profiles()
+                        .iter()
+                        .any(|profile| profile.id == *profile_id)
+                        .then(|| SessionManagerOpenTarget::Serial(profile_id.clone())),
+                    standalone_connections::StandaloneConnectionLaunch::SavedTelnet {
+                        profile_id,
+                        ..
+                    } => self
+                        .connection_store
+                        .telnet_profiles()
+                        .iter()
+                        .any(|profile| profile.id == *profile_id)
+                        .then(|| SessionManagerOpenTarget::Telnet(profile_id.clone())),
+                    standalone_connections::StandaloneConnectionLaunch::SavedBle {
+                        profile_id,
+                        ..
+                    } => self
+                        .connection_store
+                        .ble_profiles()
+                        .iter()
+                        .any(|profile| profile.id == *profile_id)
+                        .then(|| SessionManagerOpenTarget::Ble(profile_id.clone())),
+                    standalone_connections::StandaloneConnectionLaunch::SavedRemoteDesktop {
+                        profile_id,
+                    } => self
+                        .connection_store
+                        .get_remote_desktop_profile(profile_id)
+                        .map(|_| SessionManagerOpenTarget::RemoteDesktop(profile_id.clone())),
+                    _ => None,
+                }
+            };
+
+        match tab.kind {
+            TabKind::SshTerminal
+            | TabKind::LocalTerminal
+            | TabKind::MoshTerminal
+            | TabKind::Workspace => {
+                let pane_id = tab.active_pane_id?;
+                let session_id = tab.root_pane.as_ref()?.session_id_for_pane(pane_id)?;
+                if let Some(node_id) = self
+                    .workspace_runtime
+                    .read(cx)
+                    .ssh_terminal_node_id(session_id)
+                {
+                    return saved_ssh_target(&node_id);
+                }
+                if let Some(target) = saved_standalone_target(
+                    standalone_connections::StandaloneConnectionSurface::Terminal(session_id),
+                ) {
+                    return Some(target);
+                }
+                let local_profile_id = self
+                    .tab_host
+                    .read(cx)
+                    .local_sessions
+                    .get(&session_id)
+                    .and_then(|instance| instance.profile_id.as_deref())?;
+                self.connection_store
+                    .local_terminal_profiles()
+                    .iter()
+                    .any(|profile| profile.id == local_profile_id)
+                    .then(|| SessionManagerOpenTarget::LocalTerminal(local_profile_id.to_string()))
+            }
+            TabKind::RemoteDesktop => saved_standalone_target(
+                standalone_connections::StandaloneConnectionSurface::RemoteDesktop(tab.id),
+            ),
+            TabKind::Sftp => {
+                if let Some(node_id) = self.sftp_tab_nodes.get(&tab.id) {
+                    return saved_ssh_target(node_id);
+                }
+                let binding = self.standalone_sftp_tabs.get(&tab.id)?;
+                // Dual-remote pair tabs do not map to a single saved connection.
+                if binding.secondary_endpoint_id.is_some() {
+                    return None;
+                }
+                let endpoint_id = &binding.primary_endpoint_id;
+                if self.standalone_sftp_sessions.contains_key(endpoint_id)
+                    && self
+                        .connection_store
+                        .get_standalone_sftp_profile(endpoint_id)
+                        .is_some()
+                {
+                    return Some(SessionManagerOpenTarget::StandaloneSftp(
+                        endpoint_id.clone(),
+                    ));
+                }
+                if self.ftp_sessions.contains_key(endpoint_id)
+                    && self.connection_store.get_ftp_profile(endpoint_id).is_some()
+                {
+                    return Some(SessionManagerOpenTarget::Ftp(endpoint_id.clone()));
+                }
+                None
+            }
+            TabKind::Ide => {
+                let node_id = self.ide_workspace.read(cx).node_for_tab(tab.id)?;
+                saved_ssh_target(node_id)
+            }
+            TabKind::Forwards => {
+                let node_id = self.forwarding.read(cx).node_for_tab(tab.id)?;
+                saved_ssh_target(&node_id)
+            }
+            _ => None,
+        }
     }
 
     fn can_combine_tabs(&self, source: TabId, target: TabId, cx: &App) -> bool {
@@ -1370,6 +1515,10 @@ impl WorkspaceApp {
             menu_height += TAB_CONTEXT_MENU_SWITCH_HEIGHT;
         }
         menu_height += merge_targets.len() as f32 * TAB_CONTEXT_MENU_SPLIT_HEIGHT;
+        let edit_target = self.editable_saved_target_for_tab(menu.tab_id, cx);
+        if edit_target.is_some() {
+            menu_height += context_menu_item_height_estimate(&self.tokens);
+        }
         let ssh_node_menu = self.ssh_node_menu_for_tab(menu.tab_id, cx);
         if let Some(ssh) = &ssh_node_menu {
             // Terminal rows plus the fixed tool rows and the disconnect row;
@@ -1396,6 +1545,9 @@ impl WorkspaceApp {
         ];
         if renamable {
             menu_labels.push(self.i18n.t("tabbar.rename_tab"));
+        }
+        if edit_target.is_some() {
+            menu_labels.push(self.i18n.t("tabbar.edit_connection"));
         }
         if can_split_into_active {
             menu_labels.push(self.i18n.t("tabbar.split_into_active_horizontal"));
@@ -1447,6 +1599,25 @@ impl WorkspaceApp {
                                 MouseButton::Left,
                                 cx.listener(move |this, _event, window, cx| {
                                     this.begin_tab_rename(menu.tab_id, window, cx);
+                                    cx.stop_propagation();
+                                }),
+                            ),
+                        )
+                    })
+                    .when_some(edit_target, |content, target| {
+                        content.child(
+                            context_menu_item_with_icon(
+                                &self.tokens,
+                                "lucide/settings.svg",
+                                self.i18n.t("tabbar.edit_connection"),
+                                false,
+                                false,
+                            )
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _event, window, cx| {
+                                    this.close_tab_context_menu();
+                                    this.open_saved_target_editor(target.clone(), window, cx);
                                     cx.stop_propagation();
                                 }),
                             ),
@@ -2633,4 +2804,258 @@ mod tests {
 
         let _ = settings_tab_id;
     }
+
+    #[gpui::test]
+    fn tab_context_menu_edit_resolves_saved_sessions_and_opens_editor(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let Some((workspace, cx)) = detach_workspace_fixture(cx) else {
+            return;
+        };
+
+        let (
+            saved_id,
+            local_profile_id,
+            saved_tab,
+            saved_pane,
+            unsaved_tab,
+            missing_tab,
+            local_tab,
+            unsaved_pane,
+        ) = cx.update(|window, cx| {
+                workspace.update(cx, |workspace, cx| {
+                    let saved = workspace
+                        .connection_store
+                        .upsert(oxideterm_connections::SaveConnectionRequest {
+                            totp_credential_id: None,
+                            id: Some("saved-edge-1".to_string()),
+                            name: "Edge Host".to_string(),
+                            group: None,
+                            notes: Some("Primary edge host".to_string()),
+                            host: "10.0.0.10".to_string(),
+                            port: 22,
+                            username: "ops".to_string(),
+                            auth: oxideterm_connections::SavedAuth::Agent,
+                            proxy_chain: Vec::new(),
+                            upstream_proxy: oxideterm_connections::SavedUpstreamProxyPolicy::UseGlobal,
+                            proxy_command: None,
+                            color: None,
+                            icon_background_color: None,
+                            icon: None,
+                            tags: Vec::new(),
+                            connect_timeout_seconds: 15,
+                            keep_alive_interval_seconds: 15,
+                            keep_alive_count_max: 3,
+                            agent_forwarding: false,
+                            identity_agent: None,
+                            agent_forwarding_socket: None,
+                            legacy_ssh_compatibility: false,
+                            ssh_algorithms: Default::default(),
+                            dedicated_new_terminal_connection: false,
+                            open_sftp_on_connect: false,
+                            ssh_channel_strategy: Default::default(),
+                            x11_forwarding: Default::default(),
+                            post_connect_command: None,
+                            pre_connect_command: None,
+                            terminal: Default::default(),
+                        })
+                        .expect("saved SSH connection fixture");
+                    let local_profile = workspace
+                        .connection_store
+                        .upsert_local_terminal_profile(
+                            oxideterm_connections::SaveLocalTerminalProfileRequest {
+                                id: Some("local-prof-1".to_string()),
+                                name: "Dev Shell".to_string(),
+                                group: None,
+                                icon: None,
+                                color: None,
+                                icon_background_color: None,
+                                shell_id: None,
+                                cwd: None,
+                                pre_connect_command: None,
+                            },
+                        )
+                        .expect("saved local profile fixture");
+
+                    let mut make_ssh_tab =
+                        |node_name: &str,
+                         saved_connection_id: Option<String>,
+                         readiness: NodeReadiness| {
+                            let node_id = NodeId::new(node_name);
+                            let mut config = SshConfig::default();
+                            config.host = "10.0.0.10".into();
+                            config.port = 22;
+                            config.username = "ops".into();
+                            workspace.ssh_nodes.insert(
+                                node_id.clone(),
+                                WorkspaceSshNode::new(
+                                    saved_connection_id,
+                                    &config,
+                                    node_name.into(),
+                                    Vec::new(),
+                                    readiness,
+                                ),
+                            );
+                            let tab_id = workspace.alloc_tab_id(cx);
+                            let pane_id = workspace.alloc_pane_id(cx);
+                            let session_id = workspace.alloc_session_id(cx);
+                            let pane = cx.new(|cx| {
+                                TerminalPane::new_recording_playback(
+                                    80,
+                                    24,
+                                    Default::default(),
+                                    window,
+                                    cx,
+                                )
+                                .unwrap()
+                            });
+                            workspace.register_terminal_pane(pane_id, session_id, pane, window, cx);
+                            assert!(workspace.workspace_runtime.update(cx, |runtime, _| {
+                                runtime.register_ssh_terminal_session(session_id, node_id)
+                            }));
+                            workspace.insert_tab(
+                                Tab {
+                                    id: tab_id,
+                                    kind: TabKind::SshTerminal,
+                                    title: node_name.into(),
+                                    title_source: TabTitleSource::Static,
+                                    root_pane: Some(PaneNode::leaf(pane_id, session_id)),
+                                    active_pane_id: Some(pane_id),
+                                },
+                                cx,
+                            );
+                            workspace.bind_terminal_location(tab_id, pane_id, session_id, cx);
+                            (tab_id, pane_id)
+                        };
+
+                    // Disconnected saved SSH node must still remain editable.
+                    let (saved_tab, saved_pane) = make_ssh_tab(
+                        "edge-node",
+                        Some(saved.id.clone()),
+                        NodeReadiness::Disconnected,
+                    );
+                    let (unsaved_tab, unsaved_pane) =
+                        make_ssh_tab("adhoc-node", None, NodeReadiness::Ready);
+                    let (missing_tab, _) = make_ssh_tab(
+                        "deleted-node",
+                        Some("deleted-connection".to_string()),
+                        NodeReadiness::Ready,
+                    );
+
+                    // Local terminal tab backed by a saved profile.
+                    let local_tab = workspace.alloc_tab_id(cx);
+                    let local_pane = workspace.alloc_pane_id(cx);
+                    let local_session = workspace.alloc_session_id(cx);
+                    let pane = cx.new(|cx| {
+                        TerminalPane::new_recording_playback(
+                            80,
+                            24,
+                            Default::default(),
+                            window,
+                            cx,
+                        )
+                        .unwrap()
+                    });
+                    workspace.register_terminal_pane(local_pane, local_session, pane, window, cx);
+                    workspace.tab_host.update(cx, |host, _| {
+                        host.local_sessions.insert(
+                            local_session,
+                            local_sessions::LocalTerminalInstance {
+                                profile_id: Some(local_profile.id.clone()),
+                                title: "Dev Shell".to_string(),
+                                shell: None,
+                                cwd: None,
+                                remove_env: Vec::new(),
+                            },
+                        );
+                    });
+                    workspace.insert_tab(
+                        Tab {
+                            id: local_tab,
+                            kind: TabKind::LocalTerminal,
+                            title: "Dev Shell".into(),
+                            title_source: TabTitleSource::Static,
+                            root_pane: Some(PaneNode::leaf(local_pane, local_session)),
+                            active_pane_id: Some(local_pane),
+                        },
+                        cx,
+                    );
+                    workspace.bind_terminal_location(local_tab, local_pane, local_session, cx);
+
+                    (
+                        saved.id,
+                        local_profile.id,
+                        saved_tab,
+                        saved_pane,
+                        unsaved_tab,
+                        missing_tab,
+                        local_tab,
+                        unsaved_pane,
+                    )
+                })
+            });
+
+        workspace.read_with(cx, |workspace, cx| {
+            assert_eq!(
+                workspace.editable_saved_target_for_tab(saved_tab, cx),
+                Some(SessionManagerOpenTarget::Connection(saved_id.clone()))
+            );
+            assert_eq!(workspace.editable_saved_target_for_tab(unsaved_tab, cx), None);
+            assert_eq!(workspace.editable_saved_target_for_tab(missing_tab, cx), None);
+            assert_eq!(
+                workspace.editable_saved_target_for_tab(local_tab, cx),
+                Some(SessionManagerOpenTarget::LocalTerminal(local_profile_id.clone()))
+            );
+        });
+
+        // Opening the resolved target loads the connection properties editor
+        // with the saved connection's identity and notes.
+        cx.update(|window, cx| {
+            workspace.update(cx, |workspace, cx| {
+                let target = workspace
+                    .editable_saved_target_for_tab(saved_tab, cx)
+                    .expect("saved SSH tab should resolve an edit target");
+                workspace.open_saved_target_editor(target, window, cx);
+                let form_state = &workspace.connections.flow.read(cx).form;
+                assert_eq!(
+                    form_state.editing_saved_connection_id.as_deref(),
+                    Some(saved_id.as_str())
+                );
+                let form = form_state
+                    .form
+                    .as_ref()
+                    .expect("connection editor form should be open");
+                assert_eq!(form.name, "Edge Host");
+                assert_eq!(form.notes, "Primary edge host");
+            });
+        });
+
+        // Combined Workspace tab resolves whichever pane is active.
+        cx.update(|window, cx| {
+            workspace.update(cx, |workspace, cx| {
+                assert!(workspace.combine_tabs_at(
+                    unsaved_tab,
+                    saved_tab,
+                    None,
+                    SplitDirection::Horizontal,
+                    false,
+                    window,
+                    cx,
+                ));
+                let combined_id = workspace.active_tab_id(cx).unwrap();
+                workspace.tab_host.update(cx, |host, _| {
+                    host.set_active_pane(Some(combined_id), saved_pane);
+                });
+                assert_eq!(
+                    workspace.editable_saved_target_for_tab(combined_id, cx),
+                    Some(SessionManagerOpenTarget::Connection(saved_id.clone()))
+                );
+                workspace.tab_host.update(cx, |host, _| {
+                    host.set_active_pane(Some(combined_id), unsaved_pane);
+                });
+                assert_eq!(workspace.editable_saved_target_for_tab(combined_id, cx), None);
+            });
+        });
+    }
+
 }

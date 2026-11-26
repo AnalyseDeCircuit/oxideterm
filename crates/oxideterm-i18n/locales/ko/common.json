@@ -1381,6 +1381,7 @@
     "cancel_reconnect": "재연결 취소",
     "reconnect": "재연결",
     "rename_tab": "탭 이름 바꾸기",
+    "edit_connection": "연결 편집",
     "rename_tab_description": "이 터미널 탭을 식별할 이름을 입력하세요.",
     "rename_tab_placeholder": "탭 이름",
     "rename_tab_action": "이름 바꾸기",

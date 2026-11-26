@@ -1381,6 +1381,7 @@
     "cancel_reconnect": "Cancelar reconexão",
     "reconnect": "Reconectar",
     "rename_tab": "Renomear aba",
+    "edit_connection": "Editar conexão",
     "rename_tab_description": "Digite um nome para identificar esta aba do terminal.",
     "rename_tab_placeholder": "Nome da aba",
     "rename_tab_action": "Renomear",

@@ -1381,6 +1381,7 @@
     "cancel_reconnect": "Cancel reconnect",
     "reconnect": "Reconnect",
     "rename_tab": "Rename tab",
+    "edit_connection": "Edit connection",
     "rename_tab_description": "Enter a name to identify this terminal tab.",
     "rename_tab_placeholder": "Tab name",
     "rename_tab_action": "Rename",

@@ -1381,6 +1381,7 @@
     "cancel_reconnect": "Hủy kết nối lại",
     "reconnect": "Kết nối lại",
     "rename_tab": "Đổi tên tab",
+    "edit_connection": "Chỉnh sửa kết nối",
     "rename_tab_description": "Nhập tên để nhận biết tab terminal này.",
     "rename_tab_placeholder": "Tên tab",
     "rename_tab_action": "Đổi tên",

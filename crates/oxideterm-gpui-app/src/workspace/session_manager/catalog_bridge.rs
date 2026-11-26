@@ -48,6 +48,31 @@ impl WorkspaceApp {
         }
     }
 
+    pub(in crate::workspace) fn open_saved_target_editor(
+        &mut self,
+        target: SessionManagerOpenTarget,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match target {
+            SessionManagerOpenTarget::Tunnel(id) => {
+                self.open_ssh_tunnel_form(Some(&id), window, cx)
+            }
+            SessionManagerOpenTarget::Connection(id) => {
+                self.open_saved_connection_editor(&id, None, window, cx)
+            }
+            SessionManagerOpenTarget::Plugin(id) => self.edit_plugin_connection(&id, window, cx),
+            SessionManagerOpenTarget::Ftp(id) => {
+                self.open_saved_ftp_profile_editor(&id, window, cx)
+            }
+            SessionManagerOpenTarget::LocalTerminal(id) => {
+                self.open_saved_local_terminal_profile_editor(&id, window, cx)
+            }
+            SessionManagerOpenTarget::SshConfig(_) => {}
+            target => self.open_catalog_profile_editor(target, window, cx),
+        }
+    }
+
     pub(in crate::workspace) fn apply_session_manager_catalog_action(
         &mut self,
         action: CatalogAction,
@@ -103,25 +128,7 @@ impl WorkspaceApp {
             CatalogAction::Open { target, open_sftp } => {
                 self.open_session_manager_target_with_sftp(target, open_sftp, window, cx)
             }
-            CatalogAction::Edit(target) => match target {
-                SessionManagerOpenTarget::Tunnel(id) => {
-                    self.open_ssh_tunnel_form(Some(&id), window, cx)
-                }
-                SessionManagerOpenTarget::Connection(id) => {
-                    self.open_saved_connection_editor(&id, None, window, cx)
-                }
-                SessionManagerOpenTarget::Plugin(id) => {
-                    self.edit_plugin_connection(&id, window, cx)
-                }
-                SessionManagerOpenTarget::Ftp(id) => {
-                    self.open_saved_ftp_profile_editor(&id, window, cx)
-                }
-                SessionManagerOpenTarget::LocalTerminal(id) => {
-                    self.open_saved_local_terminal_profile_editor(&id, window, cx)
-                }
-                SessionManagerOpenTarget::SshConfig(_) => {}
-                target => self.open_catalog_profile_editor(target, window, cx),
-            },
+            CatalogAction::Edit(target) => self.open_saved_target_editor(target, window, cx),
             CatalogAction::Duplicate(id) => self.duplicate_connection(&id, window, cx),
             CatalogAction::Test(id) => self.test_connection(&id, window, cx),
             CatalogAction::OpenImporters => self.open_connection_importers_settings(window, cx),
