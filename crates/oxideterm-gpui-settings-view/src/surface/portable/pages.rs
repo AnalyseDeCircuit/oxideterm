@@ -339,10 +339,39 @@ pub(super) fn render_section(
                         .into_iter()
                         .enumerate()
                         .map(|(group_idx, group)| {
-                            let all_approved = group.state()
+                            let state_kind = group.state();
+                            let locked = state_kind
+                                == oxideterm_settings_model::AiToolPolicyGroupState::Locked;
+                            let all_enabled = state_kind
                                 == oxideterm_settings_model::AiToolPolicyGroupState::AllApproved;
                             let edit_owner = owner.downgrade();
                             let title = state.i18n.t(group.title_key);
+                            let trailing = if locked {
+                                div()
+                                    .text_size(px(tokens.metrics.ui_text_xs))
+                                    .text_color(rgb(tokens.ui.text_muted))
+                                    .child(state.i18n.t("settings_view.ai.tool_fixed_policy"))
+                                    .into_any_element()
+                            } else {
+                                oxideterm_gpui_ui::switch::switch(
+                                    tokens,
+                                    format!("ai-policy-group-{group_idx}"),
+                                    String::new(),
+                                    all_enabled,
+                                )
+                                .on_mouse_down(gpui::MouseButton::Left, move |_, _, cx| {
+                                    let _ = edit_owner.update(cx, |s, cx| {
+                                        oxideterm_settings_model::set_ai_tool_policy_group_approval(
+                                            &mut s.settings,
+                                            &group,
+                                            !all_enabled,
+                                        );
+                                        s.changed(cx);
+                                    });
+                                    cx.stop_propagation();
+                                })
+                                .into_any_element()
+                            };
                             div()
                                 .w_full()
                                 .p_3()
@@ -363,28 +392,7 @@ pub(super) fn render_section(
                                         .text_color(rgb(tokens.ui.text))
                                         .child(title),
                                 )
-                                .child(
-                                    oxideterm_gpui_ui::switch::switch(
-                                        tokens,
-                                        format!("ai-policy-group-{group_idx}"),
-                                        String::new(),
-                                        all_approved,
-                                    )
-                                    .on_mouse_down(
-                                        gpui::MouseButton::Left,
-                                        move |_, _, cx| {
-                                            let _ = edit_owner.update(cx, |s, cx| {
-                                        oxideterm_settings_model::set_ai_tool_policy_group_approval(
-                                            &mut s.settings,
-                                            &group,
-                                            !all_approved,
-                                        );
-                                        s.changed(cx);
-                                    });
-                                            cx.stop_propagation();
-                                        },
-                                    ),
-                                )
+                                .child(trailing)
                                 .into_any_element()
                         })
                         .collect();

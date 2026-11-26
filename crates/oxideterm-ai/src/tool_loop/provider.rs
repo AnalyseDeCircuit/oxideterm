@@ -249,6 +249,8 @@ async fn execute_ai_chat_tool_loop(
     let mut progress_guard = crate::agent::ProgressGuard::default();
     let user_requested_json = ai_user_explicitly_requested_json(&request_text);
     let mut hard_deny_retry_count = 0usize;
+    let mut auto_classifier_cache: std::collections::HashMap<(String, String), bool> =
+        std::collections::HashMap::new();
 
     let mut awaiting_summary_round_id: Option<String> = None;
 
@@ -917,7 +919,8 @@ async fn execute_ai_chat_tool_loop(
                     crate::sanitize_api_messages_for_provider(history[user_index..].to_vec());
                 let user_override = if !sanitized.is_empty() {
                     let wire_user = sanitized.remove(0);
-                    (!wire_user.content.is_empty()).then_some((task_user_id.clone(), wire_user.content))
+                    (!wire_user.content.is_empty())
+                        .then_some((task_user_id.clone(), wire_user.content))
                 } else {
                     None
                 };
@@ -1184,6 +1187,7 @@ async fn execute_ai_chat_tool_loop(
                     let session = &tool_session_id;
                     let conversation = &conversation_id;
                     let assistant = &assistant_id;
+                    let request_text = request_text.as_str();
                     let dispatch = dispatch.as_ref();
                     async move {
                         execute_ai_round_call(
@@ -1196,6 +1200,8 @@ async fn execute_ai_chat_tool_loop(
                             session,
                             conversation,
                             assistant,
+                            request_text,
+                            None,
                             &mut None,
                             false,
                             dispatch,
@@ -1218,6 +1224,8 @@ async fn execute_ai_chat_tool_loop(
                         &tool_session_id,
                         &conversation_id,
                         &assistant_id,
+                        &request_text,
+                        Some(&mut auto_classifier_cache),
                         execution,
                         true,
                         dispatch.as_ref(),
@@ -1354,10 +1362,12 @@ async fn execute_ai_chat_tool_loop(
             };
         }
         let budget_history = crate::sanitize_api_messages_for_provider(history.clone());
-        let prompt_breakdown = ai_request_token_breakdown(&budget_history, &config, response_reserve);
+        let prompt_breakdown =
+            ai_request_token_breakdown(&budget_history, &config, response_reserve);
         let system_budget = prompt_breakdown
             .system_instructions
-            .saturating_add(prompt_breakdown.tool_definitions).min(prompt_breakdown.prompt_tokens());
+            .saturating_add(prompt_breakdown.tool_definitions)
+            .min(prompt_breakdown.prompt_tokens());
         let regular_messages = history
             .iter()
             .filter(|message| message.role != AiChatRole::System)
@@ -1367,14 +1377,19 @@ async fn execute_ai_chat_tool_loop(
             context_window: model_runtime.context_window,
             response_reserve,
             system_budget,
-            history_tokens: prompt_breakdown.prompt_tokens().saturating_sub(system_budget),
+            history_tokens: prompt_breakdown
+                .prompt_tokens()
+                .saturating_sub(system_budget),
             trimmable_history_tokens: None,
             summary_eligible_tokens: Some(summary_eligible_tokens),
             can_summarize: summary_eligible_tokens > 0,
             can_lookup_transcript: transcript_lookup_prompt.is_some(),
             in_tool_loop: true,
             auto_compact_threshold: Some(ai_to_usable_budget_threshold(
-                AI_COMPACTION_TRIGGER_THRESHOLD, model_runtime.context_window, system_budget, response_reserve,
+                AI_COMPACTION_TRIGGER_THRESHOLD,
+                model_runtime.context_window,
+                system_budget,
+                response_reserve,
             )),
             transcript_lookup_threshold: None,
             tool_loop_stop_threshold: Some(ai_to_usable_budget_threshold(

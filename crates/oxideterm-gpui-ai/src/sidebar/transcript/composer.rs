@@ -455,11 +455,13 @@ impl AiAssistantSidebarView {
         let icon = match mode {
             AiSafetyMode::Default => LucideIcon::ShieldCheck,
             AiSafetyMode::ReadOnly => LucideIcon::Shield,
+            AiSafetyMode::Auto => LucideIcon::Sparkles,
             AiSafetyMode::Bypass => LucideIcon::ShieldAlert,
         };
         let label = match mode {
             AiSafetyMode::Default => self.i18n.t("ai.safety_mode.default_label"),
             AiSafetyMode::ReadOnly => self.i18n.t("ai.safety_mode.read_only_label"),
+            AiSafetyMode::Auto => self.i18n.t("ai.safety_mode.auto_label"),
             AiSafetyMode::Bypass => self.i18n.t("ai.safety_mode.bypass_label"),
         };
         div()

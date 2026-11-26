@@ -237,6 +237,7 @@ pub enum AiTranscriptRequest {
     DeleteConversation(String),
     SafetyDefault,
     SafetyReadOnly,
+    SafetyAuto,
     SafetyConfirm,
     ConfirmSafety(bool),
     ConfirmSummary(bool),

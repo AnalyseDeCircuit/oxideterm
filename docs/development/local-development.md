@@ -29,6 +29,18 @@ Build the CLI or optional Linux agent only when the change needs them:
 ./scripts/build/build-agent.sh
 ```
 
+## Browser (Wasm)
+
+To check browser-facing changes without building the desktop binary, install the `wasm32-unknown-unknown` target and run `cargo check -p oxideterm-gpui-web --target wasm32-unknown-unknown`. A native check alone skips the browser entry point.
+
+To run it, use [dev.sh](../../crates/oxideterm-gpui-web/dev.sh) from the repository root:
+
+```sh
+./crates/oxideterm-gpui-web/dev.sh
+```
+
+The script requires the matching `wasm-bindgen` CLI version it reports, cached Cargo dependencies for its offline build, and Python 3. Open `http://127.0.0.1:8000` for the demo (`PORT` overrides 8000). To test the gateway path, supply a compatible WSS endpoint via the `gateway` query parameter; the script serves static assets, not a gateway.
+
 ## Platform Notes
 
 ### macOS

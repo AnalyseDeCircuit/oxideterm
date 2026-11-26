@@ -410,15 +410,19 @@ Con Nix: `nix build .#oxideterm`, `nix run .#oxideterm` o `nix develop`. La CLI 
 
 ### Arquitectura
 
-Interfaz, terminales y SSH comparten un proceso Rust. El agente remoto opcional y los auxiliares de plataforma son procesos independientes. La salida SSH o PTY local entra directamente en `TerminalState`, dibujado por GPUI, sin WebView, puente JSON ni xterm.js.
+En el escritorio, la interfaz, las sesiones de terminal y SSH se ejecutan en un mismo proceso de Rust. El agente remoto opcional y las utilidades de la plataforma se ejecutan por separado. El emulador procesa la salida del PTY o de SSH para que GPUI la dibuje. La versión para navegador comparte el emulador, la superficie de dibujo y la interfaz del espacio de trabajo, pero usa sus propios medios de conexión.
 
 `NodeRouter` distribuye conexiones desde `SshConnectionRegistry`, un grupo basado en DashMap. Terminales, SFTP, reenvíos y editor comparten una conexión por servidor salvo que un terminal use una propia. Los estados son `connecting → active → idle → link_down → reconnecting`. Si falla un salto, sus servidores descendientes pasan a `link_down`. Cada regla de reenvío tiene su escucha. Tras reconectar se vuelven a adquirir sesiones SFTP; una operación de la conexión anterior nunca se traslada silenciosamente.
 
 ```text
 crates/
-├── oxideterm-gpui-app/        # Desktop app: windows, workspace, settings
-├── oxideterm-gpui-terminal/   # Terminal panes: input, selection, overlays
-├── oxideterm-terminal/        # Terminal model and escape-sequence parsing
+├── oxideterm-gpui-app/        # Desktop windows and runtime integration
+├── oxideterm-gpui-web/        # Browser workspace and transports
+├── oxideterm-gpui-shell/      # Shared workspace frame, tabs and pane layout
+├── oxideterm-gpui-terminal/   # Desktop terminal panes and session integration
+├── oxideterm-gpui-terminal-view/ # Shared canvas, input and standalone TerminalView
+├── oxideterm-terminal-emulator/  # Grid, escape-sequence parsing and snapshots
+├── oxideterm-terminal/        # Native sessions and transport I/O
 ├── oxideterm-ssh/             # SSH connections, NodeRouter, jump hosts
 ├── oxideterm-sftp/            # SFTP sessions and transfers
 ├── oxideterm-forwarding/      # Port forwarding runtime

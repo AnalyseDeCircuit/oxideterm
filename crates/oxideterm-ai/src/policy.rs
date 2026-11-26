@@ -30,6 +30,7 @@ pub enum AiPolicySafetyMode {
     #[default]
     Default,
     ReadOnly,
+    Auto,
     Bypass,
 }
 
@@ -175,18 +176,27 @@ pub fn resolve_ai_policy_decision(
         );
     }
 
+    if safety_mode == AiPolicySafetyMode::Bypass {
+        // Bypass mode skips per-action approval for every enabled non-credential
+        // tool in the current conversation; disabled tools and credentials are
+        // already intercepted above.
+        let reason_code = if risk == AiActionRisk::Destructive {
+            "bypass_destructive_allowed"
+        } else {
+            "bypass_allowed"
+        };
+        return policy_decision(
+            AiPolicyDecisionKind::Allow,
+            risk,
+            reason_code,
+            "ai.tool_use.policy_reason_bypass",
+            matched_policy_key,
+            safety_mode,
+            profile_id,
+        );
+    }
+
     if risk == AiActionRisk::Destructive {
-        if safety_mode == AiPolicySafetyMode::Bypass {
-            return policy_decision(
-                AiPolicyDecisionKind::Allow,
-                risk,
-                "bypass_destructive_allowed",
-                "ai.tool_use.policy_reason_bypass",
-                matched_policy_key,
-                safety_mode,
-                profile_id,
-            );
-        }
         return policy_decision(
             AiPolicyDecisionKind::RequireApproval,
             risk,
@@ -198,20 +208,21 @@ pub fn resolve_ai_policy_decision(
         );
     }
 
-    // Action-specific entries override their tool-family setting. This keeps
-    // the settings UI compact while preserving granular persisted policies.
-    let auto_approved = tool_use
-        .auto_approve_tools
-        .get(&matched_policy_key)
-        .or_else(|| tool_use.auto_approve_tools.get(tool_name))
-        .copied()
-        .unwrap_or(false);
-    if auto_approved {
+    if safety_mode == AiPolicySafetyMode::Auto
+        && tool_name == "run_command"
+        && risk == AiActionRisk::Execute
+        && args
+            .and_then(|value| value.get("command"))
+            .and_then(Value::as_str)
+            .is_some_and(crate::auto_policy::is_safe_read_only_shell_command)
+    {
+        // Fast-path unambiguously read-only shell commands locally in Auto mode
+        // with zero extra model latency or tokens.
         return policy_decision(
             AiPolicyDecisionKind::Allow,
             risk,
-            "auto_approved",
-            "ai.tool_use.policy_reason_auto_approved",
+            "auto_read_only_command_allowed",
+            "ai.tool_use.policy_reason_auto_allowed",
             matched_policy_key,
             safety_mode,
             profile_id,

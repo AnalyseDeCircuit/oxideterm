@@ -467,6 +467,8 @@ mod agent_loop_tests {
             &ToolSessionId::new(),
             "conversation",
             "assistant",
+            "",
+            None,
             &mut None,
             true,
             Some(&dispatch),

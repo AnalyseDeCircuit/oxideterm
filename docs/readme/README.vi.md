@@ -410,15 +410,19 @@ Với Nix: `nix build .#oxideterm`, `nix run .#oxideterm` hoặc `nix develop`. 
 
 ### Kiến trúc tổng thể
 
-Giao diện, terminal và SSH chạy cùng một tiến trình Rust. Agent từ xa tùy chọn và công cụ nền tảng chạy riêng. Đầu ra SSH/PTY cục bộ vào trực tiếp `TerminalState` rồi GPUI vẽ, không qua WebView, cầu JSON hay xterm.js.
+Trên máy tính, giao diện, phiên terminal và SSH chạy trong cùng một tiến trình Rust. Tác nhân từ xa tùy chọn và các tiện ích của hệ điều hành chạy riêng. Bộ giả lập terminal xử lý đầu ra từ PTY hoặc kênh SSH để GPUI hiển thị. Bản trình duyệt dùng chung bộ giả lập, vùng vẽ và khung giao diện, nhưng tự quản lý kết nối.
 
 `NodeRouter` cấp kết nối từ pool DashMap `SshConnectionRegistry`. Terminal, SFTP, chuyển tiếp và trình soạn thảo chia sẻ kết nối theo máy chủ, trừ terminal đặt dùng kết nối riêng. Trạng thái: `connecting → active → idle → link_down → reconnecting`. Máy trung gian lỗi đưa máy phía sau vào `link_down`. Mỗi quy tắc chuyển tiếp có bộ lắng nghe riêng. Sau kết nối lại, SFTP được lấy lại trên kết nối mới; thao tác cũ không bao giờ âm thầm chuyển sang kết nối khác.
 
 ```text
 crates/
-├── oxideterm-gpui-app/        # Desktop app: windows, workspace, settings
-├── oxideterm-gpui-terminal/   # Terminal panes: input, selection, overlays
-├── oxideterm-terminal/        # Terminal model and escape-sequence parsing
+├── oxideterm-gpui-app/        # Desktop windows and runtime integration
+├── oxideterm-gpui-web/        # Browser workspace and transports
+├── oxideterm-gpui-shell/      # Shared workspace frame, tabs and pane layout
+├── oxideterm-gpui-terminal/   # Desktop terminal panes and session integration
+├── oxideterm-gpui-terminal-view/ # Shared canvas, input and standalone TerminalView
+├── oxideterm-terminal-emulator/  # Grid, escape-sequence parsing and snapshots
+├── oxideterm-terminal/        # Native sessions and transport I/O
 ├── oxideterm-ssh/             # SSH connections, NodeRouter, jump hosts
 ├── oxideterm-sftp/            # SFTP sessions and transfers
 ├── oxideterm-forwarding/      # Port forwarding runtime

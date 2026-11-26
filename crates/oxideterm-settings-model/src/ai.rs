@@ -92,21 +92,56 @@ impl AiToolPolicyGroup {
     }
 }
 
-/// Applies one auto-approval value to every mutable item in a category.
+/// Returns whether a toggleable AI tool key is currently enabled (not in `disabled_tools`).
+pub fn ai_tool_is_enabled(settings: &PersistedSettings, key: &str) -> bool {
+    let disabled = &settings.ai.tool_use.disabled_tools;
+    if disabled.iter().any(|name| name == key) {
+        return false;
+    }
+    if matches!(key, "write_resource:settings" | "write_resource:file")
+        && disabled.iter().any(|name| name == "write_resource")
+    {
+        return false;
+    }
+    true
+}
+
+/// Enables or disables one AI tool key by updating `settings.ai.tool_use.disabled_tools`.
+pub fn set_ai_tool_enabled(settings: &mut PersistedSettings, key: &str, enabled: bool) {
+    let disabled = &mut settings.ai.tool_use.disabled_tools;
+    if enabled {
+        disabled.retain(|name| name != key);
+        // If legacy whole-tool `write_resource` was disabled, expand it to only the
+        // sibling scope so re-enabling one scope does not accidentally re-enable both.
+        if matches!(key, "write_resource:settings" | "write_resource:file")
+            && disabled.iter().any(|name| name == "write_resource")
+        {
+            disabled.retain(|name| name != "write_resource");
+            let sibling = if key == "write_resource:settings" {
+                "write_resource:file"
+            } else {
+                "write_resource:settings"
+            };
+            if !disabled.iter().any(|name| name == sibling) {
+                disabled.push(sibling.to_string());
+            }
+        }
+    } else if !disabled.iter().any(|name| name == key) {
+        disabled.push(key.to_string());
+    }
+}
+
+/// Applies one enabled/disabled value to every mutable item in a category.
 pub fn set_ai_tool_policy_group_approval(
     settings: &mut PersistedSettings,
     group: &AiToolPolicyGroup,
-    approved: bool,
+    enabled: bool,
 ) {
     // Locked discovery tools are system policy and must never be changed by a
     // group-level convenience control.
     for item in group.items.iter().filter(|item| !item.locked) {
         if let Some(key) = item.key {
-            settings
-                .ai
-                .tool_use
-                .auto_approve_tools
-                .insert(key.to_string(), serde_json::json!(approved));
+            set_ai_tool_enabled(settings, key, enabled);
         }
     }
 }
@@ -199,22 +234,23 @@ impl AcpAgentPreset {
 }
 
 pub fn ai_tool_auto_approved_count(settings: &PersistedSettings) -> usize {
-    settings
-        .ai
-        .tool_use
-        .auto_approve_tools
-        .values()
-        .filter(|value| value.as_bool() == Some(true))
+    ai_tool_policy_groups(settings)
+        .into_iter()
+        .flat_map(|group| group.items)
+        .filter(|item| !item.locked && item.key.is_some() && item.checked)
         .count()
 }
 
 pub fn ai_tool_auto_approve_total_count(settings: &PersistedSettings) -> usize {
-    settings.ai.tool_use.auto_approve_tools.len()
+    ai_tool_policy_groups(settings)
+        .into_iter()
+        .flat_map(|group| group.items)
+        .filter(|item| !item.locked && item.key.is_some())
+        .count()
 }
 
 pub fn ai_tool_policy_groups(settings: &PersistedSettings) -> Vec<AiToolPolicyGroup> {
-    let auto = &settings.ai.tool_use.auto_approve_tools;
-    let checked = |key: &str| auto.get(key).and_then(serde_json::Value::as_bool) == Some(true);
+    let checked = |key: &str| ai_tool_is_enabled(settings, key);
     vec![
         AiToolPolicyGroup {
             title_key: "settings_view.ai.tool_policy_read_title",
@@ -831,11 +867,7 @@ mod tests {
     #[test]
     fn ai_tool_policy_group_bulk_toggle_preserves_locked_policy() {
         let mut settings = PersistedSettings::default();
-        settings
-            .ai
-            .tool_use
-            .auto_approve_tools
-            .insert("run_command".to_string(), serde_json::json!(true));
+        set_ai_tool_enabled(&mut settings, "run_command", false);
 
         let groups = ai_tool_policy_groups(&settings);
         let locked_group = groups[0].clone();
@@ -848,23 +880,34 @@ mod tests {
         );
         assert_eq!(terminal_group.next_bulk_value(), Some(true));
 
-        let locked_policy_before = settings.ai.tool_use.auto_approve_tools.clone();
+        let disabled_before = settings.ai.tool_use.disabled_tools.clone();
         set_ai_tool_policy_group_approval(&mut settings, &locked_group, false);
-        assert_eq!(
-            settings.ai.tool_use.auto_approve_tools,
-            locked_policy_before
-        );
+        assert_eq!(settings.ai.tool_use.disabled_tools, disabled_before);
 
         set_ai_tool_policy_group_approval(&mut settings, &terminal_group, true);
         let terminal_group = ai_tool_policy_groups(&settings)[1].clone();
         assert_eq!(terminal_group.state(), AiToolPolicyGroupState::AllApproved);
         assert_eq!(terminal_group.next_bulk_value(), Some(false));
+        assert!(ai_tool_is_enabled(&settings, "run_command"));
 
         set_ai_tool_policy_group_approval(&mut settings, &terminal_group, false);
         assert_eq!(
             ai_tool_policy_groups(&settings)[1].state(),
             AiToolPolicyGroupState::NoneApproved
         );
+        assert!(!ai_tool_is_enabled(&settings, "run_command"));
+        assert!(!ai_tool_is_enabled(&settings, "send_terminal_input"));
+
+        // Re-enabling one `write_resource` scope when legacy whole-tool `write_resource`
+        // is disabled keeps the sibling scope disabled.
+        settings
+            .ai
+            .tool_use
+            .disabled_tools
+            .push("write_resource".to_string());
+        set_ai_tool_enabled(&mut settings, "write_resource:file", true);
+        assert!(ai_tool_is_enabled(&settings, "write_resource:file"));
+        assert!(!ai_tool_is_enabled(&settings, "write_resource:settings"));
     }
 
     #[cfg(not(target_family = "wasm"))]

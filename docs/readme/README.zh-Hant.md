@@ -410,15 +410,19 @@ cargo run
 
 ### 整體架構
 
-介面、終端機和 SSH 在同一個 Rust 處理程序中執行，選用的遠端 Agent 和平台輔助程式則以獨立處理程序執行。終端機輸出從 SSH 通道或本機 PTY 直接寫入 `TerminalState`，再由 GPUI 繪製，中間沒有 WebView、JSON 橋接或 xterm.js。
+桌面版的介面、終端機工作階段與 SSH 在同一個 Rust 行程中執行，選用的遠端代理程式與平台輔助程式則獨立執行。終端機模擬器處理來自本機 PTY 或 SSH 通道的輸出，再由 GPUI 繪製。瀏覽器版共用同一套模擬器、畫布及工作區外框，通訊則由瀏覽器端負責。
 
 `NodeRouter` 從以 DashMap 為基礎的連線池 `SshConnectionRegistry` 中分配連線，因此終端機窗格、SFTP、連接埠轉發和編輯器會共用每台伺服器的一條 SSH 連線，除非某個終端機設定為使用獨立連線。每條連線都會經歷 `connecting → active → idle → link_down → reconnecting` 這些狀態。跳板主機發生故障時，其後方的伺服器會進入 `link_down`。每條轉發規則都有自己的監聽器。重新連線後，SFTP 工作階段會在新連線上重新取得，而在舊連線上發起的操作絕不會被悄悄轉移到新連線。
 
 ```text
 crates/
-├── oxideterm-gpui-app/        # Desktop app: windows, workspace, settings
-├── oxideterm-gpui-terminal/   # Terminal panes: input, selection, overlays
-├── oxideterm-terminal/        # Terminal model and escape-sequence parsing
+├── oxideterm-gpui-app/        # Desktop windows and runtime integration
+├── oxideterm-gpui-web/        # Browser workspace and transports
+├── oxideterm-gpui-shell/      # Shared workspace frame, tabs and pane layout
+├── oxideterm-gpui-terminal/   # Desktop terminal panes and session integration
+├── oxideterm-gpui-terminal-view/ # Shared canvas, input and standalone TerminalView
+├── oxideterm-terminal-emulator/  # Grid, escape-sequence parsing and snapshots
+├── oxideterm-terminal/        # Native sessions and transport I/O
 ├── oxideterm-ssh/             # SSH connections, NodeRouter, jump hosts
 ├── oxideterm-sftp/            # SFTP sessions and transfers
 ├── oxideterm-forwarding/      # Port forwarding runtime

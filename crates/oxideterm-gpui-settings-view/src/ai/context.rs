@@ -16,7 +16,8 @@ use oxideterm_gpui_ui::{
 use oxideterm_settings::PersistedSettings;
 use oxideterm_settings_model::{
     AiToolPolicyGroup, AiToolPolicyGroupState, SettingsSectionId, ai_tool_auto_approve_total_count,
-    ai_tool_auto_approved_count, ai_tool_policy_groups, set_ai_tool_policy_group_approval,
+    ai_tool_auto_approved_count, ai_tool_policy_groups, set_ai_tool_enabled,
+    set_ai_tool_policy_group_approval,
 };
 
 use super::*;
@@ -387,40 +388,22 @@ impl AiContextPage<'_> {
             let tool_key = item.key.map(str::to_string);
             let checked = item.checked;
             let locked = item.locked;
-            let control = checkbox(self.tokens, item.label_key, String::new(), checked)
-                .opacity(if locked { 0.5 } else { 1.0 })
-                .when(!locked, |checkbox| {
-                    checkbox.on_mouse_down(
-                        MouseButton::Left,
-                        self.edit(move |settings| {
-                            if let Some(tool_key) = tool_key.clone() {
-                                settings
-                                    .ai
-                                    .tool_use
-                                    .auto_approve_tools
-                                    .insert(tool_key, serde_json::json!(!checked));
-                            }
-                        }),
-                    )
-                })
-                .into_any_element();
-            let disabled = item.key.is_some_and(|key| {
-                self.settings
-                    .ai
-                    .tool_use
-                    .disabled_tools
-                    .iter()
-                    .any(|name| name == key)
-            });
-            let control = if disabled {
-                self.text_badge(self.i18n.t("common.disabled"), self.tokens.ui.warning)
-            } else if locked {
+            let control = if locked {
                 self.text_badge(
                     self.i18n.t("settings_view.ai.tool_no_confirmation"),
                     self.tokens.ui.text_muted,
                 )
             } else {
-                control
+                checkbox(self.tokens, item.label_key, String::new(), checked)
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        self.edit(move |settings| {
+                            if let Some(tool_key) = tool_key.clone() {
+                                set_ai_tool_enabled(settings, &tool_key, !checked);
+                            }
+                        }),
+                    )
+                    .into_any_element()
             };
             items.push(settings_ai_tool_policy_item(
                 self.tokens,

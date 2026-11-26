@@ -9,6 +9,8 @@ async fn execute_ai_round_call(
     tool_session_id: &ToolSessionId,
     conversation_id: &str,
     assistant_id: &str,
+    user_goal: &str,
+    mut auto_classifier_cache: Option<&mut std::collections::HashMap<(String, String), bool>>,
     execution: &mut Option<AgentExecution>,
     allow_selection: bool,
     dispatch: Option<&crate::agent::AgentDispatch>,
@@ -25,6 +27,8 @@ async fn execute_ai_round_call(
             tool_session_id,
             conversation_id,
             assistant_id,
+            user_goal,
+            auto_classifier_cache.as_deref_mut(),
             execution,
             allow_selection,
             dispatch,
@@ -73,6 +77,8 @@ async fn execute_ai_round_call_once(
     tool_session_id: &ToolSessionId,
     conversation_id: &str,
     assistant_id: &str,
+    user_goal: &str,
+    auto_classifier_cache: Option<&mut std::collections::HashMap<(String, String), bool>>,
     execution: &mut Option<AgentExecution>,
     allow_selection: bool,
     dispatch: Option<&crate::agent::AgentDispatch>,
@@ -204,13 +210,58 @@ async fn execute_ai_round_call_once(
             return Ok(executed);
         }
         let approval_args = parsed_args.clone();
-        let decision = resolve_ai_policy_decision(
+        let mut decision = resolve_ai_policy_decision(
             &call.name,
             Some(&approval_args),
             &config.tool_policy,
             config.safety_mode,
             config.profile_id.as_deref(),
         );
+        if config.safety_mode == crate::AiPolicySafetyMode::Auto
+            && decision.decision == crate::AiPolicyDecisionKind::RequireApproval
+            && matches!(
+                decision.risk,
+                crate::AiActionRisk::Execute
+                    | crate::AiActionRisk::Write
+                    | crate::AiActionRisk::Interactive
+            )
+        {
+            // Destructive and credential-sensitive actions never enter the LLM
+            // classifier; grey-area actions are evaluated in an isolated request
+            // with its own prompt_cache_key so main chat caching stays untouched.
+            let sanitized_args = sanitize_ai_tool_arguments_for_approval(&call.arguments);
+            let cache_key = (call.name.clone(), sanitized_args.clone());
+            let cached = auto_classifier_cache
+                .as_deref()
+                .and_then(|cache| cache.get(&cache_key).copied());
+            let auto_allowed = match cached {
+                Some(allowed) => allowed,
+                None => {
+                    let verdict = match crate::auto_policy::classify_auto_mode_action(
+                        config,
+                        user_goal,
+                        &call.name,
+                        decision.risk,
+                        &sanitized_args,
+                        dispatch,
+                    )
+                    .await
+                    {
+                        Ok(verdict) => verdict,
+                        Err(()) => return Ok(ai_direction_changed_result(&call)),
+                    };
+                    if let (Some(cache), Some(allowed)) = (auto_classifier_cache, verdict) {
+                        cache.insert(cache_key, allowed);
+                    }
+                    verdict.unwrap_or(false)
+                }
+            };
+            if auto_allowed {
+                decision.decision = crate::AiPolicyDecisionKind::Allow;
+                decision.reason_code = "auto_classifier_allowed".to_string();
+                decision.reason_text_key = "ai.tool_use.policy_reason_auto_allowed".to_string();
+            }
+        }
         let risk = ai_policy_risk_label(decision.risk).to_string();
         let summary = decision.reason_code.clone();
         let policy_ref = decision.reason_code.as_str();

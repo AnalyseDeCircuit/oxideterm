@@ -1,6 +1,6 @@
 # OxideTerm Development Guide
 
-This guide is the entry point for contributors working on the native desktop application. Product workflows belong in the [user guide](../user-guide/en/README.md); personal investigations and future proposals under `docs/local/` are not development contracts.
+This guide is the entry point for contributors working on the desktop and browser hosts and their shared crates. Product workflows belong in the [user guide](../user-guide/en/README.md); personal investigations and future proposals under `docs/local/` are not development contracts.
 
 ## Start Here
 
@@ -22,15 +22,10 @@ Use this sequence for a focused bug fix or small feature:
 
 ## How The Repository Is Organized
 
-The application is built from four concentric layers:
+Start with the host that owns the operation. Both hosts mount the shared GPUI shell, terminal canvas and feature views; their I/O paths differ:
 
-```text
-User workflow
-  -> workspace and feature UI
-  -> product services and protocol adapters
-  -> terminal, SSH, storage, and other domain crates
-  -> GPUI CE and operating-system backends
-```
+- **Desktop:** `oxideterm-gpui-app` routes actions to native services such as the PTY, the SSH connection registry and the settings store.
+- **Browser:** `oxideterm-gpui-web` runs on the single-threaded GPUI web backend. Its workspace supplies browser services, demo data or a gateway transport to the portable views.
 
 Move inward only when evidence says the outer layer is correct. For example, an SFTP button that opens the wrong connection normally belongs in workspace identity resolution, not in the SSH transport or a GPUI hit-test path.
 
@@ -42,7 +37,7 @@ Move inward only when evidence says the outer layer is correct. For example, an 
 | Find the correct crate or entry point | [Crate map](crate-map.md) |
 | Build a product page with existing controls, focus, IME, and overlays | [GPUI product UI](gpui-product-ui.md) |
 | Change tab scopes, shared search, or motion | [Product UI contracts](gpui-product-ui.md) and [workspace behavior](../user-guide/en/workspace.md) |
-| Build and run on macOS, Windows, or Linux | [Local development](local-development.md) |
+| Build and run on desktop or in a browser | [Local development](local-development.md) · [Browser setup](local-development.md#browser-wasm) |
 | Choose checks for a focused change | [Verification matrix](verification.md) |
 | Change a shared SSH connection or long-running task | [Runtime ownership](runtime-ownership.md) |
 | Combine, detach, reopen, or close workspace pages | [Page, pane, and window lifetime](runtime-ownership.md#pages-panes-and-window-mounts) |

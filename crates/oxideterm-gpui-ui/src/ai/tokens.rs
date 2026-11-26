@@ -100,6 +100,7 @@ pub enum AiToolRisk {
 pub enum AiSafetyMode {
     Default,
     ReadOnly,
+    Auto,
     Bypass,
 }
 

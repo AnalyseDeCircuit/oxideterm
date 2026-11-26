@@ -216,6 +216,24 @@ impl Render for KnowledgeWorkspaceView {
 }
 
 impl KnowledgeWorkspaceEntity {
+    pub fn leave_confirmation_open(&self) -> bool {
+        self.pending_document_id.is_some()
+            || self.pending_collection_id.is_some()
+            || self.pending_close.is_some()
+            || self.pending_app_quit
+    }
+
+    pub fn text_editor_focused(&self, window: &Window, cx: &App) -> bool {
+        self.menu
+            .as_ref()
+            .is_some_and(|menu| menu.focus.is_focused(window))
+            || self.editor.as_ref().is_some_and(|editor| {
+                let editor = editor.read(cx);
+                editor.source_editable()
+                    && editor.editor.read(cx).focus_handle(cx).is_focused(window)
+            })
+    }
+
     pub fn input_owner(&self, input: KnowledgeInput) -> Option<gpui::WindowId> {
         match input {
             KnowledgeInput::Search => self.navigator_search_window,
@@ -295,19 +313,6 @@ impl KnowledgeWorkspaceView {
                 editor.update(cx, |editor, cx| editor.set_cache_visible(visible, cx));
             }
         });
-    }
-
-    pub fn text_editor_focused(&self, window: &Window, cx: &App) -> bool {
-        let state = self.state.read(cx);
-        state
-            .menu
-            .as_ref()
-            .is_some_and(|menu| menu.focus.is_focused(window))
-            || state.editor.as_ref().is_some_and(|editor| {
-                let editor = editor.read(cx);
-                editor.source_editable()
-                    && editor.editor.read(cx).focus_handle(cx).is_focused(window)
-            })
     }
 
     pub fn set_input_value(
@@ -633,14 +638,6 @@ impl KnowledgeWorkspaceView {
             )
         })
         .into_any_element()
-    }
-
-    pub fn knowledge_leave_confirmation_open(&self, cx: &App) -> bool {
-        let knowledge = self.state.read(cx);
-        knowledge.pending_document_id.is_some()
-            || knowledge.pending_collection_id.is_some()
-            || knowledge.pending_close.is_some()
-            || knowledge.pending_app_quit
     }
 
     pub fn handle_knowledge_leave_confirmation_key(
@@ -1423,7 +1420,7 @@ impl KnowledgeWorkspaceView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.text_editor_focused(window, cx) {
+        if self.state.read(cx).text_editor_focused(window, cx) {
             return false;
         }
         let key = event.keystroke.key.as_str();

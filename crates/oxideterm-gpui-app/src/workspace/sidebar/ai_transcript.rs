@@ -158,6 +158,7 @@ impl WorkspaceApp {
                         }
                         AiTranscriptRequest::SafetyDefault => app.set_ai_safety_mode_default(cx),
                         AiTranscriptRequest::SafetyReadOnly => app.set_ai_safety_mode_read_only(cx),
+                        AiTranscriptRequest::SafetyAuto => app.set_ai_safety_mode_auto(cx),
                         AiTranscriptRequest::SafetyConfirm => app.open_ai_safety_confirm(cx),
                         AiTranscriptRequest::ConfirmSafety(confirmed) => {
                             if app.begin_ai_safety_confirm_exit(cx) && confirmed {

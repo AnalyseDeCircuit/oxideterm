@@ -1,6 +1,6 @@
-# OxideTerm Native 架构设计
+# OxideTerm 架构设计
 
-> **版本**: Native 桌面架构
+> **范围**：桌面与浏览器共用的界面，以及桌面运行时。
 > **实现依据**：当前 Rust/GPUI 工作区。版本见 [Cargo.toml](../../../Cargo.toml)，贡献流程见[开发指南](../../development/README.md)。
 
 本文档说明原生应用的组件、数据与控制路径，以及生命周期归属。日常操作可先阅读[工作区导航](workspace.md)。
@@ -85,6 +85,16 @@ flowchart TB
 
 ## 整体架构概览
 
+### 桌面与浏览器共用什么
+
+桌面端由 `oxideterm-gpui-app` 管理窗口、SSH 节点和本地进程。[浏览器入口](../../../crates/oxideterm-gpui-web/src/boot.rs)则在单个浏览器窗口中创建自己的工作区。两端都使用 [`WorkspaceShell`](../../../crates/oxideterm-gpui-shell/src/host.rs)：外壳负责标签栏、侧栏和窗格布局，宿主提供页面，并决定输入或关闭操作作用于哪个会话。
+
+两端也共用终端模拟器和画布。`oxideterm-terminal-emulator` 解析字节并生成网格快照；`oxideterm-gpui-terminal-view` 负责排版、绘制和输入。桌面端的 `TerminalPane` 通过 `TerminalCanvasHost` 使用画布，由原生会话读写 PTY 或 SSH 通道。浏览器挂载独立的 `TerminalView`，由浏览器宿主把输入、协议回复和尺寸变化送回对应会话。
+
+默认演示终端和文件页面使用内存中的示例数据，主机工具显示示例采样。指定 `?gateway=wss://…` 后，终端改用 [WebSocket 协议](../../../crates/oxideterm-gpui-web/src/transport.rs)向网关请求会话；连接失败时不会自动切回演示。蓝牙终端使用另一条路径：支持 Web Bluetooth 的浏览器可在用户选择设备后直接连接 GATT 服务。桌面插件的 Wasm 运行时与浏览器入口互相独立。
+
+下图以及后面的 SSH、SFTP 生命周期说明以桌面端为准。
+
 总览区分应用编排、可复用的运行时领域、持久状态和外部资源。粗箭头表示生命周期管理或持有句柄，实线表示调用或数据流，虚线表示限定范围的访问或元数据交付。句柄可以指向共享资源，不表示独占所有权。
 
 ```mermaid
@@ -97,7 +107,7 @@ flowchart TB
         Tabs["WorkspaceTabHostEntity<br/>窗格树、终端实体、窗口挂载"]
         Terminal["TerminalPane / TerminalSession<br/>本地、SSH、Mosh、Telnet、串口、BLE"]
         Grid["vte / alacritty_terminal / terminal-graphics<br/>ANSI、网格、历史、协议图像"]
-        Paint["oxideterm-gpui-terminal / GPUI<br/>快照、行缓存、字形、图像上传"]
+        Paint["gpui-terminal-view / GPUI<br/>快照、行缓存、字形、图像上传"]
         Media["背景媒体与特效<br/>解码、动画、合成"]
         Services["文件、转发与监控协调实体<br/>SFTP / IDE / 传输 / 主机工具"]
         Consumers["SFTP 会话 / IDE 文件访问<br/>转发监听器 / 主机采样器"]
@@ -340,7 +350,7 @@ flowchart TB
 
 ### 第一层：GPUI 应用外壳
 
-窗口外壳由 `oxideterm-gpui-app` 负责；各功能界面管理自己的状态，工作区协调需要窗口或长期运行时参与的操作。
+`oxideterm-gpui-shell` 提供外壳布局；`oxideterm-gpui-app` 将桌面窗口、功能视图和会话装配到其中。各功能实体管理自己的状态。
 
 职责：
 
@@ -355,7 +365,7 @@ flowchart TB
 ```text
 crates/oxideterm-gpui-app/src/workspace.rs
 crates/oxideterm-gpui-app/src/workspace/tabs/
-crates/oxideterm-gpui-app/src/workspace/pane_tree.rs
+crates/oxideterm-gpui-shell/src/panes.rs
 crates/oxideterm-gpui-app/src/workspace/sidebar/
 crates/oxideterm-gpui-app/src/workspace/settings/
 crates/oxideterm-gpui-app/src/workspace/knowledge.rs
@@ -762,14 +772,14 @@ flowchart TB
 | 传输输出与协议解析 | `oxideterm-terminal`、`oxideterm-terminal-graphics`、`vte` 和 `alacritty_terminal` | 图像与控制序列按顺序解析，更新文本网格并产生图像事件。OSC 载荷批量扫描在 BEL 或 ESC 处停止，保留存储上限和分块输入状态。 |
 | 网格与历史 | `alacritty_terminal` | 可写行使用完整单元格数组。历史行在有收益时采用重复尾部或打包存储；只读遍历不展开压缩行。 |
 | 显示快照 | `oxideterm-terminal-model` 和终端运行时 | 行通过 `Arc` 共享单元格数据，并使用稳定行标识及绘制相关签名识别变化。 |
-| 行布局与文字排版 | `oxideterm-gpui-terminal` 中的 `TerminalLayoutCache` | 行缓存键包含内容、选择区、光标、主题和高亮状态。行变化后，文本、列位置、单元格数和完整样式一致的片段仍可复用排版与绘制缓存；字号、单元格宽度或行高变化会使片段复用失效。 |
+| 行布局与文字排版 | `oxideterm-gpui-terminal-view` 中的 `TerminalLayoutCache` | 行缓存键包含内容、选择区、光标、主题和高亮状态。行变化后，文本、列位置、单元格数和完整样式一致的片段仍可复用排版与绘制缓存；字号、单元格宽度或行高变化会使片段复用失效。 |
 | 语义角色 | 终端逻辑行布局 | 分类依据逻辑行的绝对范围、当前输入状态和不可变命令标记快照。弱引用用于识别快照替换，不延长命令文本的生命周期。 |
 | 字形批次与装饰线 | GPUI 的 `LinePaintCache` | 布局、颜色、缩放和渲染器资源有效时复用已准备的字形数据。整段统一的下划线和删除线复用字形，线条按当前样式绘制；局部装饰使用通用绘制路径。 |
 | 协议图像显示 | 终端图像缓存和 GPUI 图像资源 | 图像标识、版本和来源裁剪区域决定缓存复用。共享像素租约统计解码内存；有容量限制的显示缓存和可见性共同控制渲染资源的保留。 |
 
 对于共用基线且采用整数纵向栅格化的字形，批次以取整后的设备基线为锚点。纵向滚动时可以直接平移批次，避免重复准备字形，并保持原有栅格位置。带额外纵向排版偏移的字形继续按设备像素相位判断缓存是否有效。颜色在准备阶段完成色相归一化，每次绘制再应用当前不透明度。空白格跳过无用的前景色转换，主题默认背景复用已经转换的颜色。
 
-这些职责分别位于[行布局](../../../crates/oxideterm-gpui-terminal/src/terminal_view/element.rs)、[GPUI 字形绘制](../../../crates/gpui-pre/gpui/src/text_system/line.rs)、[图像缓存](../../../crates/oxideterm-gpui-terminal/src/app/image_cache.rs)和[图像与网格同步](../../../crates/oxideterm-terminal-graphics/src/graphics/grid.rs)中。
+这些职责分别位于[行布局](../../../crates/oxideterm-gpui-terminal-view/src/element.rs)、[GPUI 字形绘制](../../../crates/gpui-pre/gpui/src/text_system/line.rs)、[图像缓存](../../../crates/oxideterm-gpui-terminal/src/app/image_cache.rs)和[图像与网格同步](../../../crates/oxideterm-terminal-graphics/src/graphics/grid.rs)中。
 
 ### 提权与文件传输辅助
 
@@ -2891,9 +2901,9 @@ flowchart TB
 %%{init: {"layout": "dagre", "flowchart": {"nodeSpacing": 45, "rankSpacing": 75, "curve": "basis"}}}%%
 flowchart TB
     App["oxideterm-gpui-app<br/>工作区装配"]
-    SharedUI["gpui-ui / gpui-platform<br/>workspace / theme"]
-    TerminalUI["oxideterm-gpui-terminal"]
-    Terminal["terminal / terminal-model / terminal-*<br/>vte / alacritty_terminal"]
+    SharedUI["gpui-shell / gpui-ui / gpui-platform<br/>workspace / theme"]
+    TerminalUI["gpui-terminal / gpui-terminal-view"]
+    Terminal["terminal / terminal-emulator / terminal-model<br/>vte / alacritty_terminal"]
     Remote["ssh / sftp / forwarding<br/>connection-monitor / topology"]
     Editor["gpui-ide / gpui-editor / gpui-markdown<br/>ide-core / ide-fs / editor-*"]
     Graphics["gpui-remote-desktop / remote-desktop<br/>wsl-graphics / 市场辅助程序"]
@@ -2919,10 +2929,10 @@ flowchart TB
 
 | 区域 | Crates |
 |---|---|
-| 桌面外壳和工作区衔接 | `oxideterm-gpui-app`, `oxideterm-workspace` |
+| 桌面外壳和工作区衔接 | `oxideterm-gpui-app`, `oxideterm-gpui-shell`, `oxideterm-workspace` |
 | 共享 GPUI 组件和平台辅助 | `oxideterm-gpui-ui`, `oxideterm-gpui-platform`, `oxideterm-theme` |
 | 终端渲染和终端领域 | `oxideterm-gpui-terminal`, `oxideterm-terminal`, `oxideterm-terminal-*` |
-| 终端解析、网格与历史 | 工作区维护的 `vte`、`alacritty_terminal` 分支；显示快照位于 `oxideterm-terminal-model` |
+| 终端解析、网格与历史 | 工作区维护的 `vte`、`alacritty_terminal` 分支；`oxideterm-terminal-emulator` 使用 `oxideterm-terminal-model` 的行和单元格生成快照 |
 | BLE 终端传输 | `oxideterm-ble`、`oxideterm-terminal/src/session/ble.rs` |
 | 终端 modem 传输 | `oxideterm-modem-transfer`, 终端 modem worker 集成 |
 | SSH、节点路由、重连 | `oxideterm-ssh`, `oxideterm-topology`, `oxideterm-session-adapter` |

@@ -760,6 +760,12 @@ impl AiAssistantSidebarView {
                 cx,
             ))
             .child(self.render_ai_safety_menu_item(
+                AiSafetyMode::Auto,
+                self.i18n.t("ai.safety_mode.auto_mode"),
+                self.i18n.t("ai.safety_mode.auto_desc"),
+                cx,
+            ))
+            .child(self.render_ai_safety_menu_item(
                 AiSafetyMode::Bypass,
                 self.i18n.t("ai.safety_mode.bypass_mode"),
                 self.i18n.t("ai.safety_mode.bypass_desc"),
@@ -829,6 +835,7 @@ impl AiAssistantSidebarView {
         let icon = match mode {
             AiSafetyMode::Default => LucideIcon::ShieldCheck,
             AiSafetyMode::ReadOnly => LucideIcon::Shield,
+            AiSafetyMode::Auto => LucideIcon::Sparkles,
             AiSafetyMode::Bypass => LucideIcon::ShieldAlert,
         };
         let bypass = mode == AiSafetyMode::Bypass;
@@ -840,6 +847,7 @@ impl AiAssistantSidebarView {
         let mode_key = match mode {
             AiSafetyMode::Default => "default",
             AiSafetyMode::ReadOnly => "read-only",
+            AiSafetyMode::Auto => "auto",
             AiSafetyMode::Bypass => "bypass",
         };
         let item = div()
@@ -918,6 +926,9 @@ impl AiAssistantSidebarView {
                     }
                     AiSafetyMode::ReadOnly => {
                         (this.bindings.request)(AiTranscriptRequest::SafetyReadOnly, None, cx)
+                    }
+                    AiSafetyMode::Auto => {
+                        (this.bindings.request)(AiTranscriptRequest::SafetyAuto, None, cx)
                     }
                     AiSafetyMode::Bypass => {
                         if this.active_ai_safety_mode(cx) != AiSafetyMode::Bypass {

@@ -17,6 +17,7 @@ pub use handoff::{
 };
 pub mod agent;
 mod application_tools;
+mod auto_policy;
 mod chat;
 pub mod chat_tools;
 mod context_sanitizer;

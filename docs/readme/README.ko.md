@@ -410,15 +410,19 @@ Nix: `nix build .#oxideterm`, `nix run .#oxideterm` 또는 `nix develop`. CLI �
 
 ### 전체 구조
 
-UI, 터미널, SSH는 하나의 Rust 프로세스에서 실행합니다. 선택적인 원격 에이전트와 플랫폼 보조 도구는 별도 프로세스입니다. SSH/로컬 PTY 출력은 `TerminalState`로 직접 들어가 GPUI가 WebView, JSON 브리지, xterm.js 없이 그립니다.
+데스크톱에서는 화면, 터미널 세션, SSH가 하나의 Rust 프로세스에서 실행됩니다. 선택 사항인 원격 에이전트와 플랫폼 보조 프로그램은 별도 프로세스에서 실행됩니다. 터미널 에뮬레이터가 PTY 또는 SSH 출력을 처리하면 GPUI가 화면에 그립니다. 브라우저 버전은 에뮬레이터와 그리기 영역, 작업 공간의 기본 틀을 공유하고 통신은 별도로 처리합니다.
 
 `NodeRouter`는 DashMap 기반 풀 `SshConnectionRegistry`에서 연결을 제공합니다. 자체 연결로 설정된 터미널을 제외하고 터미널, SFTP, 포워딩, 편집기는 서버별 연결 하나를 공유합니다. 상태는 `connecting → active → idle → link_down → reconnecting`입니다. 점프 호스트가 실패하면 하위 서버는 `link_down`이 됩니다. 포워딩 규칙마다 리스너가 있으며, 재연결 후 SFTP 세션은 새로 취득하고 이전 연결의 작업을 몰래 옮기지 않습니다.
 
 ```text
 crates/
-├── oxideterm-gpui-app/        # Desktop app: windows, workspace, settings
-├── oxideterm-gpui-terminal/   # Terminal panes: input, selection, overlays
-├── oxideterm-terminal/        # Terminal model and escape-sequence parsing
+├── oxideterm-gpui-app/        # Desktop windows and runtime integration
+├── oxideterm-gpui-web/        # Browser workspace and transports
+├── oxideterm-gpui-shell/      # Shared workspace frame, tabs and pane layout
+├── oxideterm-gpui-terminal/   # Desktop terminal panes and session integration
+├── oxideterm-gpui-terminal-view/ # Shared canvas, input and standalone TerminalView
+├── oxideterm-terminal-emulator/  # Grid, escape-sequence parsing and snapshots
+├── oxideterm-terminal/        # Native sessions and transport I/O
 ├── oxideterm-ssh/             # SSH connections, NodeRouter, jump hosts
 ├── oxideterm-sftp/            # SFTP sessions and transfers
 ├── oxideterm-forwarding/      # Port forwarding runtime

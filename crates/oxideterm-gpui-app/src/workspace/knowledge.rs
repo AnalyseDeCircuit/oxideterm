@@ -254,7 +254,7 @@ impl WorkspaceApp {
             Some(WorkspaceImeTarget::KnowledgeSearch | WorkspaceImeTarget::KnowledgeRename)
         ) || self
             .knowledge_workspace
-            .view
+            .state
             .read(cx)
             .text_editor_focused(window, cx)
     }
@@ -278,9 +278,9 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn knowledge_leave_confirmation_open(&self, cx: &App) -> bool {
         self.knowledge_workspace
-            .view
+            .state
             .read(cx)
-            .knowledge_leave_confirmation_open(cx)
+            .leave_confirmation_open()
     }
 
     pub(in crate::workspace) fn handle_knowledge_leave_confirmation_key(

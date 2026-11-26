@@ -939,6 +939,157 @@ fn ai_policy_read_only_mode_allows_reads_and_denies_every_mutation_class() {
 }
 
 #[test]
+fn ai_policy_default_requires_approval_bypass_allows_enabled_and_disabled_stays_denied() {
+    let mut legacy_auto = HashMap::new();
+    legacy_auto.insert("run_command".to_string(), true);
+    legacy_auto.insert("write_resource:file".to_string(), true);
+    let policy = AiToolUsePolicy {
+        enabled: true,
+        auto_approve_tools: legacy_auto,
+        disabled_tools: vec![
+            "transfer_resource".to_string(),
+            "write_resource:settings".to_string(),
+        ],
+        max_rounds: Some(10),
+        max_calls_per_round: Some(8),
+    };
+
+    // Default mode always requires approval for enabled mutating/execute/destructive tools,
+    // even if a legacy persisted settings file had `autoApproveTools` entries set to true.
+    let default_run = resolve_ai_policy_decision(
+        "run_command",
+        Some(&serde_json::json!({ "command": "ls -la" })),
+        &policy,
+        AiPolicySafetyMode::Default,
+        None,
+    );
+    assert_eq!(default_run.decision, AiPolicyDecisionKind::RequireApproval);
+    assert_eq!(default_run.reason_code, "policy_requires_approval");
+
+    let default_write = resolve_ai_policy_decision(
+        "write_resource",
+        Some(&serde_json::json!({ "resource": "file" })),
+        &policy,
+        AiPolicySafetyMode::Default,
+        None,
+    );
+    assert_eq!(
+        default_write.decision,
+        AiPolicyDecisionKind::RequireApproval
+    );
+
+    // Bypass mode skips approval for all enabled non-credential tools (execute, write,
+    // interactive, and destructive), not only destructive commands.
+    for (tool, args, expected_reason) in [
+        (
+            "run_command",
+            serde_json::json!({ "command": "ls -la" }),
+            "bypass_allowed",
+        ),
+        (
+            "write_resource",
+            serde_json::json!({ "resource": "file" }),
+            "bypass_allowed",
+        ),
+        (
+            "send_terminal_input",
+            serde_json::json!({ "input": "y\n" }),
+            "bypass_allowed",
+        ),
+        (
+            "run_command",
+            serde_json::json!({ "command": "rm -rf /tmp/demo" }),
+            "bypass_destructive_allowed",
+        ),
+    ] {
+        let decision = resolve_ai_policy_decision(
+            tool,
+            Some(&args),
+            &policy,
+            AiPolicySafetyMode::Bypass,
+            None,
+        );
+        assert_eq!(decision.decision, AiPolicyDecisionKind::Allow, "{tool}");
+        assert_eq!(decision.reason_code, expected_reason, "{tool}");
+    }
+
+    // Disabled tools remain denied even in Bypass mode (both whole-tool and scoped keys).
+    let disabled_transfer = resolve_ai_policy_decision(
+        "transfer_resource",
+        None,
+        &policy,
+        AiPolicySafetyMode::Bypass,
+        None,
+    );
+    assert_eq!(disabled_transfer.decision, AiPolicyDecisionKind::Deny);
+    assert_eq!(disabled_transfer.reason_code, "tool_disabled");
+
+    let disabled_settings = resolve_ai_policy_decision(
+        "write_resource",
+        Some(&serde_json::json!({ "resource": "settings" })),
+        &policy,
+        AiPolicySafetyMode::Bypass,
+        None,
+    );
+    assert_eq!(disabled_settings.decision, AiPolicyDecisionKind::Deny);
+    assert_eq!(disabled_settings.reason_code, "tool_disabled");
+
+    // Auto mode fast-paths unambiguously read-only shell commands locally, keeps
+    // destructive and grey-area actions requiring approval at the policy layer,
+    // and still denies disabled tools.
+    let auto_readonly_cmd = resolve_ai_policy_decision(
+        "run_command",
+        Some(&serde_json::json!({ "command": "ls -la | head -n 10" })),
+        &policy,
+        AiPolicySafetyMode::Auto,
+        None,
+    );
+    assert_eq!(auto_readonly_cmd.decision, AiPolicyDecisionKind::Allow);
+    assert_eq!(
+        auto_readonly_cmd.reason_code,
+        "auto_read_only_command_allowed"
+    );
+
+    let auto_grey_cmd = resolve_ai_policy_decision(
+        "run_command",
+        Some(&serde_json::json!({ "command": "systemctl restart nginx" })),
+        &policy,
+        AiPolicySafetyMode::Auto,
+        None,
+    );
+    assert_eq!(
+        auto_grey_cmd.decision,
+        AiPolicyDecisionKind::RequireApproval
+    );
+
+    let auto_destructive = resolve_ai_policy_decision(
+        "run_command",
+        Some(&serde_json::json!({ "command": "rm -rf /tmp/demo" })),
+        &policy,
+        AiPolicySafetyMode::Auto,
+        None,
+    );
+    assert_eq!(
+        auto_destructive.decision,
+        AiPolicyDecisionKind::RequireApproval
+    );
+    assert_eq!(
+        auto_destructive.reason_code,
+        "destructive_requires_approval"
+    );
+
+    let auto_disabled = resolve_ai_policy_decision(
+        "transfer_resource",
+        None,
+        &policy,
+        AiPolicySafetyMode::Auto,
+        None,
+    );
+    assert_eq!(auto_disabled.decision, AiPolicyDecisionKind::Deny);
+    assert_eq!(auto_disabled.reason_code, "tool_disabled");
+}
+
+#[test]
 fn application_tool_policy_classifies_mutations_by_action() {
     assert_eq!(
         orchestrator_risk_for_tool(

@@ -36,15 +36,32 @@ pub fn ai_stream_tool_definitions_with(
         // whether a guessed tool call succeeds at execution time.
         tools.retain(|tool| tool.name != "load_skill" && tool.name != "read_skill_resource");
     }
+    let tool_disabled = |tool_name: &str| {
+        if tool_policy
+            .disabled_tools
+            .iter()
+            .any(|disabled| disabled == tool_name)
+        {
+            return true;
+        }
+        // `write_resource` is exposed in Settings as separate settings/file toggles;
+        // omit it from model tool definitions once both writable scopes are disabled.
+        if tool_name == "write_resource" {
+            let has = |key: &str| {
+                tool_policy
+                    .disabled_tools
+                    .iter()
+                    .any(|disabled| disabled == key)
+            };
+            return has("write_resource:settings") && has("write_resource:file");
+        }
+        false
+    };
+    tools.retain(|tool| !tool_disabled(&tool.name));
     // Native does not ship Tauri's autonomous agent path yet. Expose MCP
     // resource/dynamic tools through chat as a native-only bridge so MCP
     // remains usable from the primary AI surface.
-    tools.extend(mcp().into_iter().filter(|tool| {
-        !tool_policy
-            .disabled_tools
-            .iter()
-            .any(|name| name == &tool.name)
-    }));
+    tools.extend(mcp().into_iter().filter(|tool| !tool_disabled(&tool.name)));
     tools
 }
 
@@ -96,6 +113,8 @@ mod tests {
             disabled_tools: vec![
                 "list_mcp_resources".to_string(),
                 "read_resource".to_string(),
+                "write_resource:settings".to_string(),
+                "write_resource:file".to_string(),
             ],
             ..crate::AiToolUsePolicy::default()
         };
@@ -106,7 +125,8 @@ mod tests {
             .map(|tool| tool.name.as_str())
             .collect::<Vec<_>>();
 
-        assert!(names.contains(&"read_resource"));
+        assert!(!names.contains(&"read_resource"));
+        assert!(!names.contains(&"write_resource"));
         assert!(names.contains(&"read_mcp_resource"));
         assert!(!names.contains(&"list_mcp_resources"));
         assert!(!names.contains(&"search_web"));

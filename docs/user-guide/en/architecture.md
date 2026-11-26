@@ -1,6 +1,6 @@
-# OxideTerm Native Architecture
+# OxideTerm Architecture
 
-> **Version**: Native desktop architecture
+> **Scope**: Shared desktop and browser UI, and the desktop runtime.
 > **Source of truth**: the current Rust/GPUI workspace; see [Cargo.toml](../../../Cargo.toml) for its version and [development guides](../../development/README.md) for contributor workflows.
 
 This document describes the native system's components, data and control paths, and lifecycle ownership. For daily navigation, start with [Workspace Navigation](workspace.md).
@@ -85,6 +85,16 @@ flowchart TB
 
 ## Architecture Overview
 
+### What the desktop and browser share
+
+The desktop host, `oxideterm-gpui-app`, owns windows, SSH nodes and local processes. The [browser entry point](../../../crates/oxideterm-gpui-web/src/boot.rs) creates its own workspace in a single browser window. Both use [`WorkspaceShell`](../../../crates/oxideterm-gpui-shell/src/host.rs) for tab strips, rails and pane layout. Each host supplies the pages and decides which session receives input or a close request.
+
+Both hosts also share the terminal emulator and canvas. `oxideterm-terminal-emulator` parses bytes and produces grid snapshots; `oxideterm-gpui-terminal-view` handles layout, painting and input. The desktop `TerminalPane` implements `TerminalCanvasHost` while a native session reads and writes the PTY or SSH channel. The browser mounts a standalone `TerminalView` and routes input, protocol replies and resize events to its session.
+
+By default the demo terminal and file pages use seeded in-memory data, and Host Tools shows sample captures. With `?gateway=wss://…`, the terminal requests sessions over the [WebSocket protocol](../../../crates/oxideterm-gpui-web/src/transport.rs); a failed connection does not switch back to the demo. BLE uses a separate path: a browser with Web Bluetooth can connect directly to a GATT service after the user selects a device. The native Wasm plugin runtime is separate from the browser entry point.
+
+The diagram below and the SSH and SFTP lifecycles that follow describe the desktop host.
+
 The overview separates application coordination, reusable runtime domains, durable state and external resources. Thick arrows mean lifecycle ownership or a retained handle, solid arrows mean calls or data flow, and dotted arrows mean scoped access or metadata delivery. A retained handle can refer to a shared resource; it does not imply exclusive ownership.
 
 ```mermaid
@@ -97,7 +107,7 @@ flowchart TB
         Tabs["WorkspaceTabHostEntity<br/>pane trees, terminal entities, window mounts"]
         Terminal["TerminalPane / TerminalSession<br/>local, SSH, Mosh, Telnet, serial, BLE"]
         Grid["vte / alacritty_terminal / terminal-graphics<br/>ANSI, grid, history, protocol images"]
-        Paint["oxideterm-gpui-terminal / GPUI<br/>snapshots, row caches, glyphs, image uploads"]
+        Paint["gpui-terminal-view / GPUI<br/>snapshots, row caches, glyphs, image uploads"]
         Media["Background media and effects<br/>decode, animation, composition"]
         Services["File, forwarding and monitor coordinators<br/>SFTP / IDE / transfers / host tools"]
         Consumers["SFTP sessions / IDE file access<br/>forwarding listeners / host samplers"]
@@ -340,8 +350,7 @@ Implementation: [workspace](../../../crates/oxideterm-gpui-app/src/workspace.rs)
 
 ### Layer 1: GPUI Application Shell
 
-The window shell lives in `oxideterm-gpui-app`. Feature crates own their views; the workspace is
-the coordinator for long-lived application entities.
+`oxideterm-gpui-shell` provides the frame; `oxideterm-gpui-app` composes desktop windows, feature views and sessions inside it. Feature entities own their state.
 
 Responsibilities:
 
@@ -357,7 +366,7 @@ Representative modules:
 ```text
 crates/oxideterm-gpui-app/src/workspace.rs
 crates/oxideterm-gpui-app/src/workspace/tabs/
-crates/oxideterm-gpui-app/src/workspace/pane_tree.rs
+crates/oxideterm-gpui-shell/src/panes.rs
 crates/oxideterm-gpui-app/src/workspace/sidebar/
 crates/oxideterm-gpui-app/src/workspace/settings/
 crates/oxideterm-gpui-app/src/workspace/knowledge.rs
@@ -768,14 +777,14 @@ Terminal drawing passes through these boundaries:
 | Transport output and protocol parsing | `oxideterm-terminal`, `oxideterm-terminal-graphics`, `vte` and `alacritty_terminal` | Ordered graphics/control parsing feeds the text grid and graphics events. OSC payload scanning stops at BEL or ESC and preserves the storage limit and partial-input state. |
 | Grid and history | `alacritty_terminal` | Writable rows use dense cells. History can use repeated-tail or packed storage when beneficial; read-only iteration does not expand compact rows. |
 | Display snapshots | `oxideterm-terminal-model` and the terminal runtime | Rows share cell data through `Arc`, with stable line identities and paint-relevant signatures. |
-| Row layout and text shaping | `TerminalLayoutCache` in `oxideterm-gpui-terminal` | Row keys include content, selection, cursor, theme and highlight state. When a row changes, unchanged text runs can retain shaping and paint caches if text, column, cell count and complete style match. Font size, cell width and line height changes invalidate run reuse. |
+| Row layout and text shaping | `TerminalLayoutCache` in `oxideterm-gpui-terminal-view` | Row keys include content, selection, cursor, theme and highlight state. When a row changes, unchanged text runs can retain shaping and paint caches if text, column, cell count and complete style match. Font size, cell width and line height changes invalidate run reuse. |
 | Semantic roles | Terminal logical-line layout | Classification uses absolute logical-line ranges, active-input state and the immutable command-mark snapshot. A weak snapshot reference detects replacement without retaining command text. |
 | Glyph batches and decorations | GPUI `LinePaintCache` | Prepared glyph data is reused while layout, colors, scale and renderer resources remain valid. Uniform full-run underlines and strikethroughs reuse glyphs and draw their strokes with current styles. Partial decorations use the general painter. |
 | Protocol image display | Terminal image cache and GPUI image resources | Image identity, version and source crop determine cache reuse. Shared pixel leases track decoded memory; bounded display caches and visibility control renderer-resource retention. |
 
 For glyphs that share a baseline and use integer vertical rasterization, the batch anchor is the rounded device baseline. Vertical scrolling can then translate the batch without repeating glyph preparation or changing rasterized positions. Glyphs with additional vertical shaping offsets retain device-phase invalidation. Prepared colors normalize hue once, while each draw applies current opacity. Blank cells avoid unused foreground conversion, and theme-default backgrounds reuse the converted background color.
 
-The [row layout](../../../crates/oxideterm-gpui-terminal/src/terminal_view/element.rs), [GPUI glyph painter](../../../crates/gpui-pre/gpui/src/text_system/line.rs), [image cache](../../../crates/oxideterm-gpui-terminal/src/app/image_cache.rs) and [graphics/grid synchronization](../../../crates/oxideterm-terminal-graphics/src/graphics/grid.rs) own these boundaries.
+The [row layout](../../../crates/oxideterm-gpui-terminal-view/src/element.rs), [GPUI glyph painter](../../../crates/gpui-pre/gpui/src/text_system/line.rs), [image cache](../../../crates/oxideterm-gpui-terminal/src/app/image_cache.rs) and [graphics/grid synchronization](../../../crates/oxideterm-terminal-graphics/src/graphics/grid.rs) own these boundaries.
 
 ### Privilege And File-Transfer Helpers
 
@@ -2908,9 +2917,9 @@ This map groups responsibilities, not every Cargo dependency. Short crate names 
 %%{init: {"layout": "dagre", "flowchart": {"nodeSpacing": 45, "rankSpacing": 75, "curve": "basis"}}}%%
 flowchart TB
     App["oxideterm-gpui-app<br/>workspace composition"]
-    SharedUI["gpui-ui / gpui-platform<br/>workspace / theme"]
-    TerminalUI["oxideterm-gpui-terminal"]
-    Terminal["terminal / terminal-model / terminal-*<br/>vte / alacritty_terminal"]
+    SharedUI["gpui-shell / gpui-ui / gpui-platform<br/>workspace / theme"]
+    TerminalUI["gpui-terminal / gpui-terminal-view"]
+    Terminal["terminal / terminal-emulator / terminal-model<br/>vte / alacritty_terminal"]
     Remote["ssh / sftp / forwarding<br/>connection-monitor / topology"]
     Editor["gpui-ide / gpui-editor / gpui-markdown<br/>ide-core / ide-fs / editor-*"]
     Graphics["gpui-remote-desktop / remote-desktop<br/>wsl-graphics / marketplace helpers"]
@@ -2936,10 +2945,10 @@ flowchart TB
 
 | Area | Crates |
 |---|---|
-| Desktop shell and workspace glue | `oxideterm-gpui-app`, `oxideterm-workspace` |
+| Desktop shell and workspace glue | `oxideterm-gpui-app`, `oxideterm-gpui-shell`, `oxideterm-workspace` |
 | Shared GPUI components and platform helpers | `oxideterm-gpui-ui`, `oxideterm-gpui-platform`, `oxideterm-theme` |
 | Terminal rendering and terminal domain | `oxideterm-gpui-terminal`, `oxideterm-terminal`, `oxideterm-terminal-*` |
-| Terminal parsing, grid and history | Workspace forks of `vte` and `alacritty_terminal`; display snapshots in `oxideterm-terminal-model` |
+| Terminal parsing, grid and history | Workspace forks of `vte` and `alacritty_terminal`; `oxideterm-terminal-emulator` builds snapshots from `oxideterm-terminal-model` rows and cells |
 | BLE terminal transport | `oxideterm-ble`, `oxideterm-terminal/src/session/ble.rs` |
 | Terminal modem transfers | `oxideterm-modem-transfer`, terminal modem worker integration |
 | SSH, node routing, reconnect | `oxideterm-ssh`, `oxideterm-topology`, `oxideterm-session-adapter` |

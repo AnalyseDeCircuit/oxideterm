@@ -156,6 +156,7 @@ impl AiWorkspaceEntity {
                 reasoning_effort: None,
                 safety_mode: match self.active_conversation_safety_mode() {
                     AiSafetyMode::Bypass => AiPolicySafetyMode::Bypass,
+                    AiSafetyMode::Auto => AiPolicySafetyMode::Auto,
                     AiSafetyMode::ReadOnly => AiPolicySafetyMode::ReadOnly,
                     AiSafetyMode::Default => AiPolicySafetyMode::Default,
                 },
@@ -243,6 +244,7 @@ impl AiWorkspaceEntity {
             reasoning_effort: Some(reasoning_effort),
             safety_mode: match self.active_conversation_safety_mode() {
                 AiSafetyMode::Bypass => AiPolicySafetyMode::Bypass,
+                AiSafetyMode::Auto => AiPolicySafetyMode::Auto,
                 AiSafetyMode::ReadOnly => AiPolicySafetyMode::ReadOnly,
                 AiSafetyMode::Default => AiPolicySafetyMode::Default,
             },
@@ -328,6 +330,7 @@ impl AiWorkspaceEntity {
             reasoning_effort: Some(reasoning_effort),
             safety_mode: match self.active_conversation_safety_mode() {
                 AiSafetyMode::Bypass => AiPolicySafetyMode::Bypass,
+                AiSafetyMode::Auto => AiPolicySafetyMode::Auto,
                 AiSafetyMode::ReadOnly => AiPolicySafetyMode::ReadOnly,
                 AiSafetyMode::Default => AiPolicySafetyMode::Default,
             },

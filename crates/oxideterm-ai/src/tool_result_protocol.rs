@@ -138,6 +138,7 @@ pub fn ai_policy_safety_mode_label(mode: crate::AiPolicySafetyMode) -> &'static 
     match mode {
         crate::AiPolicySafetyMode::Default => "default",
         crate::AiPolicySafetyMode::ReadOnly => "read_only",
+        crate::AiPolicySafetyMode::Auto => "auto",
         crate::AiPolicySafetyMode::Bypass => "bypass",
     }
 }
