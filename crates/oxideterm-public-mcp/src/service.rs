@@ -1226,14 +1226,13 @@ impl ServerHandler for PublicMcpService {
                 Err(error) => *error,
             },
             "transfers_start" => match parse_arguments::<StartTransferArgs>(arguments) {
-                Ok(args) if remote_path_is_valid(args.remote_path()) => {
-                    self.execute_call(&client, PublicToolCall::TransferStart(args))
-                        .await
-                }
-                Ok(_) => tool_error(
-                    "invalid_arguments",
-                    "The remote transfer path exceeds the supported bounds",
-                ),
+                Ok(args) => match validate_start_transfer_args(&args) {
+                    Ok(()) => {
+                        self.execute_call(&client, PublicToolCall::TransferStart(args))
+                            .await
+                    }
+                    Err(message) => tool_error("invalid_arguments", message),
+                },
                 Err(error) => *error,
             },
             "transfers_status" => match parse_arguments::<TransferHandleArgs>(arguments) {
@@ -1949,14 +1948,14 @@ fn tool_definitions() -> Vec<ToolDefinition> {
         ),
         define_tool::<StartTransferArgs>(
             "transfers_start",
-            "Start one bounded background SFTP upload or download between an authorized remote path and client-owned artifact storage.",
+            "Start a background SFTP upload or download between an authorized remote path and either client-owned artifact storage (bounded files) or an absolute local file or directory path (unbounded size; directories auto-stream via tar archive with recursive fallback).",
             ToolGroup::ArtifactTransfer,
             false,
             true,
         ),
         define_tool::<TransferHandleArgs>(
             "transfers_status",
-            "Read bounded progress and the completed artifact for one client-owned transfer.",
+            "Read transfer progress, strategy, and completed artifact or item count for one client-owned transfer.",
             ToolGroup::ArtifactTransfer,
             true,
             false,
@@ -2850,6 +2849,34 @@ fn remote_path_is_valid(path: &str) -> bool {
         && !path.chars().any(char::is_control)
 }
 
+fn local_path_is_valid(path: &str) -> bool {
+    !path.trim().is_empty()
+        && path.len() <= REMOTE_PATH_LIMIT_BYTES
+        && !path.chars().any(char::is_control)
+        && std::path::Path::new(path).is_absolute()
+}
+
+fn validate_start_transfer_args(args: &StartTransferArgs) -> Result<(), &'static str> {
+    if !remote_path_is_valid(args.remote_path()) {
+        return Err("The remote transfer path exceeds the supported bounds");
+    }
+    if let StartTransferArgs::Upload {
+        artifact_ref,
+        local_path,
+        ..
+    } = args
+        && artifact_ref.is_some() == local_path.is_some()
+    {
+        return Err("Provide exactly one of artifact_ref or local_path for upload");
+    }
+    if let Some(local_path) = args.local_path()
+        && !local_path_is_valid(local_path)
+    {
+        return Err("The local transfer path must be a valid absolute path");
+    }
+    Ok(())
+}
+
 fn envelope_result(envelope: ToolEnvelope) -> CallToolResult {
     match envelope.outcome {
         ToolOutcome::Failed => {
@@ -3226,5 +3253,93 @@ mod tests {
         assert!(state.approvals.list().is_empty());
         request.finish(ToolEnvelope::accepted(json!({ "outcome": "approval_required" })).unwrap());
         let _ = execution.await.unwrap();
+    }
+
+    #[test]
+    fn transfers_start_validates_local_path_and_approval_rules() {
+        let session = crate::FileSessionRef::new();
+        let artifact = crate::ArtifactRef::new();
+        let abs_local = std::env::temp_dir().join("oxideterm-mcp-transfer-test.bin");
+        let abs_local_str = abs_local.to_string_lossy().into_owned();
+
+        // Upload must provide exactly one of artifact_ref or local_path.
+        let both = StartTransferArgs::Upload {
+            file_session_ref: session.clone(),
+            remote_path: "/srv/app.bin".into(),
+            artifact_ref: Some(artifact.clone()),
+            local_path: Some(abs_local_str.clone()),
+            overwrite: false,
+            resume: false,
+        };
+        assert!(validate_start_transfer_args(&both).is_err());
+
+        let neither = StartTransferArgs::Upload {
+            file_session_ref: session.clone(),
+            remote_path: "/srv/app.bin".into(),
+            artifact_ref: None,
+            local_path: None,
+            overwrite: false,
+            resume: false,
+        };
+        assert!(validate_start_transfer_args(&neither).is_err());
+
+        // Relative local paths must be rejected for both directions.
+        let rel_upload = StartTransferArgs::Upload {
+            file_session_ref: session.clone(),
+            remote_path: "/srv/app.bin".into(),
+            artifact_ref: None,
+            local_path: Some("relative/app.bin".into()),
+            overwrite: false,
+            resume: false,
+        };
+        assert!(validate_start_transfer_args(&rel_upload).is_err());
+
+        let rel_download = StartTransferArgs::Download {
+            file_session_ref: session.clone(),
+            remote_path: "/srv/app.bin".into(),
+            local_path: Some("relative/out.bin".into()),
+            overwrite: false,
+            resume: false,
+        };
+        assert!(validate_start_transfer_args(&rel_download).is_err());
+
+        // Valid local-path upload & download both require approval and show local+remote paths.
+        let local_upload = StartTransferArgs::Upload {
+            file_session_ref: session.clone(),
+            remote_path: "/srv/release".into(),
+            artifact_ref: None,
+            local_path: Some(abs_local_str.clone()),
+            overwrite: true,
+            resume: false,
+        };
+        assert!(validate_start_transfer_args(&local_upload).is_ok());
+        let upload_call = PublicToolCall::TransferStart(local_upload);
+        assert!(upload_call.requires_approval());
+        assert!(upload_call.target_summary().contains(&abs_local_str));
+        assert!(upload_call.target_summary().contains("/srv/release"));
+
+        let local_download = StartTransferArgs::Download {
+            file_session_ref: session.clone(),
+            remote_path: "/srv/release".into(),
+            local_path: Some(abs_local_str.clone()),
+            overwrite: false,
+            resume: false,
+        };
+        assert!(validate_start_transfer_args(&local_download).is_ok());
+        let download_call = PublicToolCall::TransferStart(local_download);
+        assert!(download_call.requires_approval());
+        assert!(download_call.target_summary().contains(&abs_local_str));
+        assert!(download_call.target_summary().contains("/srv/release"));
+
+        // Artifact-backed download stays read-only without approval.
+        let artifact_download = StartTransferArgs::Download {
+            file_session_ref: session,
+            remote_path: "/srv/release".into(),
+            local_path: None,
+            overwrite: false,
+            resume: false,
+        };
+        assert!(validate_start_transfer_args(&artifact_download).is_ok());
+        assert!(!PublicToolCall::TransferStart(artifact_download).requires_approval());
     }
 }

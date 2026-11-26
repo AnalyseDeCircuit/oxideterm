@@ -1544,7 +1544,12 @@ pub enum StartTransferArgs {
     Upload {
         file_session_ref: FileSessionRef,
         remote_path: String,
-        artifact_ref: ArtifactRef,
+        /// Client-owned artifact ref for bounded uploads; mutually exclusive with `local_path`.
+        #[serde(default)]
+        artifact_ref: Option<ArtifactRef>,
+        /// Absolute host local file or directory path for direct streaming upload without the artifact size limit.
+        #[serde(default)]
+        local_path: Option<String>,
         #[serde(default)]
         overwrite: bool,
         #[serde(default)]
@@ -1553,6 +1558,11 @@ pub enum StartTransferArgs {
     Download {
         file_session_ref: FileSessionRef,
         remote_path: String,
+        /// Optional absolute host local file or directory path for direct streaming download without the artifact size limit.
+        #[serde(default)]
+        local_path: Option<String>,
+        #[serde(default)]
+        overwrite: bool,
         #[serde(default)]
         resume: bool,
     },
@@ -1562,6 +1572,14 @@ impl StartTransferArgs {
     pub fn remote_path(&self) -> &str {
         match self {
             Self::Upload { remote_path, .. } | Self::Download { remote_path, .. } => remote_path,
+        }
+    }
+
+    pub fn local_path(&self) -> Option<&str> {
+        match self {
+            Self::Upload { local_path, .. } | Self::Download { local_path, .. } => {
+                local_path.as_deref()
+            }
         }
     }
 }
@@ -2001,6 +2019,10 @@ impl PublicToolCall {
                 | Self::FilesMove(_)
                 | Self::FilesRemove(_)
                 | Self::TransferStart(StartTransferArgs::Upload { .. })
+                | Self::TransferStart(StartTransferArgs::Download {
+                    local_path: Some(_),
+                    ..
+                })
                 | Self::WorkspaceApplyEdits(_)
         )
     }
@@ -2256,16 +2278,32 @@ impl PublicToolCall {
                     file_session_ref,
                     remote_path,
                     artifact_ref,
+                    local_path,
                     overwrite,
                     resume,
-                } => format!(
-                    "{file_session_ref} upload {artifact_ref} to {remote_path} overwrite={overwrite} resume={resume}"
-                ),
+                } => match (artifact_ref, local_path) {
+                    (Some(artifact_ref), _) => format!(
+                        "{file_session_ref} upload {artifact_ref} to {remote_path} overwrite={overwrite} resume={resume}"
+                    ),
+                    (None, Some(local_path)) => format!(
+                        "{file_session_ref} upload local {local_path} to {remote_path} overwrite={overwrite} resume={resume}"
+                    ),
+                    (None, None) => format!(
+                        "{file_session_ref} upload to {remote_path} overwrite={overwrite} resume={resume}"
+                    ),
+                },
                 StartTransferArgs::Download {
                     file_session_ref,
                     remote_path,
+                    local_path,
+                    overwrite,
                     resume,
-                } => format!("{file_session_ref} download {remote_path} resume={resume}"),
+                } => match local_path {
+                    Some(local_path) => format!(
+                        "{file_session_ref} download {remote_path} to local {local_path} overwrite={overwrite} resume={resume}"
+                    ),
+                    None => format!("{file_session_ref} download {remote_path} resume={resume}"),
+                },
             },
             Self::TransferStatus(args) | Self::TransferCancel(args) => {
                 args.transfer_ref.to_string()

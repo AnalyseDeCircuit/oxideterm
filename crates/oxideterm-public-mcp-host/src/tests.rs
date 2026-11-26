@@ -442,6 +442,8 @@ async fn file_handle_survives_node_release_and_immediate_idle_reconnect() {
         PublicToolCall::TransferStart(StartTransferArgs::Download {
             file_session_ref: file_ref.clone(),
             remote_path: "sample".into(),
+            local_path: None,
+            overwrite: false,
             resume: false,
         }),
     )
@@ -1220,4 +1222,699 @@ fn cloud_sync_errors_keep_the_safe_code_but_drop_backend_details() {
         sync_protocol::PublicMcpSyncFailure::from_error("unexpected server detail".into());
     assert_eq!(unknown.display_error, "The Cloud Sync operation failed");
     assert_eq!(unknown.message, "The Cloud Sync operation failed");
+}
+
+#[tokio::test]
+async fn local_path_file_transfer_streams_to_disk_and_enforces_overwrite() {
+    use oxideterm_public_mcp::calls::{
+        ConnectNodeArgs, FilesOpenArgs, StartTransferArgs, TransferHandleArgs,
+    };
+    use oxideterm_ssh::SshTransportClient;
+
+    let (work_dir, host, mut backend, client, mut receiver) = dispatch_fixture(&[
+        ToolGroup::NodeSession,
+        ToolGroup::FileRead,
+        ToolGroup::FileWrite,
+        ToolGroup::ArtifactTransfer,
+    ]);
+    let (config, _, server, _) = ssh_peer::start_peer(false).await;
+    let registry = SshConnectionRegistry::default();
+    backend.node_router = NodeRouter::new(registry.clone());
+    let node = NodeId::new("local-file-transfer");
+    backend
+        .node_router
+        .upsert_node(node.clone(), config.clone());
+    let conn = SshTransportClient::new(config)
+        .connect_node_with_registry(registry, ConnectionConsumer::NodeRouter(node.0.clone()))
+        .await
+        .unwrap();
+    let delivery = backend
+        .node_router
+        .bind_established_connection(&node, conn.connection_id())
+        .unwrap();
+    let (request, response) = queued_request(
+        &host,
+        &mut receiver,
+        &client,
+        PublicToolCall::ConnectNode(ConnectNodeArgs {
+            connection_ref: ConnectionRef::new(),
+        }),
+    )
+    .await;
+    backend.acquire_node_lease(request, node.clone(), "saved".into(), None);
+    let node_ref: NodeRef =
+        serde_json::from_value(response.await.unwrap().data.unwrap()["node_ref"].clone()).unwrap();
+    drop(delivery);
+
+    async fn dispatch(
+        backend: &PublicMcpBackground,
+        host: &PublicMcpHost,
+        receiver: &mut DomainRequestReceiver,
+        client: &ClientRef,
+        call: PublicToolCall,
+    ) -> ToolEnvelope {
+        let (request, response) = queued_request(host, receiver, client, call).await;
+        assert!(backend.dispatch(request).is_ok());
+        response.await.unwrap()
+    }
+
+    async fn wait_transfer(
+        backend: &PublicMcpBackground,
+        host: &PublicMcpHost,
+        receiver: &mut DomainRequestReceiver,
+        client: &ClientRef,
+        transfer_ref: &TransferRef,
+    ) -> serde_json::Value {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let status = dispatch(
+                    backend,
+                    host,
+                    receiver,
+                    client,
+                    PublicToolCall::TransferStatus(TransferHandleArgs {
+                        transfer_ref: transfer_ref.clone(),
+                    }),
+                )
+                .await
+                .data
+                .unwrap();
+                match status["state"].as_str() {
+                    Some("completed" | "failed" | "cancelled") => return status,
+                    _ => tokio::task::yield_now().await,
+                }
+            }
+        })
+        .await
+        .unwrap()
+    }
+
+    let files = dispatch(
+        &backend,
+        &host,
+        &mut receiver,
+        &client,
+        PublicToolCall::FilesOpen(FilesOpenArgs {
+            node_ref,
+            root: Some("/fixture".into()),
+        }),
+    )
+    .await;
+    let file_ref: FileSessionRef =
+        serde_json::from_value(files.data.unwrap()["file_session_ref"].clone()).unwrap();
+
+    // Download directly to a local file path (bypassing artifact staging).
+    let local_file = work_dir.path().join("nested").join("sample.bin");
+    let local_file_str = local_file.to_string_lossy().into_owned();
+    let started = dispatch(
+        &backend,
+        &host,
+        &mut receiver,
+        &client,
+        PublicToolCall::TransferStart(StartTransferArgs::Download {
+            file_session_ref: file_ref.clone(),
+            remote_path: "sample".into(),
+            local_path: Some(local_file_str.clone()),
+            overwrite: false,
+            resume: false,
+        }),
+    )
+    .await;
+    let transfer_ref: TransferRef =
+        serde_json::from_value(started.data.unwrap()["transfer_ref"].clone()).unwrap();
+    let status = wait_transfer(&backend, &host, &mut receiver, &client, &transfer_ref).await;
+    assert_eq!(status["state"], "completed", "{status}");
+    assert_eq!(status["entry_kind"], "file");
+    assert_eq!(status["strategy"], "sftp_file");
+    assert_eq!(status["local_path"], local_file_str);
+    assert!(status["artifact"].is_null());
+    assert_eq!(std::fs::read(&local_file).unwrap(), &[1]);
+
+    // Overwrite=false must fail with local_exists and leave existing local bytes intact.
+    std::fs::write(&local_file, b"sentinel").unwrap();
+    let blocked = dispatch(
+        &backend,
+        &host,
+        &mut receiver,
+        &client,
+        PublicToolCall::TransferStart(StartTransferArgs::Download {
+            file_session_ref: file_ref.clone(),
+            remote_path: "sample".into(),
+            local_path: Some(local_file_str.clone()),
+            overwrite: false,
+            resume: false,
+        }),
+    )
+    .await;
+    let blocked_ref: TransferRef =
+        serde_json::from_value(blocked.data.unwrap()["transfer_ref"].clone()).unwrap();
+    let blocked_status = wait_transfer(&backend, &host, &mut receiver, &client, &blocked_ref).await;
+    assert_eq!(blocked_status["state"], "failed", "{blocked_status}");
+    assert_eq!(blocked_status["error_code"], "local_exists");
+    assert_eq!(std::fs::read(&local_file).unwrap(), b"sentinel");
+
+    // Overwrite=true must atomically replace the existing local file.
+    let replaced = dispatch(
+        &backend,
+        &host,
+        &mut receiver,
+        &client,
+        PublicToolCall::TransferStart(StartTransferArgs::Download {
+            file_session_ref: file_ref.clone(),
+            remote_path: "sample".into(),
+            local_path: Some(local_file_str),
+            overwrite: true,
+            resume: false,
+        }),
+    )
+    .await;
+    let replaced_ref: TransferRef =
+        serde_json::from_value(replaced.data.unwrap()["transfer_ref"].clone()).unwrap();
+    let replaced_status =
+        wait_transfer(&backend, &host, &mut receiver, &client, &replaced_ref).await;
+    assert_eq!(replaced_status["state"], "completed", "{replaced_status}");
+    assert_eq!(std::fs::read(&local_file).unwrap(), &[1]);
+
+    // Missing local upload path fails with local_unavailable; relative path is rejected upfront.
+    let missing_upload = dispatch(
+        &backend,
+        &host,
+        &mut receiver,
+        &client,
+        PublicToolCall::TransferStart(StartTransferArgs::Upload {
+            file_session_ref: file_ref.clone(),
+            remote_path: "out.bin".into(),
+            artifact_ref: None,
+            local_path: Some(
+                work_dir
+                    .path()
+                    .join("does-not-exist.bin")
+                    .to_string_lossy()
+                    .into_owned(),
+            ),
+            overwrite: true,
+            resume: false,
+        }),
+    )
+    .await;
+    let missing_ref: TransferRef =
+        serde_json::from_value(missing_upload.data.unwrap()["transfer_ref"].clone()).unwrap();
+    let missing_status = wait_transfer(&backend, &host, &mut receiver, &client, &missing_ref).await;
+    assert_eq!(missing_status["state"], "failed");
+    assert_eq!(missing_status["error_code"], "local_unavailable");
+
+    let relative_upload = dispatch(
+        &backend,
+        &host,
+        &mut receiver,
+        &client,
+        PublicToolCall::TransferStart(StartTransferArgs::Upload {
+            file_session_ref: file_ref,
+            remote_path: "out.bin".into(),
+            artifact_ref: None,
+            local_path: Some("relative/out.bin".into()),
+            overwrite: true,
+            resume: false,
+        }),
+    )
+    .await;
+    assert!(relative_upload.error.is_some());
+
+    server.abort();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn local_path_directory_transfer_streams_tar_archive_both_directions() {
+    use oxideterm_public_mcp::calls::{
+        ConnectNodeArgs, FilesOpenArgs, StartTransferArgs, TransferHandleArgs,
+    };
+    use oxideterm_ssh::{SshConfig, SshTransportClient};
+    use russh::{keys, server};
+    use std::path::PathBuf;
+
+    struct TarPeer {
+        root: PathBuf,
+        channels: std::collections::HashMap<russh::ChannelId, russh::Channel<server::Msg>>,
+        tasks: tokio::task::JoinSet<()>,
+    }
+
+    struct LocalFsSftp {
+        root: PathBuf,
+        dirs: std::collections::HashMap<String, Vec<russh_sftp::protocol::File>>,
+    }
+
+    impl LocalFsSftp {
+        fn attrs_for(
+            path: &std::path::Path,
+        ) -> Result<russh_sftp::protocol::FileAttributes, russh_sftp::protocol::StatusCode>
+        {
+            use std::os::unix::fs::MetadataExt;
+            let meta = std::fs::symlink_metadata(path)
+                .map_err(|_| russh_sftp::protocol::StatusCode::NoSuchFile)?;
+            Ok(russh_sftp::protocol::FileAttributes {
+                size: Some(meta.len()),
+                permissions: Some(meta.mode()),
+                ..Default::default()
+            })
+        }
+    }
+
+    impl russh_sftp::server::Handler for LocalFsSftp {
+        type Error = russh_sftp::protocol::StatusCode;
+        fn unimplemented(&self) -> Self::Error {
+            russh_sftp::protocol::StatusCode::OpUnsupported
+        }
+        async fn realpath(
+            &mut self,
+            id: u32,
+            path: String,
+        ) -> Result<russh_sftp::protocol::Name, Self::Error> {
+            let resolved = if path == "." {
+                self.root.to_string_lossy().into_owned()
+            } else {
+                path
+            };
+            Ok(russh_sftp::protocol::Name {
+                id,
+                files: vec![russh_sftp::protocol::File::dummy(resolved)],
+            })
+        }
+        async fn stat(
+            &mut self,
+            id: u32,
+            path: String,
+        ) -> Result<russh_sftp::protocol::Attrs, Self::Error> {
+            Ok(russh_sftp::protocol::Attrs {
+                id,
+                attrs: Self::attrs_for(std::path::Path::new(&path))?,
+            })
+        }
+        async fn lstat(
+            &mut self,
+            id: u32,
+            path: String,
+        ) -> Result<russh_sftp::protocol::Attrs, Self::Error> {
+            self.stat(id, path).await
+        }
+        async fn mkdir(
+            &mut self,
+            id: u32,
+            path: String,
+            _: russh_sftp::protocol::FileAttributes,
+        ) -> Result<russh_sftp::protocol::Status, Self::Error> {
+            let _ = std::fs::create_dir_all(&path);
+            Ok(russh_sftp::protocol::Status {
+                id,
+                status_code: russh_sftp::protocol::StatusCode::Ok,
+                error_message: String::new(),
+                language_tag: String::new(),
+            })
+        }
+        async fn opendir(
+            &mut self,
+            id: u32,
+            path: String,
+        ) -> Result<russh_sftp::protocol::Handle, Self::Error> {
+            let mut entries = Vec::new();
+            let dir = std::fs::read_dir(&path)
+                .map_err(|_| russh_sftp::protocol::StatusCode::NoSuchFile)?;
+            for entry in dir.flatten() {
+                let attrs = Self::attrs_for(&entry.path()).unwrap_or_default();
+                let name = entry.file_name().to_string_lossy().into_owned();
+                entries.push(russh_sftp::protocol::File::new(name, attrs));
+            }
+            let handle = format!("dir-{id}");
+            self.dirs.insert(handle.clone(), entries);
+            Ok(russh_sftp::protocol::Handle { id, handle })
+        }
+        async fn readdir(
+            &mut self,
+            id: u32,
+            handle: String,
+        ) -> Result<russh_sftp::protocol::Name, Self::Error> {
+            let Some(entries) = self.dirs.get_mut(&handle) else {
+                return Err(russh_sftp::protocol::StatusCode::NoSuchFile);
+            };
+            if entries.is_empty() {
+                return Err(russh_sftp::protocol::StatusCode::Eof);
+            }
+            let batch = std::mem::take(entries);
+            Ok(russh_sftp::protocol::Name { id, files: batch })
+        }
+        async fn close(
+            &mut self,
+            id: u32,
+            handle: String,
+        ) -> Result<russh_sftp::protocol::Status, Self::Error> {
+            self.dirs.remove(&handle);
+            Ok(russh_sftp::protocol::Status {
+                id,
+                status_code: russh_sftp::protocol::StatusCode::Ok,
+                error_message: String::new(),
+                language_tag: String::new(),
+            })
+        }
+    }
+
+    impl server::Handler for TarPeer {
+        type Error = russh::Error;
+        async fn auth_password(
+            &mut self,
+            user: &str,
+            password: &str,
+        ) -> Result<server::Auth, Self::Error> {
+            Ok(if user == "tar-user" && password == "tar-secret" {
+                server::Auth::Accept
+            } else {
+                server::Auth::reject()
+            })
+        }
+        async fn channel_open_session(
+            &mut self,
+            channel: russh::Channel<server::Msg>,
+            reply: server::ChannelOpenHandle,
+            _: &mut server::Session,
+        ) -> Result<(), Self::Error> {
+            self.channels.insert(channel.id(), channel);
+            reply.accept().await;
+            Ok(())
+        }
+        async fn subsystem_request(
+            &mut self,
+            channel: russh::ChannelId,
+            name: &str,
+            session: &mut server::Session,
+        ) -> Result<(), Self::Error> {
+            if name != "sftp" {
+                return session.channel_failure(channel);
+            }
+            session.channel_success(channel)?;
+            let stream = self.channels.remove(&channel).unwrap().into_stream();
+            let root = self.root.clone();
+            self.tasks.spawn(async move {
+                russh_sftp::server::run(
+                    stream,
+                    LocalFsSftp {
+                        root,
+                        dirs: Default::default(),
+                    },
+                )
+                .await;
+            });
+            Ok(())
+        }
+        async fn exec_request(
+            &mut self,
+            channel: russh::ChannelId,
+            command: &[u8],
+            session: &mut server::Session,
+        ) -> Result<(), Self::Error> {
+            let cmd = String::from_utf8_lossy(command).into_owned();
+            session.channel_success(channel)?;
+            let mut ch = self.channels.remove(&channel).unwrap();
+            self.tasks.spawn(async move {
+                use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                let mut child = tokio::process::Command::new("/bin/sh")
+                    .args(["-c", &cmd])
+                    .stdin(std::process::Stdio::piped())
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::piped())
+                    .spawn()
+                    .unwrap();
+                let mut child_stdin = Some(child.stdin.take().unwrap());
+                let mut child_stdout = child.stdout.take().unwrap();
+                let mut child_stderr = child.stderr.take().unwrap();
+                let writer = ch.make_writer();
+                let stdout_task = tokio::spawn(async move {
+                    let mut out = writer;
+                    let mut buf = [0u8; 16 * 1024];
+                    while let Ok(n) = child_stdout.read(&mut buf).await {
+                        if n == 0 {
+                            break;
+                        }
+                        if out.write_all(&buf[..n]).await.is_err() {
+                            break;
+                        }
+                    }
+                    let _ = out.flush().await;
+                });
+                let err_writer = ch.make_writer_ext(Some(1));
+                let stderr_task = tokio::spawn(async move {
+                    let mut err = err_writer;
+                    let mut buf = [0u8; 4096];
+                    while let Ok(n) = child_stderr.read(&mut buf).await {
+                        if n == 0 {
+                            break;
+                        }
+                        let _ = err.write_all(&buf[..n]).await;
+                    }
+                });
+                let status = loop {
+                    tokio::select! {
+                        status = child.wait() => break status.unwrap(),
+                        msg = ch.wait(), if child_stdin.is_some() => match msg {
+                            Some(russh::ChannelMsg::Data { data }) => {
+                                if let Some(stdin) = child_stdin.as_mut() {
+                                    let _ = stdin.write_all(&data).await;
+                                }
+                            }
+                            Some(russh::ChannelMsg::Eof | russh::ChannelMsg::Close) | None => {
+                                child_stdin.take();
+                            }
+                            _ => {}
+                        },
+                    }
+                };
+                drop(child_stdin);
+                let _ = stdout_task.await;
+                let _ = stderr_task.await;
+                let _ = ch.exit_status(status.code().unwrap_or(1) as u32).await;
+                let _ = ch.eof().await;
+                let _ = ch.close().await;
+            });
+            Ok(())
+        }
+    }
+
+    let remote_root = tempfile::tempdir().unwrap();
+    let remote_root_path = std::fs::canonicalize(remote_root.path()).unwrap();
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let key = keys::PrivateKey::random(&mut rand10::rng(), keys::Algorithm::Ed25519).unwrap();
+    let fingerprint = key
+        .public_key()
+        .fingerprint(keys::HashAlg::Sha256)
+        .to_string();
+    let server_root = remote_root_path.clone();
+    let server = tokio::spawn(async move {
+        let config = Arc::new(server::Config {
+            keys: vec![key],
+            auth_rejection_time: Duration::ZERO,
+            ..Default::default()
+        });
+        let mut conns = tokio::task::JoinSet::new();
+        loop {
+            let (socket, _) = listener.accept().await.unwrap();
+            let cfg = config.clone();
+            let root = server_root.clone();
+            conns.spawn(async move {
+                if let Ok(connection) = server::run_stream(
+                    cfg,
+                    socket,
+                    TarPeer {
+                        root,
+                        channels: Default::default(),
+                        tasks: Default::default(),
+                    },
+                )
+                .await
+                {
+                    let _ = connection.await;
+                }
+            });
+        }
+    });
+
+    let mut ssh_config = SshConfig::password("127.0.0.1", port, "tar-user", "tar-secret");
+    ssh_config.trust_host_key = Some(false);
+    ssh_config.expected_host_key_fingerprint = Some(fingerprint);
+    let (work_dir, host, mut backend, client, mut receiver) = dispatch_fixture(&[
+        ToolGroup::NodeSession,
+        ToolGroup::FileRead,
+        ToolGroup::FileWrite,
+        ToolGroup::ArtifactTransfer,
+    ]);
+    let registry = SshConnectionRegistry::default();
+    backend.node_router = NodeRouter::new(registry.clone());
+    let node = NodeId::new("tar-dir-transfer");
+    backend
+        .node_router
+        .upsert_node(node.clone(), ssh_config.clone());
+    let conn = SshTransportClient::new(ssh_config)
+        .connect_node_with_registry(registry, ConnectionConsumer::NodeRouter(node.0.clone()))
+        .await
+        .unwrap();
+    let delivery = backend
+        .node_router
+        .bind_established_connection(&node, conn.connection_id())
+        .unwrap();
+
+    async fn dispatch(
+        backend: &PublicMcpBackground,
+        host: &PublicMcpHost,
+        receiver: &mut DomainRequestReceiver,
+        client: &ClientRef,
+        call: PublicToolCall,
+    ) -> ToolEnvelope {
+        let (request, response) = queued_request(host, receiver, client, call).await;
+        assert!(backend.dispatch(request).is_ok());
+        response.await.unwrap()
+    }
+
+    async fn wait_transfer(
+        backend: &PublicMcpBackground,
+        host: &PublicMcpHost,
+        receiver: &mut DomainRequestReceiver,
+        client: &ClientRef,
+        transfer_ref: &TransferRef,
+    ) -> serde_json::Value {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let status = dispatch(
+                    backend,
+                    host,
+                    receiver,
+                    client,
+                    PublicToolCall::TransferStatus(TransferHandleArgs {
+                        transfer_ref: transfer_ref.clone(),
+                    }),
+                )
+                .await
+                .data
+                .unwrap();
+                match status["state"].as_str() {
+                    Some("completed" | "failed" | "cancelled") => return status,
+                    _ => tokio::task::yield_now().await,
+                }
+            }
+        })
+        .await
+        .unwrap()
+    }
+
+    let (request, response) = queued_request(
+        &host,
+        &mut receiver,
+        &client,
+        PublicToolCall::ConnectNode(ConnectNodeArgs {
+            connection_ref: ConnectionRef::new(),
+        }),
+    )
+    .await;
+    backend.acquire_node_lease(request, node.clone(), "saved".into(), None);
+    let node_ref: NodeRef =
+        serde_json::from_value(response.await.unwrap().data.unwrap()["node_ref"].clone()).unwrap();
+    drop(delivery);
+
+    let files = dispatch(
+        &backend,
+        &host,
+        &mut receiver,
+        &client,
+        PublicToolCall::FilesOpen(FilesOpenArgs {
+            node_ref,
+            root: Some(remote_root_path.to_string_lossy().into_owned()),
+        }),
+    )
+    .await;
+    let file_ref: FileSessionRef =
+        serde_json::from_value(files.data.unwrap()["file_session_ref"].clone()).unwrap();
+
+    // Build a local multi-file folder (>= 5 files) so tar streaming is selected.
+    let src_dir = work_dir.path().join("release_bundle");
+    std::fs::create_dir_all(src_dir.join("sub")).unwrap();
+    for idx in 0..5 {
+        std::fs::write(
+            src_dir.join(format!("file_{idx}.txt")),
+            format!("payload-{idx}"),
+        )
+        .unwrap();
+    }
+    std::fs::write(src_dir.join("sub").join("nested.txt"), "nested-content").unwrap();
+
+    // Upload folder via local_path -> auto-packed and unpacked remotely via tar_archive.
+    let upload = dispatch(
+        &backend,
+        &host,
+        &mut receiver,
+        &client,
+        PublicToolCall::TransferStart(StartTransferArgs::Upload {
+            file_session_ref: file_ref.clone(),
+            remote_path: "deployed".into(),
+            artifact_ref: None,
+            local_path: Some(src_dir.to_string_lossy().into_owned()),
+            overwrite: false,
+            resume: false,
+        }),
+    )
+    .await;
+    let upload_ref: TransferRef =
+        serde_json::from_value(upload.data.unwrap()["transfer_ref"].clone()).unwrap();
+    let upload_status = wait_transfer(&backend, &host, &mut receiver, &client, &upload_ref).await;
+    assert_eq!(upload_status["state"], "completed", "{upload_status}");
+    assert_eq!(upload_status["entry_kind"], "directory");
+    assert_eq!(upload_status["strategy"], "tar_archive");
+    assert!(upload_status["item_count"].as_u64().unwrap_or(0) >= 6);
+    assert_eq!(
+        std::fs::read_to_string(remote_root_path.join("deployed").join("file_3.txt")).unwrap(),
+        "payload-3"
+    );
+    assert_eq!(
+        std::fs::read_to_string(
+            remote_root_path
+                .join("deployed")
+                .join("sub")
+                .join("nested.txt")
+        )
+        .unwrap(),
+        "nested-content"
+    );
+
+    // Download the remote folder back to a fresh local path -> auto-packed remotely and unpacked locally.
+    let dst_dir = work_dir.path().join("downloaded_bundle");
+    let download = dispatch(
+        &backend,
+        &host,
+        &mut receiver,
+        &client,
+        PublicToolCall::TransferStart(StartTransferArgs::Download {
+            file_session_ref: file_ref,
+            remote_path: "deployed".into(),
+            local_path: Some(dst_dir.to_string_lossy().into_owned()),
+            overwrite: false,
+            resume: false,
+        }),
+    )
+    .await;
+    let download_ref: TransferRef =
+        serde_json::from_value(download.data.unwrap()["transfer_ref"].clone()).unwrap();
+    let download_status =
+        wait_transfer(&backend, &host, &mut receiver, &client, &download_ref).await;
+    assert_eq!(download_status["state"], "completed", "{download_status}");
+    assert_eq!(download_status["entry_kind"], "directory");
+    assert_eq!(download_status["strategy"], "tar_archive");
+    assert!(download_status["item_count"].as_u64().unwrap_or(0) >= 6);
+    assert_eq!(
+        std::fs::read_to_string(dst_dir.join("file_0.txt")).unwrap(),
+        "payload-0"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dst_dir.join("sub").join("nested.txt")).unwrap(),
+        "nested-content"
+    );
+
+    server.abort();
 }
