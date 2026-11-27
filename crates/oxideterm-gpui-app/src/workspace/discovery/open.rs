@@ -326,8 +326,10 @@ impl WorkspaceApp {
             self.report_discovery_open_failure(DiscoveryFailure::StaleTarget, cx);
             return;
         };
-        let Some(target_generation) = self.discovery.epoch(id).and_then(|epoch| self.discovery.directory_target_generation(id, epoch, &target))
-        else {
+        let Some(target_generation) = self.discovery.epoch(id).and_then(|epoch| {
+            self.discovery
+                .directory_target_generation(id, epoch, &target)
+        }) else {
             self.report_discovery_open_failure(DiscoveryFailure::StaleTarget, cx);
             return;
         };
@@ -361,7 +363,9 @@ impl WorkspaceApp {
                     return;
                 }
                 Some(OpenCandidate::Transport(node)) if self.node_allows_session_tools(&node) => {
-                    if let Err(error) = self.queue_ssh_terminal_tab_for_sidebar_node(node, window, cx) {
+                    if let Err(error) =
+                        self.queue_ssh_terminal_tab_for_sidebar_node(node, window, cx)
+                    {
                         self.report_discovery_open_error(error.to_string(), cx);
                     }
                     return;

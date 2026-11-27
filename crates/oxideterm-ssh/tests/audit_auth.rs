@@ -60,11 +60,15 @@ async fn discovery_prepared_session_admits_one_shell_and_releases_its_provider_o
     assert!(registry.admit_initial_terminal(id).is_none());
     assert!(router.acquire_sftp(&node).await.is_err());
     assert!(matches!(
-        connection.open_direct_tcpip("localhost", 22, "localhost", 0).await,
+        connection
+            .open_direct_tcpip("localhost", 22, "localhost", 0)
+            .await,
         Err(SshTransportError::CommandChannelUnavailable)
     ));
     assert!(matches!(
-        connection.request_remote_tcpip_forward("localhost", 0).await,
+        connection
+            .request_remote_tcpip_forward("localhost", 0)
+            .await,
         Err(SshTransportError::CommandChannelUnavailable)
     ));
     assert!(matches!(

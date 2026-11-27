@@ -87,7 +87,8 @@ impl SettingsWorkspaceEntity {
                     self.totp_error = Some(oxideterm_connections::totp::TotpError::InUse);
                     cx.notify();
                 } else {
-                    outcome.store_changed = self.delete_totp_credential_from_settings(id, store, cx);
+                    outcome.store_changed =
+                        self.delete_totp_credential_from_settings(id, store, cx);
                 }
             }
             CredentialRequest::CancelTotp => {

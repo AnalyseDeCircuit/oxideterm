@@ -33,7 +33,11 @@ fn discovery_validates_terminal_entries_source_actions_and_credential_fields() {
             serde_json::json!(""),
             "sourceActions.title",
         ),
-        ("/sourceActions/0/field", serde_json::json!("wrong/site"), "source action field"),
+        (
+            "/sourceActions/0/field",
+            serde_json::json!("wrong/site"),
+            "source action field",
+        ),
         ("/terminalEntry", serde_json::Value::Null, "terminalEntry"),
         (
             "/recommendedRefreshIntervalMinutes",
@@ -75,15 +79,23 @@ fn discovery_validates_terminal_entries_source_actions_and_credential_fields() {
         );
     }
     let mut scoped = manifest.clone();
-    scoped["contributes"]["discoveryProviders"][0]["form"]["controls"].as_array_mut().unwrap()
+    scoped["contributes"]["discoveryProviders"][0]["form"]["controls"]
+        .as_array_mut()
+        .unwrap()
         .push(serde_json::json!({"kind":"password","id":"token","secretScope":["root/site"]}));
-    let parse = |manifest: &serde_json::Value| discovery_providers::parse_manifest(&manifest.to_string(), &directory).unwrap();
+    let parse = |manifest: &serde_json::Value| {
+        discovery_providers::parse_manifest(&manifest.to_string(), &directory).unwrap()
+    };
     let (installed, warnings) = parse(&scoped);
     assert!(warnings.is_empty());
-    assert_eq!(installed.contributes.unwrap().discovery_providers[0].id, "hosts");
+    assert_eq!(
+        installed.contributes.unwrap().discovery_providers[0].id,
+        "hosts"
+    );
     for scope in ["root/token", "root/missing"] {
         let mut invalid = scoped.clone();
-        invalid["contributes"]["discoveryProviders"][0]["form"]["controls"][1]["secretScope"] = serde_json::json!([scope]);
+        invalid["contributes"]["discoveryProviders"][0]["form"]["controls"][1]["secretScope"] =
+            serde_json::json!([scope]);
         assert!(parse(&invalid).1[0].contains("non-secret fields"));
     }
     scoped["permissions"]["capabilities"] = serde_json::json!(["ui.write"]);

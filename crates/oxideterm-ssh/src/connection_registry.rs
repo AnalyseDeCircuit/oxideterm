@@ -674,7 +674,10 @@ impl SshConnectionHandle {
 
     /// Additional consumers share only the transport authorized for this asset instance.
     pub fn allows_additional_channels(&self) -> bool {
-        self.config().discovery_origin.as_ref().is_none_or(|origin| origin.allows_asset_channels())
+        self.config()
+            .discovery_origin
+            .as_ref()
+            .is_none_or(|origin| origin.allows_asset_channels())
     }
 
     pub(crate) fn config(&self) -> &SshConfig {
@@ -1193,7 +1196,11 @@ impl SshConnectionRegistry {
             }
             return None;
         }
-        if entry.config.discovery_origin.as_ref().is_some_and(|origin| !origin.allows_asset_channels())
+        if entry
+            .config
+            .discovery_origin
+            .as_ref()
+            .is_some_and(|origin| !origin.allows_asset_channels())
             && self.has_only_idle_owners(&entry)
         {
             let handle = SshConnectionHandle {
@@ -1519,11 +1526,7 @@ impl SshConnectionRegistry {
         true
     }
 
-    fn retire_unused_discovery(
-        &self,
-        handle: &SshConnectionHandle,
-        reason: &'static str,
-    ) -> bool {
+    fn retire_unused_discovery(&self, handle: &SshConnectionHandle, reason: &'static str) -> bool {
         if !self.detach_connection(handle, RetirementCondition::DiscoveryUnused) {
             return false;
         }
@@ -3235,7 +3238,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn discovery_single_terminal_cannot_open_extra_channels_or_share_another_instances_transport() {
+    async fn discovery_single_terminal_cannot_open_extra_channels_or_share_another_instances_transport()
+     {
         let registry = SshConnectionRegistry::default();
         let first_origin = oxideterm_discovery::DiscoveryOrigin::new(
             "source".into(),
@@ -3321,14 +3325,20 @@ mod tests {
         let first = ConnectionConsumer::Terminal("first".into());
         let asset = |id: &str, user: &str| {
             let origin = oxideterm_discovery::DiscoveryOrigin::new(
-                "source".into(), id.into(), Uuid::new_v4(),
-            ).with_asset_session(true);
-            let handle = registry.acquire(SshConfig {
-                host: "gateway.invalid".into(),
-                username: user.into(),
-                discovery_origin: Some(origin.clone()),
-                ..Default::default()
-            }, first.clone());
+                "source".into(),
+                id.into(),
+                Uuid::new_v4(),
+            )
+            .with_asset_session(true);
+            let handle = registry.acquire(
+                SshConfig {
+                    host: "gateway.invalid".into(),
+                    username: user.into(),
+                    discovery_origin: Some(origin.clone()),
+                    ..Default::default()
+                },
+                first.clone(),
+            );
             handle.set_physical(Arc::new(()));
             registry.mark_state(handle.connection_id(), ConnectionState::Active);
             origin.connected();
@@ -3340,10 +3350,22 @@ mod tests {
         let split = ConnectionConsumer::Terminal("split".into());
         for (target, login) in [("asset-b", "alice"), ("asset-a", "bob")] {
             let (other, _) = asset(target, login);
-            assert!(registry.attach_admitted_terminal(other.connection_id(), &split, &admission).is_none());
+            assert!(
+                registry
+                    .attach_admitted_terminal(other.connection_id(), &split, &admission)
+                    .is_none()
+            );
         }
-        assert_eq!(registry.attach_admitted_terminal(id, &split, &admission).unwrap().connection_id(), id);
-        let files = registry.lease_consumer(id, ConnectionConsumer::Sftp("files".into())).unwrap();
+        assert_eq!(
+            registry
+                .attach_admitted_terminal(id, &split, &admission)
+                .unwrap()
+                .connection_id(),
+            id
+        );
+        let files = registry
+            .lease_consumer(id, ConnectionConsumer::Sftp("files".into()))
+            .unwrap();
         registry.release(id, &first);
         registry.release(id, &split);
         drop(admission);
@@ -3354,7 +3376,11 @@ mod tests {
         origin.invalidation().cancel();
         assert!(!selected.allows_target_operations());
         assert!(!selected.allows_additional_channels());
-        assert!(registry.attach_admitted_terminal(id, &split, &reopened).is_none());
+        assert!(
+            registry
+                .attach_admitted_terminal(id, &split, &reopened)
+                .is_none()
+        );
         drop(reopened);
         assert!(registry.get(id).is_none());
     }

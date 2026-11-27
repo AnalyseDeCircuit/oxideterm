@@ -804,9 +804,9 @@ impl SettingsInput {
             Self::ManagedKeyPastePrivateKey => 30_004,
             Self::ManagedKeyPastePassphrase => 30_005,
             Self::ManagedKeyRenameName => 30_006,
-            Self::DiscoveryField(index) | Self::DiscoverySecret(index) | Self::DiscoveryMultiline(index) => {
-                (1 << 48) + index as u64
-            }
+            Self::DiscoveryField(index)
+            | Self::DiscoverySecret(index)
+            | Self::DiscoveryMultiline(index) => (1 << 48) + index as u64,
             Self::PluginSetting(index) => PLUGIN_SETTING_INPUT_ANCHOR_BASE + index as u64,
         }
     }

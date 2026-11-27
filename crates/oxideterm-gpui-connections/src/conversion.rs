@@ -6,9 +6,7 @@ use oxideterm_connections::{
     SavedProxyCommand, SavedUpstreamProxyProtocol, SecretString, first_available_default_key_path,
 };
 use oxideterm_remote_desktop::RemoteDesktopProtocol;
-use oxideterm_session_adapter::{
-    auth_method_from_saved_auth, proxy_command_from_value,
-};
+use oxideterm_session_adapter::{auth_method_from_saved_auth, proxy_command_from_value};
 use oxideterm_ssh::{
     AuthMethod, NativeSessionTreeConnectEndpoint, NodeId, NodeRouter, ProxyCommandConfig,
     ProxyHopConfig, SshConfig, UpstreamProxyAuth, UpstreamProxyProtocol, X11ForwardPolicy,
@@ -813,7 +811,9 @@ mod runtime_save_tests {
         )
         .unwrap();
         assert_eq!(config.post_connect_command, None);
-        assert!(matches!(config.auth, AuthMethod::Password { password, prompt: true } if password.as_str().is_empty()));
+        assert!(
+            matches!(config.auth, AuthMethod::Password { password, prompt: true } if password.as_str().is_empty())
+        );
         form.password = "user-selected".into();
         let (config, _) = build_ssh_config(
             &mut form,

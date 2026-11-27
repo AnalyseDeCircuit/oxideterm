@@ -272,7 +272,10 @@ mod tests {
             let replaced = vec![row("west:gamma"), row("east:beta")];
             palette.restore_item_selection(selected, &replaced, cx);
             assert!(
-                key_request(&enter, palette.query(), palette.selected_index(), || replaced).is_none()
+                key_request(&enter, palette.query(), palette.selected_index(), || {
+                    replaced
+                })
+                .is_none()
             );
         });
     }

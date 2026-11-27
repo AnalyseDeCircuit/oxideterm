@@ -133,20 +133,36 @@ mod tests {
             ..Default::default()
         };
         let save = |store: &mut SettingsStore, source, new| {
-            store.save_discovery_source(source, new, vec![], |_, _| unreachable!(), |_| unreachable!()).unwrap();
+            store
+                .save_discovery_source(
+                    source,
+                    new,
+                    vec![],
+                    |_, _| unreachable!(),
+                    |_| unreachable!(),
+                )
+                .unwrap();
         };
         save(&mut store, draft.clone(), true);
-        let read = || SettingsStore::load_from_path(&path).unwrap().settings().discovery_sources[0].clone();
+        let read = || {
+            SettingsStore::load_from_path(&path)
+                .unwrap()
+                .settings()
+                .discovery_sources[0]
+                .clone()
+        };
         draft = read();
         assert!(draft.enabled);
         let mut list = SettingsStore::load_from_path(&path).unwrap();
-        list.set_discovery_source_enabled("inventory", false).unwrap();
+        list.set_discovery_source_enabled("inventory", false)
+            .unwrap();
         draft.name = "Updated".into();
         store = SettingsStore::load_from_path(&path).unwrap();
         save(&mut store, draft.clone(), false);
         draft.enabled = false;
         assert_eq!(read(), draft);
-        list.set_discovery_source_enabled("inventory", true).unwrap();
+        list.set_discovery_source_enabled("inventory", true)
+            .unwrap();
         draft.enabled = true;
         assert_eq!(read(), draft);
     }

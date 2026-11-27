@@ -2,9 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use super::*;
-use oxideterm_plugin_manifest::discovery::{
-    DiscoveryLaunchKind,
-};
+use oxideterm_plugin_manifest::discovery::DiscoveryLaunchKind;
 use std::collections::HashSet;
 
 impl NativePluginRegistry {
@@ -88,7 +86,10 @@ pub(super) fn parse_manifest(
             }
             let provider: NativePluginDiscoveryProviderDef = serde_json::from_value(entry.clone())
                 .map_err(|_| "Unsupported discovery provider declaration")?;
-            validate_provider(&provider, capabilities.iter().any(|c| c == "credentials.raw.read"))?;
+            validate_provider(
+                &provider,
+                capabilities.iter().any(|c| c == "credentials.raw.read"),
+            )?;
             if let Some(entry) = &provider.terminal_entry {
                 let root = root
                     .canonicalize()
@@ -144,8 +145,14 @@ fn validate_controls(
             fields.insert(format!("{section}/{id}"));
         }
         if control.kind == "password" {
-            let scope = control.secret_scope.as_ref().ok_or("Discovery password fields require a secretScope")?;
-            secrets.push((format!("{section}/{}", control.id.as_deref().unwrap_or_default()), scope.clone()));
+            let scope = control
+                .secret_scope
+                .as_ref()
+                .ok_or("Discovery password fields require a secretScope")?;
+            secrets.push((
+                format!("{section}/{}", control.id.as_deref().unwrap_or_default()),
+                scope.clone(),
+            ));
         } else if control.secret_scope.is_some() {
             return Err("Only discovery password fields may declare secretScope".into());
         }
@@ -154,7 +161,10 @@ fn validate_controls(
     Ok(())
 }
 
-fn validate_provider(provider: &NativePluginDiscoveryProviderDef, can_read_secrets: bool) -> Result<(), String> {
+fn validate_provider(
+    provider: &NativePluginDiscoveryProviderDef,
+    can_read_secrets: bool,
+) -> Result<(), String> {
     for field in [&provider.id, &provider.title, &provider.icon] {
         validate_manifest_text_field("discoveryProvider", field)?;
     }
@@ -189,7 +199,11 @@ fn validate_provider(provider: &NativePluginDiscoveryProviderDef, can_read_secre
         return Err("Discovery password fields require credentials.raw.read".into());
     }
     for (_, scope) in &secrets {
-        if !unique(scope) || scope.iter().any(|key| !fields.contains(key) || secrets.iter().any(|(secret, _)| secret == key)) {
+        if !unique(scope)
+            || scope
+                .iter()
+                .any(|key| !fields.contains(key) || secrets.iter().any(|(secret, _)| secret == key))
+        {
             return Err("Discovery secretScope must reference distinct non-secret fields".into());
         }
     }
@@ -197,7 +211,11 @@ fn validate_provider(provider: &NativePluginDiscoveryProviderDef, can_read_secre
     for action in &provider.source_actions {
         validate_manifest_text_field("sourceActions.id", &action.id)?;
         validate_manifest_text_field("sourceActions.title", &action.title)?;
-        if action.field.as_ref().is_some_and(|key| !fields.contains(key)) {
+        if action
+            .field
+            .as_ref()
+            .is_some_and(|key| !fields.contains(key))
+        {
             return Err("Unknown discovery source action field".into());
         }
         if action.id.chars().any(char::is_control)

@@ -5,11 +5,16 @@ use super::*;
 use oxideterm_discovery::{DiscoveryFailure, DiscoveryProvider, DiscoverySource};
 use oxideterm_gpui_settings_view::connections_page::DiscoveryProviderChoice;
 
-fn discovery_secret_account(plugin: &str, binding: &oxideterm_settings::DiscoverySecretBinding) -> anyhow::Result<String> {
+fn discovery_secret_account(
+    plugin: &str,
+    binding: &oxideterm_settings::DiscoverySecretBinding,
+) -> anyhow::Result<String> {
     use oxideterm_settings::DiscoverySecretBinding;
     match binding {
-        DiscoverySecretBinding::Plugin(key) =>
-            oxideterm_plugin_host_api::secrets::plugin_secret_account_id(plugin, key).map_err(anyhow::Error::msg),
+        DiscoverySecretBinding::Plugin(key) => {
+            oxideterm_plugin_host_api::secrets::plugin_secret_account_id(plugin, key)
+                .map_err(anyhow::Error::msg)
+        }
         DiscoverySecretBinding::SshPassphrase(account) => Ok(account.clone()),
     }
 }
@@ -33,7 +38,10 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn node_allows_drill_down(&self, node_id: &NodeId) -> bool {
-        self.node_router.runtime_store().discovery_origin(node_id).is_none()
+        self.node_router
+            .runtime_store()
+            .discovery_origin(node_id)
+            .is_none()
     }
 
     pub(in crate::workspace) fn discovery_node_allows_target(&self, node_id: &NodeId) -> bool {
@@ -114,14 +122,11 @@ impl WorkspaceApp {
                 action.title = translate(&action.title);
             }
             plugin_ui::localize_native_plugin_schema(&mut def.form, self.i18n.locale());
-            providers.push(DiscoveryProviderChoice::new(
-                plugin_id.into(),
-                title,
-                def,
-            ));
+            providers.push(DiscoveryProviderChoice::new(plugin_id.into(), title, def));
         }
         self.discovery.configure_saved(&saved, |s| {
-            s.plugin_id.as_ref()
+            s.plugin_id
+                .as_ref()
                 .and_then(|id| plugin.discovery_process(id, &s.provider_id))
                 .map(|p| Arc::new(p) as Arc<dyn DiscoveryProvider>)
         });
@@ -133,7 +138,10 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn publish_discovery_catalog(&mut self, cx: &mut Context<Self>) {
-        if !self.discovery.matches_sources(&self.settings_store.settings().discovery_sources) && self.load_discovery_settings(cx).is_err()
+        if !self
+            .discovery
+            .matches_sources(&self.settings_store.settings().discovery_sources)
+            && self.load_discovery_settings(cx).is_err()
         {
             self.report_discovery_failure(DiscoveryFailure::Unavailable, cx);
             return;
@@ -161,12 +169,7 @@ impl WorkspaceApp {
             None
         };
         let mut groups = Vec::new();
-        for source in self
-            .settings_store
-            .settings()
-            .discovery_sources
-            .iter()
-        {
+        for source in self.settings_store.settings().discovery_sources.iter() {
             let Some(snapshot) = self.discovery.snapshot(&source.id) else {
                 continue;
             };
@@ -211,12 +214,7 @@ impl WorkspaceApp {
                 );
             }
             self.settings_workspace.update(cx, |s, cx| {
-                s.set_discovery_catalog(
-                    source.id.clone(),
-                    snapshot.refreshing,
-                    status,
-                    cx,
-                )
+                s.set_discovery_catalog(source.id.clone(), snapshot.refreshing, status, cx)
             });
         }
         let sources = &self.settings_store.settings().discovery_sources;
@@ -253,7 +251,6 @@ impl WorkspaceApp {
         self.connections
             .session_manager
             .update(cx, |s, cx| s.set_status(Some(message), cx));
-
     }
 
     pub(in crate::workspace) fn run_discovery_source_action(
@@ -298,7 +295,10 @@ impl WorkspaceApp {
             return false;
         }
         let previous_source = self.discovery.source(&source.id);
-        if previous_source.as_ref().is_some_and(|old| old.removal_pending) {
+        if previous_source
+            .as_ref()
+            .is_some_and(|old| old.removal_pending)
+        {
             self.report_discovery_status(
                 self.i18n.t("settings_view.discovery.removal_pending"),
                 cx,
@@ -307,10 +307,18 @@ impl WorkspaceApp {
         }
         let result = (|| -> anyhow::Result<()> {
             let mut settings = SettingsStore::load_from_path(self.settings_store.path())?;
-            let plugin = source.plugin_id.clone().ok_or_else(|| anyhow::anyhow!("Missing provider"))?;
+            let plugin = source
+                .plugin_id
+                .clone()
+                .ok_or_else(|| anyhow::anyhow!("Missing provider"))?;
             let store = self.ai.state.read(cx).key_store().clone();
-            settings.save_discovery_source(source, previous_source.is_none(), secrets,
-                |key, value| store.store_provider_key(&discovery_secret_account(&plugin, key)?, value),
+            settings.save_discovery_source(
+                source,
+                previous_source.is_none(),
+                secrets,
+                |key, value| {
+                    store.store_provider_key(&discovery_secret_account(&plugin, key)?, value)
+                },
                 |key| store.delete_provider_key(&discovery_secret_account(&plugin, key)?),
             )?;
             self.apply_discovery_settings(&settings, cx);
@@ -370,7 +378,11 @@ impl WorkspaceApp {
     fn finish_deleting_discovery_source(&mut self, id: &str, cx: &mut Context<Self>) {
         let result = (|| -> anyhow::Result<()> {
             let mut settings = SettingsStore::load_from_path(self.settings_store.path())?;
-            if let Some(source) = settings.settings().discovery_sources.iter().find(|s| s.id == id && s.removal_pending)
+            if let Some(source) = settings
+                .settings()
+                .discovery_sources
+                .iter()
+                .find(|s| s.id == id && s.removal_pending)
                 && let Some(plugin) = &source.plugin_id
             {
                 let store = self.ai.state.read(cx).key_store().clone();
@@ -379,10 +391,7 @@ impl WorkspaceApp {
                     store.delete_provider_key(&account)?;
                 }
             }
-            self.discovery.finish_remove(
-                id,
-                &mut settings,
-            )?;
+            self.discovery.finish_remove(id, &mut settings)?;
             self.apply_discovery_settings(&settings, cx);
             Ok(())
         })();

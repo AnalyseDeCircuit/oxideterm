@@ -1,7 +1,7 @@
 use super::*;
+use oxideterm_connections::ConnectionStore;
 use oxideterm_gpui_connections::SshAuthTab;
 use oxideterm_settings::{DiscoverySshAuth, DiscoverySshPreferences};
-use oxideterm_connections::ConnectionStore;
 
 fn apply_discovered_ssh_preferences(
     prefs: &DiscoverySshPreferences,
@@ -16,7 +16,10 @@ fn apply_discovered_ssh_preferences(
             form.key_path.clone_from(path);
             SshAuthTab::SshKey
         }
-        DiscoverySshAuth::Certificate { key_path, cert_path } => {
+        DiscoverySshAuth::Certificate {
+            key_path,
+            cert_path,
+        } => {
             form.key_path.clone_from(key_path);
             form.cert_path.clone_from(cert_path);
             SshAuthTab::Certificate
@@ -50,10 +53,7 @@ fn apply_discovered_ssh_preferences(
     Ok(())
 }
 
-fn can_connect_with_preset(
-    prefs: &DiscoverySshPreferences,
-    login: Option<&str>,
-) -> bool {
+fn can_connect_with_preset(prefs: &DiscoverySshPreferences, login: Option<&str>) -> bool {
     prefs.skip_connection_form && login.is_some_and(|name| !name.trim().is_empty())
 }
 
@@ -426,7 +426,6 @@ impl WorkspaceApp {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -452,7 +451,10 @@ mod tests {
         };
         let login = Some("alice@ops@asset");
         assert!(can_connect_with_preset(&prefs, login));
-        assert!(!can_connect_with_preset(&DiscoverySshPreferences::default(), login));
+        assert!(!can_connect_with_preset(
+            &DiscoverySshPreferences::default(),
+            login
+        ));
         assert!(!can_connect_with_preset(&prefs, None));
         let mut form = NewConnectionForm::default();
         form.host = "gateway.example".into();
@@ -473,18 +475,47 @@ mod tests {
         assert_eq!(config.totp.unwrap().credential_id, "gateway-mfa");
         for (auth, certificate) in [
             (DiscoverySshAuth::KeyFile("fixture/key".into()), false),
-            (DiscoverySshAuth::Certificate { key_path: "fixture/key".into(), cert_path: "fixture/cert.pub".into() }, true),
+            (
+                DiscoverySshAuth::Certificate {
+                    key_path: "fixture/key".into(),
+                    cert_path: "fixture/cert.pub".into(),
+                },
+                true,
+            ),
         ] {
             prefs.auth = auth;
-            apply_discovered_ssh_preferences(&prefs, &mut form, &store, Some(zeroize::Zeroizing::new("fixture-unlock".into()))).unwrap();
-            let (config, _) = build_ssh_config(&mut form, &store, &Default::default(), &Default::default(), RuntimeSecretHandoff::Move).unwrap();
+            apply_discovered_ssh_preferences(
+                &prefs,
+                &mut form,
+                &store,
+                Some(zeroize::Zeroizing::new("fixture-unlock".into())),
+            )
+            .unwrap();
+            let (config, _) = build_ssh_config(
+                &mut form,
+                &store,
+                &Default::default(),
+                &Default::default(),
+                RuntimeSecretHandoff::Move,
+            )
+            .unwrap();
             match config.auth {
-                oxideterm_ssh::AuthMethod::Key {key_path, passphrase} if !certificate => {
+                oxideterm_ssh::AuthMethod::Key {
+                    key_path,
+                    passphrase,
+                } if !certificate => {
                     assert_eq!(key_path, "fixture/key");
                     assert_eq!(passphrase.unwrap().as_str(), "fixture-unlock");
                 }
-                oxideterm_ssh::AuthMethod::Certificate { key_path, cert_path, passphrase } if certificate => {
-                    assert_eq!((key_path.as_str(), cert_path.as_str()), ("fixture/key", "fixture/cert.pub"));
+                oxideterm_ssh::AuthMethod::Certificate {
+                    key_path,
+                    cert_path,
+                    passphrase,
+                } if certificate => {
+                    assert_eq!(
+                        (key_path.as_str(), cert_path.as_str()),
+                        ("fixture/key", "fixture/cert.pub")
+                    );
                     assert_eq!(passphrase.unwrap().as_str(), "fixture-unlock");
                 }
                 _ => panic!("discovery lost the selected key source"),

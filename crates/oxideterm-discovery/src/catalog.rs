@@ -1,7 +1,4 @@
-use crate::{
-    DiscoveryFailure, DiscoveryPage, DiscoveryProvider, DiscoverySource,
-    DiscoveryTarget,
-};
+use crate::{DiscoveryFailure, DiscoveryPage, DiscoveryProvider, DiscoverySource, DiscoveryTarget};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     path::{Path, PathBuf},
@@ -67,11 +64,12 @@ impl CatalogEntry {
 
     pub fn search_text(&self) -> String {
         let mut text = format!("{} {} {}", self.label, self.subtitle(), self.tags.join(" "));
-        for term in self
-            .detail
-            .iter()
-            .chain(self.group_paths.iter().flatten().map(|segment| &segment.label))
-        {
+        for term in self.detail.iter().chain(
+            self.group_paths
+                .iter()
+                .flatten()
+                .map(|segment| &segment.label),
+        ) {
             text.push(' ');
             text.push_str(term);
         }
@@ -488,7 +486,8 @@ impl DiscoveryService {
                         .is_none_or(|p| p.catalog_config(&slot.source) == p.catalog_config(&source))
                 {
                     let changed_config = slot.source.config != source.config;
-                    let changed_open_preferences = slot.source.ssh_preferences != source.ssh_preferences;
+                    let changed_open_preferences =
+                        slot.source.ssh_preferences != source.ssh_preferences;
                     let changed_interval = slot.source.refresh_minutes != source.refresh_minutes;
                     slot.source = source;
                     if changed_config || changed_open_preferences {
@@ -716,7 +715,7 @@ impl DiscoveryService {
                         slot.snapshot.complete = true;
                         slot.snapshot.refreshed_at = Some(SystemTime::now());
                         slot.snapshot.failure = None;
-                            slot.suspended = false;
+                        slot.suspended = false;
                     }
                     Err(failure) => apply_failure(slot, failure),
                 }
@@ -725,7 +724,6 @@ impl DiscoveryService {
             }
         });
     }
-
 }
 
 fn current(

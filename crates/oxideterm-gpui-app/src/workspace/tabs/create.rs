@@ -1631,7 +1631,10 @@ impl WorkspaceApp {
         if origin.allows_asset_channels() {
             return true;
         }
-        if self.discovery.can_open(&origin.source_id, &origin.target_id) {
+        if self
+            .discovery
+            .can_open(&origin.source_id, &origin.target_id)
+        {
             self.prompt_reopen_discovery_target(node_id, window, cx);
         } else {
             self.report_discovery_open_failure(
@@ -1682,7 +1685,8 @@ impl WorkspaceApp {
                 )
             });
         let discovery_origin = self.node_router.runtime_store().discovery_origin(node_id);
-        let dedicated_new_terminal_connection = discovery_origin.is_none() && reuse_connection_id.is_none()
+        let dedicated_new_terminal_connection = discovery_origin.is_none()
+            && reuse_connection_id.is_none()
             && should_use_dedicated_terminal_connection(
                 allow_dedicated_connection,
                 saved_connection_policy.map(|policy| policy.0),
@@ -2164,7 +2168,12 @@ impl WorkspaceApp {
                 window,
                 cx,
             ) {
-                if self.node_router.runtime_store().discovery_origin(&request.node_id).is_some() {
+                if self
+                    .node_router
+                    .runtime_store()
+                    .discovery_origin(&request.node_id)
+                    .is_some()
+                {
                     self.report_discovery_open_error(error.to_string(), cx);
                 }
                 continue;

@@ -1212,7 +1212,11 @@ impl WorkspaceApp {
 
     fn schedule_grace_period_reconnect(&mut self, node_id: &NodeId, cx: &mut Context<Self>) {
         if !self.settings_store.settings().reconnect.enabled
-            || self.node_router.runtime_store().discovery_origin(node_id).is_some()
+            || self
+                .node_router
+                .runtime_store()
+                .discovery_origin(node_id)
+                .is_some()
         {
             return;
         }
@@ -1229,7 +1233,12 @@ impl WorkspaceApp {
     }
 
     fn start_grace_period_reconnect(&mut self, node_id: &NodeId, cx: &mut Context<Self>) {
-        if self.node_router.runtime_store().discovery_origin(node_id).is_some() {
+        if self
+            .node_router
+            .runtime_store()
+            .discovery_origin(node_id)
+            .is_some()
+        {
             return;
         }
         let Some(node) = self.ssh_nodes.get(node_id) else {
@@ -1445,7 +1454,11 @@ impl WorkspaceApp {
         {
             // An independently recovered child will not deliver a second connection completion.
             if self.node_is_ready_for_terminal(&node_id)
-                || self.node_router.runtime_store().discovery_origin(&node_id).is_some()
+                || self
+                    .node_router
+                    .runtime_store()
+                    .discovery_origin(&node_id)
+                    .is_some()
             {
                 continue;
             }

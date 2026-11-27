@@ -2,6 +2,7 @@ mod editor_actions;
 mod ssh;
 
 use super::*;
+use oxideterm_plugin_manifest::discovery::{secret_key, secret_scope};
 use oxideterm_plugin_manifest::{
     NativePluginDeclarativeUiControl,
     discovery::{
@@ -11,9 +12,8 @@ use oxideterm_plugin_manifest::{
 };
 use oxideterm_settings::{DiscoverySource, DiscoverySshAuth};
 use serde_json::{Value, json};
-use oxideterm_plugin_manifest::discovery::{secret_scope, secret_key};
-use zeroize::Zeroizing;
 use std::hash::{Hash, Hasher};
+use zeroize::Zeroizing;
 
 const DEFAULT_REFRESH_INTERVAL_MINUTES: u32 = 5;
 
@@ -57,7 +57,11 @@ impl DiscoveryProviderChoice {
     }
 
     fn editor_choices(&self, store: &ConnectionStore) -> EditorChoices {
-        if !self.definition.launch_kinds.contains(&DiscoveryLaunchKind::Ssh) {
+        if !self
+            .definition
+            .launch_kinds
+            .contains(&DiscoveryLaunchKind::Ssh)
+        {
             return EditorChoices::default();
         }
         EditorChoices {
@@ -76,9 +80,9 @@ impl DiscoveryProviderChoice {
     }
 
     pub fn matches(&self, source: &DiscoverySource) -> bool {
-        source.plugin_id.as_ref() == Some(&self.plugin_id) && self.definition.id == source.provider_id
+        source.plugin_id.as_ref() == Some(&self.plugin_id)
+            && self.definition.id == source.provider_id
     }
-
 }
 
 #[derive(Default)]
@@ -126,8 +130,7 @@ impl DiscoverySettingsState {
                 if matches!(
                     field.slot,
                     Slot::ScheduledRefresh | Slot::SshAuth | Slot::KeySource
-                )
-                {
+                ) {
                     field.value.hash(hasher);
                 }
             }
@@ -223,11 +226,7 @@ impl SettingsWorkspaceEntity {
         status: Option<String>,
         cx: &mut Context<Self>,
     ) {
-        let feedback = self
-            .discovery
-            .feedback
-            .entry(source_id)
-            .or_default();
+        let feedback = self.discovery.feedback.entry(source_id).or_default();
         let changed = feedback.catalog != status || feedback.refreshing != refreshing;
 
         feedback.catalog = status;
@@ -375,19 +374,9 @@ impl SourceEditor {
             ),
         ];
         let def = &provider.definition;
-        collect_controls(
-            &mut fields,
-            &def.form.controls,
-            "root",
-            &source.config,
-        );
+        collect_controls(&mut fields, &def.form.controls, "root", &source.config);
         for section in &def.form.sections {
-            collect_controls(
-                &mut fields,
-                &section.controls,
-                &section.id,
-                &source.config,
-            );
+            collect_controls(&mut fields, &section.controls, &section.id, &source.config);
         }
         if def.launch_kinds.contains(&DiscoveryLaunchKind::Ssh) {
             let prefs = &source.ssh_preferences;
@@ -426,10 +415,17 @@ impl SourceEditor {
         match field.slot {
             Slot::Minutes => self.scheduled_refresh(),
             Slot::IdentityAgent => self.ssh_choice(Slot::SshAuth) == Some("agent"),
-            Slot::KeySource | Slot::Passphrase | Slot::KeyPath | Slot::CertPath | Slot::ManagedKey => {
+            Slot::KeySource
+            | Slot::Passphrase
+            | Slot::KeyPath
+            | Slot::CertPath
+            | Slot::ManagedKey => {
                 self.ssh_choice(Slot::SshAuth) == Some("key")
                     && match field.slot {
-                        Slot::KeyPath => matches!(self.ssh_choice(Slot::KeySource), Some("file" | "certificate")),
+                        Slot::KeyPath => matches!(
+                            self.ssh_choice(Slot::KeySource),
+                            Some("file" | "certificate")
+                        ),
                         Slot::CertPath => self.ssh_choice(Slot::KeySource) == Some("certificate"),
                         Slot::ManagedKey => self.ssh_choice(Slot::KeySource) == Some("managed"),
                         _ => true,
@@ -440,17 +436,31 @@ impl SourceEditor {
     }
 
     pub(crate) fn clear_dependent_secrets(&mut self, index: usize) {
-        if self.fields.get(index).is_some_and(|field| matches!(field.slot,
-            Slot::SshAuth | Slot::KeySource | Slot::KeyPath | Slot::CertPath | Slot::ManagedKey))
-            && let Some(draft) = self.fields.iter_mut().find(|f| f.slot == Slot::Passphrase).and_then(|f| f.secret.as_mut())
+        if self.fields.get(index).is_some_and(|field| {
+            matches!(
+                field.slot,
+                Slot::SshAuth | Slot::KeySource | Slot::KeyPath | Slot::CertPath | Slot::ManagedKey
+            )
+        }) && let Some(draft) = self
+            .fields
+            .iter_mut()
+            .find(|f| f.slot == Slot::Passphrase)
+            .and_then(|f| f.secret.as_mut())
         {
             draft.value = Zeroizing::default();
         }
-        let Some(EditorField { slot: Slot::Config(key), .. }) = self.fields.get(index) else { return };
+        let Some(EditorField {
+            slot: Slot::Config(key),
+            ..
+        }) = self.fields.get(index)
+        else {
+            return;
+        };
         let key = key.clone();
         for field in &mut self.fields {
             if let Some(secret) = &mut field.secret
-                && !secret.value.is_empty() && secret.scope.contains(&key)
+                && !secret.value.is_empty()
+                && secret.scope.contains(&key)
             {
                 secret.value = Zeroizing::default();
             }
@@ -461,9 +471,14 @@ impl SourceEditor {
         let Some(field) = self.fields.get_mut(field_index) else {
             return;
         };
-        let changed = field.options.get(option_index).is_some_and(|(_, v)| v.to_string() != field.value);
+        let changed = field
+            .options
+            .get(option_index)
+            .is_some_and(|(_, v)| v.to_string() != field.value);
         field.select(option_index);
-        if changed { self.clear_dependent_secrets(field_index); }
+        if changed {
+            self.clear_dependent_secrets(field_index);
+        }
     }
 
     fn validated(&self) -> Option<DiscoverySource> {
@@ -515,7 +530,8 @@ impl SourceEditor {
                 }
                 Slot::ConfirmForm => source.ssh_preferences.skip_connection_form = text != "true",
                 Slot::IdentityAgent => {
-                    source.ssh_preferences.identity_agent = (self.field_visible(field) && !text.is_empty()).then(|| text.to_owned());
+                    source.ssh_preferences.identity_agent =
+                        (self.field_visible(field) && !text.is_empty()).then(|| text.to_owned());
                 }
                 Slot::SshAuth => source.ssh_preferences.auth = self.ssh_auth()?,
                 Slot::Totp => {
@@ -525,7 +541,9 @@ impl SourceEditor {
                 Slot::Passphrase => {
                     source.ssh_preferences.passphrase_revision = if !self.field_visible(field) {
                         None
-                    } else if let Some(secret) = field.secret.as_ref().filter(|s| !s.value.is_empty()) {
+                    } else if let Some(secret) =
+                        field.secret.as_ref().filter(|s| !s.value.is_empty())
+                    {
                         Some(secret.revision)
                     } else if source.ssh_preferences.auth == self.source.ssh_preferences.auth {
                         self.source.ssh_preferences.passphrase_revision
@@ -542,7 +560,8 @@ impl SourceEditor {
             if let (Slot::Config(key), Some(secret)) = (&field.slot, &field.secret) {
                 let scope = secret_scope(&source.config, &secret.scope);
                 if !secret.value.is_empty() {
-                    source.config[key] = json!({"discoverySecret": secret.revision, "scope": scope});
+                    source.config[key] =
+                        json!({"discoverySecret": secret.revision, "scope": scope});
                 } else if source.config[key].get("scope") != Some(&scope)
                     || secret_key(&source.id, key, &source.config[key]).is_none()
                 {
@@ -558,7 +577,10 @@ impl SourceEditor {
         saved: &DiscoverySource,
         provider: &DiscoveryProviderChoice,
     ) -> bool {
-        let config = provider.definition.config_for(&saved.id, &saved.config, DiscoveryConfigUse::Both);
+        let config =
+            provider
+                .definition
+                .config_for(&saved.id, &saved.config, DiscoveryConfigUse::Both);
         self.fields.iter().all(|field| match &field.slot {
             Slot::Config(_) if field.secret.is_some() => field.secret_value() == Some(""),
             Slot::Config(key) => field.value == config_field_text(&field.kind, config.get(key)),
@@ -568,19 +590,22 @@ impl SourceEditor {
 
     fn save_request(self) -> Option<ConnectionRequest> {
         let source = self.validated()?;
-        let secrets = self.fields.into_iter().filter_map(|field| {
-            let key = match field.slot {
-                Slot::Config(key) => key,
-                Slot::Passphrase if source.ssh_preferences.passphrase_revision.is_some() => oxideterm_settings::DISCOVERY_SSH_PASSPHRASE_FIELD.into(),
-                _ => return None,
-            };
-            let secret = field.secret?.value;
-            (!secret.is_empty()).then_some((key, secret))
-        }).collect();
-        Some(ConnectionRequest::SaveDiscovery {
-            secrets,
-            source,
-        })
+        let secrets = self
+            .fields
+            .into_iter()
+            .filter_map(|field| {
+                let key = match field.slot {
+                    Slot::Config(key) => key,
+                    Slot::Passphrase if source.ssh_preferences.passphrase_revision.is_some() => {
+                        oxideterm_settings::DISCOVERY_SSH_PASSPHRASE_FIELD.into()
+                    }
+                    _ => return None,
+                };
+                let secret = field.secret?.value;
+                (!secret.is_empty()).then_some((key, secret))
+            })
+            .collect();
+        Some(ConnectionRequest::SaveDiscovery { secrets, source })
     }
 }
 
@@ -615,7 +640,11 @@ fn collect_controls(
         {
             let key = format!("{section}/{id}");
             let value = config.get(&key).or(control.value.as_ref());
-            let text = if control.kind == "password" { String::new() } else { config_field_text(&control.kind, value) };
+            let text = if control.kind == "password" {
+                String::new()
+            } else {
+                config_field_text(&control.kind, value)
+            };
             let mut field = EditorField::new(
                 Slot::Config(key),
                 control.label.as_deref().unwrap_or(id),
@@ -694,13 +723,23 @@ impl ConnectionPage<'_> {
         if let Some(editor) = &ui.editor {
             let mut rows = Vec::new();
             let field_provider = ui.providers.iter().find(|p| {
-                p.matches(&editor.source) && p.definition.source_actions.iter().any(|a| a.field.is_some())
+                p.matches(&editor.source)
+                    && p.definition
+                        .source_actions
+                        .iter()
+                        .any(|a| a.field.is_some())
             });
-            let saved = self.settings.discovery_sources.iter().find(|s| s.id == editor.source.id);
+            let saved = self
+                .settings
+                .discovery_sources
+                .iter()
+                .find(|s| s.id == editor.source.id);
             // Source actions execute against persisted settings. Never open a credential
             // editor for the previous site or account while its replacement is on screen.
             let actions_ready = field_provider.zip(saved).is_some_and(|(provider, saved)| {
-                saved.enabled && !saved.removal_pending && provider.matches(saved)
+                saved.enabled
+                    && !saved.removal_pending
+                    && provider.matches(saved)
                     && editor.matches_action_config(saved, provider)
             });
             let draft = editor.validated();
@@ -764,12 +803,25 @@ impl ConnectionPage<'_> {
                     "password" => {
                         let configured = draft.as_ref().is_some_and(|source| match &field.slot {
                             Slot::Config(key) => source.config.get(key).is_some(),
-                            Slot::Passphrase => source.ssh_preferences.passphrase_revision.is_some(),
+                            Slot::Passphrase => {
+                                source.ssh_preferences.passphrase_revision.is_some()
+                            }
                             _ => false,
                         });
-                        let hint = if configured { self.i18n.t("settings_view.totp.keep_secret") } else { field.placeholder.clone() };
-                        self.field(SettingsInput::DiscoverySecret(index), field.secret_value().unwrap_or_default(), hint,
-                            Some(self.tokens.metrics.settings_select_width), TextInputContentAlign::Start, true, cx)
+                        let hint = if configured {
+                            self.i18n.t("settings_view.totp.keep_secret")
+                        } else {
+                            field.placeholder.clone()
+                        };
+                        self.field(
+                            SettingsInput::DiscoverySecret(index),
+                            field.secret_value().unwrap_or_default(),
+                            hint,
+                            Some(self.tokens.metrics.settings_select_width),
+                            TextInputContentAlign::Start,
+                            true,
+                            cx,
+                        )
                     }
                     "textarea" => {
                         let input = SettingsInput::DiscoveryMultiline(index);
@@ -792,18 +844,35 @@ impl ConnectionPage<'_> {
                 if let (Some(provider), Slot::Config(key)) = (field_provider, &field.slot) {
                     let mut actions = provider.actions_at(Some(key)).peekable();
                     if actions.peek().is_some() {
-                        let controls = div().flex().flex_wrap().items_center().gap(px(8.))
+                        let controls = div()
+                            .flex()
+                            .flex_wrap()
+                            .items_center()
+                            .gap(px(8.))
                             .child(element)
-                            .children(actions.map(|action| self.source_action_button(&editor.source, action, !actions_ready)));
-                        let hint = if actions_ready { "" } else { "settings_view.discovery.save_before_action" };
-                        rows.push(self.setting_row(&field.label, hint, controls.into_any_element(), cx));
+                            .children(actions.map(|action| {
+                                self.source_action_button(&editor.source, action, !actions_ready)
+                            }));
+                        let hint = if actions_ready {
+                            ""
+                        } else {
+                            "settings_view.discovery.save_before_action"
+                        };
+                        rows.push(self.setting_row(
+                            &field.label,
+                            hint,
+                            controls.into_any_element(),
+                            cx,
+                        ));
                         continue;
                     }
                 }
                 rows.push(self.setting_row(&field.label, "", element, cx));
             }
             if field_provider.is_some()
-                && let Some(message) = ui.feedback.get(&editor.source.id)
+                && let Some(message) = ui
+                    .feedback
+                    .get(&editor.source.id)
                     .and_then(|feedback| feedback.action.as_ref())
                     .and_then(SourceRequestFeedback::message)
             {
@@ -901,22 +970,31 @@ impl ConnectionPage<'_> {
                 None,
                 self.connection_import_secondary_button_options(false),
                 move |_, window, cx| {
-                    dispatch(crate::components::SettingsWindowRequest::OpenPluginManager, window, cx);
+                    dispatch(
+                        crate::components::SettingsWindowRequest::OpenPluginManager,
+                        window,
+                        cx,
+                    );
                     cx.stop_propagation();
                 },
             );
             (
                 "settings_view.discovery.install_provider_hint",
-                manage.debug_selector(|| "discovery-open-plugins".into()).into_any_element(),
+                manage
+                    .debug_selector(|| "discovery-open-plugins".into())
+                    .into_any_element(),
             )
         } else {
-            ("", self.settings_select_control(
-                SettingsSelect::DiscoveryProvider,
-                self.i18n.t("settings_view.discovery.add"),
-                false,
-                Some(self.tokens.metrics.ui_select_min_width),
-                cx,
-            ))
+            (
+                "",
+                self.settings_select_control(
+                    SettingsSelect::DiscoveryProvider,
+                    self.i18n.t("settings_view.discovery.add"),
+                    false,
+                    Some(self.tokens.metrics.ui_select_min_width),
+                    cx,
+                ),
+            )
         };
         self.settings_card_with_header(
             "settings_view.discovery.title",
@@ -936,7 +1014,8 @@ mod tests {
         let definition = serde_json::from_value(json!({
             "id": "assets", "title": "Inventory", "icon": "inventory.svg", "protocolVersion": 1,
             "form": {}, "launchKinds": ["ssh"],
-        })).unwrap();
+        }))
+        .unwrap();
         let source = DiscoverySource {
             id: "lab".into(),
             provider_id: "assets".into(),
@@ -944,7 +1023,14 @@ mod tests {
             name: "Lab".into(),
             ..Default::default()
         };
-        (source, DiscoveryProviderChoice::new("com.example.inventory".into(), "Inventory".into(), definition))
+        (
+            source,
+            DiscoveryProviderChoice::new(
+                "com.example.inventory".into(),
+                "Inventory".into(),
+                definition,
+            ),
+        )
     }
 
     #[test]
@@ -953,16 +1039,46 @@ mod tests {
         provider.definition.form = serde_json::from_value(json!({"controls":[
             {"kind":"text","id":"site"}, {"kind":"text","id":"user"},
             {"kind":"password","id":"secret","secretScope":["root/site","root/user"]}
-        ]})).unwrap();
+        ]}))
+        .unwrap();
         source.config = json!({"root/site":"one", "root/user":"alice"});
-        let edit = |source| SourceEditor::new(source, &provider, &EditorChoices::default(), &I18n::new(oxideterm_i18n::Locale::En));
+        let edit = |source| {
+            SourceEditor::new(
+                source,
+                &provider,
+                &EditorChoices::default(),
+                &I18n::new(oxideterm_i18n::Locale::En),
+            )
+        };
         let mut first = edit(source);
-        let index = first.fields.iter().position(|f| f.secret.is_some()).unwrap();
-        first.fields[index].secret_value_mut().unwrap().push_str("fixture-password");
-        let Some(ConnectionRequest::SaveDiscovery {source: saved, secrets, ..}) = first.save_request() else { panic!("expected save") };
+        let index = first
+            .fields
+            .iter()
+            .position(|f| f.secret.is_some())
+            .unwrap();
+        first.fields[index]
+            .secret_value_mut()
+            .unwrap()
+            .push_str("fixture-password");
+        let Some(ConnectionRequest::SaveDiscovery {
+            source: saved,
+            secrets,
+            ..
+        }) = first.save_request()
+        else {
+            panic!("expected save")
+        };
         assert_eq!(secrets[0].1.as_str(), "fixture-password");
-        assert!(!serde_json::to_string(&saved).unwrap().contains("fixture-password"));
-        let wire = |source: &DiscoverySource| provider.definition.config_for(&source.id, &source.config, DiscoveryConfigUse::Both);
+        assert!(
+            !serde_json::to_string(&saved)
+                .unwrap()
+                .contains("fixture-password")
+        );
+        let wire = |source: &DiscoverySource| {
+            provider
+                .definition
+                .config_for(&source.id, &source.config, DiscoveryConfigUse::Both)
+        };
         let reference = wire(&saved)["root/secret"].as_str().unwrap().to_owned();
         assert!(reference.starts_with("discovery:3:lab:root/secret:"));
         let mut other = saved.clone();
@@ -970,19 +1086,37 @@ mod tests {
         assert_ne!(wire(&other)["root/secret"], reference);
         let mut reopened = edit(saved.clone());
         assert_eq!(reopened.fields[index].secret_value(), Some(""));
-        assert_eq!(wire(&reopened.validated().unwrap())["root/secret"], reference);
-        reopened.fields[index].secret_value_mut().unwrap().push_str("replacement");
+        assert_eq!(
+            wire(&reopened.validated().unwrap())["root/secret"],
+            reference
+        );
+        reopened.fields[index]
+            .secret_value_mut()
+            .unwrap()
+            .push_str("replacement");
         let replacement = reopened.validated().unwrap();
         assert_ne!(wire(&replacement)["root/secret"], reference);
         drop(reopened);
         assert_eq!(wire(&saved)["root/secret"], reference);
         for key in ["root/site", "root/user"] {
             let mut editor = edit(saved.clone());
-            let position = editor.fields.iter().position(|f| matches!(&f.slot, Slot::Config(k) if k == key)).unwrap();
-            editor.fields[index].secret_value_mut().unwrap().push_str("old-identity-draft");
+            let position = editor
+                .fields
+                .iter()
+                .position(|f| matches!(&f.slot, Slot::Config(k) if k == key))
+                .unwrap();
+            editor.fields[index]
+                .secret_value_mut()
+                .unwrap()
+                .push_str("old-identity-draft");
             editor.fields[position].value = "changed".into();
             editor.clear_dependent_secrets(position);
-            let Some(ConnectionRequest::SaveDiscovery {source, secrets, ..}) = editor.save_request() else { panic!("expected save") };
+            let Some(ConnectionRequest::SaveDiscovery {
+                source, secrets, ..
+            }) = editor.save_request()
+            else {
+                panic!("expected save")
+            };
             assert!(secrets.is_empty());
             assert!(wire(&source).get("root/secret").is_none());
         }
@@ -993,20 +1127,41 @@ mod tests {
         let (mut source, mut provider) = inventory_fixture();
         provider.definition.form = serde_json::from_value(json!({"controls":[
             {"kind":"text","id":"account"}, {"kind":"text","id":"site"}
-        ]})).unwrap();
+        ]}))
+        .unwrap();
         provider.definition.source_actions = serde_json::from_value(json!([
             {"id":"configure","title":"Configure","field":"root/account"},
             {"id":"inspect","title":"Inspect"}
-        ])).unwrap();
-        assert_eq!(provider.actions_at(None).map(|a| a.id.as_str()).collect::<Vec<_>>(), ["inspect"]);
-        assert_eq!(provider.actions_at(Some("root/account")).map(|a| a.id.as_str()).collect::<Vec<_>>(), ["configure"]);
+        ]))
+        .unwrap();
+        assert_eq!(
+            provider
+                .actions_at(None)
+                .map(|a| a.id.as_str())
+                .collect::<Vec<_>>(),
+            ["inspect"]
+        );
+        assert_eq!(
+            provider
+                .actions_at(Some("root/account"))
+                .map(|a| a.id.as_str())
+                .collect::<Vec<_>>(),
+            ["configure"]
+        );
         assert_eq!(provider.actions_at(Some("root/site")).count(), 0);
         source.config = json!({"root/account":"alpha","root/site":"one.example"});
         let mut editor = SourceEditor::new(
-            source.clone(), &provider, &EditorChoices::default(), &I18n::new(oxideterm_i18n::Locale::En),
+            source.clone(),
+            &provider,
+            &EditorChoices::default(),
+            &I18n::new(oxideterm_i18n::Locale::En),
         );
         assert!(editor.matches_action_config(&source, &provider));
-        let site = editor.fields.iter_mut().find(|f| matches!(&f.slot, Slot::Config(key) if key == "root/site")).unwrap();
+        let site = editor
+            .fields
+            .iter_mut()
+            .find(|f| matches!(&f.slot, Slot::Config(key) if key == "root/site"))
+            .unwrap();
         site.value = "two.example".into();
         assert!(!editor.matches_action_config(&source, &provider));
         source.config["root/site"] = json!("two.example");
@@ -1046,12 +1201,7 @@ mod tests {
             s.finish_discovery_action("west", current, Some("Could not open settings".into()), cx);
             s.set_discovery_catalog("west".into(), true, None, cx);
             assert!(s.discovery.feedback["west"].refreshing);
-            s.set_discovery_catalog(
-                "west".into(),
-                false,
-                Some("Found 0 targets".into()),
-                cx,
-            );
+            s.set_discovery_catalog("west".into(), false, Some("Found 0 targets".into()), cx);
             assert_eq!(
                 s.discovery
                     .source_detail(&source("west"), Some(&provider), &i18n),
@@ -1074,32 +1224,76 @@ mod tests {
         let edit = |source| SourceEditor::new(source, &provider, &choices, &i18n);
         let mut editor = edit(source);
         let index = |slot| editor.fields.iter().position(|f| f.slot == slot).unwrap();
-        let (family, key_source, key, cert, passphrase) = (index(Slot::SshAuth), index(Slot::KeySource),
-            index(Slot::KeyPath), index(Slot::CertPath), index(Slot::Passphrase));
+        let (family, key_source, key, cert, passphrase) = (
+            index(Slot::SshAuth),
+            index(Slot::KeySource),
+            index(Slot::KeyPath),
+            index(Slot::CertPath),
+            index(Slot::Passphrase),
+        );
         editor.select_choice(family, 1);
         assert!(editor.field_visible(&editor.fields[key]));
         assert!(!editor.field_visible(&editor.fields[cert]));
-        assert!(editor.validated().is_none(), "an explicit key file must have a path");
+        assert!(
+            editor.validated().is_none(),
+            "an explicit key file must have a path"
+        );
         editor.fields[key].value = "fixture/private-key".into();
         editor.select_choice(key_source, 3);
         assert!(editor.field_visible(&editor.fields[cert]));
-        assert!(editor.validated().is_none(), "a certificate requires both paths");
+        assert!(
+            editor.validated().is_none(),
+            "a certificate requires both paths"
+        );
         editor.fields[cert].value = "fixture/cert.pub".into();
-        editor.fields[passphrase].secret_value_mut().unwrap().push_str("fixture-unlock");
-        let Some(ConnectionRequest::SaveDiscovery { source, secrets, .. }) = editor.save_request() else { panic!("expected save") };
-        assert_eq!(source.ssh_preferences.auth, DiscoverySshAuth::Certificate {
-            key_path: "fixture/private-key".into(), cert_path: "fixture/cert.pub".into(),
-        });
+        editor.fields[passphrase]
+            .secret_value_mut()
+            .unwrap()
+            .push_str("fixture-unlock");
+        let Some(ConnectionRequest::SaveDiscovery {
+            source, secrets, ..
+        }) = editor.save_request()
+        else {
+            panic!("expected save")
+        };
+        assert_eq!(
+            source.ssh_preferences.auth,
+            DiscoverySshAuth::Certificate {
+                key_path: "fixture/private-key".into(),
+                cert_path: "fixture/cert.pub".into(),
+            }
+        );
         assert_eq!(source.config, json!({}));
-        assert!(!serde_json::to_string(&source).unwrap().contains("fixture-unlock"));
-        assert_eq!(secrets[0].0, oxideterm_settings::DISCOVERY_SSH_PASSPHRASE_FIELD);
+        assert!(
+            !serde_json::to_string(&source)
+                .unwrap()
+                .contains("fixture-unlock")
+        );
+        assert_eq!(
+            secrets[0].0,
+            oxideterm_settings::DISCOVERY_SSH_PASSPHRASE_FIELD
+        );
         assert_eq!(secrets[0].1.as_str(), "fixture-unlock");
         let reference = source.ssh_preferences.passphrase_revision.unwrap();
         let mut editor = edit(source);
         assert_eq!(editor.fields[passphrase].secret_value(), Some(""));
-        assert_eq!(editor.validated().unwrap().ssh_preferences.passphrase_revision, Some(reference));
+        assert_eq!(
+            editor
+                .validated()
+                .unwrap()
+                .ssh_preferences
+                .passphrase_revision,
+            Some(reference)
+        );
         editor.fields[key].value = "fixture/other".into();
-        assert_eq!(editor.validated().unwrap().ssh_preferences.passphrase_revision, None);
+        assert_eq!(
+            editor
+                .validated()
+                .unwrap()
+                .ssh_preferences
+                .passphrase_revision,
+            None
+        );
     }
 
     #[test]
@@ -1145,7 +1339,8 @@ mod tests {
         };
         for (recommendation, expected) in [(None, 5), (NonZeroU32::new(10), 10)] {
             choice.definition.recommended_refresh_interval_minutes = recommendation;
-            let mut editor = SourceEditor::new(source.clone(), &choice, &EditorChoices::default(), &i18n);
+            let mut editor =
+                SourceEditor::new(source.clone(), &choice, &EditorChoices::default(), &i18n);
             let manual = editor.validated().unwrap();
             assert_eq!(manual.refresh_minutes, None);
             set_scheduled(&mut editor, true);
@@ -1163,7 +1358,12 @@ mod tests {
             .find(|f| matches!(f.slot, Slot::Minutes))
             .unwrap()
             .value = "2".into();
-        let mut editor = SourceEditor::new(editor.validated().unwrap(), &choice, &EditorChoices::default(), &i18n);
+        let mut editor = SourceEditor::new(
+            editor.validated().unwrap(),
+            &choice,
+            &EditorChoices::default(),
+            &i18n,
+        );
         set_scheduled(&mut editor, false);
         let paused = editor.validated().unwrap();
         assert_eq!(paused.refresh_minutes, None);
@@ -1175,5 +1375,4 @@ mod tests {
             NonZeroU32::new(2)
         );
     }
-
 }

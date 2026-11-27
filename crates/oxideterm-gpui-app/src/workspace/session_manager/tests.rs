@@ -302,7 +302,9 @@ fn selected_tunnels_share_host_auth_and_leave_manager_active(cx: &mut TestAppCon
 }
 
 #[gpui::test]
-fn ide_access_prompt_defers_tab_creation_and_excludes_discovery_terminal_tools(cx: &mut TestAppContext) {
+fn ide_access_prompt_defers_tab_creation_and_excludes_discovery_terminal_tools(
+    cx: &mut TestAppContext,
+) {
     let Some(fixture_dir) = isolated_workspace_fixture(cx, "OXIDETERM_IDE_ACCESS_PROMPT_TEST_DIR")
     else {
         return;
@@ -314,12 +316,19 @@ fn ide_access_prompt_defers_tab_creation_and_excludes_discovery_terminal_tools(c
     let node_id = NodeId::new("ide-choice-host");
     workspace.update(cx, |workspace, _cx| {
         let asset = oxideterm_discovery::DiscoveryOrigin::new(
-            "source".into(), "ide-asset".into(), uuid::Uuid::new_v4(),
-        ).with_asset_session(true);
+            "source".into(),
+            "ide-asset".into(),
+            uuid::Uuid::new_v4(),
+        )
+        .with_asset_session(true);
         asset.connected();
-        workspace.node_router.upsert_node(node_id.clone(), SshConfig {
-            discovery_origin: Some(asset), ..Default::default()
-        });
+        workspace.node_router.upsert_node(
+            node_id.clone(),
+            SshConfig {
+                discovery_origin: Some(asset),
+                ..Default::default()
+            },
+        );
         assert!(!workspace.node_allows_drill_down(&node_id));
         workspace.ssh_nodes.insert(
             node_id.clone(),

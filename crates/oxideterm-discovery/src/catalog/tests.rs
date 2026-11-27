@@ -51,9 +51,7 @@ impl DiscoveryProvider for ProviderEndpoint {
                 reply,
             })
             .map_err(|_| DiscoveryFailure::Unavailable)?;
-        response
-            .await
-            .map_err(|_| DiscoveryFailure::Unavailable)?
+        response.await.map_err(|_| DiscoveryFailure::Unavailable)?
     }
 
     async fn cancel_list(&self, _: &DiscoverySource, refresh: &str) {
@@ -442,7 +440,9 @@ fn only_a_complete_manual_refresh_restores_access_to_the_source() {
         assert_eq!(last.cursor.as_deref(), Some("next"));
         assert!(!service.can_open("inventory", "current"));
         last.reply.send(Ok(page("other", None))).unwrap();
-        while !service.can_open("inventory", "current") { changes.changed().await.unwrap(); }
+        while !service.can_open("inventory", "current") {
+            changes.changed().await.unwrap();
+        }
         assert!(service.can_open("inventory", "current"));
     });
 }
@@ -517,8 +517,7 @@ fn discovery_removal_drains_both_windows_and_resumes_partial_cleanup_after_resta
     let first = DiscoveryService::shared(&path, &runtime);
     let second = DiscoveryService::shared(&path, &runtime);
     let endpoint = Endpoint::new();
-    first
-        .configure_saved(&settings, |_| Some(endpoint.provider.clone()));
+    first.configure_saved(&settings, |_| Some(endpoint.provider.clone()));
     let epoch = first.epoch("inventory").unwrap();
     let connect = |window: &DiscoveryService| {
         let mut metadata = crate::DiscoveryOrigin::new("inventory".into(), "build".into(), epoch);
@@ -573,8 +572,7 @@ fn discovery_removal_drains_both_windows_and_resumes_partial_cleanup_after_resta
 
     let mut settings = SettingsStore::load_from_path(&settings_path).unwrap();
     let restarted = DiscoveryService::shared(&path, &runtime);
-    restarted
-        .configure_saved(&settings, |_| Some(endpoint.provider.clone()));
+    restarted.configure_saved(&settings, |_| Some(endpoint.provider.clone()));
     let pending = restarted.source("inventory").unwrap();
     assert!(pending.removal_pending && !pending.enabled);
     assert!(restarted.epoch("inventory").is_none());
@@ -583,18 +581,13 @@ fn discovery_removal_drains_both_windows_and_resumes_partial_cleanup_after_resta
         .unwrap()
         .unwrap();
     assert!(drained.has_changed().is_err());
-    restarted
-        .finish_remove("inventory", &mut settings)
-        .unwrap();
+    restarted.finish_remove("inventory", &mut settings).unwrap();
     let mut preferences = other_window_settings.settings().clone();
     preferences.terminal.font_size = 20;
     other_window_settings.replace_and_save(preferences).unwrap();
     let persisted = SettingsStore::load_from_path(settings_path).unwrap();
     assert_eq!(persisted.settings().terminal.font_size, 20);
-    assert_eq!(
-        persisted.settings().discovery_sources,
-        [other]
-    );
+    assert_eq!(persisted.settings().discovery_sources, [other]);
     assert_eq!(
         ConnectionStore::load_read_only(path)
             .unwrap()

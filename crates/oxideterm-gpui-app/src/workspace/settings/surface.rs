@@ -336,9 +336,11 @@ impl WorkspaceApp {
         let next_connections = change
             .connections
             .then(|| {
-                self.connection_store.reload_after_external_change().map_err(|error| {
-                    format!("Failed to reload connections after external sync: {error}")
-                })
+                self.connection_store
+                    .reload_after_external_change()
+                    .map_err(|error| {
+                        format!("Failed to reload connections after external sync: {error}")
+                    })
             })
             .transpose()?;
         if let Some(next_settings) = next_settings {

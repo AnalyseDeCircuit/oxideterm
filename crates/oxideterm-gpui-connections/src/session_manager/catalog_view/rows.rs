@@ -1207,28 +1207,30 @@ impl CatalogView {
                             sidebar,
                             cx,
                         )
-                        .when(item.discovery_source().is_none(), |row| row.drag_over::<SessionManagerDrag>(move |row, _drag, _window, _cx| {
-                            // Every visible child row participates in its nearest folder's drop area.
-                            let row = if sidebar {
-                                row.rounded(px(radius))
-                            } else {
-                                row
-                            };
-                            row.border_1()
-                                .border_color(rgb(theme.accent))
-                                .bg(rgba((theme.accent << 8) | MANAGER_DRAG_GROUP_BG_ALPHA))
+                        .when(item.discovery_source().is_none(), |row| {
+                            row.drag_over::<SessionManagerDrag>(move |row, _drag, _window, _cx| {
+                                // Every visible child row participates in its nearest folder's drop area.
+                                let row = if sidebar {
+                                    row.rounded(px(radius))
+                                } else {
+                                    row
+                                };
+                                row.border_1()
+                                    .border_color(rgb(theme.accent))
+                                    .bg(rgba((theme.accent << 8) | MANAGER_DRAG_GROUP_BG_ALPHA))
+                            })
+                            .can_drop(|drag, _window, _cx| drag.is::<SessionManagerDrag>())
+                            .on_drop(cx.listener(
+                                move |this, drag: &SessionManagerDrag, _window, cx| {
+                                    this.move_dragged_sessions_to_group(
+                                        &drag.targets,
+                                        drop_group.as_deref(),
+                                        cx,
+                                    );
+                                    cx.stop_propagation();
+                                },
+                            ))
                         })
-                        .can_drop(|drag, _window, _cx| drag.is::<SessionManagerDrag>())
-                        .on_drop(cx.listener(
-                            move |this, drag: &SessionManagerDrag, _window, cx| {
-                                this.move_dragged_sessions_to_group(
-                                    &drag.targets,
-                                    drop_group.as_deref(),
-                                    cx,
-                                );
-                                cx.stop_propagation();
-                            },
-                        )))
                         .on_mouse_down(
                             MouseButton::Right,
                             cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
@@ -1243,7 +1245,10 @@ impl CatalogView {
                         );
                     if item.group_paths.len() > 1 {
                         // Separate pointer state for simultaneous placements of the same asset.
-                        return div().id(("discovery-tree-placement", row_index)).child(row).into_any_element();
+                        return div()
+                            .id(("discovery-tree-placement", row_index))
+                            .child(row)
+                            .into_any_element();
                     }
                     if !sidebar {
                         return row.into_any_element();

@@ -439,7 +439,8 @@ impl DiscoveryProvider for DiscoveryProcess {
     }
     fn catalog_config(&self, source: &DiscoverySource) -> serde_json::Value {
         self.definition.config_for(
-            &source.id, &source.config,
+            &source.id,
+            &source.config,
             oxideterm_plugin_registry::DiscoveryConfigUse::Catalog,
         )
     }

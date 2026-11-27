@@ -1205,7 +1205,11 @@ fn discovery_target_runs_its_startup_command_without_lending_a_single_terminal_t
             "asset".into(),
             uuid::Uuid::new_v4(),
         )
-        .with_instance("prepared-asset".into(), Default::default(), std::sync::Arc::new(())),
+        .with_instance(
+            "prepared-asset".into(),
+            Default::default(),
+            std::sync::Arc::new(()),
+        ),
     );
     let config = SshSessionConfig::from(config)
         .with_registry(
@@ -1234,7 +1238,10 @@ fn discovery_target_runs_its_startup_command_without_lending_a_single_terminal_t
         .unwrap()
         .err()
         .expect("single-terminal instance lent the IDE a shell");
-    assert_eq!(denied.to_string(), oxideterm_ssh::SshTransportError::CommandChannelUnavailable.to_string());
+    assert_eq!(
+        denied.to_string(),
+        oxideterm_ssh::SshTransportError::CommandChannelUnavailable.to_string()
+    );
     assert_eq!(
         peer.input.recv_timeout(Duration::from_secs(5)).unwrap().0,
         b"only-on-target\r"

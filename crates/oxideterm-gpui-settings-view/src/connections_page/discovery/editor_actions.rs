@@ -1,10 +1,7 @@
 use super::*;
 
 impl ConnectionPage<'_> {
-    pub(super) fn discovery_editor_actions(
-        &self,
-        draft: Option<DiscoverySource>,
-    ) -> Div {
+    pub(super) fn discovery_editor_actions(&self, draft: Option<DiscoverySource>) -> Div {
         let dispatch = self.dispatch.clone();
         let save = self.workspace_toolbar_action_button(
             self.i18n.t("plugin.connections.save"),

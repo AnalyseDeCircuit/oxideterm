@@ -319,7 +319,9 @@ fn write_settings(path: &Path, update: SettingsUpdate<'_>) -> Result<SettingsSav
             SettingsUpdate::Preferences(settings) => {
                 let mut proposed = settings.to_value();
                 // An ordinary save may have started before a different window deleted a source.
-                if let Some(sources) = previous.as_ref().and_then(|raw| raw.get("discoverySources"))
+                if let Some(sources) = previous
+                    .as_ref()
+                    .and_then(|raw| raw.get("discoverySources"))
                 {
                     proposed["discoverySources"] = sources.clone();
                 } else if let Some(fields) = proposed.as_object_mut() {

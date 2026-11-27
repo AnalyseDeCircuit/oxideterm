@@ -206,7 +206,11 @@ impl ConnectionFlowEntity {
             && (store.refresh_if_changed().is_err()
                 || store.saved_ssh_identity(id) != Some(expected))
         {
-            self.set_form_feedback(None, Some(i18n.t("modals.new_connection.saved_identity_changed")), cx);
+            self.set_form_feedback(
+                None,
+                Some(i18n.t("modals.new_connection.saved_identity_changed")),
+                cx,
+            );
             return None;
         }
         Some(match self.plan_submission(action, i18n, cx)? {

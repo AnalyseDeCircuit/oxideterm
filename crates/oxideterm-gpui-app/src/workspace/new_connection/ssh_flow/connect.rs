@@ -720,7 +720,8 @@ impl WorkspaceApp {
             options.open_sftp_on_connect,
             window,
             cx,
-        ) && discovery {
+        ) && discovery
+        {
             self.report_discovery_open_error(error.to_string(), cx);
         }
     }

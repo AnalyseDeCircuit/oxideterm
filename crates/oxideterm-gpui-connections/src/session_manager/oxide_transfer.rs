@@ -954,18 +954,23 @@ impl OxideTransfer<'_> {
         let i18n = self.i18n.clone();
         let worker = std::thread::spawn(move || {
             let mut store = store;
-            let result = store.refresh_if_changed().map_err(|error| OxideFileError::Store(error.to_string())).and_then(|_| export_connections_to_oxide_with_progress(
-                &store,
-                &selected_ids,
-                &password,
-                options,
-                |stage, current, total| {
-                    let _ = sender.send(OxideWorkerDelivery::ExportProgress {
-                        generation,
-                        progress: OxideTransferProgress::new(stage, current, total),
-                    });
-                },
-            ));
+            let result = store
+                .refresh_if_changed()
+                .map_err(|error| OxideFileError::Store(error.to_string()))
+                .and_then(|_| {
+                    export_connections_to_oxide_with_progress(
+                        &store,
+                        &selected_ids,
+                        &password,
+                        options,
+                        |stage, current, total| {
+                            let _ = sender.send(OxideWorkerDelivery::ExportProgress {
+                                generation,
+                                progress: OxideTransferProgress::new(stage, current, total),
+                            });
+                        },
+                    )
+                });
             let _ = sender.send(OxideWorkerDelivery::ExportDone {
                 generation,
                 result: result.map_err(|error| oxide_file_error_message(error, &i18n)),

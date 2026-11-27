@@ -1565,9 +1565,14 @@ impl WorkspaceApp {
         let show_tools = ssh_node_menu
             .as_ref()
             .is_some_and(|menu| self.node_allows_session_tools(&menu.node_id));
-        let show_drill_down = ssh_node_menu.as_ref().is_some_and(|menu| self.node_allows_drill_down(&menu.node_id));
+        let show_drill_down = ssh_node_menu
+            .as_ref()
+            .is_some_and(|menu| self.node_allows_drill_down(&menu.node_id));
         if let Some(ssh) = &ssh_node_menu {
-            let ssh_rows = ssh.terminals.len() + 2 + if show_tools { 3 } else { 0 } + usize::from(show_drill_down);
+            let ssh_rows = ssh.terminals.len()
+                + 2
+                + if show_tools { 3 } else { 0 }
+                + usize::from(show_drill_down);
             let ssh_separators = if ssh.terminals.is_empty() { 3 } else { 4 };
             menu_height += ssh_rows as f32 * context_menu_item_height_estimate(&self.tokens)
                 + ssh_separators as f32 * context_menu_separator_height_estimate(&self.tokens);
@@ -2036,11 +2041,7 @@ impl WorkspaceApp {
                                         let node_id = node_id.clone();
                                         move |this, _event, window, cx| {
                                             this.close_tab_context_menu();
-                                            this.open_forwards_tab(
-                                                node_id.clone(),
-                                                window,
-                                                cx,
-                                            );
+                                            this.open_forwards_tab(node_id.clone(), window, cx);
                                             cx.stop_propagation();
                                         }
                                     }),

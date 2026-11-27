@@ -214,7 +214,9 @@ mod tests {
             matches!(reply(json!({"kind":"ssh","endpoint":{"host":"vm.test","port":2222},"username":"ops@vm"})),Ok(DiscoveryReply::Open(DiscoveryOpen::Ready{launch:DiscoveryLaunch::Ssh{username:Some(user),allow_reuse_on_open:false,asset_session:false,..},..})) if user=="ops@vm")
         );
         assert!(matches!(
-            reply(json!({"kind":"ssh","endpoint":{"host":"vm.test","port":2222},"username":"ops@asset","allowReuseOnOpen":true,"assetSession":true})),
+            reply(
+                json!({"kind":"ssh","endpoint":{"host":"vm.test","port":2222},"username":"ops@asset","allowReuseOnOpen":true,"assetSession":true})
+            ),
             Ok(DiscoveryReply::Open(DiscoveryOpen::Ready {
                 launch: DiscoveryLaunch::Ssh {
                     allow_reuse_on_open: true,
@@ -375,7 +377,7 @@ impl DiscoveryRequest {
                                 session_identity,
                                 ..
                             },
-                        owner
+                        owner,
                     } => {
                         if !provider.launch_kinds.contains(&DiscoveryLaunchKind::Ssh)
                             || session_identity.as_deref().is_some_and(|id| !text_ok(id))

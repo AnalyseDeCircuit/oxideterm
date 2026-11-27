@@ -127,7 +127,8 @@ impl ReconnectRuntimeEffect {
             }
             | Self::NodeConnectFailed {
                 node_id,
-                action: ReconnectFailureAction::Retry { .. } | ReconnectFailureAction::FinishReconnect,
+                action:
+                    ReconnectFailureAction::Retry { .. } | ReconnectFailureAction::FinishReconnect,
                 ..
             }
             | Self::GraceRecovered { node_id, .. }
@@ -3119,9 +3120,9 @@ impl WorkspaceRuntimeEntity {
     ) -> Option<ReconnectRuntimeEffect> {
         // A worker result can already be queued when the plugin revokes the instance.
         if let ReconnectWorkerResult::NodeConnected { node_id, .. }
-            | ReconnectWorkerResult::NodeConnectFailed { node_id, .. }
-            | ReconnectWorkerResult::GraceRecovered { node_id, .. }
-            | ReconnectWorkerResult::GraceExpired { node_id, .. } = &result
+        | ReconnectWorkerResult::NodeConnectFailed { node_id, .. }
+        | ReconnectWorkerResult::GraceRecovered { node_id, .. }
+        | ReconnectWorkerResult::GraceExpired { node_id, .. } = &result
             && self.has_active_reconnect_job(node_id)
             && self
                 .node_router
@@ -4001,7 +4002,11 @@ mod tests {
                     "same-target".into(),
                     epoch,
                 )
-                .with_instance(instance_id.into(), Default::default(), Arc::new(()));
+                .with_instance(
+                    instance_id.into(),
+                    Default::default(),
+                    Arc::new(()),
+                );
                 let config = SshConfig {
                     host: "same.example.test".into(),
                     discovery_origin: Some(origin.clone()),
@@ -4019,7 +4024,8 @@ mod tests {
                     .mark_state(&connection_id, ConnectionState::Active);
                 let job =
                     entity.start_reconnect_job(&node, node.0.clone(), ReconnectSnapshot::default());
-                let attempt_id = register_test_node_transport_attempt(entity, &node, &connection_id);
+                let attempt_id =
+                    register_test_node_transport_attempt(entity, &node, &connection_id);
                 entity
                     .reconnect_worker_sender()
                     .send(ReconnectWorkerResult::NodeConnected {
@@ -4045,7 +4051,12 @@ mod tests {
                     if node_id == &sibling
             ));
             assert_eq!(
-                entity.node_router.node_state(&revoked).unwrap().state.readiness,
+                entity
+                    .node_router
+                    .node_state(&revoked)
+                    .unwrap()
+                    .state
+                    .readiness,
                 NodeReadiness::Disconnected
             );
             assert!(!entity.has_active_reconnect_job(&revoked));

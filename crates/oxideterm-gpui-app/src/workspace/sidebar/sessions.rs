@@ -1959,7 +1959,8 @@ impl WorkspaceApp {
         // Owning a saved connection swaps "save as connection" for the
         // port-forwarding row, so it changes the option stack height.
         row.saved_connection_id.hash(&mut hasher);
-        self.node_allows_session_tools(&row.node_id).hash(&mut hasher);
+        self.node_allows_session_tools(&row.node_id)
+            .hash(&mut hasher);
         self.can_save_runtime_node_as_connection(&row.node_id, row.saved_connection_id.as_deref())
             .hash(&mut hasher);
         if row.terminal_group.is_some() {

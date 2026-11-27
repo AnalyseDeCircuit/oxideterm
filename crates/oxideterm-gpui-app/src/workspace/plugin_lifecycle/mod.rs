@@ -1431,7 +1431,10 @@ impl WorkspaceApp {
             }
         }
         self.start_pending_plugin_connections(cx);
-        if self.plugin_entity.update(cx, |entity,_|entity.take_discovery_catalog_changed()) {
+        if self
+            .plugin_entity
+            .update(cx, |entity, _| entity.take_discovery_catalog_changed())
+        {
             self.reconcile_discovery_sources(cx);
         }
         cx.notify();

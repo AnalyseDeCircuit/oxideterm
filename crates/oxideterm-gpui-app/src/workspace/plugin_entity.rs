@@ -176,7 +176,7 @@ enum RuntimeStop {
 /// Owns plugin workers and reliable delivery independently from plugin page visibility.
 pub(in crate::workspace) struct PluginWorkspaceEntity {
     discovery_instances: discovery::DiscoveryInstances,
-    discovery_lifetimes: HashMap<String,tokio_util::sync::CancellationToken>,
+    discovery_lifetimes: HashMap<String, tokio_util::sync::CancellationToken>,
     discovery_catalog_changed: bool,
     pub(in crate::workspace) connections: super::plugin_connections::PluginConnections,
     task_runtime: Arc<tokio::runtime::Runtime>,
@@ -1206,9 +1206,9 @@ impl PluginWorkspaceEntity {
     }
 
     fn start_runtime_deactivation(&mut self, plugin_id: String, stop: RuntimeStop) {
-        if let Some(live)=self.discovery_lifetimes.remove(&plugin_id) {
+        if let Some(live) = self.discovery_lifetimes.remove(&plugin_id) {
             live.cancel();
-            self.discovery_catalog_changed=true;
+            self.discovery_catalog_changed = true;
         }
         self.runtime_intents.extend(
             self.discovery_instances
@@ -2034,7 +2034,9 @@ impl PluginWorkspaceEntity {
             return false;
         }
         self.release_shutdown_started = true;
-        for (_,live) in self.discovery_lifetimes.drain() {live.cancel();}
+        for (_, live) in self.discovery_lifetimes.drain() {
+            live.cancel();
+        }
         self.retire_security_key(None);
         self.uninstall_task.take();
         self.runtime_services_started = false;
@@ -2479,7 +2481,8 @@ impl PluginWorkspaceEntity {
         for message in &push.messages {
             // Connection-scoped registrations and instance revocations have independent owners.
             if stale_action
-                && let plugin_runtime::PluginOutboundMessage::RegisterContribution { registration } = message
+                && let plugin_runtime::PluginOutboundMessage::RegisterContribution { registration } =
+                    message
                 && matches!(
                     registration.kind,
                     plugin_runtime::PluginRegistrationKind::Tab
@@ -2700,7 +2703,9 @@ impl PluginWorkspaceEntity {
                     .invalidate_event(plugin, generation, &event.payload)
             {
                 self.runtime_intents
-                    .push_back(PluginRuntimeIntent::DiscoveryInstanceInvalidated(id.to_owned()));
+                    .push_back(PluginRuntimeIntent::DiscoveryInstanceInvalidated(
+                        id.to_owned(),
+                    ));
             }
             return Ok(());
         }

@@ -2110,7 +2110,13 @@ impl SettingsWorkspaceEntity {
             SettingsInput::PortableCurrentPassword => Some(&self.portable_current_password),
             SettingsInput::PortableNewPassword => Some(&self.portable_new_password),
             SettingsInput::PortableConfirmPassword => Some(&self.portable_confirm_password),
-            SettingsInput::DiscoverySecret(index) => self.discovery.editor.as_ref()?.fields.get(index)?.secret_value(),
+            SettingsInput::DiscoverySecret(index) => self
+                .discovery
+                .editor
+                .as_ref()?
+                .fields
+                .get(index)?
+                .secret_value(),
             SettingsInput::DiscoveryField(index) | SettingsInput::DiscoveryMultiline(index) => self
                 .discovery
                 .editor
@@ -2445,7 +2451,13 @@ impl SettingsWorkspaceEntity {
             SettingsInput::PortableCurrentPassword => Some(&mut self.portable_current_password),
             SettingsInput::PortableNewPassword => Some(&mut self.portable_new_password),
             SettingsInput::PortableConfirmPassword => Some(&mut self.portable_confirm_password),
-            SettingsInput::DiscoverySecret(index) => self.discovery.editor.as_mut()?.fields.get_mut(index)?.secret_value_mut(),
+            SettingsInput::DiscoverySecret(index) => self
+                .discovery
+                .editor
+                .as_mut()?
+                .fields
+                .get_mut(index)?
+                .secret_value_mut(),
             SettingsInput::DiscoveryField(index) | SettingsInput::DiscoveryMultiline(index) => self
                 .discovery
                 .editor

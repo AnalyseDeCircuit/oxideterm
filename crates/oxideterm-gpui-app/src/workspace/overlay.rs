@@ -2388,7 +2388,8 @@ mod tests {
         use crate::workspace::session_manager::tests::isolated_workspace_fixture;
         use oxideterm_gpui_connections::launch::SshConnectionWorkerResult;
 
-        let Some(fixture_dir) = isolated_workspace_fixture(cx, "OXIDETERM_PALETTE_FAILURE_TEST_DIR")
+        let Some(fixture_dir) =
+            isolated_workspace_fixture(cx, "OXIDETERM_PALETTE_FAILURE_TEST_DIR")
         else {
             return;
         };
@@ -2507,7 +2508,12 @@ mod tests {
                     workspace.dispatch_connections_request(request, Some(window), cx);
                 }
                 assert_eq!(
-                    workspace.connections.session_manager.read(cx).status.as_deref(),
+                    workspace
+                        .connections
+                        .session_manager
+                        .read(cx)
+                        .status
+                        .as_deref(),
                     Some("Saved SSH handshake failed")
                 );
             });
