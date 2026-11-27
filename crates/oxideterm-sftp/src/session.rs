@@ -132,6 +132,7 @@ impl fmt::Debug for SftpSession {
 }
 
 include!("session/basic.rs");
+include!("session/clipboard_image.rs");
 include!("session/preview.rs");
 include!("session/file_ops.rs");
 include!("session/directory_scheduler.rs");

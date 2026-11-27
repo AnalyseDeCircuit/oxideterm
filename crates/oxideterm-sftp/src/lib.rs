@@ -110,7 +110,11 @@ pub use scp::{
     scp_download_directory, scp_download_file, scp_upload_directory, scp_upload_file,
 };
 #[cfg(not(target_family = "wasm"))]
-pub use session::{SftpChannelOpener, SftpSession, WriteContentResult, content_version};
+pub use session::{
+    CLIPBOARD_IMAGE_DIR_SEGMENTS, CLIPBOARD_IMAGE_MAX_BYTES, SftpChannelOpener, SftpSession,
+    WriteContentResult, content_version, format_clipboard_image_filename, format_posix_shell_path,
+    sanitize_clipboard_image_extension,
+};
 #[cfg(not(target_family = "wasm"))]
 pub use ssh_transfer::{
     SshTransferError, SshTransferPreference, SshTransferRequest, run_ssh_transfer,

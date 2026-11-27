@@ -563,4 +563,89 @@ mod tests {
             }
         }
     }
+
+    #[gpui::test]
+    fn ssh_pane_emits_clipboard_image_only_when_clipboard_has_no_text(cx: &mut TestAppContext) {
+        let (pane, cx) = cx.add_window_view(|window, cx| {
+            TerminalPane::new_recording_playback(
+                80,
+                24,
+                TerminalUiPreferences::default(),
+                window,
+                cx,
+            )
+            .unwrap()
+        });
+        let emitted = Rc::new(std::cell::RefCell::new(Vec::<TerminalClipboardImage>::new()));
+        let emitted_clone = emitted.clone();
+        let delivered = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let delivered_clone = delivered.clone();
+        let _subscription = cx.update(|_, cx| {
+            pane.update(cx, |pane, _| {
+                pane.test_accepts_input = true;
+                pane.set_input_broadcaster(Some(Rc::new(move |kind, bytes, _| {
+                    delivered_clone.borrow_mut().push((kind, bytes.to_vec()));
+                })));
+            });
+            cx.subscribe(&pane, move |pane, event, cx| {
+                if *event == TerminalPaneEvent::ClipboardImagePasted {
+                    if let Some(image) =
+                        pane.update(cx, |pane, _| pane.take_pasted_clipboard_image())
+                    {
+                        emitted_clone.borrow_mut().push(image);
+                    }
+                }
+            })
+        });
+
+        let sample_image = gpui::Image {
+            format: gpui::ImageFormat::Png,
+            bytes: vec![0x89, b'P', b'N', b'G', 1, 2, 3],
+            id: 42,
+        };
+
+        // Non-SSH panes (including local terminals) must ignore clipboard images.
+        cx.update(|_, cx| {
+            cx.write_to_clipboard(ClipboardItem::new_image(&sample_image));
+            pane.update(cx, |pane, cx| {
+                pane.session_kind = TerminalSessionKind::LocalPty;
+                pane.paste_from_clipboard(cx);
+            });
+        });
+        assert!(emitted.borrow().is_empty());
+        assert!(delivered.borrow().is_empty());
+
+        // SSH pane emits ClipboardImagePasted for image-only clipboard contents.
+        cx.update(|_, cx| {
+            pane.update(cx, |pane, cx| {
+                pane.session_kind = TerminalSessionKind::SshPty;
+                pane.paste_from_clipboard(cx);
+            });
+        });
+        assert_eq!(
+            &*emitted.borrow(),
+            &[TerminalClipboardImage {
+                extension: "png",
+                bytes: sample_image.bytes.clone(),
+            }]
+        );
+        assert!(delivered.borrow().is_empty());
+        emitted.borrow_mut().clear();
+
+        // When both text and image are present, text paste must still win.
+        cx.update(|_, cx| {
+            cx.write_to_clipboard(ClipboardItem {
+                entries: vec![
+                    gpui::ClipboardEntry::String(gpui::ClipboardString::new("hello".into())),
+                    gpui::ClipboardEntry::Image(sample_image.clone()),
+                ],
+            });
+            pane.update(cx, |pane, cx| pane.paste_from_clipboard(cx));
+        });
+        assert!(emitted.borrow().is_empty());
+        assert_eq!(
+            &*delivered.borrow(),
+            &[(TerminalBroadcastInputKind::Paste, b"hello".to_vec())]
+        );
+    }
 }

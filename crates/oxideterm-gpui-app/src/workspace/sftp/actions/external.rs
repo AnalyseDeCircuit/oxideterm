@@ -45,6 +45,37 @@ fn configure_sftp_external_bridge(command: &mut std::process::Command) {
     command.creation_flags(SFTP_EXTERNAL_BRIDGE_CREATE_NO_WINDOW);
 }
 
+const CLIPBOARD_IMAGE_UPLOAD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ClipboardImagePasteOrigin {
+    pane_id: PaneId,
+    session_id: TerminalSessionId,
+    node_id: NodeId,
+    pane_entity_id: gpui::EntityId,
+    reconnect_generation: u64,
+    connection_id: Option<String>,
+}
+
+fn clipboard_image_paste_target_matches(
+    origin: &ClipboardImagePasteOrigin,
+    active_pane_id: Option<PaneId>,
+    current_session_id: Option<TerminalSessionId>,
+    current_node_id: Option<&NodeId>,
+    current_pane_entity_id: Option<gpui::EntityId>,
+    current_reconnect_generation: Option<u64>,
+    current_connection_id: Option<&str>,
+    accepts_input: bool,
+) -> bool {
+    accepts_input
+        && active_pane_id == Some(origin.pane_id)
+        && current_session_id == Some(origin.session_id)
+        && current_node_id == Some(&origin.node_id)
+        && current_pane_entity_id == Some(origin.pane_entity_id)
+        && current_reconnect_generation == Some(origin.reconnect_generation)
+        && current_connection_id == origin.connection_id.as_deref()
+}
+
 impl WorkspaceApp {
     pub(in crate::workspace::sftp) fn browse_sftp_upload_files(&mut self, cx: &mut Context<Self>) {
         let Some(node_id) = self.visible_sftp_node_id(cx) else {
@@ -223,6 +254,186 @@ impl WorkspaceApp {
             Some((&target_dir, &listing.files)),
             cx,
         );
+    }
+
+    pub(in crate::workspace) fn handle_sftp_terminal_clipboard_image_paste(
+        &mut self,
+        pane_id: PaneId,
+        session_id: TerminalSessionId,
+        image: oxideterm_gpui_terminal::TerminalClipboardImage,
+        cx: &mut Context<Self>,
+    ) {
+        if image.bytes.is_empty() {
+            return;
+        }
+        if image.bytes.len() > oxideterm_sftp::CLIPBOARD_IMAGE_MAX_BYTES {
+            let max_mb = oxideterm_sftp::CLIPBOARD_IMAGE_MAX_BYTES / (1024 * 1024);
+            self.push_sftp_toast(
+                self.i18n.t("sftp.toast.clipboard_image_upload_failed"),
+                Some(
+                    self.i18n
+                        .t("sftp.toast.clipboard_image_too_large")
+                        .replace("{{size}}", &format!("{max_mb} MiB")),
+                ),
+                TerminalNoticeVariant::Error,
+                cx,
+            );
+            return;
+        }
+        let Some(node_id) = self
+            .workspace_runtime
+            .read(cx)
+            .ssh_terminal_node_id(session_id)
+        else {
+            return;
+        };
+        let Some(pane) = self.tab_host.read(cx).panes().get(&pane_id).cloned() else {
+            return;
+        };
+        let origin = {
+            let pane_state = pane.read(cx);
+            if !pane_state.terminal_accepts_input() {
+                return;
+            }
+            ClipboardImagePasteOrigin {
+                pane_id,
+                session_id,
+                node_id: node_id.clone(),
+                pane_entity_id: pane.entity_id(),
+                reconnect_generation: pane_state.ssh_reconnect_generation(),
+                connection_id: pane_state
+                    .ssh_connection_handle()
+                    .map(|connection| connection.connection_id().to_string()),
+            }
+        };
+        let remote_id = SftpRemoteId::Node(node_id);
+        let Some(backend) = self.sftp_remote_backend(&remote_id) else {
+            self.push_sftp_toast(
+                self.i18n.t("sftp.toast.clipboard_image_upload_failed"),
+                Some(self.i18n.t("sftp.toast.clipboard_image_sftp_unavailable")),
+                TerminalNoticeVariant::Error,
+                cx,
+            );
+            return;
+        };
+
+        // Run SFTP acquisition and upload on the node runtime with a bounded timeout
+        // and early cancellation if the GPUI waiter is dropped during shutdown.
+        let (mut sender, receiver) = tokio::sync::oneshot::channel();
+        let runtime = self.forwarding_runtime.clone();
+        let extension = image.extension;
+        let bytes = image.bytes;
+        let timeout_message = self.i18n.t("sftp.toast.clipboard_image_upload_timeout");
+        runtime.spawn(async move {
+            let upload = async {
+                let sftp = backend.acquire_transfer_sftp().await?;
+                sftp.write_private_clipboard_image(extension, &bytes)
+                    .await
+                    .map_err(|error| error.to_string())
+            };
+            let result = tokio::select! {
+                _ = sender.closed() => return,
+                timed = tokio::time::timeout(CLIPBOARD_IMAGE_UPLOAD_TIMEOUT, upload) => {
+                    match timed {
+                        Ok(result) => result,
+                        Err(_) => Err(timeout_message),
+                    }
+                }
+            };
+            let _ = sender.send(result);
+        });
+        cx.spawn(async move |weak, cx| {
+            let Ok(result) = receiver.await else {
+                return;
+            };
+            let _ = weak.update(cx, |this, cx| {
+                this.finish_sftp_terminal_clipboard_image_paste(origin, result, cx);
+            });
+        })
+        .detach();
+    }
+
+    fn finish_sftp_terminal_clipboard_image_paste(
+        &mut self,
+        origin: ClipboardImagePasteOrigin,
+        result: Result<String, String>,
+        cx: &mut Context<Self>,
+    ) {
+        let remote_path = match result {
+            Ok(path) => path,
+            Err(error) => {
+                self.push_sftp_toast(
+                    self.i18n.t("sftp.toast.clipboard_image_upload_failed"),
+                    Some(error),
+                    TerminalNoticeVariant::Error,
+                    cx,
+                );
+                return;
+            }
+        };
+
+        let active_pane_id = self.active_pane_id(cx);
+        let current_session_id = self.session_id_for_pane(origin.pane_id, cx);
+        let current_node_id = current_session_id.and_then(|session_id| {
+            self.workspace_runtime
+                .read(cx)
+                .ssh_terminal_node_id(session_id)
+        });
+        let pane = self.tab_host.read(cx).panes().get(&origin.pane_id).cloned();
+        let (
+            current_pane_entity_id,
+            current_reconnect_generation,
+            current_connection_id,
+            accepts_input,
+        ) = match pane.as_ref() {
+            Some(pane) => {
+                let state = pane.read(cx);
+                (
+                    Some(pane.entity_id()),
+                    Some(state.ssh_reconnect_generation()),
+                    state
+                        .ssh_connection_handle()
+                        .map(|connection| connection.connection_id().to_string()),
+                    state.terminal_accepts_input(),
+                )
+            }
+            None => (None, None, None, false),
+        };
+
+        if !clipboard_image_paste_target_matches(
+            &origin,
+            active_pane_id,
+            current_session_id,
+            current_node_id.as_ref(),
+            current_pane_entity_id,
+            current_reconnect_generation,
+            current_connection_id.as_deref(),
+            accepts_input,
+        ) {
+            self.push_sftp_toast(
+                self.i18n.t("sftp.toast.clipboard_image_target_changed"),
+                Some(remote_path),
+                TerminalNoticeVariant::Warning,
+                cx,
+            );
+            return;
+        }
+
+        let Some(pane) = pane else {
+            return;
+        };
+        let formatted_path = oxideterm_sftp::format_posix_shell_path(&remote_path);
+        // Insert into the originating pane only, without sending Enter or broadcasting
+        // a host-local remote path to other synced terminals.
+        let pasted = pane.update(cx, |pane, cx| pane.paste_text_to_self(&formatted_path, cx));
+        if !pasted {
+            self.push_sftp_toast(
+                self.i18n.t("sftp.toast.clipboard_image_target_changed"),
+                Some(remote_path),
+                TerminalNoticeVariant::Warning,
+                cx,
+            );
+        }
     }
 
     pub(in crate::workspace::sftp) fn browse_sftp_local_folder(&mut self, cx: &mut Context<Self>) {

@@ -341,6 +341,16 @@ impl WorkspaceApp {
                 let paths = pane.update(cx, |pane, _cx| pane.take_dropped_external_paths());
                 self.handle_sftp_terminal_drop(pane_id, session_id, paths, cx);
             }
+            TerminalPaneEvent::ClipboardImagePasted => {
+                let Some(pane) = self.tab_host.read(cx).panes().get(&pane_id).cloned() else {
+                    return;
+                };
+                let Some(image) = pane.update(cx, |pane, _cx| pane.take_pasted_clipboard_image())
+                else {
+                    return;
+                };
+                self.handle_sftp_terminal_clipboard_image_paste(pane_id, session_id, image, cx);
+            }
             TerminalPaneEvent::CurrentDirectoryChanged => {
                 if self.active_pane_id(cx) == Some(pane_id) {
                     self.sync_active_terminal_metadata_context(cx);

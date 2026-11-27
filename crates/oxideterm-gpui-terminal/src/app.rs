@@ -194,6 +194,8 @@ pub enum TerminalPaneEvent {
     TriggerInteractionRequested,
     // Dropped OS paths stay pane-owned until Workspace routes them to SFTP.
     ExternalPathsDropped,
+    // Clipboard image payloads stay pane-owned until Workspace uploads them via SFTP.
+    ClipboardImagePasted,
     // Search completion is asynchronous; Workspace reads the latest pane-owned status.
     SearchStatusChanged,
     // The pane retains the hovered value; Workspace owns tooltip timing and placement.
@@ -211,6 +213,12 @@ pub enum TerminalPaneEvent {
     ToolbarActionInvoked {
         id: SharedString,
     },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TerminalClipboardImage {
+    pub extension: &'static str,
+    pub bytes: Vec<u8>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -668,6 +676,10 @@ pub struct TerminalPane {
     /// Paths dropped from the OS onto an SSH pane. The workspace drains this
     /// after `ExternalPathsDropped` so the terminal crate never owns SFTP policy.
     dropped_external_paths: Vec<std::path::PathBuf>,
+    /// Clipboard image pasted into an SSH pane. The workspace drains this after
+    /// `ClipboardImagePasted` so the terminal crate never owns SFTP policy.
+    pending_clipboard_image: Option<TerminalClipboardImage>,
+    ssh_reconnect_generation: u64,
     last_drain_budget_exhausted: bool,
     scheduler_wake_sender: Sender<()>,
     process_info_refresh_in_flight: bool,
@@ -1483,6 +1495,8 @@ impl TerminalPane {
             last_terminal_input: Instant::now(),
             last_terminal_activity: Instant::now(),
             dropped_external_paths: Vec::new(),
+            pending_clipboard_image: None,
+            ssh_reconnect_generation: 0,
             last_drain_budget_exhausted: false,
             scheduler_wake_sender,
             process_info_refresh_in_flight: false,
@@ -2589,10 +2603,15 @@ impl TerminalPane {
         cx: &mut Context<Self>,
     ) -> Result<()> {
         self.terminal.lock().reconnect_ssh(config)?;
+        self.ssh_reconnect_generation = self.ssh_reconnect_generation.wrapping_add(1);
         self.ssh_reconnect_state = SshReconnectState::StartingShell;
         let _ = self.scheduler_wake_sender.try_send(());
         cx.notify();
         Ok(())
+    }
+
+    pub fn ssh_reconnect_generation(&self) -> u64 {
+        self.ssh_reconnect_generation
     }
 
     pub fn session_kind(&self) -> TerminalSessionKind {
@@ -3142,6 +3161,11 @@ impl TerminalPane {
         }
     }
 
+    /// Pastes text into this pane only, without broadcasting to synced panes.
+    pub fn paste_text_to_self(&mut self, text: &str, cx: &mut Context<Self>) -> bool {
+        self.paste_text_without_broadcast(text, cx)
+    }
+
     fn paste_text_without_broadcast(&mut self, text: &str, cx: &mut Context<Self>) -> bool {
         if !self.terminal_accepts_input() {
             return false;
@@ -3186,6 +3210,10 @@ impl TerminalPane {
 
     pub fn take_dropped_external_paths(&mut self) -> Vec<std::path::PathBuf> {
         std::mem::take(&mut self.dropped_external_paths)
+    }
+
+    pub fn take_pasted_clipboard_image(&mut self) -> Option<TerminalClipboardImage> {
+        self.pending_clipboard_image.take()
     }
 
     pub fn send_command_line(&mut self, command: &str, cx: &mut Context<Self>) -> bool {
@@ -3719,23 +3747,51 @@ impl TerminalPane {
         if self.paste_editor.is_some() {
             return;
         }
-        let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else {
+        let Some(clipboard_item) = cx.read_from_clipboard() else {
             return;
         };
-        if text.is_empty() {
+        if let Some(text) = clipboard_item.text() {
+            if text.is_empty() {
+                return;
+            }
+            if !self.terminal_accepts_input() {
+                return;
+            }
+            if self.settings.paste_protection && paste_needs_confirmation(&text) {
+                self.open_paste_editor(Zeroizing::new(text), prefix, cx);
+                return;
+            }
+            if !prefix.is_empty() {
+                self.send_user_protocol_bytes(prefix, cx);
+            }
+            self.paste_text(&text, cx);
             return;
         }
-        if !self.terminal_accepts_input() {
+        // Only SSH panes upload image-only clipboard payloads via SFTP; local
+        // terminals keep existing behavior so local CLIs can read the clipboard directly.
+        if !prefix.is_empty()
+            || self.session_kind != TerminalSessionKind::SshPty
+            || !self.terminal_accepts_input()
+        {
             return;
         }
-        if self.settings.paste_protection && paste_needs_confirmation(&text) {
-            self.open_paste_editor(Zeroizing::new(text), prefix, cx);
+        let Some(image) = clipboard_item
+            .entries()
+            .iter()
+            .find_map(|entry| match entry {
+                gpui::ClipboardEntry::Image(image) if !image.bytes.is_empty() => {
+                    Some(TerminalClipboardImage {
+                        extension: image.format.extension(),
+                        bytes: image.bytes.clone(),
+                    })
+                }
+                _ => None,
+            })
+        else {
             return;
-        }
-        if !prefix.is_empty() {
-            self.send_user_protocol_bytes(prefix, cx);
-        }
-        self.paste_text(&text, cx);
+        };
+        self.pending_clipboard_image = Some(image);
+        cx.emit(TerminalPaneEvent::ClipboardImagePasted);
     }
 
     fn resolve_kitty_file_transmission(
@@ -4931,7 +4987,7 @@ impl TerminalPane {
         self.cwd_source == Some(TerminalWorkingDirectorySource::ShellIntegration)
     }
 
-    fn terminal_accepts_input(&self) -> bool {
+    pub fn terminal_accepts_input(&self) -> bool {
         if self.shell_ide_preparing {
             return false;
         }
