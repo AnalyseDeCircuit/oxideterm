@@ -27,7 +27,7 @@ use crate::{
 
 pub(crate) const DEFAULT_COLS: usize = 120;
 pub(crate) const DEFAULT_ROWS: usize = 40;
-pub(crate) const DEFAULT_SCROLLBACK_LINES: usize = 1000;
+pub(crate) const DEFAULT_SCROLLBACK_LINES: usize = 10_000;
 pub(crate) const SCROLLBAR_HIT_WIDTH: f32 = 16.0;
 pub(crate) const SCROLLBAR_GAP: f32 = 0.0;
 pub(crate) const SCROLLBAR_HIDE_DELAY: Duration = Duration::from_secs(1);

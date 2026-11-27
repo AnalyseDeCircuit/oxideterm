@@ -738,7 +738,7 @@ mod tests {
             "connectionPool": { "idleTimeoutSecs": 1 }
         });
         let sanitized = sanitize_settings_value(raw).unwrap();
-        assert_eq!(sanitized.settings.terminal.scrollback, 500);
+        assert_eq!(sanitized.settings.terminal.scrollback, 100);
         assert_eq!(sanitized.settings.terminal.font_size, 32);
         assert_eq!(sanitized.settings.terminal.line_height, 3.0);
         assert_eq!(sanitized.settings.terminal.session_log.retention_days, 0);

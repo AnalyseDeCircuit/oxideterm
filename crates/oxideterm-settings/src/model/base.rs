@@ -2,9 +2,11 @@ pub use oxideterm_render_policy::RenderProfile;
 
 pub const SETTINGS_SCHEMA_VERSION: u32 = 4;
 pub const DEFAULT_COLOR_THEME: &str = "default";
-pub const DEFAULT_TERMINAL_SCROLLBACK: i64 = 1000;
-pub const TERMINAL_SCROLLBACK_MIN: i64 = 500;
-pub const TERMINAL_SCROLLBACK_MAX: i64 = 20_000;
+pub const DEFAULT_TERMINAL_SCROLLBACK: i64 = 10_000;
+pub const TERMINAL_SCROLLBACK_MIN: i64 = 100;
+// Keep a generous upper bound well within alacritty_terminal's Line(i32) range
+// so history + viewport arithmetic cannot overflow.
+pub const TERMINAL_SCROLLBACK_MAX: i64 = 10_000_000;
 pub const DEFAULT_BACKEND_HOT_BUFFER_LINES: i64 = 8_000;
 pub const BACKEND_HOT_BUFFER_MIN: i64 = 5_000;
 pub const BACKEND_HOT_BUFFER_MAX: i64 = 12_000;

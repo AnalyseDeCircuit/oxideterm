@@ -1493,7 +1493,10 @@ impl WorkspaceApp {
                 SettingsCursorStyle::Bar => TerminalCursorShape::Bar,
             },
             cursor_blink: terminal.cursor_blink,
-            scrollback_lines: terminal.scrollback.clamp(500, 20_000) as usize,
+            scrollback_lines: terminal.scrollback.clamp(
+                oxideterm_settings::TERMINAL_SCROLLBACK_MIN,
+                oxideterm_settings::TERMINAL_SCROLLBACK_MAX,
+            ) as usize,
             smooth_scroll: terminal.smooth_scroll,
             optical_bloom: terminal.optical_bloom,
             crt_effect: terminal.crt_effect,

@@ -17,9 +17,9 @@ use oxideterm_settings::{
     MAX_TERMINAL_FONT_WEIGHT, MAX_TERMINAL_PADDING, MIN_AI_TOOL_MAX_CALLS_PER_ROUND,
     MIN_AI_TOOL_MAX_ROUNDS, MIN_TERMINAL_CHARACTER_SPACING, MIN_TERMINAL_FONT_WEIGHT,
     MIN_TERMINAL_LINE_HEIGHT, PersistedSettings, RECOMMENDED_FOCUS_HANDOFF_COMMANDS,
-    SettingsUpstreamProxyAuth, UpdateProxyMode, parse_terminal_session_log_content_template,
-    parse_terminal_session_log_directory_template, parse_terminal_session_log_file_name_template,
-    reindex_highlight_rules,
+    SettingsUpstreamProxyAuth, TERMINAL_SCROLLBACK_MAX, TERMINAL_SCROLLBACK_MIN, UpdateProxyMode,
+    parse_terminal_session_log_content_template, parse_terminal_session_log_directory_template,
+    parse_terminal_session_log_file_name_template, reindex_highlight_rules,
 };
 use oxideterm_terminal_semantic::SEMANTIC_CLASSES;
 
@@ -451,7 +451,10 @@ pub fn apply_persisted_settings_input_draft(
             })
             .into(),
         SettingsInput::TerminalScrollback => parse_i64(draft)
-            .map(|value| settings.terminal.scrollback = value.clamp(500, 20_000))
+            .map(|value| {
+                settings.terminal.scrollback =
+                    value.clamp(TERMINAL_SCROLLBACK_MIN, TERMINAL_SCROLLBACK_MAX)
+            })
             .into(),
         SettingsInput::CommandHistoryRetention => parse_i64(draft)
             .map(|value| {
@@ -1158,7 +1161,25 @@ mod tests {
             ),
             SettingsInputDraftApply::Applied
         );
-        assert_eq!(settings.terminal.scrollback, 20_000);
+        assert_eq!(settings.terminal.scrollback, 99_999);
+        assert_eq!(
+            apply_persisted_settings_input_draft(
+                &mut settings,
+                SettingsInput::TerminalScrollback,
+                "50",
+            ),
+            SettingsInputDraftApply::Applied
+        );
+        assert_eq!(settings.terminal.scrollback, TERMINAL_SCROLLBACK_MIN);
+        assert_eq!(
+            apply_persisted_settings_input_draft(
+                &mut settings,
+                SettingsInput::TerminalScrollback,
+                "999999999",
+            ),
+            SettingsInputDraftApply::Applied
+        );
+        assert_eq!(settings.terminal.scrollback, TERMINAL_SCROLLBACK_MAX);
         let original_port = settings.connection_defaults.port;
         assert_eq!(
             apply_persisted_settings_input_draft(
