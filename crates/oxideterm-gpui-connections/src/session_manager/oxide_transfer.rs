@@ -9,7 +9,7 @@ use oxideterm_connections::{
     ConnectionStore,
     oxide_file::{
         EncryptedPluginSetting, EncryptedPortableSecret, ExportPreflightResult,
-        ImportConflictStrategy, OxideExportOptions, OxideImportOptions,
+        ImportConflictStrategy, OxideExportOptions, OxideFileError, OxideImportOptions,
         apply_oxide_import_with_options_with_progress, export_connections_to_oxide_with_progress,
         preflight_export, preview_oxide_import_with_progress,
     },
@@ -902,7 +902,11 @@ impl OxideTransfer<'_> {
                     0
                 },
             );
-            export_options(dialog, cx).map(|options| (selected, preflight, options))
+            if preflight.can_export {
+                export_options(dialog, cx).map(|options| (selected, preflight, options))
+            } else {
+                Err(self.i18n.t("export.error_managed_keys_required"))
+            }
         };
         match request {
             Ok(request) => Some(request),
@@ -949,18 +953,24 @@ impl OxideTransfer<'_> {
         let store = self.store.clone();
         let i18n = self.i18n.clone();
         let worker = std::thread::spawn(move || {
-            let result = export_connections_to_oxide_with_progress(
-                &store,
-                &selected_ids,
-                &password,
-                options,
-                |stage, current, total| {
-                    let _ = sender.send(OxideWorkerDelivery::ExportProgress {
-                        generation,
-                        progress: OxideTransferProgress::new(stage, current, total),
-                    });
-                },
-            );
+            let mut store = store;
+            let result = store
+                .refresh_if_changed()
+                .map_err(|error| OxideFileError::Store(error.to_string()))
+                .and_then(|_| {
+                    export_connections_to_oxide_with_progress(
+                        &store,
+                        &selected_ids,
+                        &password,
+                        options,
+                        |stage, current, total| {
+                            let _ = sender.send(OxideWorkerDelivery::ExportProgress {
+                                generation,
+                                progress: OxideTransferProgress::new(stage, current, total),
+                            });
+                        },
+                    )
+                });
             let _ = sender.send(OxideWorkerDelivery::ExportDone {
                 generation,
                 result: result.map_err(|error| oxide_file_error_message(error, &i18n)),

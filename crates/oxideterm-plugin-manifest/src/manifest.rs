@@ -91,6 +91,8 @@ pub enum NativePluginRuntimeKind {
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NativePluginContributes {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub discovery_providers: Vec<crate::discovery::NativePluginDiscoveryProviderDef>,
     #[serde(default)]
     pub connections: Option<Vec<crate::NativePluginConnectionDef>>,
     /// Package-relative media imported into the user's background gallery on installation.
@@ -383,6 +385,12 @@ pub struct NativePluginDeclarativeUiSection {
 #[serde(rename_all = "camelCase")]
 pub struct NativePluginDeclarativeUiControl {
     pub kind: String,
+    /// Interpreted only by the discovery form contract.
+    #[serde(default, rename = "use", skip_serializing_if = "Option::is_none")]
+    pub discovery_use: Option<String>,
+    /// Non-secret configuration fields that determine which identity may use this secret.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret_scope: Option<Vec<String>>,
     #[serde(default)]
     pub id: Option<String>,
     #[serde(default)]

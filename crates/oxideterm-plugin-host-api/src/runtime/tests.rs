@@ -616,6 +616,390 @@ async fn runtime_host_deactivation_always_releases_permission_snapshots() {
 
 #[cfg(unix)]
 #[tokio::test]
+async fn discovery_dispatches_declared_actions_and_pages_with_their_own_config() {
+    use oxideterm_plugin_protocol::discovery::{DiscoveryReply, DiscoveryRequest};
+    let dir = unique_temp_dir("process-discovery-pages");
+    write_process_plugin(
+        &dir,
+        r#"#!/bin/sh
+read -r activate
+printf '%s\n' '{"protocolVersion":1,"requestId":"activate:com.example.runtime","payload":{"requestId":"activate:com.example.runtime","result":{"status":"ok","value":{}}}}'
+previous=''
+while IFS= read -r frame; do
+  id=$(printf '%s\n' "$frame" | sed -n 's/.*"requestId":"\([^"]*\)".*/\1/p')
+  case "$frame" in
+    *'"command":"discovery.sourceAction"'*)
+      case "$frame" in *'"actionId":"inspect"'*) ;; *) exit 1 ;; esac
+      case "$frame" in *'"sourceId":"source-2"'*) ;; *) exit 1 ;; esac
+      case "$frame" in *'"root/site":"test"'*) ;; *) exit 1 ;; esac
+      case "$frame" in *'"root/login":"operator"'*) ;; *) exit 1 ;; esac
+      case "$frame" in *'private-extra'*|*'"refreshId"'*) exit 1 ;; esac
+      printf '{"protocolVersion":1,"requestId":"%s","payload":{"requestId":"%s","result":{"status":"error","error":{"code":"permissionDenied","message":"Choose an inventory role","recoverable":true}}}}\n' "$id" "$id"
+      continue ;;
+    *'"command":"discovery.list"'*) ;;
+    *) exit 1 ;;
+  esac
+  case "$frame" in *'"root/site":"prod"'*) ;; *) exit 1 ;; esac
+  case "$frame" in *'"sourceId":"source-1"'*) ;; *) exit 1 ;; esac
+  case "$frame" in *'login-only'*|*'private-extra'*) exit 1 ;; esac
+  if [ -z "$previous" ]; then
+    value='{"targets":[{"id":"one","label":"First"}],"nextCursor":"remaining"}'
+  else
+    [ "$id" != "$previous" ] || exit 1
+    case "$frame" in *'"cursor":"remaining"'*) ;; *) exit 1 ;; esac
+    value='{"targets":[{"id":"two","label":"Second"}]}'
+  fi
+  printf '{"protocolVersion":1,"requestId":"%s","payload":{"requestId":"%s","result":{"status":"ok","value":%s}}}\n' "$id" "$id" "$value"
+  previous=$id
+done
+"#,
+    );
+    let mut manifest = sample_manifest();
+    manifest.contributes = Some(serde_json::from_value(serde_json::json!({
+        "discoveryProviders":[{"id":"inventory","title":"Inventory","icon":"server","protocolVersion":1,"launchKinds":["ssh"],
+            "sourceActions":[{"id":"inspect","title":"@inspect"}],
+            "form":{"controls":[{"id":"site","kind":"text","use":"catalog"},{"id":"login","kind":"text","use":"open"}]}}]
+    })).unwrap());
+    let mut host = NativePluginRuntimeHost::default();
+    let timeout = process_runtime_test_timeout();
+    let activation = host
+        .activate_process_plugin(
+            manifest,
+            dir.clone(),
+            "bin/plugin".into(),
+            PluginPermissionSet {
+                capabilities: vec!["ui.write".into()],
+                ..Default::default()
+            },
+            timeout,
+        )
+        .await
+        .unwrap();
+    // Undeclared actions must be refused before contacting the shared process.
+    let (refused, _) = host
+        .dispatch_discovery(
+            "com.example.runtime",
+            activation.generation,
+            "source-2",
+            "inventory",
+            DiscoveryRequest::SourceAction {
+                action_id: "unregistered".into(),
+                config: serde_json::json!({}),
+            },
+            timeout,
+        )
+        .await
+        .unwrap();
+    assert!(
+        matches!(refused, Err(DiscoveryCommandError::Rejected(error)) if error.code == "unsupported")
+    );
+    let (result, _) = host
+        .dispatch_discovery(
+            "com.example.runtime",
+            activation.generation,
+            "source-2",
+            "inventory",
+            DiscoveryRequest::SourceAction {
+                action_id: "inspect".into(),
+                config: serde_json::json!({"root/site":"test","root/login":"operator","unknown":"private-extra"}),
+            },
+            timeout,
+        )
+        .await
+        .unwrap();
+    assert!(matches!(result, Err(DiscoveryCommandError::Provider(error))
+        if error.code == "permissionDenied" && error.message == "Choose an inventory role" && error.recoverable));
+    let mut cursor = None;
+    for (id, label, next) in [("one", "First", Some("remaining")), ("two", "Second", None)] {
+        let (reply, _) = host
+            .dispatch_discovery(
+                "com.example.runtime",
+                activation.generation,
+                "source-1",
+                "inventory",
+                DiscoveryRequest::List {
+                    refresh_id: "round".into(),
+                    cursor,
+                    config: serde_json::json!({"root/site":"prod","root/login":"login-only","unknown":"private-extra"}),
+                },
+                timeout,
+            )
+            .await
+            .unwrap();
+        let DiscoveryReply::List(page) = reply.unwrap() else {
+            panic!("expected a discovery page")
+        };
+        assert_eq!(
+            page.targets
+                .iter()
+                .map(|target| (target.id.as_str(), target.label.as_str()))
+                .collect::<Vec<_>>(),
+            [(id, label)]
+        );
+        assert_eq!(page.next_cursor.as_deref(), next);
+        cursor = page.next_cursor;
+    }
+    host.deactivate_plugin("com.example.runtime").await.unwrap();
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn discovery_revocation_precedes_blocked_reply_and_shutdown_closes_provider_resource() {
+    use oxideterm_plugin_protocol::discovery::{
+        DiscoveryOpen, DiscoveryOwner, DiscoveryReply, DiscoveryRequest,
+    };
+    let dir = unique_temp_dir("discovery-revocation");
+    write_process_plugin(
+        &dir,
+        r#"#!/bin/sh
+mkfifo receipt
+while IFS= read -r frame; do
+  id=$(printf '%s\n' "$frame" | sed -n 's/.*"requestId":"\([^"]*\)".*/\1/p')
+  case "$frame" in
+    *'"type":"activate"'*) value='{}' ;;
+    *'"command":"discovery.prepareOpen"'*)
+      value='{"kind":"ready","owner":"provider","launch":{"kind":"ssh","endpoint":{"host":"vm.example","port":22}}}'
+      case "$frame" in
+        *'"instanceId":"invalid"'*) value='{"kind":"ready","owner":"provider","launch":{"kind":"ssh"}}' ;;
+        *) opened_id=$id ;;
+      esac
+      ;;
+    *'"command":"discovery.list"'*)
+      printf '{"protocolVersion":1,"requestId":"%s","payload":{"requestId":"%s","result":{"status":"ok","value":{"kind":"ready","owner":"provider","launch":{"kind":"ssh","endpoint":{"host":"vm.example","port":22}}}}}}\n' "$opened_id" "$opened_id"
+      printf '%s\n' '{"protocolVersion":1,"payload":{"type":"emitEvent","event":{"name":"discovery.instanceInvalidated","payload":{"sourceId":"s","providerId":"p","instanceId":"opened"}}}}'
+      read -r acknowledged < receipt
+      value="{\"targets\":[{\"id\":\"observed\",\"label\":\"$acknowledged\"}]}"
+      ;;
+    *'"command":"discovery.close"'*)
+      case "$frame" in
+        *'"instanceId":"opened"'*) printf 'opened' > released ;;
+        *'"instanceId":"invalid"'*) printf 'invalid' > rejected-resource ;;
+        *) exit 1 ;;
+      esac
+      value='{}' ;;
+    *) exit 1 ;;
+  esac
+  printf '{"protocolVersion":1,"requestId":"%s","payload":{"requestId":"%s","result":{"status":"ok","value":%s}}}\n' "$id" "$id" "$value"
+done
+"#,
+    );
+    let mut manifest = sample_manifest();
+    manifest.contributes=Some(serde_json::from_value(serde_json::json!({"discoveryProviders":[{"id":"p","title":"Inventory","icon":"server","protocolVersion":1,"launchKinds":["ssh"],"form":{"controls":[{"kind":"text","id":"site"}]}}]})).unwrap());
+    let timeout = process_runtime_test_timeout();
+    let mut host = NativePluginRuntimeHost::default();
+    let generation = host
+        .activate_process_plugin(
+            manifest,
+            dir.clone(),
+            "bin/plugin".into(),
+            PluginPermissionSet {
+                capabilities: vec!["ui.write".into()],
+                ..Default::default()
+            },
+            timeout,
+        )
+        .await
+        .unwrap()
+        .generation;
+    let receipt = dir.join("receipt");
+    host.set_discovery_invalidation_sink(
+        "com.example.runtime",
+        generation,
+        Arc::new(move |event| {
+            let identity = event.payload["instanceId"].as_str().unwrap();
+            fs::write(&receipt, format!("{identity}\n")).unwrap();
+        }),
+    );
+    let open = |instance: &str| DiscoveryRequest::PrepareOpen {
+        instance_id: instance.into(),
+        target_id: "vm".into(),
+        config: serde_json::json!({}),
+        continuation: None,
+        option_id: None,
+    };
+    let (response, _) = host
+        .dispatch_discovery(
+            "com.example.runtime",
+            generation,
+            "s",
+            "p",
+            open("opened"),
+            timeout,
+        )
+        .await
+        .unwrap();
+    assert!(matches!(
+        response,
+        Ok(DiscoveryReply::Open(DiscoveryOpen::Ready {
+            owner: DiscoveryOwner::Provider,
+            ..
+        }))
+    ));
+    let (rejected, _) = host
+        .dispatch_discovery(
+            "com.example.runtime",
+            generation,
+            "s",
+            "p",
+            open("invalid"),
+            timeout,
+        )
+        .await
+        .unwrap();
+    assert!(
+        matches!(rejected, Err(DiscoveryCommandError::Rejected(error)) if error.code == "invalidDiscoveryMessage")
+    );
+    let (cleaned, _) = host
+        .dispatch_discovery(
+            "com.example.runtime",
+            generation,
+            "s",
+            "p",
+            DiscoveryRequest::CancelOpen {
+                instance_id: "invalid".into(),
+            },
+            timeout,
+        )
+        .await
+        .unwrap();
+    assert!(matches!(cleaned, Ok(DiscoveryReply::Done)));
+    assert_eq!(
+        fs::read_to_string(dir.join("rejected-resource")).unwrap(),
+        "invalid"
+    );
+    let list = DiscoveryRequest::List {
+        refresh_id: "round".into(),
+        cursor: None,
+        config: serde_json::json!({}),
+    };
+    let (reply, _) = host
+        .dispatch_discovery("com.example.runtime", generation, "s", "p", list, timeout)
+        .await
+        .unwrap();
+    assert!(matches!(reply,Ok(DiscoveryReply::List(page)) if page.targets[0].label=="opened"));
+    host.deactivate_plugin("com.example.runtime").await.unwrap();
+    assert_eq!(fs::read_to_string(dir.join("released")).unwrap(), "opened");
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn discovery_slow_provider_does_not_delay_another_process() {
+    use oxideterm_plugin_protocol::discovery::{DiscoveryReply, DiscoveryRequest};
+    let directory = unique_temp_dir("independent-discovery-processes");
+    write_process_plugin(
+        &directory,
+        r#"#!/bin/sh
+while IFS= read -r frame; do
+  id=$(printf '%s\n' "$frame" | sed -n 's/.*"requestId":"\([^"]*\)".*/\1/p')
+  case "$frame" in
+    *'"sourceId":"slow"'*)
+      printf '%s\n' '{"protocolVersion":1,"payload":{"type":"emitEvent","event":{"name":"discovery.instanceInvalidated","payload":{"sourceId":"slow","providerId":"inventory","instanceId":"in-flight"}}}}'
+      while [ ! -f release ]; do sleep 0.01; done
+      value='{"targets":[{"id":"first","label":"First"}]}' ;;
+    *'"sourceId":"fast"'*) value='{"targets":[{"id":"second","label":"Second"}]}' ;;
+    *) value='{}' ;;
+  esac
+  printf '{"protocolVersion":1,"requestId":"%s","payload":{"requestId":"%s","result":{"status":"ok","value":%s}}}\n' "$id" "$id" "$value"
+done
+"#,
+    );
+    let mut hosts = NativePluginRuntimeHosts::default();
+    let timeout = process_runtime_test_timeout();
+    let mut generations = Vec::new();
+    for id in ["example.slow", "example.fast"] {
+        let mut manifest = sample_manifest();
+        manifest.id = id.into();
+        manifest.contributes = Some(serde_json::from_value(serde_json::json!({
+            "discoveryProviders":[{"id":"inventory","title":"Inventory","icon":"server","protocolVersion":1,"launchKinds":["ssh"],"form":{}}]
+        })).unwrap());
+        hosts.prepare_process(&manifest);
+        let host = hosts.for_plugin(id);
+        let activation = host
+            .lock()
+            .await
+            .activate_process_plugin(
+                manifest,
+                directory.clone(),
+                "bin/plugin".into(),
+                PluginPermissionSet {
+                    capabilities: vec!["ui.write".into()],
+                    ..Default::default()
+                },
+                timeout,
+            )
+            .await
+            .unwrap();
+        generations.push(activation.generation);
+    }
+    let (entered, mut waiting) = tokio::sync::mpsc::unbounded_channel();
+    hosts
+        .for_plugin("example.slow")
+        .lock()
+        .await
+        .set_discovery_invalidation_sink(
+            "example.slow",
+            generations[0],
+            Arc::new(move |event| {
+                entered.send(event.payload["instanceId"].clone()).unwrap();
+            }),
+        );
+    let enumerate = |id: &'static str, source: &'static str, generation| {
+        let host = hosts.for_plugin(id);
+        async move {
+            let (reply, _) = host
+                .lock()
+                .await
+                .dispatch_discovery(
+                    id,
+                    generation,
+                    source,
+                    "inventory",
+                    DiscoveryRequest::List {
+                        refresh_id: "round".into(),
+                        config: serde_json::json!({}),
+                        cursor: None,
+                    },
+                    timeout,
+                )
+                .await
+                .unwrap();
+            let DiscoveryReply::List(page) = reply.unwrap() else {
+                panic!("expected a catalog page")
+            };
+            page.targets
+                .into_iter()
+                .map(|target| target.id)
+                .collect::<Vec<_>>()
+        }
+    };
+    let (slow, fast) = time::timeout(timeout, async {
+        tokio::join!(enumerate("example.slow", "slow", generations[0]), async {
+            assert_eq!(waiting.recv().await, Some(serde_json::json!("in-flight")));
+            let fast = enumerate("example.fast", "fast", generations[1]).await;
+            fs::write(directory.join("release"), []).unwrap();
+            fast
+        })
+    })
+    .await
+    .expect("the second process must finish while the first is blocked");
+    assert_eq!(slow, ["first"]);
+    assert_eq!(fast, ["second"]);
+    for id in ["example.slow", "example.fast"] {
+        hosts
+            .for_plugin(id)
+            .lock()
+            .await
+            .deactivate_plugin(id)
+            .await
+            .unwrap();
+    }
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[cfg(unix)]
+#[tokio::test]
 async fn runtime_host_dispatches_registered_command_over_process_rpc() {
     let temp_dir = unique_temp_dir("plugin-runtime-host-dispatch-command");
     let plugin_dir = temp_dir.join("plugin");

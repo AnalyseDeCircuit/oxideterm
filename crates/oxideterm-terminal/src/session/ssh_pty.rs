@@ -165,6 +165,8 @@ impl SshPtyCore {
         if let Some(runtime_handle) = runtime_handle {
             let connection = config.connection.take();
             let registry = config.registry.take();
+            let admission = config.route_lease.take();
+            let pending_route = config.pending_route.take();
             let consumer = config.consumer.take();
             let prompt_handler = config.prompt_handler.take();
             let managed_key_resolver = config.managed_key_resolver.take();
@@ -179,7 +181,16 @@ impl SshPtyCore {
                 if let Some(task) = previous_task {
                     let _ = task.await;
                 }
-                let result = match connection {
+                let result = async {
+                let admission = match (admission, pending_route, registry.as_ref()) {
+                    (None, Some(id), Some(registry)) => {
+                        let admitted = registry.admit_terminal(&id)
+                            .ok_or(oxideterm_ssh::SshTransportError::CommandChannelUnavailable)?;
+                        Some(admitted)
+                    }
+                    (admission, _, _) => admission,
+                };
+                match connection {
                     Some(SshSessionConnection::New(mut ssh_config)) => {
                         ssh_config.cols = cols;
                         ssh_config.rows = rows;
@@ -203,26 +214,18 @@ impl SshPtyCore {
                         x11_forwarding_override,
                     }) => {
                         match (registry, consumer) {
-                            (Some(registry), Some(consumer)) => match x11_forwarding_override {
-                                Some(x11_forwarding) => {
-                                    SshTransportClient::connect_shell_on_existing_connection_with_x11_forwarding(
-                                        registry,
-                                        connection_id,
-                                        consumer,
-                                        cols,
-                                        rows,
-                                        x11_forwarding,
-                                    )
-                                    .await
+                            (Some(registry), Some(consumer)) => match admission {
+                                Some(admission) => SshTransportClient::connect_admitted_terminal(
+                                    registry, connection_id, consumer, cols, rows, x11_forwarding_override, admission
+                                ).await,
+                                None => match x11_forwarding_override {
+                                    Some(x11) => SshTransportClient::connect_shell_on_existing_connection_with_x11_forwarding(
+                                        registry, connection_id, consumer, cols, rows, x11
+                                    ).await,
+                                    None => SshTransportClient::connect_shell_on_existing_connection(
+                                        registry, connection_id, consumer, cols, rows
+                                    ).await,
                                 }
-                                None => SshTransportClient::connect_shell_on_existing_connection(
-                                    registry,
-                                    connection_id,
-                                    consumer,
-                                    cols,
-                                    rows,
-                                )
-                                .await,
                             },
                             _ => Err(oxideterm_ssh::SshTransportError::ConnectionFailed(
                                 "existing SSH terminal requires a connection registry".to_string(),
@@ -245,15 +248,14 @@ impl SshPtyCore {
                         }
                         match (registry, consumer) {
                             (Some(registry), Some(consumer)) => {
-                                // Dedicated terminals still use the registry so
-                                // their physical connection has one clear owner.
-                                client
-                                    .connect_shell_with_dedicated_registry(
-                                        registry,
-                                        consumer,
-                                        parent_connection_id,
-                                    )
-                                    .await
+                                match admission {
+                                    Some(admission) => client.connect_admitted_dedicated_terminal(
+                                        registry, consumer, parent_connection_id, admission,
+                                    ).await,
+                                    None => client.connect_shell_with_dedicated_registry(
+                                        registry, consumer, parent_connection_id,
+                                    ).await,
+                                }
                             }
                             _ => Err(oxideterm_ssh::SshTransportError::ConnectionFailed(
                                 "dedicated SSH terminal requires a connection registry".to_string(),
@@ -264,7 +266,7 @@ impl SshPtyCore {
                         "SSH terminal connection ownership was already transferred".to_string(),
                     )),
                 }
-                .map_err(|error| error.to_string());
+                }.await.map_err(|error| error.to_string());
                 let _ = connect_tx.send(result);
                 connect_activity.notify();
             }));
@@ -370,6 +372,9 @@ impl SshPtyCore {
         }
 
         self.post_connect_input_sent = true;
+        if !self.allows_shell_automation() {
+            return;
+        }
         match self.config.post_connect_input() {
             Ok(Some(payload)) => {
                 let _ = self.send_command(SshTransportCommand::Data(payload));
@@ -380,6 +385,26 @@ impl SshPtyCore {
                     .feed_utf8_terminal_output(format!("\r\n{error}\r\n").as_bytes());
             }
         }
+    }
+
+    fn allows_shell_automation(&self) -> bool {
+        self.handle.as_ref().is_some_and(|pty| {
+            pty.ssh_connection_handle()
+                .is_none_or(|connection| connection.allows_target_operations())
+        })
+    }
+
+    fn acquire_ide_shell_channel(&mut self) -> Result<crate::ShellChannel> {
+        if !self.allows_shell_automation()
+            || self
+                .handle
+                .as_ref()
+                .and_then(SshPtyHandle::ssh_connection_handle)
+                .is_some_and(|connection| !connection.allows_additional_channels())
+        {
+            return Err(oxideterm_ssh::SshTransportError::CommandChannelUnavailable.into());
+        }
+        self.parser_state.acquire_shell_channel()
     }
 
     fn drain_transport_output(&mut self) -> TerminalDrainReport {
@@ -613,7 +638,7 @@ impl TerminalSessionBackend for SshPtyCore {
 
     fn acquire_shell_channel(&mut self) -> Result<crate::ShellChannelAcquisition> {
         let (tx, rx) = tokio::sync::oneshot::channel();
-        let mut result = self.parser_state.acquire_shell_channel();
+        let mut result = self.acquire_ide_shell_channel();
         if let Ok(channel) = &mut result {
             channel.set_audit_context(self.audit_context());
         }

@@ -31,6 +31,7 @@ impl SettingsWorkspaceEntity {
     pub fn apply_credential_request(
         &mut self,
         request: CredentialRequest,
+        discovery_sources: &[oxideterm_settings::DiscoverySource],
         store: &mut ConnectionStore,
         i18n: &I18n,
         cx: &mut Context<Self>,
@@ -80,7 +81,15 @@ impl SettingsWorkspaceEntity {
                 }
             }
             CredentialRequest::DeleteTotp(id) => {
-                outcome.store_changed = self.delete_totp_credential_from_settings(id, store, cx);
+                if discovery_sources.iter().any(|source| {
+                    source.ssh_preferences.totp_credential_id.as_deref() == Some(id.as_str())
+                }) {
+                    self.totp_error = Some(oxideterm_connections::totp::TotpError::InUse);
+                    cx.notify();
+                } else {
+                    outcome.store_changed =
+                        self.delete_totp_credential_from_settings(id, store, cx);
+                }
             }
             CredentialRequest::CancelTotp => {
                 self.cancel_totp_draft(cx);

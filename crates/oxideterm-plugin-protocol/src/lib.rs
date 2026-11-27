@@ -3,6 +3,7 @@
 
 //! Shared native plugin protocol types used by process and WASM runtimes.
 
+pub mod discovery;
 mod envelope;
 mod error;
 mod event;

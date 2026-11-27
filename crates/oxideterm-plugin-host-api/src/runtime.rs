@@ -93,9 +93,54 @@ pub struct NativePluginRuntimePush {
     pub effects: Vec<PluginOutboundEffect>,
 }
 
+/// Only the outer dispatch error describes a failed transport. Provider codes are opaque.
+#[derive(Debug)]
+pub enum DiscoveryCommandError {
+    Rejected(PluginError),
+    Provider(PluginError),
+}
+
+pub type SharedRuntimeHost = Arc<tokio::sync::Mutex<NativePluginRuntimeHost>>;
+
+/// Discovery refreshes and interaction share a queue only with their own process.
+/// Existing plugins without discovery contributions retain their original host.
+#[derive(Clone, Default)]
+pub struct NativePluginRuntimeHosts {
+    shared: SharedRuntimeHost,
+    discovery: Arc<HashMap<String, SharedRuntimeHost>>,
+}
+
+impl NativePluginRuntimeHosts {
+    pub fn shared(&self) -> SharedRuntimeHost {
+        self.shared.clone()
+    }
+
+    pub fn for_plugin(&self, id: &str) -> SharedRuntimeHost {
+        self.discovery.get(id).unwrap_or(&self.shared).clone()
+    }
+
+    pub fn prepare_process(&mut self, manifest: &NativePluginManifest) {
+        if manifest
+            .contributes
+            .as_ref()
+            .is_some_and(|c| !c.discovery_providers.is_empty())
+        {
+            Arc::make_mut(&mut self.discovery)
+                .entry(manifest.id.clone())
+                .or_default();
+        } else if self.discovery.contains_key(&manifest.id) {
+            Arc::make_mut(&mut self.discovery).remove(&manifest.id);
+        }
+    }
+
+    pub fn retain_installed<'a>(&mut self, ids: impl Iterator<Item = &'a str>) {
+        let installed = ids.collect::<std::collections::HashSet<_>>();
+        Arc::make_mut(&mut self.discovery).retain(|id, _| installed.contains(id.as_str()));
+    }
+}
+
 #[derive(Default)]
 pub struct NativePluginRuntimeHost {
-    next_generation: u64,
     output_wake: Arc<tokio::sync::Notify>,
     process_runtimes: HashMap<String, NativeProcessPluginRuntime>,
     process_permissions: HashMap<String, PluginPermissionSet>,
@@ -107,6 +152,151 @@ pub struct NativePluginRuntimeHost {
 }
 
 impl NativePluginRuntimeHost {
+    pub fn set_discovery_invalidation_sink(
+        &mut self,
+        plugin_id: &str,
+        generation: u64,
+        sink: Arc<dyn Fn(PluginEvent) + Send + Sync>,
+    ) {
+        if let Some(runtime) = self.process_runtimes.get_mut(plugin_id)
+            && runtime.generation == generation
+            && self
+                .process_permissions
+                .get(plugin_id)
+                .is_some_and(|permissions| {
+                    permissions::capability_allowed(
+                        permissions,
+                        crate::capabilities::NATIVE_PLUGIN_CAPABILITY_UI_WRITE,
+                    )
+                })
+        {
+            runtime.discovery_invalidation_sink = Some(sink);
+        }
+    }
+    /// Discovery calls bind to the activated manifest and exact process generation.
+    pub async fn dispatch_discovery(
+        &mut self,
+        plugin_id: &str,
+        generation: u64,
+        source_id: &str,
+        provider_id: &str,
+        request: oxideterm_plugin_protocol::discovery::DiscoveryRequest,
+        timeout: Duration,
+    ) -> Result<
+        (
+            Result<oxideterm_plugin_protocol::discovery::DiscoveryReply, DiscoveryCommandError>,
+            NativePluginRuntimePush,
+        ),
+        PluginError,
+    > {
+        // Local authorization failures have no effect on the shared process or its other sources.
+        let reject = |error| {
+            Ok((
+                Err(DiscoveryCommandError::Rejected(error)),
+                NativePluginRuntimePush {
+                    messages: Vec::new(),
+                    effects: Vec::new(),
+                },
+            ))
+        };
+        let runtime = self
+            .process_runtimes
+            .get_mut(plugin_id)
+            .filter(|runtime| runtime.generation == generation)
+            .ok_or_else(|| {
+                PluginError::runtime("unavailable", "Discovery provider is no longer active")
+            })?;
+        let request = runtime
+            .discovery_resources
+            .cleanup_request(provider_id, source_id, request);
+        let Some(provider) = runtime
+            .discovery_providers
+            .iter()
+            .find(|p| p.id == provider_id)
+        else {
+            return reject(PluginError::protocol(
+                "unsupported",
+                "Unregistered discovery provider",
+            ));
+        };
+        let (command, args) = match request.command_args(source_id, provider) {
+            Ok(command) => command,
+            Err(_) => {
+                return reject(PluginError::protocol(
+                    "unsupported",
+                    "Operation is not supported by this discovery provider",
+                ));
+            }
+        };
+        let permissions = self
+            .process_permissions
+            .get(plugin_id)
+            .cloned()
+            .unwrap_or_default();
+        if !permissions.capabilities.iter().any(|c| c == "ui.write") {
+            return reject(PluginError::protocol(
+                "permissionDenied",
+                "Discovery requires approved ui.write",
+            ));
+        }
+        runtime.next_discovery_request =
+            runtime
+                .next_discovery_request
+                .checked_add(1)
+                .ok_or_else(|| {
+                    PluginError::runtime("unavailable", "Discovery request IDs exhausted")
+                })?;
+        let request_id = format!("discovery:{generation}:{}", runtime.next_discovery_request);
+        let response = runtime
+            .call(PluginRequest {
+                request_id,
+                kind: PluginRequestKind::DispatchCommand {
+                    command: command.to_owned(),
+                    args,
+                },
+                timeout_ms: Some(timeout.as_millis().try_into().unwrap_or(u64::MAX)),
+            })
+            .await?;
+        runtime.last_completed_discovery_request = runtime.next_discovery_request;
+        let messages = runtime.drain_outbound_messages();
+        let effects = runtime.drain_outbound_effects();
+        validate_outbound_message_permissions(
+            &messages,
+            &permissions,
+            &runtime.discovery_providers,
+        )?;
+        validate_outbound_effect_permissions(&effects, &permissions)?;
+        let result = match response.result {
+            PluginResponseResult::Ok { value } => {
+                runtime.discovery_resources.observe_ready(
+                    provider_id,
+                    source_id,
+                    &request,
+                    &value,
+                )?;
+                let definition = runtime
+                    .discovery_providers
+                    .iter()
+                    .find(|p| p.id == provider_id)
+                    .expect("the active runtime is exclusively borrowed for this dispatch");
+                request
+                    .parse_reply(definition, value)
+                    .map_err(DiscoveryCommandError::Rejected)
+            }
+            PluginResponseResult::Error { mut error } => {
+                if error.message.trim().is_empty() || error.message.chars().any(char::is_control) {
+                    error.message = "Discovery operation failed".into();
+                }
+                Err(DiscoveryCommandError::Provider(error))
+            }
+        };
+        if let Ok(reply) = &result {
+            runtime
+                .discovery_resources
+                .record(provider_id, source_id, &request, reply);
+        }
+        Ok((result, NativePluginRuntimePush { messages, effects }))
+    }
     pub fn dispose_connection_views(&mut self, plugin_id: &str, instance_id: &str) {
         if let Some(runtime) = self.process_runtimes.get_mut(plugin_id) {
             runtime.supervisor.dispose_connection_views(instance_id);
@@ -146,7 +336,13 @@ impl NativePluginRuntimeHost {
                 .cloned()
                 .unwrap_or_default();
             let result = result
-                .and_then(|_| validate_outbound_message_permissions(&messages, &permissions))
+                .and_then(|_| {
+                    validate_outbound_message_permissions(
+                        &messages,
+                        &permissions,
+                        &runtime.discovery_providers,
+                    )
+                })
                 .and_then(|_| validate_outbound_effect_permissions(&effects, &permissions));
             match result {
                 Err(error) => {
@@ -206,9 +402,23 @@ impl NativePluginRuntimeHost {
             lifecycle_timeout,
         );
         runtime.set_output_wake(self.output_wake.clone());
-        self.next_generation += 1;
-        let generation = self.next_generation;
+        // Multiple workspace hosts can publish into the same device-local discovery catalog.
+        static NEXT_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        let generation = NEXT_GENERATION
+            .fetch_update(
+                std::sync::atomic::Ordering::Relaxed,
+                std::sync::atomic::Ordering::Relaxed,
+                |value| value.checked_add(1),
+            )
+            .map_err(|_| {
+                PluginError::runtime("unavailable", "Plugin runtime generation exhausted")
+            })?;
         runtime.generation = generation;
+        runtime.discovery_providers = manifest
+            .contributes
+            .as_ref()
+            .map(|c| c.discovery_providers.clone())
+            .unwrap_or_default();
         if let Some(resolver) = self.host_api_resolver.clone() {
             install_process_host_call_handler(
                 &mut runtime,
@@ -231,7 +441,11 @@ impl NativePluginRuntimeHost {
         // can mutate the host registry on the UI thread.
         let messages = runtime.drain_outbound_messages();
         let effects = runtime.drain_outbound_effects();
-        validate_outbound_message_permissions(&messages, &permissions)?;
+        validate_outbound_message_permissions(
+            &messages,
+            &permissions,
+            &runtime.discovery_providers,
+        )?;
         validate_outbound_effect_permissions(&effects, &permissions)?;
 
         if matches!(response.result, PluginResponseResult::Ok { .. }) {
@@ -294,7 +508,7 @@ impl NativePluginRuntimeHost {
                 .await?;
             let messages = runtime.drain_outbound_messages();
             let effects = runtime.drain_outbound_effects();
-            validate_outbound_message_permissions(&messages, &permissions)?;
+            validate_outbound_message_permissions(&messages, &permissions, &[])?;
             validate_outbound_effect_permissions(&effects, &permissions)?;
 
             if matches!(response.result, PluginResponseResult::Ok { .. }) {
@@ -338,7 +552,7 @@ impl NativePluginRuntimeHost {
                 .await?;
             let messages = runtime.drain_outbound_messages();
             let effects = runtime.drain_outbound_effects();
-            validate_outbound_message_permissions(&messages, &permissions)?;
+            validate_outbound_message_permissions(&messages, &permissions, &[])?;
             validate_outbound_effect_permissions(&effects, &permissions)?;
             return Ok(NativePluginRuntimeCommandDispatch {
                 plugin_id: plugin_id.to_string(),
@@ -381,7 +595,11 @@ impl NativePluginRuntimeHost {
             .await?;
         let messages = runtime.drain_outbound_messages();
         let effects = runtime.drain_outbound_effects();
-        validate_outbound_message_permissions(&messages, &permissions)?;
+        validate_outbound_message_permissions(
+            &messages,
+            &permissions,
+            &runtime.discovery_providers,
+        )?;
         validate_outbound_effect_permissions(&effects, &permissions)?;
         Ok(NativePluginRuntimeCommandDispatch {
             plugin_id: plugin_id.to_string(),
@@ -408,7 +626,7 @@ impl NativePluginRuntimeHost {
             let response = runtime.send_event(event.clone()).await?;
             let messages = runtime.drain_outbound_messages();
             let effects = runtime.drain_outbound_effects();
-            validate_outbound_message_permissions(&messages, &permissions)?;
+            validate_outbound_message_permissions(&messages, &permissions, &[])?;
             validate_outbound_effect_permissions(&effects, &permissions)?;
             let _ = timeout;
             return Ok(NativePluginRuntimeEventDispatch {
@@ -447,7 +665,11 @@ impl NativePluginRuntimeHost {
             .await?;
         let messages = runtime.drain_outbound_messages();
         let effects = runtime.drain_outbound_effects();
-        validate_outbound_message_permissions(&messages, &permissions)?;
+        validate_outbound_message_permissions(
+            &messages,
+            &permissions,
+            &runtime.discovery_providers,
+        )?;
         validate_outbound_effect_permissions(&effects, &permissions)?;
         // Keep the caller-supplied timeout in the API even though the current
         // PluginRuntimeBridge::send_event path uses the lifecycle timeout; the
@@ -469,6 +691,26 @@ impl NativePluginRuntimeHost {
         // Runtime shutdown owns dynamic contribution cleanup. Manifest-only
         // contributions are cleaned by WorkspaceApp after this call so registry
         // mutation stays on the UI thread.
+        if let Some(runtime) = self.process_runtimes.get_mut(plugin_id) {
+            let generation = runtime.generation;
+            let deadline = Instant::now() + runtime.supervisor.lifecycle_timeout();
+            let resources = runtime.discovery_resources.drain();
+            // Bound shutdown even when the provider retained several resources.
+            for (provider, source, request) in resources {
+                let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+                    break;
+                };
+                if !matches!(
+                    self.dispatch_discovery(
+                        plugin_id, generation, &source, &provider, request, remaining
+                    )
+                    .await,
+                    Ok((Ok(_), _))
+                ) {
+                    break;
+                }
+            }
+        }
         let response = if let Some(mut runtime) = self.process_runtimes.remove(plugin_id) {
             runtime.deactivate().await
         } else {
@@ -500,6 +742,7 @@ impl NativePluginRuntimeHost {
     }
 }
 
+mod discovery_resources;
 mod paths;
 mod permissions;
 mod process;

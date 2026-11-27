@@ -36,6 +36,7 @@ oxideterm-background-media = { path = "../oxideterm-background-media" }
 oxideterm-connections = { path = "../oxideterm-connections" }
 oxideterm-gpui-background = { path = "../oxideterm-gpui-background" }
 oxideterm-gpui-terminal = { path = "../oxideterm-gpui-terminal" }
+oxideterm-plugin-manifest = { path = "../oxideterm-plugin-manifest" }
 oxideterm-portable-runtime = { path = "../oxideterm-portable-runtime" }
 oxideterm-public-mcp = { path = "../oxideterm-public-mcp" }
 oxideterm-skills = { path = "../oxideterm-skills" }
@@ -45,6 +46,7 @@ oxideterm-terminal-triggers = { path = "../oxideterm-terminal-triggers" }
 oxideterm-update = { path = "../oxideterm-update" }
 oxideterm-workspace = { path = "../oxideterm-workspace" }
 tokio.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }

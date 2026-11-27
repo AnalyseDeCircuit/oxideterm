@@ -2,11 +2,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use super::{
-    SessionManagerOpenTarget, SessionManagerRowActionTarget, SessionManagerSelectionTarget,
-    SessionSortField, SortDirection, session_manager_row_menu_selection_target,
+    CatalogAction, SessionManagerOpenTarget, SessionManagerRowActionTarget,
+    SessionManagerSelectionTarget, SessionSortField, SortDirection,
+    session_manager_row_menu_selection_target,
 };
 use crate::icons::SessionIcon;
 use oxideterm_gpui_ui::icons::LucideIcon;
+use oxideterm_plugin_protocol::discovery::DiscoveryGroupSegment;
 use std::{
     collections::{HashMap, HashSet, hash_map::DefaultHasher},
     hash::{Hash, Hasher},
@@ -17,6 +19,9 @@ use std::{
 #[derive(Clone)]
 pub struct CatalogRow {
     pub target: SessionManagerOpenTarget,
+    /// Target IDs are scoped to a source, so discovered rows use a composite display ID.
+    pub discovery_row_id: String,
+    pub group_paths: Vec<Vec<DiscoveryGroupSegment>>,
     pub name: String,
     pub group: Option<String>,
     pub subtitle: String,
@@ -41,7 +46,7 @@ impl CatalogRow {
         let icon = match &target {
             Tunnel(_) => LucideIcon::Network,
             Plugin(_) => LucideIcon::Puzzle,
-            Connection(_) => LucideIcon::Server,
+            Connection(_) | Discovery(_) => LucideIcon::Server,
             SshConfig(_) => LucideIcon::FileTerminal,
             Serial(_) => LucideIcon::Radio,
             Ble(_) => LucideIcon::Bluetooth,
@@ -52,6 +57,13 @@ impl CatalogRow {
         }
         .into();
         Self {
+            discovery_row_id: match &target {
+                Discovery((source, target)) => {
+                    format!("discovery:{}:{source}{target}", source.len())
+                }
+                _ => String::new(),
+            },
+            group_paths: Vec::new(),
             tags: Vec::new(),
             protocol_badge: None,
             active: false,
@@ -76,6 +88,7 @@ impl CatalogRow {
             Tunnel(id) | Plugin(id) | Connection(id) | SshConfig(id) | Serial(id) | Ble(id)
             | LocalTerminal(id) | Telnet(id) | Ftp(id) | Mosh(id) | StandaloneSftp(id)
             | RemoteDesktop(id) => id,
+            Discovery(_) => &self.discovery_row_id,
         }
     }
     pub(super) fn row_action_target(&self) -> SessionManagerRowActionTarget {
@@ -86,6 +99,7 @@ impl CatalogRow {
             Open::Plugin(id) => Row::Plugin(id.clone()),
             Open::Connection(id) => Row::Connection(id.clone()),
             Open::SshConfig(id) => Row::SshConfig(id.clone()),
+            Open::Discovery(key) => Row::Discovery(key.clone()),
             Open::Serial(id) => Row::Serial(id.clone()),
             Open::Ble(id) => Row::Ble(id.clone()),
             Open::LocalTerminal(id) => Row::LocalTerminal(id.clone()),
@@ -102,6 +116,8 @@ pub(super) trait CatalogEntry {
     fn id(&self) -> &str;
     fn name(&self) -> &str;
     fn group(&self) -> Option<&str>;
+    fn discovery_source(&self) -> Option<&str>;
+    fn group_paths(&self) -> &[Vec<DiscoveryGroupSegment>];
     fn last_used(&self) -> Option<String>;
     fn host(&self) -> &str;
     fn port_sort_key(&self) -> u32;
@@ -116,6 +132,15 @@ pub(super) trait CatalogEntry {
 }
 
 impl CatalogEntry for CatalogRow {
+    fn group_paths(&self) -> &[Vec<DiscoveryGroupSegment>] {
+        &self.group_paths
+    }
+    fn discovery_source(&self) -> Option<&str> {
+        match &self.target {
+            SessionManagerOpenTarget::Discovery((source, _)) => Some(source),
+            _ => None,
+        }
+    }
     fn hash_appearance(&self, hasher: &mut DefaultHasher) {
         std::mem::discriminant(&self.target).hash(hasher);
         if self.active || self.protocol_badge.is_some() {
@@ -206,8 +231,49 @@ pub enum SessionManagerGridRow {
     },
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub struct DiscoveryCatalogGroup {
+    pub id: String,
+    pub name: String,
+    pub failed: bool,
+    pub hint: Option<String>,
+}
+
+impl DiscoveryCatalogGroup {
+    pub(super) fn menu_actions(&self) -> Vec<(&'static str, &'static str, CatalogAction)> {
+        vec![
+            (
+                if self.failed {
+                    "settings_view.help.retry"
+                } else {
+                    "settings_view.known_hosts.refresh"
+                },
+                "lucide/refresh-cw.svg",
+                CatalogAction::RefreshDiscovery(self.id.clone()),
+            ),
+            (
+                "settings_view.discovery.edit_source",
+                "lucide/pencil.svg",
+                CatalogAction::EditDiscoverySource(self.id.clone()),
+            ),
+        ]
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SessionManagerTreeRow {
+    DiscoveryGroup {
+        group: DiscoveryCatalogGroup,
+        expanded: bool,
+        count: usize,
+    },
+    DiscoverySubgroup {
+        key: Vec<String>,
+        label: String,
+        count: usize,
+        expanded: bool,
+    },
+    DiscoveryStatus(String),
     Group {
         path: String,
         depth: usize,
@@ -224,6 +290,9 @@ impl SessionManagerTreeRow {
     pub fn depth(&self) -> usize {
         match self {
             Self::Group { depth, .. } | Self::Item { depth, .. } => *depth,
+            Self::DiscoveryGroup { .. } => 0,
+            Self::DiscoveryStatus(_) => 1,
+            Self::DiscoverySubgroup { key, .. } => key.len() - 1,
         }
     }
 }
@@ -449,6 +518,7 @@ fn push_session_manager_grid_section(
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub(super) fn session_manager_tree_rows<T: CatalogEntry>(
     items: &[T],
     roots: &[String],
@@ -456,11 +526,36 @@ pub(super) fn session_manager_tree_rows<T: CatalogEntry>(
     expanded_groups: &HashSet<String>,
     search_active: bool,
 ) -> Vec<SessionManagerTreeRow> {
+    session_manager_tree_with_sources(
+        items,
+        roots,
+        children,
+        expanded_groups,
+        &[],
+        &HashSet::new(),
+        search_active,
+    )
+}
+
+pub(super) fn session_manager_tree_with_sources<T: CatalogEntry>(
+    items: &[T],
+    roots: &[String],
+    children: &HashMap<String, Vec<String>>,
+    expanded_groups: &HashSet<String>,
+    sources: &[DiscoveryCatalogGroup],
+    expanded_discovery: &HashSet<Vec<String>>,
+    search_active: bool,
+) -> Vec<SessionManagerTreeRow> {
+    let mut discovery_items: HashMap<&str, Vec<usize>> = HashMap::new();
     // Index direct membership once; scanning every connection for each visible
     // group makes a tree repaint quadratic as saved connections accumulate.
     let mut grouped_items: HashMap<Option<&str>, Vec<usize>> = HashMap::new();
     for (index, item) in items.iter().enumerate() {
-        grouped_items.entry(item.group()).or_default().push(index);
+        if let Some(source) = item.discovery_source() {
+            discovery_items.entry(source).or_default().push(index);
+        } else {
+            grouped_items.entry(item.group()).or_default().push(index);
+        }
     }
     // Items are filtered before the tree is projected, so a collapsed group
     // would silently hide every match. While searching, collect the groups on
@@ -499,7 +594,100 @@ pub(super) fn session_manager_tree_rows<T: CatalogEntry>(
                 depth: 0,
             }),
     );
+    for group in sources {
+        let indices = discovery_items
+            .remove(group.id.as_str())
+            .unwrap_or_default();
+        if search_active && indices.is_empty() {
+            continue;
+        }
+        let mut key = vec![group.id.clone()];
+        let expanded = search_active || expanded_discovery.contains(&key);
+        rows.push(SessionManagerTreeRow::DiscoveryGroup {
+            group: group.clone(),
+            expanded,
+            count: indices.len(),
+        });
+        if expanded && let Some(hint) = &group.hint {
+            rows.push(SessionManagerTreeRow::DiscoveryStatus(hint.clone()));
+        }
+        if expanded {
+            let mut root = DiscoveryBranch::default();
+            for index in indices {
+                let paths = items[index].group_paths();
+                if paths.is_empty() {
+                    root.items.push(index);
+                }
+                for path in paths {
+                    let mut branch = &mut root;
+                    for segment in path {
+                        branch =
+                            branch
+                                .children
+                                .entry(&segment.id)
+                                .or_insert_with(|| DiscoveryBranch {
+                                    label: &segment.label,
+                                    ..Default::default()
+                                });
+                        // All paths of a target are visited together, including shared ancestors.
+                        if branch.last_member != Some(index) {
+                            branch.count += 1;
+                            branch.last_member = Some(index);
+                        }
+                    }
+                    if branch.items.last() != Some(&index) {
+                        branch.items.push(index);
+                    }
+                }
+            }
+            root.append_rows(&mut rows, &mut key, expanded_discovery, search_active);
+        }
+    }
     rows
+}
+
+#[derive(Default)]
+struct DiscoveryBranch<'a> {
+    label: &'a str,
+    count: usize,
+    last_member: Option<usize>,
+    children: HashMap<&'a str, DiscoveryBranch<'a>>,
+    items: Vec<usize>,
+}
+
+impl DiscoveryBranch<'_> {
+    fn append_rows(
+        self,
+        rows: &mut Vec<SessionManagerTreeRow>,
+        key: &mut Vec<String>,
+        open: &HashSet<Vec<String>>,
+        searching: bool,
+    ) {
+        let mut children: Vec<_> = self.children.into_iter().collect();
+        children.sort_unstable_by_key(|(id, child)| (child.label, *id));
+        for (id, child) in children {
+            key.push(id.to_owned());
+            let expanded = searching || open.contains(key);
+            rows.push(SessionManagerTreeRow::DiscoverySubgroup {
+                key: key.clone(),
+                label: child.label.to_owned(),
+                count: child.count,
+                expanded,
+            });
+            if expanded {
+                child.append_rows(rows, key, open, searching);
+            }
+            key.pop();
+        }
+        rows.extend(
+            self.items
+                .into_iter()
+                .map(|item_index| SessionManagerTreeRow::Item {
+                    item_index,
+                    depth: key.len(),
+                }),
+        );
+    }
 }
 
 /// Selectable tree rows in render order, used by Shift+click range selection.
@@ -512,7 +700,10 @@ pub(super) fn session_manager_tree_visible_targets<T: CatalogEntry>(
             SessionManagerTreeRow::Item { item_index, .. } => items
                 .get(*item_index)
                 .and_then(|item| item.selection_target()),
-            SessionManagerTreeRow::Group { .. } => None,
+            SessionManagerTreeRow::Group { .. }
+            | SessionManagerTreeRow::DiscoveryGroup { .. }
+            | SessionManagerTreeRow::DiscoverySubgroup { .. }
+            | SessionManagerTreeRow::DiscoveryStatus(_) => None,
         })
         .collect()
 }
@@ -662,6 +853,27 @@ pub(super) fn session_manager_tree_row_signature<T: CatalogEntry>(
 ) -> u64 {
     let mut hasher = DefaultHasher::new();
     match row {
+        SessionManagerTreeRow::DiscoverySubgroup {
+            key,
+            label,
+            expanded,
+            count,
+        } => {
+            4_u8.hash(&mut hasher);
+            (key, label, expanded, count).hash(&mut hasher);
+        }
+        SessionManagerTreeRow::DiscoveryStatus(message) => {
+            3_u8.hash(&mut hasher);
+            message.hash(&mut hasher);
+        }
+        SessionManagerTreeRow::DiscoveryGroup {
+            group,
+            expanded,
+            count,
+        } => {
+            2_u8.hash(&mut hasher);
+            (group, expanded, count).hash(&mut hasher);
+        }
         SessionManagerTreeRow::Group {
             path,
             depth,

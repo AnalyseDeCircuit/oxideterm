@@ -262,6 +262,7 @@ enum RetirementCondition {
     Unconditional,
     Idle(u64),
     Unowned(u64),
+    DiscoveryUnused,
 }
 
 enum ConsumerRelease<'a> {
@@ -292,10 +293,13 @@ struct ConnectionEntry {
     remote_env: RwLock<Option<RemoteEnvInfo>>,
     remote_env_detection_started: AtomicBool,
     first_visible_terminal_started: AtomicBool,
+    initial_terminal_admitted: AtomicBool,
     heartbeat_failures: AtomicU64,
     last_active_probe_at: ParkingMutex<Option<std::time::Instant>>,
     idle_generation: AtomicU64,
     idle_timer_cancel: ParkingMutex<Option<oneshot::Sender<()>>>,
+    discovery_watch: ParkingMutex<Option<oneshot::Sender<()>>>,
+    discovery_ownership: ParkingMutex<Option<Arc<dyn Any + Send + Sync>>>,
     last_emitted_status: RwLock<Option<String>>,
     created_at: SystemTime,
     last_active_at: RwLock<SystemTime>,
@@ -312,6 +316,10 @@ impl ConnectionEntry {
         audit: Option<&oxideterm_audit::AuditContext>,
     ) -> Self {
         let connection_id = Uuid::new_v4().to_string();
+        let discovery_ownership = config
+            .discovery_origin
+            .as_ref()
+            .and_then(|origin| origin.claim_transport_ownership());
         let audit = audit.map(|context| {
             let mut context = context.session(
                 "ssh",
@@ -342,10 +350,13 @@ impl ConnectionEntry {
             remote_env: RwLock::new(None),
             remote_env_detection_started: AtomicBool::new(false),
             first_visible_terminal_started: AtomicBool::new(false),
+            initial_terminal_admitted: AtomicBool::new(false),
             heartbeat_failures: AtomicU64::new(0),
             last_active_probe_at: ParkingMutex::new(None),
             idle_generation: AtomicU64::new(0),
             idle_timer_cancel: ParkingMutex::new(None),
+            discovery_watch: ParkingMutex::new(None),
+            discovery_ownership: ParkingMutex::new(discovery_ownership),
             last_emitted_status: RwLock::new(None),
             created_at: SystemTime::now(),
             last_active_at: RwLock::new(SystemTime::now()),
@@ -555,6 +566,37 @@ pub struct ConnectionConsumerLease {
 
 pub use ConnectionConsumerLease as DedicatedConnectionLease;
 
+/// A one-shot terminal admission bound to the verified physical transport.
+pub struct TerminalRouteAdmission {
+    pub(crate) lease: Arc<ConnectionConsumerLease>,
+    physical: Option<Weak<dyn Any + Send + Sync>>,
+}
+
+impl TerminalRouteAdmission {
+    pub(crate) fn current(&self) -> bool {
+        let handle = self.lease.handle();
+        handle
+            .config()
+            .discovery_origin
+            .as_ref()
+            .is_none_or(|origin| {
+                origin.consumer_authority_current()
+                    && matches!(
+                        handle.state(),
+                        ConnectionState::Active | ConnectionState::Idle
+                    )
+                    && handle.has_open_transport()
+                    && self
+                        .physical
+                        .as_ref()
+                        .zip(handle.entry.physical.read().transport.as_ref())
+                        .is_some_and(|(expected, current)| {
+                            expected.ptr_eq(&Arc::downgrade(current))
+                        })
+            })
+    }
+}
+
 impl std::fmt::Debug for ConnectionConsumerLease {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ConnectionConsumerLease")
@@ -620,6 +662,22 @@ impl SshConnectionHandle {
 
     pub fn key(&self) -> &str {
         &self.entry.key
+    }
+
+    pub fn allows_target_operations(&self) -> bool {
+        self.entry
+            .config
+            .discovery_origin
+            .as_ref()
+            .is_none_or(|origin| origin.allows_target_operations())
+    }
+
+    /// Additional consumers share only the transport authorized for this asset instance.
+    pub fn allows_additional_channels(&self) -> bool {
+        self.config()
+            .discovery_origin
+            .as_ref()
+            .is_none_or(|origin| origin.allows_asset_channels())
     }
 
     pub(crate) fn config(&self) -> &SshConfig {
@@ -702,6 +760,7 @@ impl SshConnectionHandle {
     }
 
     pub async fn clear_physical(&self) {
+        self.entry.discovery_watch.lock().take();
         // Keep the retired transport identity for its final lifecycle observations.
         let mut guard = self.entry.sftp.lock().await;
         self.entry.physical.write().transport = None;
@@ -715,6 +774,12 @@ impl SshConnectionHandle {
         Ok(self.acquire_sftp_with_meta().await?.session)
     }
 
+    pub(crate) fn replace_discovery_watch(&self) -> oneshot::Receiver<()> {
+        let (tx, rx) = oneshot::channel();
+        *self.entry.discovery_watch.lock() = Some(tx);
+        rx
+    }
+
     /// Returns only the already-open shared channel for the exact owner
     /// generation. It never creates or substitutes a replacement session.
     pub async fn acquire_existing_sftp_generation(
@@ -722,7 +787,9 @@ impl SshConnectionHandle {
         expected_generation: u64,
     ) -> Option<Arc<Mutex<SftpSession>>> {
         let guard = self.entry.sftp.lock().await;
-        if self.entry.sftp_generation.load(Ordering::Acquire) != expected_generation {
+        if !self.allows_additional_channels()
+            || self.entry.sftp_generation.load(Ordering::Acquire) != expected_generation
+        {
             return None;
         }
         match &*guard {
@@ -732,6 +799,11 @@ impl SshConnectionHandle {
     }
 
     pub async fn acquire_sftp_with_meta(&self) -> Result<AcquiredSftpMeta, SftpError> {
+        if !self.allows_additional_channels() {
+            return Err(SftpError::PermissionDenied(
+                "discovery terminal does not authorize file channels".into(),
+            ));
+        }
         loop {
             let (gate, generation) = {
                 let mut guard = self.entry.sftp.lock().await;
@@ -804,6 +876,11 @@ impl SshConnectionHandle {
     }
 
     pub async fn acquire_transfer_sftp(&self) -> Result<SftpSession, SftpError> {
+        if !self.allows_additional_channels() {
+            return Err(SftpError::PermissionDenied(
+                "discovery terminal does not authorize file channels".into(),
+            ));
+        }
         let generation = self.entry.sftp_generation.load(Ordering::Acquire);
         for attempt in 0..6 {
             match self.create_sftp_session().await {
@@ -899,6 +976,11 @@ impl Drop for ConnectionRegistryState {
 }
 
 impl SshConnectionRegistry {
+    pub(crate) fn weak_handle(&self) -> impl Fn() -> Option<Self> + Send + 'static {
+        let pool = Arc::downgrade(&self.inner);
+        move || pool.upgrade().map(|inner| Self { inner })
+    }
+
     pub fn audit_context(&self) -> Option<oxideterm_audit::AuditContext> {
         self.inner.audit.clone()
     }
@@ -1114,6 +1196,20 @@ impl SshConnectionRegistry {
             }
             return None;
         }
+        if entry
+            .config
+            .discovery_origin
+            .as_ref()
+            .is_some_and(|origin| !origin.allows_asset_channels())
+            && self.has_only_idle_owners(&entry)
+        {
+            let handle = SshConnectionHandle {
+                entry: entry.clone(),
+            };
+            drop(entry);
+            self.retire_unused_discovery(&handle, "last discovery consumer released");
+            return None;
+        }
         if matches!(state, ConnectionState::Error(_))
             || !self.has_only_idle_owners(&entry)
             || (entry.ref_count.load(Ordering::SeqCst) > 0
@@ -1180,11 +1276,26 @@ impl SshConnectionRegistry {
         emit_node_event: bool,
         reason: &str,
     ) -> Option<ConnectionInfo> {
-        let entry = self.get(connection_id)?.entry;
+        let slot = self.inner.by_id.get_mut(connection_id)?;
         let became_active = matches!(state, ConnectionState::Active);
-        entry.set_state(state);
-        entry.touch();
+        let lost = matches!(state, ConnectionState::LinkDown);
+        let entry = Arc::clone(&slot);
+        slot.set_state(state);
+        slot.touch();
+        let retire_lost =
+            lost && entry.config.discovery_origin.is_some() && self.has_only_idle_owners(&entry);
         let info = entry.info();
+        drop(slot);
+        if retire_lost
+            && self.retire_unused_discovery(
+                &SshConnectionHandle {
+                    entry: entry.clone(),
+                },
+                "idle discovery transport lost",
+            )
+        {
+            return None;
+        }
         if emit_node_event && let Some(emitter) = self.inner.node_event_emitter.read().clone() {
             // Match Tauri's registry-to-node event flow: low-level connection
             // state changes are translated through the shared NodeEventEmitter
@@ -1383,6 +1494,9 @@ impl SshConnectionRegistry {
                             && (entry.retire_when_unused || !entry.is_keep_alive())
                             && matches!(*entry.state.read(), ConnectionState::Idle)
                     }
+                    RetirementCondition::DiscoveryUnused => {
+                        entry.config.discovery_origin.is_some() && self.has_only_idle_owners(entry)
+                    }
                 }
         });
         if removed.is_none() {
@@ -1395,6 +1509,12 @@ impl SshConnectionRegistry {
         }
         entry.cancel_idle_timer();
         let parent_consumer = entry.parent_connection_consumer.write().take();
+        entry.discovery_watch.lock().take();
+        if entry.config.discovery_origin.is_some() {
+            // Retired handles are still inspectable; they cannot pin the source or lend this socket.
+            entry.physical.write().transport.take();
+            entry.discovery_ownership.lock().take();
+        }
         let parent_ownership = entry
             .parent_connection_id
             .read()
@@ -1404,6 +1524,24 @@ impl SshConnectionRegistry {
             self.release(&parent_id, &parent_consumer);
         }
         true
+    }
+
+    fn retire_unused_discovery(&self, handle: &SshConnectionHandle, reason: &'static str) -> bool {
+        if !self.detach_connection(handle, RetirementCondition::DiscoveryUnused) {
+            return false;
+        }
+        if let Some(runtime) = self.idle_runtime() {
+            let registry = self.clone();
+            let handle = handle.clone();
+            runtime.spawn(async move { registry.finish_idle_retirement(handle, reason).await });
+        }
+        true
+    }
+
+    pub(crate) fn retire_discovery_after_authority_change(&self, connection_id: &str) {
+        if let Some(handle) = self.get(connection_id) {
+            self.retire_unused_discovery(&handle, "discovery authority changed");
+        }
     }
 
     pub fn mark_link_down_cascade(&self, root_connection_id: &str) -> Vec<ConnectionInfo> {
@@ -1475,7 +1613,9 @@ impl SshConnectionRegistry {
                 handle.clear_physical().await;
             }
         }
-        if let Some(emitter) = self.inner.node_event_emitter.read().clone() {
+        if self.inner.by_id.contains_key(root_connection_id)
+            && let Some(emitter) = self.inner.node_event_emitter.read().clone()
+        {
             let _ = emitter.emit_state_from_connection(
                 root_connection_id,
                 &ConnectionState::LinkDown,
@@ -1692,8 +1832,70 @@ impl SshConnectionRegistry {
         connection_id: &str,
         consumer: ConnectionConsumer,
     ) -> Option<ConnectionConsumerLease> {
-        let handle = self.attach_consumer_for_connection(connection_id, consumer.clone(), true)?;
+        let (handle, _) = self.attach_consumer(connection_id, &consumer, true, false)?;
         Some(ConnectionConsumerLease::new(self.clone(), handle, consumer))
+    }
+
+    pub(crate) fn lease_connection_handoff(
+        &self,
+        connection_id: &str,
+    ) -> Option<ConnectionConsumerLease> {
+        let consumer = ConnectionConsumer::NodeRouter(format!("handoff:{}", Uuid::new_v4()));
+        // Ownership crosses a queue here; the eventual channel is admitted by its own operation.
+        let (handle, _) = self.attach_consumer(connection_id, &consumer, true, true)?;
+        Some(ConnectionConsumerLease::new(self.clone(), handle, consumer))
+    }
+
+    pub fn admit_initial_terminal(&self, connection_id: &str) -> Option<TerminalRouteAdmission> {
+        let route = self.pin_terminal(connection_id, true)?;
+        if route.lease.handle().config().discovery_origin.is_some()
+            && route
+                .lease
+                .handle()
+                .entry
+                .initial_terminal_admitted
+                .swap(true, Ordering::AcqRel)
+        {
+            return None;
+        }
+        Some(route)
+    }
+
+    pub fn admit_terminal(&self, connection_id: &str) -> Option<TerminalRouteAdmission> {
+        self.pin_terminal(connection_id, false)
+    }
+
+    fn pin_terminal(
+        &self,
+        connection_id: &str,
+        initial_terminal: bool,
+    ) -> Option<TerminalRouteAdmission> {
+        let consumer = ConnectionConsumer::NodeRouter(format!("pane:{}", Uuid::new_v4()));
+        let (handle, physical) =
+            self.attach_consumer(connection_id, &consumer, true, initial_terminal)?;
+        Some(TerminalRouteAdmission {
+            lease: Arc::new(ConnectionConsumerLease::new(self.clone(), handle, consumer)),
+            physical,
+        })
+    }
+
+    pub(crate) fn attach_admitted_terminal(
+        &self,
+        connection_id: &str,
+        consumer: &ConnectionConsumer,
+        admission: &TerminalRouteAdmission,
+    ) -> Option<SshConnectionHandle> {
+        let slot = self.inner.by_id.get(connection_id)?;
+        let handle = admission.lease.handle();
+        if !matches!(consumer, ConnectionConsumer::Terminal(_))
+            || !Arc::ptr_eq(&slot, &handle.entry)
+            || !admission.current()
+            || !slot.attach_consumer(consumer)
+        {
+            return None;
+        }
+        slot.touch();
+        Some(handle.clone())
     }
 
     pub fn acquire_consumer_for_connection(
@@ -1701,24 +1903,38 @@ impl SshConnectionRegistry {
         connection_id: &str,
         consumer: ConnectionConsumer,
     ) -> Option<SshConnectionHandle> {
-        self.attach_consumer_for_connection(connection_id, consumer, false)
+        self.attach_consumer(connection_id, &consumer, false, false)
+            .map(|(handle, _)| handle)
     }
 
-    fn attach_consumer_for_connection(
+    fn attach_consumer(
         &self,
         connection_id: &str,
-        consumer: ConnectionConsumer,
+        consumer: &ConnectionConsumer,
         require_new: bool,
-    ) -> Option<SshConnectionHandle> {
-        let slot = self.inner.by_id.get_mut(connection_id)?;
+        allow_discovery_handoff: bool,
+    ) -> Option<(SshConnectionHandle, Option<Weak<dyn Any + Send + Sync>>)> {
+        let slot = self.inner.by_id.get(connection_id)?;
         let handle = SshConnectionHandle {
             entry: slot.clone(),
         };
-        if !handle.entry.attach_consumer(&consumer) && require_new {
+        if let Some(origin) = &handle.config().discovery_origin
+            && ((!allow_discovery_handoff && !origin.allows_asset_channels())
+                || !origin.consumer_authority_current()
+                || !matches!(
+                    handle.state(),
+                    ConnectionState::Active | ConnectionState::Idle
+                )
+                || !handle.has_open_transport())
+        {
             return None;
         }
-        handle.entry.touch();
-        Some(handle)
+        if !slot.attach_consumer(consumer) && require_new {
+            return None;
+        }
+        slot.touch();
+        let physical = slot.physical.read().transport.as_ref().map(Arc::downgrade);
+        Some((handle, physical))
     }
 
     pub fn mark_sftp_session(
@@ -3019,6 +3235,154 @@ mod tests {
         sleep(Duration::from_millis(40)).await;
 
         assert!(registry.get(handle.connection_id()).is_none());
+    }
+
+    #[tokio::test]
+    async fn discovery_single_terminal_cannot_open_extra_channels_or_share_another_instances_transport()
+     {
+        let registry = SshConnectionRegistry::default();
+        let first_origin = oxideterm_discovery::DiscoveryOrigin::new(
+            "source".into(),
+            "asset".into(),
+            Uuid::new_v4(),
+        );
+        let second_origin = oxideterm_discovery::DiscoveryOrigin::new(
+            "source".into(),
+            "asset".into(),
+            first_origin.epoch,
+        );
+        let config = |origin| SshConfig {
+            host: "gateway.invalid".into(),
+            username: "operator".into(),
+            discovery_origin: Some(origin),
+            ..Default::default()
+        };
+        let terminal = ConnectionConsumer::Terminal("first".into());
+        let target = registry.acquire(config(first_origin.clone()), terminal.clone());
+        let second = registry.acquire(
+            config(second_origin.clone()),
+            ConnectionConsumer::Terminal("second".into()),
+        );
+        first_origin.connected();
+        second_origin.connected();
+        target.set_physical(Arc::new(()));
+        second.set_physical(Arc::new(()));
+        registry.mark_state(target.connection_id(), ConnectionState::Active);
+        registry.mark_state(second.connection_id(), ConnectionState::Active);
+        assert_ne!(second.connection_id(), target.connection_id());
+        assert!(matches!(
+            second.acquire_transfer_sftp().await,
+            Err(SftpError::PermissionDenied(_))
+        ));
+        assert!(matches!(
+            second
+                .open_direct_tcpip("asset.invalid", 80, "127.0.0.1", 0)
+                .await,
+            Err(crate::SshTransportError::CommandChannelUnavailable)
+        ));
+        // The first shell can consume the instance admission exactly once.
+        let first = registry
+            .admit_initial_terminal(second.connection_id())
+            .unwrap();
+        let shell = ConnectionConsumer::Terminal("shell".into());
+        assert!(
+            registry
+                .attach_admitted_terminal(target.connection_id(), &shell, &first)
+                .is_none()
+        );
+        let initial = registry
+            .attach_admitted_terminal(second.connection_id(), &shell, &first)
+            .unwrap();
+        assert!(initial.info().consumers.contains(&shell));
+        assert!(
+            registry
+                .admit_initial_terminal(second.connection_id())
+                .is_none()
+        );
+        assert!(registry.admit_terminal(second.connection_id()).is_none());
+        registry.release(second.connection_id(), &shell);
+        drop(first);
+        assert!(target.allows_target_operations());
+        let files = ConnectionConsumer::Sftp("files".into());
+        assert!(
+            registry
+                .lease_consumer(second.connection_id(), files.clone())
+                .is_none()
+        );
+        assert!(
+            registry
+                .acquire_consumer_for_connection(target.connection_id(), files)
+                .is_none()
+        );
+        registry.release(target.connection_id(), &terminal);
+        assert!(registry.get(target.connection_id()).is_none());
+        assert!(registry.get(second.connection_id()).is_some());
+    }
+
+    #[tokio::test]
+    async fn discovery_asset_channels_share_only_the_selected_live_transport() {
+        let registry = SshConnectionRegistry::default();
+        let first = ConnectionConsumer::Terminal("first".into());
+        let asset = |id: &str, user: &str| {
+            let origin = oxideterm_discovery::DiscoveryOrigin::new(
+                "source".into(),
+                id.into(),
+                Uuid::new_v4(),
+            )
+            .with_asset_session(true);
+            let handle = registry.acquire(
+                SshConfig {
+                    host: "gateway.invalid".into(),
+                    username: user.into(),
+                    discovery_origin: Some(origin.clone()),
+                    ..Default::default()
+                },
+                first.clone(),
+            );
+            handle.set_physical(Arc::new(()));
+            registry.mark_state(handle.connection_id(), ConnectionState::Active);
+            origin.connected();
+            (handle, origin)
+        };
+        let (selected, origin) = asset("asset-a", "alice");
+        let id = selected.connection_id();
+        let admission = registry.admit_terminal(id).unwrap();
+        let split = ConnectionConsumer::Terminal("split".into());
+        for (target, login) in [("asset-b", "alice"), ("asset-a", "bob")] {
+            let (other, _) = asset(target, login);
+            assert!(
+                registry
+                    .attach_admitted_terminal(other.connection_id(), &split, &admission)
+                    .is_none()
+            );
+        }
+        assert_eq!(
+            registry
+                .attach_admitted_terminal(id, &split, &admission)
+                .unwrap()
+                .connection_id(),
+            id
+        );
+        let files = registry
+            .lease_consumer(id, ConnectionConsumer::Sftp("files".into()))
+            .unwrap();
+        registry.release(id, &first);
+        registry.release(id, &split);
+        drop(admission);
+        assert!(files.handle().allows_additional_channels());
+        assert!(files.handle().allows_target_operations());
+        drop(files);
+        let reopened = registry.admit_terminal(id).unwrap();
+        origin.invalidation().cancel();
+        assert!(!selected.allows_target_operations());
+        assert!(!selected.allows_additional_channels());
+        assert!(
+            registry
+                .attach_admitted_terminal(id, &split, &reopened)
+                .is_none()
+        );
+        drop(reopened);
+        assert!(registry.get(id).is_none());
     }
 
     #[test]

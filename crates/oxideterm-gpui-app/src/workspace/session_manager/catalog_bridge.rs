@@ -68,7 +68,7 @@ impl WorkspaceApp {
             SessionManagerOpenTarget::LocalTerminal(id) => {
                 self.open_saved_local_terminal_profile_editor(&id, window, cx)
             }
-            SessionManagerOpenTarget::SshConfig(_) => {}
+            SessionManagerOpenTarget::SshConfig(_) | SessionManagerOpenTarget::Discovery(_) => {}
             target => self.open_catalog_profile_editor(target, window, cx),
         }
     }
@@ -95,6 +95,12 @@ impl WorkspaceApp {
             }
             CatalogAction::OpenSshConfigImporter => {
                 return self.open_settings_ssh_config_import_dialog(cx);
+            }
+            CatalogAction::LoadDiscovery(id) => {
+                return self.discovery.request_directory(&id, false);
+            }
+            CatalogAction::RefreshDiscovery(id) => {
+                return self.discovery.request_directory(&id, true);
             }
             CatalogAction::Move { targets, group } => {
                 return self.move_dragged_sessions_to_group(&targets, group.as_deref(), cx);
@@ -125,6 +131,20 @@ impl WorkspaceApp {
             return;
         };
         match action {
+            CatalogAction::EditDiscoverySource(id) => {
+                let Some(source) = self.discovery.source(&id) else {
+                    return;
+                };
+                self.close_settings_select();
+                self.focused_settings_input = None;
+                self.clear_ime_selection();
+                self.settings_workspace.update(cx, |settings, cx| {
+                    settings.set_active_tab(SettingsTab::Discovery, cx);
+                    settings.edit_discovery_source(source, &self.connection_store, &self.i18n, cx);
+                });
+                self.sync_settings_section_list_state(cx);
+                self.open_settings(window, cx);
+            }
             CatalogAction::Open { target, open_sftp } => {
                 self.open_session_manager_target_with_sftp(target, open_sftp, window, cx)
             }

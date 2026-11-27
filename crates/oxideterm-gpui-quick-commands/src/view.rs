@@ -524,7 +524,7 @@ mod terminal_command_bar_quick_command_tests {
         let target = oxideterm_quick_commands::QuickCommandTargetContext {
             target_id: "ssh".into(),
             label: "SSH".into(),
-            protocol: super::QuickCommandTargetProtocol::Ssh,
+            protocol: Some(super::QuickCommandTargetProtocol::Ssh),
             values: Default::default(),
         };
         for (category, target, expected) in [

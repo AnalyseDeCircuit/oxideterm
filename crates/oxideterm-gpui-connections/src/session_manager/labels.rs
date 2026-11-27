@@ -117,6 +117,8 @@ pub fn session_manager_row_menu_selection_target(
             Some(SessionManagerSelectionTarget::RemoteDesktop(id.clone()))
         }
         SessionManagerRowActionTarget::SshConfig(_)
+        | SessionManagerRowActionTarget::DiscoverySource(_)
+        | SessionManagerRowActionTarget::Discovery(_)
         | SessionManagerRowActionTarget::GroupRoot
         | SessionManagerRowActionTarget::Group(_) => None,
     }

@@ -58,6 +58,7 @@ impl SavedAuthSaveTarget {
         configured_credentials_confirmed: bool,
     ) -> Option<bool> {
         let id = pending.as_ref()?.connection_id.clone();
+        let identity = store.saved_ssh_identity(&id)?;
         let auth = Self::take_confirmed_auth(
             pending,
             store.get(&id)?,
@@ -79,7 +80,11 @@ impl SavedAuthSaveTarget {
         let auth = oxideterm_connections::saved_auth_from_draft(
             crate::configuration::auth_draft_from_form(&mut draft, true),
         );
-        Some(matches!(store.set_connection_auth(&id, auth), Ok(true)))
+        Some(matches!(
+            store.with_confirmed_ssh_identity(&id, identity, |store| store
+                .set_connection_auth(&id, auth)),
+            Ok(true)
+        ))
     }
 
     pub fn new(connection: &SavedConnection) -> Self {
@@ -206,11 +211,15 @@ impl SavedPasswordTarget {
         store: &mut ConnectionStore,
         secret: &oxideterm_connections::SecretString,
     ) -> bool {
+        let Some(identity) = store.saved_ssh_identity(&self.connection_id) else {
+            return false;
+        };
         store
             .get(&self.connection_id)
             .is_some_and(|connection| self.is_current(connection))
             && matches!(
-                store.store_connection_credential(&self.connection_id, self.slot, secret),
+                store.with_confirmed_ssh_identity(&self.connection_id, identity, |store| store
+                    .store_connection_credential(&self.connection_id, self.slot, secret)),
                 Ok(true)
             )
     }

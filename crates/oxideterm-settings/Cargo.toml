@@ -9,6 +9,7 @@ version.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+oxideterm-plugin-manifest = { path = "../oxideterm-plugin-manifest" }
 oxideterm-render-policy = { path = "../oxideterm-render-policy" }
 oxideterm-terminal-semantic = { path = "../oxideterm-terminal-semantic", default-features = false }
 serde.workspace = true
@@ -21,6 +22,7 @@ web-time.workspace = true
 oxideterm-audit = { path = "../oxideterm-audit" }
 oxideterm-atomic-file = { path = "../oxideterm-atomic-file" }
 oxideterm-portable-runtime = { path = "../oxideterm-portable-runtime" }
+zeroize.workspace = true
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 uuid = { workspace = true, features = ["js"] }

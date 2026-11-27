@@ -40,7 +40,8 @@ pub use connection_registry::{
     ConnectionPoolConfig, ConnectionPoolStats, ConnectionState, ConnectionTransportStatus,
     DedicatedConnectionLease, HEARTBEAT_FAIL_THRESHOLD, HEARTBEAT_INTERVAL, KeepaliveProbeResult,
     ProbeConnectionStatus, RemoteEnvInfo, SftpSessionState, SshConnectionHandle,
-    SshConnectionRegistry, WS_BRIDGE_HEARTBEAT_INTERVAL, WS_BRIDGE_HEARTBEAT_TIMEOUT,
+    SshConnectionRegistry, TerminalRouteAdmission, WS_BRIDGE_HEARTBEAT_INTERVAL,
+    WS_BRIDGE_HEARTBEAT_TIMEOUT,
 };
 pub use connection_trace::{
     ConnectionChainProgress, ConnectionProgressReporter, ConnectionTraceEvent, ConnectionTraceMode,

@@ -806,7 +806,20 @@ impl WorkspaceApp {
         let tab = self.active_tab(cx)?;
         let pane_id = tab.active_pane_id?;
         let scope = match self.terminal_kind_for_pane(pane_id, cx)? {
-            oxideterm_terminal::TerminalSessionKind::LocalPty => CurrentDirectoryScope::Local,
+            oxideterm_terminal::TerminalSessionKind::LocalPty => {
+                let session = tab.root_pane.as_ref()?.session_id_for_pane(pane_id)?;
+                if self
+                    .tab_host
+                    .read(cx)
+                    .local_sessions
+                    .get(&session)
+                    .is_some_and(|instance| instance.discovery.is_some())
+                {
+                    // The helper's process cwd belongs to the host, not the discovered target.
+                    return None;
+                }
+                CurrentDirectoryScope::Local
+            }
             oxideterm_terminal::TerminalSessionKind::SshPty => {
                 let session_id = self.active_terminal_session_id(cx)?;
                 let node_id = self

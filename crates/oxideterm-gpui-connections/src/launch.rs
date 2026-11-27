@@ -66,6 +66,22 @@ pub enum SshConnectionIntent {
 }
 
 impl SshConnectionIntent {
+    /// Discovery jump hosts belong to the selected target's transport. The workspace
+    /// exposes only the target node; each hop still has its own host-key challenge.
+    pub(crate) fn uses_embedded_route(&self, config: &SshConfig) -> bool {
+        config
+            .proxy_chain
+            .as_ref()
+            .is_some_and(|chain| !chain.is_empty())
+            && (config.discovery_origin.is_some()
+                || matches!(
+                    self,
+                    Self::StandaloneSftp { .. }
+                        | Self::StandaloneSftpSecondary { .. }
+                        | Self::TestStandaloneSftp
+                ))
+    }
+
     pub fn standalone_sftp_pair_launch_token(&self) -> Option<&str> {
         match self {
             Self::StandaloneSftp {
@@ -160,6 +176,7 @@ pub enum SshConnectionWorkerResult {
         intent: SshConnectionIntent,
         host: String,
         port: u16,
+        checked_hop: Option<usize>,
         status: HostKeyStatus,
     },
     SessionTreePreflight {

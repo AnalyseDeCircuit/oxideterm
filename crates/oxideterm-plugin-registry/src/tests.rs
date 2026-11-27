@@ -6,6 +6,126 @@
 use super::*;
 
 #[test]
+fn discovery_validates_terminal_entries_source_actions_and_credential_fields() {
+    let manifest = serde_json::json!({
+        "id":"org.example.inventory","name":"Inventory","version":"1.0.0",
+        "runtime":{"kind":"process","entry":"bin/provider"},"engines":{"oxideterm":">=2.2.4"},
+        "permissions":{"capabilities":["ui.write","credentials.raw.read"]},
+        "contributes":{"discoveryProviders":[{"id":"hosts","title":"Hosts","icon":"server","protocolVersion":1,
+            "recommendedRefreshIntervalMinutes":10,
+            "sourceActions":[{"id":"configure","title":"@configure","field":"root/site"},{"id":"inspect","title":"@inspect"}],
+            "launchKinds":["terminal","ssh"],"terminalEntry":"bin/terminal","form":{"controls":[{"kind":"text","id":"site","use":"catalog"}]}}]}});
+    let directory = unique_temp_dir("discovery-contributions");
+    fs::create_dir_all(directory.join("bin")).unwrap();
+    fs::write(directory.join("bin/terminal"), []).unwrap();
+    let mut common = manifest["contributes"]["discoveryProviders"][0].clone();
+    common["id"] = serde_json::json!("common");
+    common["form"] = serde_json::json!({});
+    common["sourceActions"] = serde_json::json!([]);
+    for (pointer, replacement, error) in [
+        (
+            "/sourceActions/1/id",
+            serde_json::json!("configure"),
+            "duplicate discovery source action",
+        ),
+        (
+            "/sourceActions/0/title",
+            serde_json::json!(""),
+            "sourceActions.title",
+        ),
+        (
+            "/sourceActions/0/field",
+            serde_json::json!("wrong/site"),
+            "source action field",
+        ),
+        ("/terminalEntry", serde_json::Value::Null, "terminalEntry"),
+        (
+            "/recommendedRefreshIntervalMinutes",
+            serde_json::json!(0),
+            "Unsupported discovery provider declaration",
+        ),
+        (
+            "/form/controls/0/kind",
+            serde_json::json!("password"),
+            "secretScope",
+        ),
+        (
+            "/form/controls/0/use",
+            serde_json::json!("private"),
+            "discovery form",
+        ),
+    ] {
+        let mut invalid = manifest.clone();
+        *invalid["contributes"]["discoveryProviders"][0]
+            .pointer_mut(pointer)
+            .unwrap() = replacement;
+        invalid["contributes"]["discoveryProviders"]
+            .as_array_mut()
+            .unwrap()
+            .push(common.clone());
+        let (installed, warnings) =
+            discovery_providers::parse_manifest(&invalid.to_string(), &directory).unwrap();
+        let available = installed
+            .contributes
+            .unwrap()
+            .discovery_providers
+            .into_iter()
+            .map(|p| p.id)
+            .collect::<Vec<_>>();
+        assert_eq!(available, ["common"], "{pointer}");
+        assert!(
+            matches!(warnings.as_slice(), [reason] if reason.contains(error)),
+            "{pointer}: {warnings:?}"
+        );
+    }
+    let mut scoped = manifest.clone();
+    scoped["contributes"]["discoveryProviders"][0]["form"]["controls"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!({"kind":"password","id":"token","secretScope":["root/site"]}));
+    let parse = |manifest: &serde_json::Value| {
+        discovery_providers::parse_manifest(&manifest.to_string(), &directory).unwrap()
+    };
+    let (installed, warnings) = parse(&scoped);
+    assert!(warnings.is_empty());
+    assert_eq!(
+        installed.contributes.unwrap().discovery_providers[0].id,
+        "hosts"
+    );
+    for scope in ["root/token", "root/missing"] {
+        let mut invalid = scoped.clone();
+        invalid["contributes"]["discoveryProviders"][0]["form"]["controls"][1]["secretScope"] =
+            serde_json::json!([scope]);
+        assert!(parse(&invalid).1[0].contains("non-secret fields"));
+    }
+    scoped["permissions"]["capabilities"] = serde_json::json!(["ui.write"]);
+    assert!(parse(&scoped).1[0].contains("credentials.raw.read"));
+    let declarations = serde_json::json!([
+        common.clone(), common.clone(),
+        {"id":"future","launchKinds":["futureTransport"]},
+        {"id":"missing","title":"Missing","icon":"terminal","protocolVersion":1,"launchKinds":["terminal"],"form":{},"terminalEntry":"bin/missing"},
+        manifest["contributes"]["discoveryProviders"][0].clone()
+    ]);
+    let mut mixed = manifest;
+    mixed["contributes"]["discoveryProviders"] = declarations;
+    fs::write(directory.join(PLUGIN_MANIFEST_FILENAME), mixed.to_string()).unwrap();
+    fs::write(directory.join("bin/provider"), []).unwrap();
+    let (installed, warnings) =
+        load_native_plugin_manifest(&directory, &Default::default()).unwrap();
+    let ids = installed
+        .manifest
+        .contributes
+        .unwrap()
+        .discovery_providers
+        .into_iter()
+        .map(|p| p.id)
+        .collect::<Vec<_>>();
+    assert_eq!(ids, ["hosts"]);
+    assert_eq!(warnings.len(), 4);
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
 fn connection_declarations_validate_provider_permissions_and_form_boundaries() {
     let mut manifest = minimal_manifest();
     manifest.runtime = Some(NativePluginRuntime {
@@ -2970,6 +3090,8 @@ fn runtime_tab_and_sidebar_views_require_manifest_declarations_and_valid_schema(
 #[test]
 fn disabled_or_loading_declarative_buttons_are_not_actionable() {
     let active = NativePluginDeclarativeUiControl {
+        discovery_use: None,
+        secret_scope: None,
         kind: "button".to_string(),
         id: Some("run".to_string()),
         label: Some("Run".to_string()),
@@ -3474,6 +3596,7 @@ fn write_manifest(plugin_dir: &Path, manifest: &NativePluginManifest) {
 
 fn sample_contributes() -> NativePluginContributes {
     NativePluginContributes {
+        discovery_providers: Vec::new(),
         connections: None,
         backgrounds: None,
         helper: None,

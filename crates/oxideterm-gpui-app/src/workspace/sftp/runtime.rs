@@ -436,6 +436,9 @@ impl WorkspaceApp {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if !self.node_allows_session_tools(&node_id) {
+            return;
+        }
         match self.sftp_presentation_for_node(
             &node_id,
             self.settings_store.settings().sftp.presentation,
@@ -480,6 +483,9 @@ impl WorkspaceApp {
         initial_remote_path: Option<String>,
         cx: &mut Context<Self>,
     ) {
+        if !self.node_allows_session_tools(&node_id) {
+            return;
+        }
         let node_title = self
             .ssh_nodes
             .get(&node_id)
@@ -715,6 +721,9 @@ impl WorkspaceApp {
         remote_path: Option<String>,
         cx: &mut Context<Self>,
     ) {
+        if !self.node_allows_session_tools(&node_id) {
+            return;
+        }
         let _scope = self.enter_sftp_surface(SftpSurfaceId::Sidebar);
         // An explicit request for another server stays visible until the user enables following.
         self.embedded_sftp_pinned = self.active_ssh_terminal_node_id(cx).as_ref() != Some(&node_id);
@@ -790,6 +799,7 @@ impl WorkspaceApp {
             self.embedded_sftp_pinned,
             self.active_ssh_terminal_node_id(cx),
         )
+        .filter(|node| self.node_allows_session_tools(node))
     }
 
     pub(in crate::workspace) fn embedded_sftp_sidebar_dialog_view<'a>(

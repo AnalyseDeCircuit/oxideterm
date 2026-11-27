@@ -103,17 +103,31 @@ pub struct ExistingSftpSurface {
 }
 
 impl ConnectionFlowEntity {
+    pub(crate) fn preflight_owns_form(
+        &self,
+        origin: Option<&oxideterm_discovery::DiscoveryOrigin>,
+    ) -> bool {
+        self.form
+            .form
+            .as_ref()
+            .and_then(|form| form.discovery_origin.as_ref())
+            == origin
+    }
+
     pub fn prepare_verified_manual_terminal(
         &mut self,
         config: &SshConfig,
         cx: &mut Context<Self>,
     ) -> VerifiedManualSshRoute {
-        self.clear_connected_form(cx);
+        if self.preflight_owns_form(config.discovery_origin.as_ref()) {
+            self.clear_connected_form(cx);
+        }
         self.clear_host_key_challenge(cx);
         if config
             .proxy_chain
             .as_ref()
             .is_some_and(|chain| !chain.is_empty())
+            && config.discovery_origin.is_none()
         {
             VerifiedManualSshRoute::SessionTree
         } else {
@@ -276,27 +290,26 @@ impl ConnectionFlowEntity {
             RoutePreflight::Test
         } else {
             if let Err(message) = prepare_tree_connect_config(&mut config) {
-                let reported = self.set_form_feedback(None, Some(message.clone()), cx);
+                let reported = self.preflight_owns_form(config.discovery_origin.as_ref())
+                    && self.set_form_feedback(None, Some(message.clone()), cx);
                 return Err((!reported).then_some(message));
             }
             if matches!(&intent, SshConnectionIntent::DrillDown { .. }) {
                 // Only the live parent may be able to reach the target.
                 RoutePreflight::AlreadyVerified
             } else {
-                if form_feedback {
+                if form_feedback && self.preflight_owns_form(config.discovery_origin.as_ref()) {
                     self.set_form_feedback(
                         Some(true),
                         Some(i18n.t("ssh.form.checking_host_key")),
                         cx,
                     );
                 }
-                if config.proxy_chain.is_some()
-                    && !matches!(
-                        intent,
-                        SshConnectionIntent::StandaloneSftp { .. }
-                            | SshConnectionIntent::StandaloneSftpSecondary { .. }
-                            | SshConnectionIntent::TestStandaloneSftp
-                    )
+                if config
+                    .proxy_chain
+                    .as_ref()
+                    .is_some_and(|chain| !chain.is_empty())
+                    && !intent.uses_embedded_route(&config)
                 {
                     RoutePreflight::Routed
                 } else {
@@ -319,10 +332,14 @@ impl ConnectionFlowEntity {
         intent: SshConnectionIntent,
         host: String,
         port: u16,
+        checked_hop: Option<usize>,
         status: HostKeyStatus,
         cx: &mut Context<Self>,
     ) -> PreflightOutcome {
-        self.set_form_feedback(Some(false), None, cx);
+        let owns_form = self.preflight_owns_form(config.discovery_origin.as_ref());
+        if owns_form {
+            self.set_form_feedback(Some(false), None, cx);
+        }
         match status {
             HostKeyStatus::Verified => PreflightOutcome::Continue(config, title, intent),
             HostKeyStatus::Unknown { .. } | HostKeyStatus::Changed { .. } => {
@@ -334,6 +351,7 @@ impl ConnectionFlowEntity {
                         status,
                         intent,
                         session_tree_challenge: false,
+                        checked_hop,
                         host,
                         port,
                     },
@@ -345,7 +363,7 @@ impl ConnectionFlowEntity {
                 if let Some(token) = intent.standalone_sftp_pair_launch_token() {
                     self.take_sftp_pair_launch(token);
                 }
-                let inline = self.set_form_feedback(None, Some(message.clone()), cx);
+                let inline = owns_form && self.set_form_feedback(None, Some(message.clone()), cx);
                 PreflightOutcome::Failed {
                     intent,
                     message,

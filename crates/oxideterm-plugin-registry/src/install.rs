@@ -325,7 +325,7 @@ pub(crate) fn read_native_plugin_manifest_from_dir(
     let manifest_path = plugin_dir.join(PLUGIN_MANIFEST_FILENAME);
     let manifest_json = fs::read_to_string(&manifest_path)
         .map_err(|error| format!("Failed to read plugin.json: {error}"))?;
-    serde_json::from_str(&manifest_json).map_err(|error| format!("Invalid plugin.json: {error}"))
+    discovery_providers::parse_manifest(&manifest_json, plugin_dir).map(|(manifest, _)| manifest)
 }
 
 #[allow(dead_code)]

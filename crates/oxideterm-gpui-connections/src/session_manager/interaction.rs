@@ -84,6 +84,18 @@ impl SessionManagerState {
             return;
         }
         self.expanded_groups = groups;
+        self.expanded_discovery
+            .extend(self.discovery_groups.iter().map(|g| vec![g.id.clone()]));
+        #[cfg(not(target_family = "wasm"))]
+        for entry in &self.discovery_entries {
+            for path in &entry.group_paths {
+                let mut key = vec![entry.source_id.clone()];
+                for segment in path {
+                    key.push(segment.id.clone());
+                    self.expanded_discovery.insert(key.clone());
+                }
+            }
+        }
         cx.notify();
     }
 
@@ -92,7 +104,18 @@ impl SessionManagerState {
             return;
         }
         self.expanded_groups.clear();
+        self.expanded_discovery.clear();
         cx.notify();
+    }
+
+    pub fn focus_discovery_target(&mut self, target: (String, String), cx: &mut Context<Self>) {
+        if self.focused_discovery.as_ref() != Some(&target) {
+            self.selected_items.clear();
+            self.selection_anchor = None;
+            self.keyboard_cursor = None;
+            self.focused_discovery = Some(target);
+            cx.notify();
+        }
     }
 
     pub fn toggle_session_selection(
@@ -100,6 +123,7 @@ impl SessionManagerState {
         target: SessionManagerSelectionTarget,
         cx: &mut Context<Self>,
     ) {
+        self.focused_discovery = None;
         if self.selected_items.contains(&target) {
             self.selected_items.remove(&target);
         } else {
@@ -115,6 +139,7 @@ impl SessionManagerState {
         cx: &mut Context<Self>,
     ) {
         self.keyboard_cursor = None;
+        self.focused_discovery = None;
         match mode {
             RowSelectionMode::Replace => {
                 self.selected_items.clear();
@@ -208,7 +233,10 @@ impl SessionManagerState {
     }
 
     pub fn clear_session_manager_selection(&mut self, cx: &mut Context<Self>) {
-        if self.selected_items.is_empty() && self.selection_anchor.is_none() {
+        if self.focused_discovery.take().is_none()
+            && self.selected_items.is_empty()
+            && self.selection_anchor.is_none()
+        {
             return;
         }
         self.selected_items.clear();

@@ -1562,10 +1562,17 @@ impl WorkspaceApp {
             menu_height += context_menu_item_height_estimate(&self.tokens);
         }
         let ssh_node_menu = self.ssh_node_menu_for_tab(menu.tab_id, cx);
+        let show_tools = ssh_node_menu
+            .as_ref()
+            .is_some_and(|menu| self.node_allows_session_tools(&menu.node_id));
+        let show_drill_down = ssh_node_menu
+            .as_ref()
+            .is_some_and(|menu| self.node_allows_drill_down(&menu.node_id));
         if let Some(ssh) = &ssh_node_menu {
-            // Terminal rows plus the fixed tool rows and the disconnect row;
-            // terminals, tools, and disconnect each sit behind a separator.
-            let ssh_rows = ssh.terminals.len() + 6;
+            let ssh_rows = ssh.terminals.len()
+                + 2
+                + if show_tools { 3 } else { 0 }
+                + usize::from(show_drill_down);
             let ssh_separators = if ssh.terminals.is_empty() { 3 } else { 4 };
             menu_height += ssh_rows as f32 * context_menu_item_height_estimate(&self.tokens)
                 + ssh_separators as f32 * context_menu_separator_height_estimate(&self.tokens);
@@ -1975,90 +1982,94 @@ impl WorkspaceApp {
                                 }),
                             ),
                         );
-                        section = section.child(
-                            context_menu_item_with_icon(
-                                &self.tokens,
-                                "lucide/folder-open.svg",
-                                self.i18n.t("sessions.tree.actions.sftp"),
-                                false,
-                                false,
-                            )
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener({
-                                    let node_id = node_id.clone();
-                                    move |this, _event, window, cx| {
-                                        this.close_tab_context_menu();
-                                        this.open_sftp_tab(node_id.clone(), window, cx);
-                                        cx.stop_propagation();
-                                    }
-                                }),
-                            ),
-                        );
-                        section = section.child(
-                            context_menu_item_with_icon(
-                                &self.tokens,
-                                "lucide/code-2.svg",
-                                "IDE",
-                                false,
-                                false,
-                            )
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener({
-                                    let node_id = node_id.clone();
-                                    move |this, _event, window, cx| {
-                                        this.close_tab_context_menu();
-                                        this.open_ide_folder_picker_tab(
-                                            node_id.clone(),
-                                            window,
-                                            cx,
-                                        );
-                                        cx.stop_propagation();
-                                    }
-                                }),
-                            ),
-                        );
-                        section = section.child(
-                            context_menu_item_with_icon(
-                                &self.tokens,
-                                "lucide/arrow-left-right.svg",
-                                self.i18n.t("sessions.tree.actions.port_forwarding"),
-                                false,
-                                false,
-                            )
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener({
-                                    let node_id = node_id.clone();
-                                    move |this, _event, window, cx| {
-                                        this.close_tab_context_menu();
-                                        this.open_forwards_tab(node_id.clone(), window, cx);
-                                        cx.stop_propagation();
-                                    }
-                                }),
-                            ),
-                        );
-                        section = section.child(
-                            context_menu_item_with_icon(
-                                &self.tokens,
-                                "lucide/arrow-down-right.svg",
-                                self.i18n.t("sessions.tree.actions.drill_in"),
-                                false,
-                                false,
-                            )
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener({
-                                    let node_id = node_id.clone();
-                                    move |this, _event, window, cx| {
-                                        this.close_tab_context_menu();
-                                        this.open_drill_down_form(node_id.clone(), window, cx);
-                                        cx.stop_propagation();
-                                    }
-                                }),
-                            ),
-                        );
+                        if show_tools {
+                            section = section.child(
+                                context_menu_item_with_icon(
+                                    &self.tokens,
+                                    "lucide/folder-open.svg",
+                                    self.i18n.t("sessions.tree.actions.sftp"),
+                                    false,
+                                    false,
+                                )
+                                .on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener({
+                                        let node_id = node_id.clone();
+                                        move |this, _event, window, cx| {
+                                            this.close_tab_context_menu();
+                                            this.open_sftp_tab(node_id.clone(), window, cx);
+                                            cx.stop_propagation();
+                                        }
+                                    }),
+                                ),
+                            );
+                            section = section.child(
+                                context_menu_item_with_icon(
+                                    &self.tokens,
+                                    "lucide/code-2.svg",
+                                    self.i18n.t("connections.monitor.ide"),
+                                    false,
+                                    false,
+                                )
+                                .on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener({
+                                        let node_id = node_id.clone();
+                                        move |this, _event, window, cx| {
+                                            this.close_tab_context_menu();
+                                            this.open_ide_folder_picker_tab(
+                                                node_id.clone(),
+                                                window,
+                                                cx,
+                                            );
+                                            cx.stop_propagation();
+                                        }
+                                    }),
+                                ),
+                            );
+                            section = section.child(
+                                context_menu_item_with_icon(
+                                    &self.tokens,
+                                    "lucide/arrow-left-right.svg",
+                                    self.i18n.t("sessions.tree.actions.port_forwarding"),
+                                    false,
+                                    false,
+                                )
+                                .on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener({
+                                        let node_id = node_id.clone();
+                                        move |this, _event, window, cx| {
+                                            this.close_tab_context_menu();
+                                            this.open_forwards_tab(node_id.clone(), window, cx);
+                                            cx.stop_propagation();
+                                        }
+                                    }),
+                                ),
+                            );
+                        }
+                        if show_drill_down {
+                            section = section.child(
+                                context_menu_item_with_icon(
+                                    &self.tokens,
+                                    "lucide/arrow-down-right.svg",
+                                    self.i18n.t("sessions.tree.actions.drill_in"),
+                                    false,
+                                    false,
+                                )
+                                .on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener({
+                                        let node_id = node_id.clone();
+                                        move |this, _event, window, cx| {
+                                            this.close_tab_context_menu();
+                                            this.open_drill_down_form(node_id.clone(), window, cx);
+                                            cx.stop_propagation();
+                                        }
+                                    }),
+                                ),
+                            );
+                        }
                         section = section.child(context_menu_separator(&self.tokens)).child(
                             context_menu_item_with_icon(
                                 &self.tokens,
@@ -3142,6 +3153,7 @@ mod tests {
                         local_session,
                         local_sessions::LocalTerminalInstance {
                             profile_id: Some(local_profile.id.clone()),
+                            discovery: None,
                             title: "Dev Shell".to_string(),
                             shell: None,
                             cwd: None,

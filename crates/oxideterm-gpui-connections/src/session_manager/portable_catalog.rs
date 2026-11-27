@@ -135,6 +135,9 @@ pub enum PortableCatalogEvent {
     BatchAdd,
     ImportSshConfig(String),
     OpenSshConfigImporter,
+    LoadDiscovery(String),
+    RefreshDiscovery(String),
+    EditDiscoverySource(String),
     OpenImporters,
 }
 
@@ -364,6 +367,9 @@ impl PortableCatalogView {
             },
             A::OpenSshConfigImporter => E::OpenSshConfigImporter,
             A::ImportSshConfig(alias) => E::ImportSshConfig(alias),
+            A::LoadDiscovery(source) => E::LoadDiscovery(source),
+            A::RefreshDiscovery(source) => E::RefreshDiscovery(source),
+            A::EditDiscoverySource(source) => E::EditDiscoverySource(source),
             A::OpenImporters => E::OpenImporters,
             A::ShowBatchAdd => E::BatchAdd,
             A::StopTunnel(id) => E::StopTunnel(id),

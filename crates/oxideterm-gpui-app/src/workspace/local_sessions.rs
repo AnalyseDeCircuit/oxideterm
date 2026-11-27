@@ -6,8 +6,22 @@ use oxideterm_gpui_settings_view::local_terminal::{
 };
 
 #[derive(Clone)]
+pub(super) struct DiscoveryTerminalDisplay {
+    pub source_id: String,
+    pub source_name: String,
+    pub target_label: String,
+}
+
+impl DiscoveryTerminalDisplay {
+    pub(super) fn group_id(source: &str) -> NodeId {
+        NodeId::new(format!("discovery-terminals-{source}"))
+    }
+}
+
+#[derive(Clone)]
 pub(super) struct LocalTerminalInstance {
     pub(super) profile_id: Option<String>,
+    pub(super) discovery: Option<DiscoveryTerminalDisplay>,
     pub(super) title: String,
     pub(super) shell: Option<oxideterm_terminal::ShellInfo>,
     pub(super) cwd: Option<std::path::PathBuf>,
@@ -20,6 +34,7 @@ impl LocalTerminalInstance {
         // Retain launch identity for splits, never a copy of environment secrets.
         Self {
             profile_id: None,
+            discovery: None,
             title,
             shell: config.shell.clone(),
             cwd: config.cwd.clone(),

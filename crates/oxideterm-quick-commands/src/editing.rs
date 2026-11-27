@@ -290,7 +290,9 @@ pub fn quick_command_available_for_target(
     target: &QuickCommandTargetContext,
 ) -> bool {
     let protocol_matches = command.availability.protocols.is_empty()
-        || command.availability.protocols.contains(&target.protocol);
+        || target
+            .protocol
+            .is_some_and(|protocol| command.availability.protocols.contains(&protocol));
     let target_fields = match command.availability.match_field {
         QuickCommandMatchField::All => crate::quick_command_target_match_fields(target),
         QuickCommandMatchField::Host => target

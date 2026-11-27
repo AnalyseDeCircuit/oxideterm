@@ -419,7 +419,7 @@ fn upstream_proxy_from_saved_policy_with_runtime_secret(
     }
 }
 
-fn proxy_command_from_saved_connection(
+pub fn proxy_command_from_saved_connection(
     store: &ConnectionStore,
     settings: &PersistedSettings,
     connection: &SavedConnection,

@@ -300,11 +300,11 @@ impl Workspace {
         Some(QuickCommandTargetContext {
             target_id: id.0.to_string(),
             label: s.node.clone(),
-            protocol: if s.node == "local" {
+            protocol: Some(if s.node == "local" {
                 QuickCommandTargetProtocol::Local
             } else {
                 QuickCommandTargetProtocol::Ssh
-            },
+            }),
             values: Default::default(),
         })
     }

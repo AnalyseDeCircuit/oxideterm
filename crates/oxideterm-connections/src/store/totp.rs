@@ -599,6 +599,7 @@ impl ConnectionStore {
                 return Err(TotpError::SaveFailed);
             }
             self.data = candidate.data;
+            self.revision.observe(candidate.revision.observed());
             let _ = self.retry_persisted_keychain_cleanup();
             Ok(id)
         })();
@@ -650,6 +651,7 @@ impl ConnectionStore {
                 .retain(|entry| entry.id != id);
             candidate.save().map_err(|_| TotpError::SaveFailed)?;
             self.data = candidate.data;
+            self.revision.observe(candidate.revision.observed());
             let _ = self.retry_persisted_keychain_cleanup();
             Ok(())
         })();

@@ -280,6 +280,7 @@
       "verifying": "Wird überprüft..."
     },
     "new_connection": {
+      "saved_identity_changed": "Die gespeicherte SSH-Verbindung wurde geändert. Öffnen Sie sie erneut, um fortzufahren.",
       "transport_ftp": "FTP / FTPS",
       "ftp_description": "Remote-Dateien über FTP oder explizites FTPS mit passiven Datenverbindungen verwalten.",
       "ftp_tls": "FTPS verwenden (explizites TLS)",

@@ -89,6 +89,21 @@ impl WorkspaceApp {
         let session_id = tab_projection
             .as_ref()
             .and_then(|(_, _, _, session_id)| *session_id);
+        if let Some(instance) = session_id
+            .and_then(|id| self.tab_host.read(cx).local_sessions.get(&id))
+            .filter(|instance| instance.discovery.is_some())
+        {
+            return TerminalCommandContext {
+                pane_id,
+                session_id,
+                tab_id: tab_projection.as_ref().map(|(id, ..)| *id),
+                terminal_type: TerminalCommandContextType::Terminal,
+                node_id: None,
+                cwd: None,
+                cwd_host: None,
+                target_label: instance.title.clone(),
+            };
+        }
         let node_id = session_id.and_then(|session_id| {
             self.workspace_runtime
                 .read(cx)

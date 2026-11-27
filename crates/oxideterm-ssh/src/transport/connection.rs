@@ -236,6 +236,9 @@ impl SshConnectionHandle {
         origin_host: &str,
         origin_port: u16,
     ) -> Result<BoxedSshForwardStream, SshTransportError> {
+        if !self.allows_additional_channels() {
+            return Err(SshTransportError::CommandChannelUnavailable);
+        }
         let Some(pooled) = self.physical::<PooledSshConnection>() else {
             return Err(SshTransportError::ConnectionFailed(
                 "no active SSH connection is available for port forwarding".to_string(),
@@ -259,6 +262,9 @@ impl SshConnectionHandle {
         origin_host: &str,
         origin_port: u16,
     ) -> Result<BoxedSshForwardStream, SshTransportError> {
+        if !self.allows_additional_channels() {
+            return Err(SshTransportError::CommandChannelUnavailable);
+        }
         let Some(pooled) = self.physical::<PooledSshConnection>() else {
             return Err(SshTransportError::ConnectionFailed(
                 "no active SSH connection is available for X11 forwarding".to_string(),
@@ -359,6 +365,9 @@ impl SshConnectionHandle {
         bind_address: &str,
         bind_port: u16,
     ) -> Result<u16, SshTransportError> {
+        if !self.allows_additional_channels() {
+            return Err(SshTransportError::CommandChannelUnavailable);
+        }
         let Some(pooled) = self.physical::<PooledSshConnection>() else {
             return Err(SshTransportError::ConnectionFailed(
                 "no active SSH connection is available for remote port forwarding".to_string(),
@@ -405,6 +414,9 @@ impl SshConnectionHandle {
         timeout: Duration,
         max_output_size: usize,
     ) -> Result<String, SshTransportError> {
+        if !self.allows_additional_channels() {
+            return Err(SshTransportError::CommandChannelUnavailable);
+        }
         let Some(pooled) = self.physical::<PooledSshConnection>() else {
             return Err(SshTransportError::ConnectionFailed(
                 "no active SSH connection is available for remote command execution".to_string(),
@@ -546,6 +558,9 @@ impl SshConnectionHandle {
         max_output_size: usize,
         pty_size: Option<(u32, u32)>,
     ) -> Result<SshCommandCaptureBytes, SshTransportError> {
+        if !self.allows_additional_channels() {
+            return Err(SshTransportError::CommandChannelUnavailable);
+        }
         let Some(pooled) = self.physical::<PooledSshConnection>() else {
             return Err(SshTransportError::ConnectionFailed(
                 "no active SSH connection is available for remote command execution".to_string(),
@@ -718,6 +733,9 @@ impl SshConnectionHandle {
     pub async fn open_session_channel(
         &self,
     ) -> Result<russh::Channel<client::Msg>, SshTransportError> {
+        if !self.allows_additional_channels() {
+            return Err(SshTransportError::CommandChannelUnavailable);
+        }
         let Some(pooled) = self.physical::<PooledSshConnection>() else {
             return Err(SshTransportError::ConnectionFailed(
                 "no active SSH connection is available for a session channel".to_string(),
@@ -750,6 +768,9 @@ impl SshConnectionHandle {
         with_pty: bool,
         timeout: Duration,
     ) -> Result<SshShellChannel, SshTransportError> {
+        if !self.allows_additional_channels() {
+            return Err(SshTransportError::CommandChannelUnavailable);
+        }
         let pooled = self.physical::<PooledSshConnection>().ok_or_else(|| {
             SshTransportError::ConnectionFailed("no active SSH connection is available".into())
         })?;

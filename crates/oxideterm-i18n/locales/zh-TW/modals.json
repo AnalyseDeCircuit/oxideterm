@@ -280,6 +280,7 @@
       "verifying": "驗證中..."
     },
     "new_connection": {
+      "saved_identity_changed": "已儲存的 SSH 連線已變更，請重新開啟後繼續。",
       "transport_ftp": "FTP / FTPS",
       "ftp_description": "透過 FTP 或明確式 FTPS 管理遠端檔案，使用被動資料連線。",
       "ftp_tls": "使用 FTPS（明確式 TLS）",

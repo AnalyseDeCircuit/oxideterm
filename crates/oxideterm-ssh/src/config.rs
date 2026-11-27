@@ -113,6 +113,8 @@ fn algorithm_preferences_key_suffix(preferences: &SshAlgorithmPreferences) -> St
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SshConfig {
+    #[serde(skip)]
+    pub discovery_origin: Option<oxideterm_discovery::DiscoveryOrigin>,
     /// Resolves the explicitly bound credential at authentication time.
     #[serde(skip)]
     pub totp: Option<oxideterm_connections::TotpBinding>,
@@ -419,8 +421,13 @@ impl SshConfig {
         } else {
             String::new()
         };
+        let instance = self
+            .discovery_origin
+            .as_ref()
+            .map(|origin| format!("|discovery={}", origin.instance_id))
+            .unwrap_or_default();
         format!(
-            "{}@{}:{}|{}{}{}{}{}{}{}{}{}{}{keep_alive_key}{host_key_suffix}",
+            "{}@{}:{}|{}{}{}{}{}{}{}{}{}{}{keep_alive_key}{host_key_suffix}{instance}",
             self.username,
             self.host,
             self.port,
@@ -669,6 +676,7 @@ impl AuthMethod {
 impl Default for SshConfig {
     fn default() -> Self {
         Self {
+            discovery_origin: None,
             totp: None,
             host: String::new(),
             port: default_port(),

@@ -362,6 +362,109 @@ impl Default for SshConfigSettings {
     }
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DiscoverySshAuth {
+    #[default]
+    Password,
+    DefaultKey,
+    KeyFile(String),
+    Certificate { key_path: String, cert_path: String },
+    ManagedKey(String),
+    Agent,
+    TwoFactor,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct DiscoverySshPreferences {
+    pub auth: DiscoverySshAuth,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub passphrase_revision: Option<uuid::Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub identity_agent: Option<String>,
+    pub totp_credential_id: Option<String>,
+    pub skip_connection_form: bool,
+}
+
+pub const DISCOVERY_SSH_PASSPHRASE_FIELD: &str = "ssh-passphrase";
+
+impl DiscoverySshPreferences {
+    pub fn passphrase_account(&self, source: &str) -> Option<String> {
+        Some(Self::revision_account(source, self.active_passphrase_revision()?))
+    }
+
+    pub(crate) fn revision_account(source: &str, revision: uuid::Uuid) -> String {
+        format!("discovery-ssh:{}:{source}:{revision}", source.len())
+    }
+
+    pub(crate) fn active_passphrase_revision(&self) -> Option<uuid::Uuid> {
+        match self.auth {
+            DiscoverySshAuth::DefaultKey | DiscoverySshAuth::KeyFile(_)
+            | DiscoverySshAuth::ManagedKey(_) | DiscoverySshAuth::Certificate { .. } => {
+                self.passphrase_revision
+            }
+            _ => None,
+        }
+    }
+
+    fn is_default(&self) -> bool {
+        self == &Self::default()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct DiscoverySource {
+    pub id: String,
+    pub plugin_id: Option<String>,
+    pub provider_id: String,
+    pub name: String,
+    pub enabled: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub removal_pending: bool,
+    // Rebuild keychain accounts from this source's ID; never persist a raw account to delete.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub retired_secret_revisions: Vec<(String, uuid::Uuid)>,
+    pub refresh_minutes: Option<std::num::NonZeroU32>,
+    // Manual refresh can retain the user's interval without arming a timer.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_refresh_minutes: Option<std::num::NonZeroU32>,
+    pub config: Value,
+    #[serde(skip_serializing_if = "DiscoverySshPreferences::is_default")]
+    pub ssh_preferences: DiscoverySshPreferences,
+}
+
+impl DiscoverySource {
+    pub fn apply_ssh_policy(
+        &mut self,
+        provider: &oxideterm_plugin_manifest::discovery::NativePluginDiscoveryProviderDef,
+    ) {
+        use oxideterm_plugin_manifest::discovery::DiscoveryLaunchKind;
+        if !provider.launch_kinds.contains(&DiscoveryLaunchKind::Ssh) {
+            self.ssh_preferences = Default::default();
+        }
+    }
+}
+
+impl Default for DiscoverySource {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            plugin_id: None,
+            provider_id: String::new(),
+            name: String::new(),
+            enabled: true,
+            removal_pending: false,
+            retired_secret_revisions: Vec::new(),
+            refresh_minutes: None,
+            last_refresh_minutes: None,
+            config: Value::Object(Map::new()),
+            ssh_preferences: Default::default(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DiagnosticsSettings {
@@ -521,6 +624,8 @@ pub struct PersistedSettings {
     pub new_connection: NewConnectionSettings,
     #[serde(default)]
     pub ssh_config: SshConfigSettings,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub discovery_sources: Vec<DiscoverySource>,
     #[serde(default)]
     pub diagnostics: DiagnosticsSettings,
     #[serde(default)]
@@ -559,6 +664,7 @@ impl Default for PersistedSettings {
             agent_roles: None,
             new_connection: NewConnectionSettings::default(),
             ssh_config: SshConfigSettings::default(),
+            discovery_sources: Vec::new(),
             diagnostics: DiagnosticsSettings::default(),
             host_tools: HostToolsSettings::default(),
             extra: ExtraFields::new(),

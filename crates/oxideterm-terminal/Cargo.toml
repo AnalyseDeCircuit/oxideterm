@@ -51,6 +51,7 @@ zeroize.workspace = true
 windows = { workspace = true, features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading"] }
 
 [dev-dependencies]
+oxideterm-discovery = { path = "../oxideterm-discovery" }
 russh.workspace = true
 rand10.workspace = true
 criterion.workspace = true

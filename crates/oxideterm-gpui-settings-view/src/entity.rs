@@ -418,6 +418,7 @@ pub struct SettingsWorkspaceEntity {
     pub cli_companion_loading: bool,
     pub cli_companion_error: Option<String>,
     pub cli_companion_task: Option<Task<()>>,
+    pub(crate) discovery: crate::connections_page::DiscoverySettingsState,
     pub ssh_config_import_dialog_open: bool,
     pub ssh_config_selected_hosts: HashSet<String>,
     pub connection_import_status: Option<String>,
@@ -613,6 +614,7 @@ impl SettingsWorkspaceEntity {
             cli_companion_loading: false,
             cli_companion_error: None,
             cli_companion_task: None,
+            discovery: Default::default(),
             ssh_config_import_dialog_open: false,
             ssh_config_selected_hosts: HashSet::new(),
             connection_import_status: None,
@@ -692,6 +694,9 @@ impl SettingsWorkspaceEntity {
         }
         self.totp_draft = None;
         self.totp_error = None;
+        if tab != SettingsTab::Discovery {
+            self.discovery.editor = None;
+        }
         if tab == SettingsTab::Connections {
             self.refresh_known_hosts(cx);
         }
@@ -2105,6 +2110,20 @@ impl SettingsWorkspaceEntity {
             SettingsInput::PortableCurrentPassword => Some(&self.portable_current_password),
             SettingsInput::PortableNewPassword => Some(&self.portable_new_password),
             SettingsInput::PortableConfirmPassword => Some(&self.portable_confirm_password),
+            SettingsInput::DiscoverySecret(index) => self
+                .discovery
+                .editor
+                .as_ref()?
+                .fields
+                .get(index)?
+                .secret_value(),
+            SettingsInput::DiscoveryField(index) | SettingsInput::DiscoveryMultiline(index) => self
+                .discovery
+                .editor
+                .as_ref()?
+                .fields
+                .get(index)
+                .map(|field| field.value.as_str()),
             SettingsInput::ManagedKeyFilePath => Some(&self.managed_key_file_path),
             SettingsInput::ManagedKeyFileName => Some(&self.managed_key_file_name),
             SettingsInput::ManagedKeyFilePassphrase => Some(&self.managed_key_file_passphrase),
@@ -2172,6 +2191,11 @@ impl SettingsWorkspaceEntity {
         let can_focus = match input {
             _ if input.is_ai_mcp() => self.ai_mcp.input(input).is_some(),
             SettingsInput::TerminalCommandSpecsJson => self.command_specs_open(),
+            SettingsInput::DiscoverySecret(_)
+            | SettingsInput::DiscoveryField(_)
+            | SettingsInput::DiscoveryMultiline(_) => {
+                self.settings_entity_input_value(input).is_some()
+            }
             SettingsInput::SettingsSearch => self.settings_search_open,
             SettingsInput::CustomThemeName
             | SettingsInput::CustomThemeTerminalColor(_)
@@ -2355,6 +2379,11 @@ impl SettingsWorkspaceEntity {
 
     fn clear_settings_entity_input_error(&mut self, input: SettingsInput) {
         match input {
+            SettingsInput::DiscoveryField(index) | SettingsInput::DiscoveryMultiline(index) => {
+                if let Some(editor) = &mut self.discovery.editor {
+                    editor.clear_dependent_secrets(index);
+                }
+            }
             SettingsInput::PortableCurrentPassword
             | SettingsInput::PortableNewPassword
             | SettingsInput::PortableConfirmPassword => self.portable_action_error = None,
@@ -2422,6 +2451,20 @@ impl SettingsWorkspaceEntity {
             SettingsInput::PortableCurrentPassword => Some(&mut self.portable_current_password),
             SettingsInput::PortableNewPassword => Some(&mut self.portable_new_password),
             SettingsInput::PortableConfirmPassword => Some(&mut self.portable_confirm_password),
+            SettingsInput::DiscoverySecret(index) => self
+                .discovery
+                .editor
+                .as_mut()?
+                .fields
+                .get_mut(index)?
+                .secret_value_mut(),
+            SettingsInput::DiscoveryField(index) | SettingsInput::DiscoveryMultiline(index) => self
+                .discovery
+                .editor
+                .as_mut()?
+                .fields
+                .get_mut(index)
+                .map(|field| &mut field.value),
             SettingsInput::ManagedKeyFilePath => Some(&mut self.managed_key_file_path),
             SettingsInput::ManagedKeyFileName => Some(&mut self.managed_key_file_name),
             SettingsInput::ManagedKeyFilePassphrase => Some(&mut self.managed_key_file_passphrase),

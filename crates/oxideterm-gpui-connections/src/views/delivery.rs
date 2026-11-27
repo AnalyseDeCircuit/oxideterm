@@ -42,12 +42,23 @@ impl ConnectionFlowEntity {
                 intent,
                 host,
                 port,
+                checked_hop,
                 status,
             } => {
                 // Move the original proxy (including credentials) back to its launch owner.
                 config.upstream_proxy = upstream_proxy;
+                let discovery = config.discovery_origin.is_some();
                 Some(
-                    match self.resolve_preflight(config, title, intent, host, port, status, cx) {
+                    match self.resolve_preflight(
+                        config,
+                        title,
+                        intent,
+                        host,
+                        port,
+                        checked_hop,
+                        status,
+                        cx,
+                    ) {
                         PreflightOutcome::Continue(config, title, intent) => Request::VerifiedSsh {
                             config,
                             title,
@@ -59,6 +70,7 @@ impl ConnectionFlowEntity {
                             message,
                             inline,
                         } => Request::PreflightFailed {
+                            discovery,
                             intent,
                             message,
                             inline,

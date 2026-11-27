@@ -9,6 +9,40 @@ use crate::workspace::{
 use oxideterm_gpui_connections::profiles::{SavedSshOpen, prepare_saved_ssh_open};
 use oxideterm_gpui_terminal::TerminalNoticeVariant;
 
+fn authorize_discovery_form(
+    discovery: &oxideterm_discovery::DiscoveryService,
+    form: &mut oxideterm_gpui_connections::NewConnectionForm,
+    action: NewConnectionSubmitAction,
+) -> bool {
+    let Some(origin) = form.discovery_origin.as_mut() else {
+        return true;
+    };
+    if action != NewConnectionSubmitAction::Connect
+        || form.transport != NewConnectionTransport::Ssh
+        || !origin.can_handshake()
+        || !form.port.parse().ok().is_some_and(|port| {
+            origin.matches_endpoint(form.host.trim(), port, form.username.trim())
+        })
+        || discovery.target_revision(&origin.source_id, &origin.target_id)
+            != Some(origin.target_revision.clone())
+    {
+        return false;
+    }
+    let Some((authority, lease)) = discovery
+        .authority(&origin.source_id, origin.epoch)
+        .zip(discovery.acquire(&origin.source_id, origin.epoch))
+    else {
+        return false;
+    };
+    if origin.is_asset_session() {
+        // Only channels on the confirmed transport belong to this instance.
+        form.ssh_channel_strategy = Default::default();
+        form.dedicated_new_terminal_connection = false;
+    }
+    origin.host_authorized(lease, authority);
+    true
+}
+
 impl WorkspaceApp {
     pub(super) fn report_saved_next_hop_error(&mut self, i18n_key: &str, cx: &mut Context<Self>) {
         self.report_saved_next_hop_message(self.i18n.t(i18n_key), cx);
@@ -67,6 +101,24 @@ impl WorkspaceApp {
     ) {
         use oxideterm_gpui_connections::submission::ConnectionSubmissionEffect as Effect;
 
+        if self
+            .connection_form_state(cx)
+            .form
+            .as_ref()
+            .is_some_and(|f| f.discovery_origin.is_some())
+            && !self.update_connection_form_state(cx, |state| {
+                state
+                    .form
+                    .as_mut()
+                    .is_some_and(|f| authorize_discovery_form(&self.discovery, f, action))
+            })
+        {
+            let message = self.i18n.t("settings_view.discovery.stale_target");
+            self.connections.flow.update(cx, |flow, cx| {
+                flow.set_form_feedback(None, Some(message), cx)
+            });
+            return;
+        }
         let Some(result) = self.connections.flow.update(cx, |flow, cx| {
             flow.submit_form(
                 action,
@@ -228,6 +280,37 @@ impl WorkspaceApp {
         }
     }
 
+    pub(in crate::workspace) fn connect_discovery_with_preset(
+        &mut self,
+        mut form: oxideterm_gpui_connections::NewConnectionForm,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !authorize_discovery_form(
+            &self.discovery,
+            &mut form,
+            NewConnectionSubmitAction::Connect,
+        ) {
+            return self.report_discovery_open_failure(
+                oxideterm_discovery::DiscoveryFailure::StaleTarget,
+                cx,
+            );
+        }
+        let intent = SshConnectionIntent::Connect(SshTerminalConnectionOptions::from_form(&form));
+        match oxideterm_gpui_connections::conversion::build_ssh_config(
+            &mut form,
+            &self.connection_store,
+            self.settings_store.settings(),
+            &self.i18n,
+            oxideterm_gpui_connections::configuration::RuntimeSecretHandoff::Move,
+        ) {
+            Ok((config, title)) => {
+                self.start_connection_preflight_plan(config, title, intent, true, window, cx)
+            }
+            Err(message) => self.report_discovery_open_error(message, cx),
+        }
+    }
+
     fn start_connection_preflight_plan(
         &mut self,
         config: SshConfig,
@@ -238,6 +321,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         use oxideterm_gpui_connections::preflight::{RoutePreflight, SshPreflightPlan};
+        let discovery = config.discovery_origin.is_some();
         let plan = self.connections.flow.update(cx, |flow, cx| {
             flow.plan_preflight(config, title, intent, !show_session_status, &self.i18n, cx)
         });
@@ -250,7 +334,7 @@ impl WorkspaceApp {
             Ok(plan) => plan,
             Err(message) => {
                 if let Some(message) = message {
-                    self.set_connection_status(Some(message), cx);
+                    self.report_ssh_preflight_error(message, discovery, cx);
                 }
                 return;
             }
@@ -432,6 +516,14 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self
+            .node_router
+            .runtime_store()
+            .discovery_origin(&node_id)
+            .is_some()
+        {
+            return;
+        }
         let draft = self
             .ssh_nodes
             .get(&node_id)
@@ -730,6 +822,7 @@ impl WorkspaceApp {
                 intent,
                 host,
                 port,
+                checked_hop: None,
                 status: HostKeyStatus::Error {
                     message: self.plugin_requirement_message(
                         "com.oxideterm.terminal.mosh",

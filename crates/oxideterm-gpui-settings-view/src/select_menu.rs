@@ -39,6 +39,8 @@ pub enum SelectMenuRequest {
     #[cfg(not(target_family = "wasm"))]
     External(ExternalSelect),
     #[cfg(not(target_family = "wasm"))]
+    AddDiscoverySource(Box<oxideterm_settings::DiscoverySource>),
+    #[cfg(not(target_family = "wasm"))]
     KnowledgeCollectionScope(Option<String>),
     #[cfg(not(target_family = "wasm"))]
     KnowledgeDocumentFormat(&'static str),

@@ -336,9 +336,11 @@ impl WorkspaceApp {
         let next_connections = change
             .connections
             .then(|| {
-                ConnectionStore::load(self.connection_store.path().to_path_buf()).map_err(|error| {
-                    format!("Failed to reload connections after external sync: {error}")
-                })
+                self.connection_store
+                    .reload_after_external_change()
+                    .map_err(|error| {
+                        format!("Failed to reload connections after external sync: {error}")
+                    })
             })
             .transpose()?;
         if let Some(next_settings) = next_settings {
@@ -352,6 +354,7 @@ impl WorkspaceApp {
             return Ok(());
         }
         self.sync_ssh_config_sync_service();
+        self.reconcile_discovery_sources(cx);
         // External sync mutates persisted stores outside the GPUI controls.
         // Re-apply the same runtime side effects used by edit_settings instead
         // of relying on stale in-memory settings or browser-style stores.

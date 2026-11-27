@@ -59,6 +59,7 @@ impl WorkspaceApp {
                             && this.session_manager_sidebar_visible()
                         {
                             this.refresh_session_manager_ssh_config_hosts(cx);
+                            this.discovery.ensure_visible();
                         }
                     });
                 })
@@ -186,6 +187,7 @@ impl WorkspaceApp {
         // Reopening a collapsed panel already refreshes in the expand path.
         if !was_visible && !was_collapsed && self.session_manager_sidebar_visible() {
             self.refresh_session_manager_ssh_config_hosts(cx);
+            self.discovery.ensure_visible();
         }
         if matches!(
             self.rails.section,

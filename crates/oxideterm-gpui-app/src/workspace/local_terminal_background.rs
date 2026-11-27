@@ -34,13 +34,39 @@ impl WorkspaceApp {
         };
 
         let pane_ref = pane.read(cx);
-        let title = pane_ref.title().to_string();
         let session = pane_ref.shared_session();
         let buffer_lines = pane_ref.buffer_line_count();
+        let history = pane_ref.command_history();
+        let title = pane_ref.title().to_string();
+        let instance = self
+            .tab_host
+            .update(cx, |host, _| host.local_sessions.remove(&session_id));
+        let (discovery_pane, title) = if self.plugin_entity.read(cx).discovery_terminal(&session) {
+            // The pane drains PTY exit events. Keep its reader and a scoped exit listener
+            // while the tab host has no visible mount for this provider's process.
+            let exited = cx.subscribe(&pane, |workspace, pane, event, cx| {
+                if matches!(event, TerminalPaneEvent::Exited { .. }) {
+                    let session = pane.read(cx).shared_session();
+                    workspace.plugin_entity.update(cx, |plugins, _| {
+                        plugins.finish_discovery_terminal(&session);
+                    });
+                }
+            });
+            self.finish_exited_background_discovery_terminal(&session, cx);
+            let title = instance
+                .as_ref()
+                .map(|item| item.title.clone())
+                .unwrap_or(title);
+            (Some((pane, exited)), title)
+        } else {
+            (None, title)
+        };
         self.detached_local_terminals.insert(
             session_id,
             DetachedLocalTerminalSession {
-                history: pane_ref.command_history(),
+                history,
+                discovery_pane,
+                instance,
                 session_id,
                 title: title.clone(),
                 session,
@@ -83,13 +109,7 @@ impl WorkspaceApp {
             })
             .collect::<Vec<_>>();
         for session_id in &stale_sessions {
-            self.detached_local_terminals.remove(session_id);
-            self.ai.authority.update(cx, |runtime, _cx| {
-                runtime.revoke_terminal_session(*session_id);
-            });
-        }
-        if self.detached_local_terminals.is_empty() {
-            self.detached_local_terminals_popover_open = false;
+            self.kill_detached_local_terminal_session(*session_id, cx);
         }
         self.push_command_palette_toast(
             self.i18n_replace(
@@ -117,7 +137,7 @@ impl WorkspaceApp {
         {
             self.release_public_mcp_terminal_for_closed_session(session_id, cx);
         }
-        self.remove_terminal_pane(&active_pane_id, cx);
+        self.unmount_terminal_pane(&active_pane_id, cx);
 
         let tab_id = self.tabs(cx)[active_index].id;
         self.tab_host.update(cx, |tab_host, _| {
@@ -157,7 +177,7 @@ impl WorkspaceApp {
             self.release_public_mcp_terminal_for_closed_session(session_id, cx);
         }
         for pane_id in pane_ids {
-            self.remove_terminal_pane(&pane_id, cx);
+            self.unmount_terminal_pane(&pane_id, cx);
         }
         self.apply_main_window_active_tab_change(previous_active_tab_id, next_active_tab_id, cx);
         self.sync_active_tab_surface(cx);
@@ -183,14 +203,26 @@ impl WorkspaceApp {
         let tab_id = self.alloc_tab_id(cx);
         let pane_id = self.alloc_pane_id(cx);
         let title = detached.title.clone();
-        let mut preferences =
-            self.prepare_terminal_preferences_for_tab_kind(&TabKind::LocalTerminal, cx);
-        preferences.command_history = detached.history;
-        let session = detached.session.clone();
-        let pane = cx.new(|cx| {
-            TerminalPane::from_shared_session(session, preferences, window, cx)
-                .expect("failed to resume detached local terminal pane")
-        });
+        let pane = match detached.discovery_pane {
+            Some((pane, _)) => {
+                self.finish_exited_background_discovery_terminal(&detached.session, cx);
+                pane
+            }
+            None => {
+                let mut preferences =
+                    self.prepare_terminal_preferences_for_tab_kind(&TabKind::LocalTerminal, cx);
+                preferences.command_history = detached.history;
+                cx.new(|cx| {
+                    TerminalPane::from_shared_session(detached.session, preferences, window, cx)
+                        .expect("failed to resume detached local terminal pane")
+                })
+            }
+        };
+        if let Some(instance) = detached.instance {
+            self.tab_host.update(cx, |host, _| {
+                host.local_sessions.insert(session_id, instance);
+            });
+        }
 
         self.register_terminal_pane(pane_id, detached.session_id, pane.clone(), window, cx);
         self.refresh_native_plugin_terminal_hooks(cx);
@@ -223,12 +255,26 @@ impl WorkspaceApp {
         cx.notify();
     }
 
+    fn finish_exited_background_discovery_terminal(
+        &mut self,
+        session: &SharedTerminalSession,
+        cx: &mut Context<Self>,
+    ) {
+        // The previous subscriber may already have queued the exit when ownership changes.
+        if !session.lock().lifecycle().is_running() {
+            self.plugin_entity.update(cx, |plugins, _| {
+                plugins.finish_discovery_terminal(session);
+            });
+        }
+    }
+
     pub(super) fn kill_detached_local_terminal_session(
         &mut self,
         session_id: TerminalSessionId,
         cx: &mut Context<Self>,
     ) {
         if let Some(detached) = self.detached_local_terminals.remove(&session_id) {
+            self.close_plugin_connection_terminal(&detached.session, cx);
             detached.session.lock().shutdown();
         }
         self.ai.authority.update(cx, |runtime, _cx| {
@@ -384,7 +430,6 @@ impl WorkspaceApp {
             .detached_local_terminal_order
             .get(index)
             .and_then(|session_id| self.detached_local_terminals.get(session_id))
-            .cloned()
         else {
             return div().into_any_element();
         };
@@ -393,7 +438,7 @@ impl WorkspaceApp {
 
     fn render_detached_local_terminal_row(
         &self,
-        session: DetachedLocalTerminalSession,
+        session: &DetachedLocalTerminalSession,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
@@ -425,7 +470,7 @@ impl WorkspaceApp {
                             .line_height(px(16.0))
                             .text_color(rgb(theme.text))
                             .truncate()
-                            .child(session.title),
+                            .child(session.title.clone()),
                     )
                     .child(
                         div()

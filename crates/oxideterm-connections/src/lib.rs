@@ -10,6 +10,7 @@ mod ssh_config_sync;
 mod ssh_keys;
 mod ssh_paths;
 mod store;
+pub use store::SavedSshIdentity;
 pub mod totp;
 pub use batch::{
     BatchAddResult, BatchDataParse, BatchDataRow, BatchDuplicateNamePolicy,

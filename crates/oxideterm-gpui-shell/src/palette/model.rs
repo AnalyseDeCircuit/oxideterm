@@ -29,6 +29,7 @@ pub enum PaletteSection {
     Commands,
     Sessions,
     Connections,
+    Discovery,
     Transfers,
     Reconnects,
     #[allow(dead_code)]
@@ -99,11 +100,9 @@ pub enum PaletteStep {
 
 pub fn resolve_command_palette_selected_index<A>(
     ranked_items: &[RankedItem<A>],
-    selected_index: usize,
+    selected_index: Option<usize>,
 ) -> Option<usize> {
-    if ranked_items.is_empty() {
-        return None;
-    }
+    let selected_index = selected_index?;
     if let Some(item) = ranked_items.get(selected_index)
         && !item.item.disabled
     {
@@ -307,6 +306,7 @@ pub fn section_label_key(section: PaletteSection) -> &'static str {
         PaletteSection::Commands => "command_palette.section_commands",
         PaletteSection::Sessions => "command_palette.section_sessions",
         PaletteSection::Connections => "command_palette.section_connections",
+        PaletteSection::Discovery => "settings_view.discovery.title",
         PaletteSection::Transfers => "sftp.queue.title",
         PaletteSection::Reconnects => "sidebar.background_tasks.reconnecting",
         PaletteSection::Plugins => "command_palette.section_plugins",

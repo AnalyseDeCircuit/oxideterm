@@ -533,48 +533,47 @@ impl WorkspaceApp {
         ));
 
         if is_connected {
-            actions = actions
-                .child(self.render_topology_menu_action(
-                    LucideIcon::Terminal,
-                    MONITOR_EMERALD_DARK,
-                    self.i18n.t("topology.menu.new_terminal"),
-                    false,
-                    false,
-                    {
-                        let node_id = node_id.clone();
-                        move |this, event: &MouseDownEvent, window, cx| {
-                            if let Some(node_id) = node_id.clone()
-                                && let Some(title) =
-                                    this.ssh_nodes.get(&node_id).map(|node| node.title.clone())
-                            {
-                                let _ = this.queue_ssh_terminal_tab_for_existing_node(
-                                    node_id,
-                                    None,
-                                    title,
-                                    event.modifiers.control,
-                                    window,
-                                    cx,
-                                );
-                            }
+            actions = actions.child(self.render_topology_menu_action(
+                LucideIcon::Terminal,
+                MONITOR_EMERALD_DARK,
+                self.i18n.t("topology.menu.new_terminal"),
+                false,
+                false,
+                {
+                    let node_id = node_id.clone();
+                    move |this, event: &MouseDownEvent, window, cx| {
+                        if let Some(node_id) = node_id.clone()
+                            && let Some(title) =
+                                this.ssh_nodes.get(&node_id).map(|node| node.title.clone())
+                        {
+                            let _ = this.queue_ssh_terminal_tab_for_existing_node(
+                                node_id,
+                                None,
+                                title,
+                                event.modifiers.control,
+                                window,
+                                cx,
+                            );
                         }
-                    },
-                    cx,
-                ))
-                .child(self.render_topology_menu_action(
+                    }
+                },
+                cx,
+            ));
+            if let Some(node_id) = node_id.filter(|node| self.node_allows_session_tools(node)) {
+                actions = actions.child(self.render_topology_menu_action(
                     LucideIcon::FolderOpen,
                     0xeab308,
                     self.i18n.t("topology.menu.open_sftp"),
                     false,
                     false,
                     {
-                        move |this, _event, window, _cx| {
-                            if let Some(node_id) = node_id.clone() {
-                                this.open_sftp_tab(node_id, window, _cx);
-                            }
+                        move |this, _event, window, cx| {
+                            this.open_sftp_tab(node_id.clone(), window, cx);
                         }
                     },
                     cx,
                 ));
+            }
         }
 
         let menu_body = context_menu_event_boundary(
