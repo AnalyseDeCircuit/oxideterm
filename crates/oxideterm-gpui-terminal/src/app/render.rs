@@ -182,7 +182,7 @@ fn external_paths_for_local_terminal(paths: &[PathBuf]) -> Option<String> {
     Some(input)
 }
 
-const TERMINAL_VISUAL_BELL_MAX_SOFT_ALPHA: f32 = 112.0;
+const TERMINAL_VISUAL_BELL_MAX_SOFT_ALPHA: f32 = 46.0;
 
 fn terminal_pane_base_is_transparent(has_window_background: bool) -> bool {
     // Content-scoped images paint inside the pane above its fallback color.
@@ -201,12 +201,14 @@ fn terminal_visual_bell_duration_ms(style: TerminalBellStyle) -> u64 {
     }
 }
 
-fn terminal_visual_bell_soft_flash_color(bell_background: u32, progress: f32) -> u32 {
-    let alpha = ((progress * std::f32::consts::PI).sin().max(0.0)
-        * TERMINAL_VISUAL_BELL_MAX_SOFT_ALPHA)
+fn terminal_visual_bell_soft_flash_color(bell_accent: u32, progress: f32) -> u32 {
+    // Use immediate attack with smooth decay so BEL is visible on the first frame
+    // while keeping text legible across both light and dark themes.
+    let fade = (1.0 - progress.clamp(0.0, 1.0)).powf(1.6);
+    let alpha = (fade * TERMINAL_VISUAL_BELL_MAX_SOFT_ALPHA)
         .round()
         .clamp(0.0, 255.0) as u8;
-    serial_color_alpha(bell_background, alpha)
+    serial_color_alpha(bell_accent, alpha)
 }
 
 fn terminal_cursor_shape_for_render(
@@ -463,9 +465,10 @@ impl Render for TerminalPane {
         });
         let bell_style = self.preferences.bell_style;
         let bell_accent = self.theme.tokens.ui.accent;
-        let bell_flash_layer = bell_progress.and_then(|progress| {
-            (bell_style == TerminalBellStyle::SoftFlash).then(|| {
-                // Keep the soft flash above image backgrounds but below terminal text.
+        let bell_overlay_layer = bell_progress.and_then(|progress| match bell_style {
+            TerminalBellStyle::SoftFlash => Some(
+                // Paint above the terminal element so opaque terminal backgrounds and
+                // full-screen TUI cell fills cannot hide the soft flash.
                 div()
                     .absolute()
                     .top_0()
@@ -473,12 +476,10 @@ impl Render for TerminalPane {
                     .bottom_0()
                     .left_0()
                     .bg(rgba(terminal_visual_bell_soft_flash_color(
-                        self.theme.bell_background,
+                        bell_accent,
                         progress,
-                    )))
-            })
-        });
-        let bell_overlay_layer = bell_progress.and_then(|progress| match bell_style {
+                    ))),
+            ),
             TerminalBellStyle::EdgeGlow => {
                 let decay = (1.0 - progress).powi(2);
                 let border_alpha = (decay * 210.0).round().clamp(0.0, 255.0) as u8;
@@ -873,7 +874,6 @@ impl Render for TerminalPane {
             )
             .when_some(background_layer, |pane, background| pane.child(background))
             .when_some(background_scrim, |pane, scrim| pane.child(scrim))
-            .when_some(bell_flash_layer, |pane, flash| pane.child(flash))
             .child(
                 div()
                     .absolute()
@@ -4247,5 +4247,21 @@ mod tests {
             input.as_deref(),
             Some("'/Applications/Visual Studio Code.app' '/tmp/it'\\''s ready\nnext' ")
         );
+    }
+
+    #[test]
+    fn soft_flash_visual_bell_starts_visible_and_fades_to_transparent() {
+        let accent = 0x58a6ff;
+        let start = super::terminal_visual_bell_soft_flash_color(accent, 0.0);
+        let mid = super::terminal_visual_bell_soft_flash_color(accent, 0.5);
+        let end = super::terminal_visual_bell_soft_flash_color(accent, 1.0);
+
+        assert_eq!(start >> 8, accent);
+        assert_eq!(
+            start & 0xff,
+            super::TERMINAL_VISUAL_BELL_MAX_SOFT_ALPHA as u32
+        );
+        assert!((mid & 0xff) > 0 && (mid & 0xff) < (start & 0xff));
+        assert_eq!(end & 0xff, 0);
     }
 }
