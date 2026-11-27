@@ -215,19 +215,13 @@ async fn profiler_loop(
             return;
         }
     };
-    let command = format!("{}\n", platform.scan_command());
+    let scan_command = platform.scan_command();
+    let shell_command = format!("{scan_command}\n");
     let init_command = match platform {
         RemotePortScanPlatform::Windows => PROFILER_INIT_WINDOWS,
         _ => PROFILER_INIT_UNIX,
     };
-    let mut shell = match open_profiler_shell(&ssh_connection, init_command).await {
-        Ok(shell) => shell,
-        Err(error) => {
-            tracing::warn!("failed to start port detection profiler {connection_id}: {error}");
-            lifecycle.store(ProfilerLifecycle::Degraded.as_u8(), Ordering::Release);
-            return;
-        }
-    };
+    let mut transport = open_profiler_transport(&ssh_connection, platform, init_command).await;
 
     let mut previous_ports = HashSet::new();
     let mut initial_scan = true;
@@ -247,10 +241,52 @@ async fn profiler_loop(
                     tracing::warn!("port detection profiler degraded for {connection_id} after {consecutive_failures} consecutive failures");
                     continue;
                 }
-                let output = match shell
-                    .sample_until(&command, PROFILER_END_MARKER, PROFILER_SAMPLE_TIMEOUT, PORT_SCAN_MAX_OUTPUT_SIZE)
-                    .await
-                {
+                let sample_result = match &mut transport {
+                    ProfilerTransport::Exec => ssh_connection
+                        .run_command(scan_command, PROFILER_SAMPLE_TIMEOUT, PORT_SCAN_MAX_OUTPUT_SIZE)
+                        .await,
+                    ProfilerTransport::Shell(shell) => {
+                        match shell
+                            .sample_until(
+                                &shell_command,
+                                PROFILER_END_MARKER,
+                                PROFILER_SAMPLE_TIMEOUT,
+                                PORT_SCAN_MAX_OUTPUT_SIZE,
+                            )
+                            .await
+                        {
+                            Ok(output) => Ok(output),
+                            Err(error) if platform != RemotePortScanPlatform::Windows => {
+                                // Non-PTY persistent shells block on login shells such as Fish.
+                                // Promote to one-shot exec if exec succeeds so periodic scans stop timing out.
+                                match ssh_connection
+                                    .run_command(
+                                        scan_command,
+                                        PROFILER_SAMPLE_TIMEOUT,
+                                        PORT_SCAN_MAX_OUTPUT_SIZE,
+                                    )
+                                    .await
+                                {
+                                    Ok(output) => {
+                                        let _ = tokio::time::timeout(
+                                            PROFILER_SAMPLE_TIMEOUT,
+                                            shell.close(),
+                                        )
+                                        .await;
+                                        transport = ProfilerTransport::Exec;
+                                        tracing::debug!(
+                                            "port detection profiler switched to one-shot exec for {connection_id} after persistent shell error: {error}"
+                                        );
+                                        Ok(output)
+                                    }
+                                    Err(_) => Err(error),
+                                }
+                            }
+                            Err(error) => Err(error),
+                        }
+                    }
+                };
+                let output = match sample_result {
                     Ok(output) => {
                         consecutive_failures = 0;
                         lifecycle.store(ProfilerLifecycle::Running.as_u8(), Ordering::Release);
@@ -261,11 +297,11 @@ async fn profiler_loop(
                         tracing::warn!(
                             "port detection profiler sample failed for {connection_id} ({consecutive_failures}/{PROFILER_MAX_CONSECUTIVE_FAILURES}): {error}"
                         );
-                        if let Ok(new_shell) = open_profiler_shell(&ssh_connection, init_command)
-                            .await
-                        {
-                            shell = new_shell;
-                            tracing::debug!("port detection profiler reopened shell channel for {connection_id}");
+                        if matches!(transport, ProfilerTransport::Shell(_)) {
+                            transport =
+                                open_profiler_transport(&ssh_connection, platform, init_command)
+                                    .await;
+                            tracing::debug!("port detection profiler reopened sampling transport for {connection_id}");
                         }
                         continue;
                     }
@@ -329,8 +365,34 @@ async fn profiler_loop(
             }
         }
     }
-    let _ = shell.close().await;
+    if let ProfilerTransport::Shell(mut shell) = transport {
+        let _ = shell.close().await;
+    }
     lifecycle.store(ProfilerLifecycle::Stopped.as_u8(), Ordering::Release);
+}
+
+enum ProfilerTransport {
+    Shell(oxideterm_ssh::SshShellChannel),
+    Exec,
+}
+
+async fn open_profiler_transport(
+    ssh_connection: &SshConnectionHandle,
+    platform: RemotePortScanPlatform,
+    init_command: &str,
+) -> ProfilerTransport {
+    // Non-PTY Fish buffers stdin until EOF, so persistent shell channels time out
+    // on every tick. Use one-shot exec directly when Fish is already detected.
+    if platform != RemotePortScanPlatform::Windows && ssh_connection.remote_login_shell_is_fish() {
+        return ProfilerTransport::Exec;
+    }
+    match open_profiler_shell(ssh_connection, init_command).await {
+        Ok(shell) => ProfilerTransport::Shell(shell),
+        Err(error) => {
+            tracing::debug!("port detection profiler using one-shot exec fallback: {error}");
+            ProfilerTransport::Exec
+        }
+    }
 }
 
 async fn open_profiler_shell(

@@ -4,7 +4,7 @@
 use super::model::{ProjectManifestEntry, ProjectProbeError, ProjectProbeOutcome};
 use super::parse::{interpret_project_manifest_entries, project_manifest_file_names};
 use crate::cwd::{CurrentDirectorySource, expand_local_home_path};
-use crate::shell::shell_quote;
+use crate::shell::{encoded_posix_shell_command, shell_quote};
 
 pub const PROJECT_SHELL_PROBE_SENTINEL: &str = "OXIDETERM_PROJECT_PROBE_V1";
 pub const PROJECT_PROBE_MAX_ANCESTORS: usize = 12;
@@ -41,11 +41,11 @@ pub fn remote_project_cwd_source_is_trusted(source: CurrentDirectorySource) -> b
 
 /// Build the POSIX shell command used by SSH node exec probes.
 pub fn remote_shell_project_probe_command(cwd: &str) -> String {
-    format!(
+    encoded_posix_shell_command(&format!(
         "{}{}",
         remote_project_probe_cd_prelude(cwd),
         remote_project_probe_body()
-    )
+    ))
 }
 
 /// Interpret the NUL-delimited output from `remote_shell_project_probe_command`.
@@ -193,11 +193,13 @@ mod tests {
     #[test]
     fn remote_project_probe_quotes_cwd_and_uses_manifest_names() {
         let command = remote_shell_project_probe_command("~/Project Dir");
-        assert!(command.contains("cd -- \"$HOME\"/'Project Dir'"));
-        assert!(command.contains(PROJECT_SHELL_PROBE_SENTINEL));
-        assert!(command.contains("'package.json'"));
-        assert!(command.contains("'Cargo.toml'"));
-        assert!(command.contains("head -c 65536"));
+        assert!(command.starts_with("/bin/sh -c "));
+        let script = crate::shell::decoded_posix_script(&command);
+        assert!(script.contains("cd -- \"$HOME\"/'Project Dir'"));
+        assert!(script.contains(PROJECT_SHELL_PROBE_SENTINEL));
+        assert!(script.contains("'package.json'"));
+        assert!(script.contains("'Cargo.toml'"));
+        assert!(script.contains("head -c 65536"));
     }
 
     #[test]

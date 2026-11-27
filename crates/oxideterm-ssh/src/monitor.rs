@@ -11,6 +11,7 @@ use oxideterm_connection_monitor::{
 use crate::{
     ConnectionConsumer, DedicatedConnectionLease, ManagedKeyResolver, NodeId, NodeRouter,
     SshConnectionHandle, SshPromptHandler, SshShellChannel, SshTransportError,
+    connection_registry::is_fish_login_shell,
 };
 
 pub struct DedicatedNodeResourceSampler {
@@ -56,15 +57,29 @@ impl ResourceSampler for DedicatedNodeResourceSampler {
                     .map_err(|error| error.to_string())?,
             );
             let connection = lease.handle().clone();
+            // Dedicated connections do not run remote_env probing themselves; consult the
+            // node's existing shared connection so Fish login shells avoid non-PTY stdin
+            // buffering (which stalls until EOF) on single-channel leases.
+            let fish_shell = connection.remote_login_shell_is_fish()
+                || self
+                    .router
+                    .node_remote_env(&self.node_id)
+                    .and_then(|env| env.shell)
+                    .is_some_and(|shell| is_fish_login_shell(&shell));
+            let effective_init = if fish_shell {
+                fish_sampling_init_command(init_command)
+            } else {
+                init_command.to_owned()
+            };
             match connection
-                .open_sampling_shell_channel(init_command, false, timeout)
+                .open_sampling_shell_channel(&effective_init, fish_shell, timeout)
                 .await
             {
                 Ok(shell) => Ok(Box::new(SshResourceSampleShell {
                     shell,
                     fallback: None,
-                    init_command: init_command.to_owned(),
-                    pty_attempted: false,
+                    init_command: effective_init,
+                    pty_attempted: fish_shell,
                     _connection_owner: Some(lease),
                 }) as Box<dyn ResourceSampleShell>),
                 Err(_) => Ok(Box::new(SshExecResourceSampleShell {
@@ -83,6 +98,14 @@ impl ResourceSampler for SshConnectionHandle {
         timeout: Duration,
     ) -> ResourceSamplerFuture<'a, Result<Box<dyn ResourceSampleShell>, String>> {
         Box::pin(async move {
+            // Non-PTY Fish buffers stdin until EOF, which would stall the first sample
+            // for an entire timeout before falling back. Use one-shot exec directly.
+            if self.remote_login_shell_is_fish() {
+                return Ok(Box::new(SshExecResourceSampleShell {
+                    connection: self.clone(),
+                    _connection_owner: None,
+                }) as Box<dyn ResourceSampleShell>);
+            }
             match self
                 .open_sampling_shell_channel(init_command, false, timeout)
                 .await
@@ -239,4 +262,38 @@ async fn sample_exec(
         ));
     }
     Ok(output.stdout)
+}
+
+fn fish_sampling_init_command(init_command: &str) -> String {
+    // Silence echo and replace Fish with /bin/sh on the PTY before running the
+    // POSIX sampling init sequence so Fish prompts and syntax do not interfere.
+    if init_command.is_empty() {
+        "stty -echo 2>/dev/null; exec /bin/sh\n".to_string()
+    } else {
+        format!("stty -echo 2>/dev/null; exec /bin/sh\n{init_command}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fish_shell_detection_and_pty_init_handoff() {
+        for fish in [
+            "/usr/bin/fish",
+            "/opt/homebrew/bin/fish",
+            "fish",
+            "FISH.EXE ",
+        ] {
+            assert!(is_fish_login_shell(fish), "{fish}");
+        }
+        for other in ["/bin/bash", "/bin/zsh", "/usr/bin/sh", "starfish", ""] {
+            assert!(!is_fish_login_shell(other), "{other}");
+        }
+        assert_eq!(
+            fish_sampling_init_command("export PS1=''\n"),
+            "stty -echo 2>/dev/null; exec /bin/sh\nexport PS1=''\n"
+        );
+    }
 }

@@ -25,7 +25,7 @@ pub(super) fn action_command(
         return Err("The launchd task has no valid service target.".into());
     }
     Ok(ScheduledTaskActionCommand {
-        command: posix_shell_command(&format!("launchctl {verb} {}", shell_quote(&target))),
+        command: encoded_posix_shell_command(&format!("launchctl {verb} {}", shell_quote(&target))),
         capability: ScheduledTaskCapability::Partial,
     })
 }

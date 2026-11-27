@@ -1,7 +1,7 @@
 // Copyright (C) 2026 OxideTerm contributors.
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::shell::shell_quote;
+use crate::shell::{encoded_posix_shell_command, shell_quote};
 
 pub const SHELL_PROBE_SENTINEL: &str = "OXIDETERM_GIT_PROBE_V1";
 pub const SHELL_BRANCH_LIST_SENTINEL: &str = "OXIDETERM_GIT_BRANCH_LIST_V1";
@@ -50,30 +50,30 @@ pub fn git_staged_diff_patch_args() -> GitProbeCommandArgs {
 /// The protocol uses NUL-separated records so paths and branch names containing
 /// tabs or spaces do not need ad-hoc escaping in the parser.
 pub fn remote_shell_probe_command(cwd: &str) -> String {
-    format!(
+    encoded_posix_shell_command(&format!(
         "{}{}{}",
         remote_shell_cd_prelude(cwd, SHELL_PROBE_SENTINEL),
         shell_operation_probe_body(),
         shell_probe_body(),
-    )
+    ))
 }
 
 /// Build a POSIX shell command that lists local branches and linked worktrees remotely.
 pub fn remote_shell_branch_list_command(cwd: &str) -> String {
-    format!(
+    encoded_posix_shell_command(&format!(
         "{}{}",
         remote_shell_cd_prelude(cwd, SHELL_BRANCH_LIST_SENTINEL),
         shell_branch_list_body(),
-    )
+    ))
 }
 
 /// Build a POSIX shell command that captures staged diff content remotely.
 pub fn remote_shell_staged_diff_command(cwd: &str) -> String {
-    format!(
+    encoded_posix_shell_command(&format!(
         "{}{}",
         remote_shell_cd_prelude(cwd, SHELL_STAGED_DIFF_SENTINEL),
         shell_staged_diff_body(),
-    )
+    ))
 }
 
 fn remote_shell_cd_prelude(cwd: &str, sentinel: &str) -> String {
@@ -192,31 +192,37 @@ mod tests {
             ("~/project dir", "cd -- \"$HOME\"/'project dir'"),
         ] {
             let command = remote_shell_probe_command(cwd);
-            assert!(command.contains(quoted), "{cwd}");
-            assert!(command.contains(SHELL_PROBE_SENTINEL));
-            assert!(command.contains("GIT_OPTIONAL_LOCKS=0"));
-            assert!(command.contains("git_operation_state()"));
-            assert!(!command.contains("/home/"));
+            assert!(command.starts_with("/bin/sh -c "), "{cwd}");
+            let script = crate::shell::decoded_posix_script(&command);
+            assert!(script.contains(quoted), "{cwd}");
+            assert!(script.contains(SHELL_PROBE_SENTINEL));
+            assert!(script.contains("GIT_OPTIONAL_LOCKS=0"));
+            assert!(script.contains("git_operation_state()"));
+            assert!(!script.contains("/home/"));
         }
     }
 
     #[test]
     fn remote_branch_list_command_quotes_cwd() {
         let list = remote_shell_branch_list_command("/tmp/project");
-        assert!(list.contains(SHELL_BRANCH_LIST_SENTINEL));
-        assert!(list.contains("git branch --format='%(HEAD)%09%(refname:short)'"));
-        assert!(list.contains("git worktree list --porcelain"));
-        assert!(list.contains("tab=$(printf '\\t')"));
-        assert!(list.contains("emit_worktree_record()"));
-        assert!(list.contains("*/.git/modules/*|*/.git/worktrees/*"));
+        assert!(list.starts_with("/bin/sh -c "));
+        let script = crate::shell::decoded_posix_script(&list);
+        assert!(script.contains(SHELL_BRANCH_LIST_SENTINEL));
+        assert!(script.contains("git branch --format='%(HEAD)%09%(refname:short)'"));
+        assert!(script.contains("git worktree list --porcelain"));
+        assert!(script.contains("tab=$(printf '\\t')"));
+        assert!(script.contains("emit_worktree_record()"));
+        assert!(script.contains("*/.git/modules/*|*/.git/worktrees/*"));
     }
 
     #[test]
     fn remote_staged_diff_command_quotes_cwd_and_emits_sentinel() {
         let command = remote_shell_staged_diff_command("/tmp/Oxide Term");
-        assert!(command.contains("cd -- '/tmp/Oxide Term'"));
-        assert!(command.contains(SHELL_STAGED_DIFF_SENTINEL));
-        assert!(command.contains("git diff --cached --stat --"));
-        assert!(command.contains("git diff --cached --patch --no-ext-diff --"));
+        assert!(command.starts_with("/bin/sh -c "));
+        let script = crate::shell::decoded_posix_script(&command);
+        assert!(script.contains("cd -- '/tmp/Oxide Term'"));
+        assert!(script.contains(SHELL_STAGED_DIFF_SENTINEL));
+        assert!(script.contains("git diff --cached --stat --"));
+        assert!(script.contains("git diff --cached --patch --no-ext-diff --"));
     }
 }

@@ -525,6 +525,12 @@ impl NodeRouter {
         self.runtime.connection_id_for_node(node_id)
     }
 
+    pub(crate) fn node_remote_env(&self, node_id: &NodeId) -> Option<crate::RemoteEnvInfo> {
+        self.connection_id_for_node(node_id)
+            .and_then(|connection_id| self.registry.get(&connection_id))
+            .and_then(|handle| handle.remote_env())
+    }
+
     /// Keeps the exact transport alive while work crosses a queue or an async ownership boundary.
     pub fn lease_connection_handoff(
         &self,

@@ -636,6 +636,12 @@ impl SshConnectionHandle {
         self.entry.remote_env()
     }
 
+    pub fn remote_login_shell_is_fish(&self) -> bool {
+        self.remote_env()
+            .and_then(|env| env.shell)
+            .is_some_and(|shell| is_fish_login_shell(&shell))
+    }
+
     pub fn remote_env_detection_running(&self) -> bool {
         self.entry.remote_env.read().is_none()
             && self
@@ -2054,6 +2060,12 @@ fn remote_env_timeouts_for_rtt(rtt: Option<Duration>) -> RemoteEnvTimeouts {
         phase_b,
         total: phase_a + phase_b,
     }
+}
+
+pub(crate) fn is_fish_login_shell(shell: &str) -> bool {
+    let trimmed = shell.trim();
+    let binary = trimmed.rsplit(['/', '\\']).next().unwrap_or(trimmed);
+    binary.eq_ignore_ascii_case("fish") || binary.eq_ignore_ascii_case("fish.exe")
 }
 
 pub(crate) async fn detect_remote_env_for_handle(handle: &SshConnectionHandle) -> RemoteEnvInfo {

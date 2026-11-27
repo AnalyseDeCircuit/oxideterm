@@ -3,7 +3,10 @@ use std::hash::{Hash, Hasher};
 
 use serde::{Deserialize, Serialize};
 
-use crate::shell::{posix_shell_command, powershell_quote, shell_quote, windows_encoded_command};
+use crate::shell::{
+    encoded_posix_shell_command, posix_shell_command, powershell_quote, shell_quote,
+    windows_encoded_command,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -392,27 +395,27 @@ pub fn build_service_logs_command(
     };
     let (command, capability) = match normalized_service_os(os_type) {
         ServiceOs::LinuxSystemd => (
-            format!(
+            encoded_posix_shell_command(&format!(
                 "journalctl -u {} -n 200 --no-pager 2>&1 || sudo -n journalctl -u {} -n 200 --no-pager",
                 shell_quote(service_id),
                 shell_quote(service_id)
-            ),
+            )),
             ServiceCommandCapability::Full,
         ),
         ServiceOs::MacLaunchctl => (
-            format!(
+            encoded_posix_shell_command(&format!(
                 "log show --last 1h --style compact --predicate {} 2>&1",
                 shell_quote(&format!(
                     "process == \"{service_id}\" OR sender == \"{service_id}\" OR eventMessage CONTAINS \"{service_id}\""
                 ))
-            ),
+            )),
             ServiceCommandCapability::Partial,
         ),
         ServiceOs::Bsd => (
-            format!(
+            encoded_posix_shell_command(&format!(
                 "tail -n 200 /var/log/messages 2>/dev/null | grep -F {} || true",
                 shell_quote(service_id)
-            ),
+            )),
             ServiceCommandCapability::Partial,
         ),
         ServiceOs::Windows => (
@@ -445,23 +448,26 @@ pub fn build_service_follow_logs_command(
     };
     let (command, capability) = match normalized_service_os(os_type) {
         ServiceOs::LinuxSystemd => (
-            format!("journalctl -fu {} --no-pager", shell_quote(service_id)),
+            encoded_posix_shell_command(&format!(
+                "journalctl -fu {} --no-pager",
+                shell_quote(service_id)
+            )),
             ServiceCommandCapability::Full,
         ),
         ServiceOs::MacLaunchctl => (
-            format!(
+            encoded_posix_shell_command(&format!(
                 "log stream --style compact --predicate {}",
                 shell_quote(&format!(
                     "process == \"{service_id}\" OR sender == \"{service_id}\" OR eventMessage CONTAINS \"{service_id}\""
                 ))
-            ),
+            )),
             ServiceCommandCapability::Partial,
         ),
         ServiceOs::Bsd => (
-            format!(
+            encoded_posix_shell_command(&format!(
                 "tail -f /var/log/messages 2>/dev/null | grep --line-buffered -F {}",
                 shell_quote(service_id)
-            ),
+            )),
             ServiceCommandCapability::Partial,
         ),
         ServiceOs::Windows => (
@@ -651,7 +657,7 @@ fn build_systemd_service_action_command(service_id: &str, action: &ServiceAction
     };
     let service = shell_quote(service_id);
     let success = service_action_success_text(service_id, action);
-    posix_shell_command(&format!(
+    encoded_posix_shell_command(&format!(
         "if systemctl {verb} {service} 2>&1 || sudo -n systemctl {verb} {service} 2>&1; then echo {}; else status=$?; echo 'Service action failed' >&2; exit $status; fi",
         shell_quote(&success)
     ))
@@ -676,7 +682,7 @@ fn build_launchctl_service_action_command(
             );
         }
     };
-    Ok(posix_shell_command(&format!(
+    Ok(encoded_posix_shell_command(&format!(
         "launchctl {verb} {}",
         shell_quote(service_id)
     )))
@@ -707,7 +713,7 @@ fn build_bsd_service_action_command(service_id: &str, action: &ServiceActionKind
         ),
     };
     let success = service_action_success_text(service_id, action);
-    posix_shell_command(&format!(
+    encoded_posix_shell_command(&format!(
         "if {operation} 2>&1; then echo {}; else status=$?; echo 'Service action failed' >&2; exit $status; fi",
         shell_quote(&success)
     ))
@@ -1006,6 +1012,18 @@ mod tests {
                 .contains("systemctl restart 'sshd.service'")
         );
 
+        let escaped_unit = build_service_action_command(
+            "Linux",
+            r"dev-disk-by\x2duuid-demo.device",
+            ServiceActionKind::Restart,
+        )
+        .unwrap();
+        assert!(!escaped_unit.command.contains("\\\\"));
+        assert!(
+            crate::shell::decoded_posix_script(&escaped_unit.command)
+                .contains(r"systemctl restart 'dev-disk-by\x2duuid-demo.device'")
+        );
+
         let mac = build_service_action_command(
             "macOS",
             "gui/501/com.example.agent",
@@ -1013,7 +1031,6 @@ mod tests {
         )
         .unwrap();
         assert_eq!(mac.capability, ServiceCommandCapability::Partial);
-        assert!(mac.command.contains("launchctl disable"));
         assert_eq!(
             crate::shell::decoded_posix_script(&mac.command),
             "launchctl disable 'gui/501/com.example.agent'"
@@ -1040,10 +1057,21 @@ mod tests {
 
     #[test]
     fn service_logs_use_journalctl_for_linux_follow() {
-        let command = build_service_follow_logs_command("Linux", "sshd.service").unwrap();
+        let logs = build_service_logs_command("Linux", r"dev-disk-by\x2duuid-demo.device").unwrap();
+        assert_eq!(logs.capability, ServiceCommandCapability::Full);
+        assert!(logs.command.starts_with("/bin/sh -c "));
+        assert!(
+            crate::shell::decoded_posix_script(&logs.command)
+                .contains(r"journalctl -u 'dev-disk-by\x2duuid-demo.device' -n 200 --no-pager")
+        );
 
+        let command = build_service_follow_logs_command("Linux", "sshd.service").unwrap();
         assert_eq!(command.capability, ServiceCommandCapability::Full);
-        assert!(command.command.contains("journalctl -fu 'sshd.service'"));
+        assert!(command.command.starts_with("/bin/sh -c "));
+        assert!(
+            crate::shell::decoded_posix_script(&command.command)
+                .contains("journalctl -fu 'sshd.service'")
+        );
     }
 
     #[test]

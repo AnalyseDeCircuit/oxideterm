@@ -6,7 +6,7 @@ pub(super) fn action_command(verb: &str, id: &str) -> Result<String, String> {
         .and_then(|id| id.split_once(':'))
         .filter(|(kind, name)| matches!(*kind, "formula" | "cask") && !name.is_empty())
         .ok_or_else(|| "Refresh Homebrew packages before choosing this action.".to_string())?;
-    Ok(posix_shell_command(&format!(
+    Ok(encoded_posix_shell_command(&format!(
         "HOMEBREW_NO_AUTO_UPDATE=1 brew {verb} --{kind} -- {}",
         shell_quote(name)
     )))

@@ -15,28 +15,32 @@ pub const REMOTE_OS_PROBE_UNIX: &str = "echo '===DETECT==='; uname -s; echo '===
 pub const REMOTE_OS_PROBE_WINDOWS: &str = "powershell -NoProfile -Command \"Write-Output '===DETECT==='; Write-Output ('PLATFORM=' + [System.Environment]::OSVersion.Platform); Write-Output ('OS=' + [System.Environment]::OSVersion.VersionString); Write-Output '===END==='\"";
 
 pub const PORT_SCAN_COMMAND_LINUX: &str = concat!(
-    "echo '===PORTS==='; ",
+    "/bin/sh -c '",
+    "echo ===PORTS===; ",
     "((ss -tlnp 2>/dev/null || netstat -tlnp 2>/dev/null) | grep -i listen || true); ",
-    "echo '===PORTS_END==='; ",
-    "echo '===DOCKER==='; ",
-    "((docker ps --format '{{.ID}}\t{{.Names}}\t{{.Ports}}' 2>/dev/null || sudo -n docker ps --format '{{.ID}}\t{{.Names}}\t{{.Ports}}' 2>/dev/null) || true); ",
-    "echo '===DOCKER_END==='; ",
-    "echo '===END==='"
+    "echo ===PORTS_END===; ",
+    "echo ===DOCKER===; ",
+    "((docker ps --format \"{{.ID}}\\t{{.Names}}\\t{{.Ports}}\" 2>/dev/null || sudo -n docker ps --format \"{{.ID}}\\t{{.Names}}\\t{{.Ports}}\" 2>/dev/null) || true); ",
+    "echo ===DOCKER_END===; ",
+    "echo ===END===",
+    "'"
 );
 
 pub const PORT_SCAN_COMMAND_MACOS: &str = concat!(
-    "echo '===PORTS==='; ",
+    "/bin/sh -c '",
+    "echo ===PORTS===; ",
     "((lsof -iTCP -sTCP:LISTEN -nP 2>/dev/null | tail -n +2) || true); ",
-    "echo '===PORTS_END==='; ",
-    "echo '===DOCKER==='; ",
-    "((docker ps --format '{{.ID}}\t{{.Names}}\t{{.Ports}}' 2>/dev/null || sudo -n docker ps --format '{{.ID}}\t{{.Names}}\t{{.Ports}}' 2>/dev/null) || true); ",
-    "echo '===DOCKER_END==='; ",
-    "echo '===END==='"
+    "echo ===PORTS_END===; ",
+    "echo ===DOCKER===; ",
+    "((docker ps --format \"{{.ID}}\\t{{.Names}}\\t{{.Ports}}\" 2>/dev/null || sudo -n docker ps --format \"{{.ID}}\\t{{.Names}}\\t{{.Ports}}\" 2>/dev/null) || true); ",
+    "echo ===DOCKER_END===; ",
+    "echo ===END===",
+    "'"
 );
 
 pub const PORT_SCAN_COMMAND_WINDOWS: &str = "echo '===PORTS==='; powershell -NoProfile -Command \"Get-NetTCPConnection -State Listen 2>$null | Select-Object LocalAddress,LocalPort,OwningProcess | Format-Table -HideTableHeaders\" 2>/dev/null; echo '===PORTS_END==='; echo '===END==='";
 
-pub const PORT_SCAN_COMMAND_FREEBSD: &str = "echo '===PORTS==='; sockstat -4 -6 -l -P tcp 2>/dev/null | tail -n +2; echo '===PORTS_END==='; echo '===END==='";
+pub const PORT_SCAN_COMMAND_FREEBSD: &str = "/bin/sh -c 'echo ===PORTS===; sockstat -4 -6 -l -P tcp 2>/dev/null | tail -n +2; echo ===PORTS_END===; echo ===END==='";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RemotePortScanPlatform {
@@ -547,5 +551,25 @@ abc\tweb\t0.0.0.0:3000->3000/tcp, :::3000->3000/tcp
         assert!(ignored.new_ports.is_empty());
         assert_eq!(ignored.closed_ports.len(), 1);
         assert_eq!(ignored.closed_ports[0].port, 22);
+    }
+
+    #[test]
+    fn unix_port_scan_commands_wrap_posix_body_for_non_posix_login_shells() {
+        for platform in [
+            RemotePortScanPlatform::Linux,
+            RemotePortScanPlatform::MacOs,
+            RemotePortScanPlatform::FreeBsd,
+        ] {
+            let command = platform.scan_command();
+            let inner = command
+                .strip_prefix("/bin/sh -c '")
+                .and_then(|rest| rest.strip_suffix('\''))
+                .expect("Unix port scan command must run via /bin/sh -c");
+            assert!(
+                !inner.contains('\'') && !inner.contains("\\\\"),
+                "outer single-quoted payload must avoid Fish-special escapes: {platform:?}"
+            );
+            assert!(inner.contains("echo ===END==="), "{platform:?}");
+        }
     }
 }

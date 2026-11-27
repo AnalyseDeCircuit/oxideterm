@@ -3,7 +3,7 @@ use std::hash::{Hash, Hasher};
 
 use serde::{Deserialize, Serialize};
 
-use crate::shell::{posix_shell_command, shell_quote};
+use crate::shell::{encoded_posix_shell_command, posix_shell_command, shell_quote};
 
 mod homebrew;
 
@@ -216,24 +216,32 @@ pub fn build_package_inspect_command(
             if package_name.starts_with("brew:") {
                 homebrew::action_command("info", package_name)?
             } else {
-                format!("HOMEBREW_NO_AUTO_UPDATE=1 brew info -- {quoted}")
+                encoded_posix_shell_command(&format!(
+                    "HOMEBREW_NO_AUTO_UPDATE=1 brew info -- {quoted}"
+                ))
             },
             PackageCommandCapability::Partial,
         ),
         (PackageOs::Linux | PackageOs::Unknown, "apt") => (
-            format!("apt show {quoted} 2>/dev/null || dpkg -s {quoted}"),
+            encoded_posix_shell_command(&format!(
+                "apt show {quoted} 2>/dev/null || dpkg -s {quoted}"
+            )),
             PackageCommandCapability::Partial,
         ),
         (PackageOs::Linux | PackageOs::Unknown, "dnf") => (
-            format!("dnf --cacheonly info {quoted} || rpm -qi {quoted}"),
+            encoded_posix_shell_command(&format!(
+                "dnf --cacheonly info {quoted} || rpm -qi {quoted}"
+            )),
             PackageCommandCapability::Partial,
         ),
         (PackageOs::Linux | PackageOs::Unknown, "yum") => (
-            format!("yum --cacheonly info {quoted} || rpm -qi {quoted}"),
+            encoded_posix_shell_command(&format!(
+                "yum --cacheonly info {quoted} || rpm -qi {quoted}"
+            )),
             PackageCommandCapability::Partial,
         ),
         (PackageOs::Linux | PackageOs::Unknown, "pacman") => (
-            format!("pacman -Qi {quoted}"),
+            encoded_posix_shell_command(&format!("pacman -Qi {quoted}")),
             PackageCommandCapability::Partial,
         ),
         (PackageOs::Windows, "winget") => (
@@ -1183,8 +1191,13 @@ mod tests {
         let winget =
             build_package_inspect_command("Windows", "winget", "Microsoft.PowerShell").unwrap();
 
-        assert!(apt.command.contains("'weird'\"'\"'name'"));
-        assert!(brew.command.contains("HOMEBREW_NO_AUTO_UPDATE=1 brew info"));
+        assert!(apt.command.starts_with("/bin/sh -c "));
+        assert!(crate::shell::decoded_posix_script(&apt.command).contains("'weird'\"'\"'name'"));
+        assert!(brew.command.starts_with("/bin/sh -c "));
+        assert!(
+            crate::shell::decoded_posix_script(&brew.command)
+                .contains("HOMEBREW_NO_AUTO_UPDATE=1 brew info")
+        );
         assert_eq!(
             winget.command,
             "winget show \"Microsoft.PowerShell\" --accept-source-agreements"

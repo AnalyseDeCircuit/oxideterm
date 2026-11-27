@@ -5,7 +5,9 @@ use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
 use crate::capture::capture_failure_message;
-use crate::shell::{posix_shell_command, powershell_quote, shell_quote};
+use crate::shell::{
+    encoded_posix_shell_command, posix_shell_command, powershell_quote, shell_quote,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -195,7 +197,10 @@ pub fn build_tmux_action_command(
                     powershell_quote(&target)
                 )
             } else {
-                format!("tmux kill-session -t {}", shell_quote(&target))
+                encoded_posix_shell_command(&format!(
+                    "tmux kill-session -t {}",
+                    shell_quote(&target)
+                ))
             }
         }
         TmuxActionKind::KillWindow { target } => {
@@ -206,7 +211,10 @@ pub fn build_tmux_action_command(
                     powershell_quote(&target)
                 )
             } else {
-                format!("tmux kill-window -t {}", shell_quote(&target))
+                encoded_posix_shell_command(&format!(
+                    "tmux kill-window -t {}",
+                    shell_quote(&target)
+                ))
             }
         }
         TmuxActionKind::KillPane { target } => {
@@ -217,7 +225,7 @@ pub fn build_tmux_action_command(
                     powershell_quote(&target)
                 )
             } else {
-                format!("tmux kill-pane -t {}", shell_quote(&target))
+                encoded_posix_shell_command(&format!("tmux kill-pane -t {}", shell_quote(&target)))
             }
         }
         TmuxActionKind::RenameSession { target, name } => {
@@ -230,11 +238,11 @@ pub fn build_tmux_action_command(
                     powershell_quote(&name)
                 )
             } else {
-                format!(
+                encoded_posix_shell_command(&format!(
                     "tmux rename-session -t {} {}",
                     shell_quote(&target),
                     shell_quote(&name)
-                )
+                ))
             }
         }
         TmuxActionKind::RenameWindow { target, name } => {
@@ -247,11 +255,11 @@ pub fn build_tmux_action_command(
                     powershell_quote(&name)
                 )
             } else {
-                format!(
+                encoded_posix_shell_command(&format!(
                     "tmux rename-window -t {} {}",
                     shell_quote(&target),
                     shell_quote(&name)
-                )
+                ))
             }
         }
         TmuxActionKind::SendPaneCommand { target, command } => {
@@ -270,12 +278,12 @@ pub fn build_tmux_action_command(
                     powershell_quote(&target)
                 )
             } else {
-                format!(
+                encoded_posix_shell_command(&format!(
                     "tmux send-keys -t {} -l -- {} && tmux send-keys -t {} Enter",
                     shell_quote(&target),
                     shell_quote(&command),
                     shell_quote(&target)
-                )
+                ))
             }
         }
     };
@@ -300,11 +308,12 @@ pub fn build_tmux_rename_session_command(
             powershell_quote(name)
         )))
     } else {
-        Ok(Zeroizing::new(format!(
+        let script = Zeroizing::new(format!(
             "tmux rename-session -t {} {}",
             shell_quote(target),
             shell_quote(name)
-        )))
+        ));
+        Ok(Zeroizing::new(encoded_posix_shell_command(&script)))
     }
 }
 
@@ -323,11 +332,12 @@ pub fn build_tmux_rename_window_command(
             powershell_quote(name)
         )))
     } else {
-        Ok(Zeroizing::new(format!(
+        let script = Zeroizing::new(format!(
             "tmux rename-window -t {} {}",
             shell_quote(target),
             shell_quote(name)
-        )))
+        ));
+        Ok(Zeroizing::new(encoded_posix_shell_command(&script)))
     }
 }
 
@@ -352,12 +362,13 @@ pub fn build_tmux_send_pane_command(
             powershell_quote(target)
         )))
     } else {
-        Ok(Zeroizing::new(format!(
+        let script = Zeroizing::new(format!(
             "tmux send-keys -t {} -l -- {} && tmux send-keys -t {} Enter",
             shell_quote(target),
             shell_quote(command),
             shell_quote(target)
-        )))
+        ));
+        Ok(Zeroizing::new(encoded_posix_shell_command(&script)))
     }
 }
 
@@ -1068,14 +1079,20 @@ mod tests {
             },
         );
 
-        assert_eq!(kill_window.command, "tmux kill-window -t '@1; rm -rf /'");
-        assert_eq!(kill_pane.command, "tmux kill-pane -t '%2'");
         assert_eq!(
-            rename.command,
+            crate::shell::decoded_posix_script(&kill_window.command),
+            "tmux kill-window -t '@1; rm -rf /'"
+        );
+        assert_eq!(
+            crate::shell::decoded_posix_script(&kill_pane.command),
+            "tmux kill-pane -t '%2'"
+        );
+        assert_eq!(
+            crate::shell::decoded_posix_script(&rename.command),
             "tmux rename-window -t '@1' 'build'\"'\"'s logs'"
         );
         assert_eq!(
-            send.command,
+            crate::shell::decoded_posix_script(&send.command),
             "tmux send-keys -t '%3' -l -- 'echo '\"'\"'safe'\"'\"' && pwd' && tmux send-keys -t '%3' Enter"
         );
         assert!(invalid_send.is_err());
@@ -1092,12 +1109,12 @@ mod tests {
         let invalid_command = build_tmux_send_pane_command("Linux", "%3", "echo ok\nwhoami");
 
         assert_eq!(
-            rename_session.as_str(),
+            crate::shell::decoded_posix_script(rename_session.as_str()),
             "tmux rename-session -t '$1' 'work'\"'\"'s shell'"
         );
         assert!(rename_window.as_str().contains("'deploy''s logs'"));
         assert_eq!(
-            send_command.as_str(),
+            crate::shell::decoded_posix_script(send_command.as_str()),
             "tmux send-keys -t '%3' -l -- 'printf '\"'\"'%s'\"'\"' \"$TOKEN\"' && tmux send-keys -t '%3' Enter"
         );
         assert!(invalid_command.is_err());

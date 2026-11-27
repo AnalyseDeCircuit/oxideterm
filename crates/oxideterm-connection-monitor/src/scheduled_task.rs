@@ -4,7 +4,9 @@ use std::hash::{Hash, Hasher};
 use serde::{Deserialize, Serialize};
 
 use crate::capture::capture_failure_message;
-use crate::shell::{posix_shell_command, powershell_quote, shell_quote};
+use crate::shell::{
+    encoded_posix_shell_command, posix_shell_command, powershell_quote, shell_quote,
+};
 
 mod macos;
 
@@ -180,40 +182,48 @@ pub fn build_scheduled_task_logs_command(
                     return Err("Scheduled task has no systemd unit.".to_string());
                 }
                 let command = if follow {
-                    format!("journalctl -fu {} --no-pager", shell_quote(unit))
+                    encoded_posix_shell_command(&format!(
+                        "journalctl -fu {} --no-pager",
+                        shell_quote(unit)
+                    ))
                 } else {
-                    format!("journalctl -u {} -n {limit} --no-pager", shell_quote(unit))
+                    encoded_posix_shell_command(&format!(
+                        "journalctl -u {} -n {limit} --no-pager",
+                        shell_quote(unit)
+                    ))
                 };
                 (command, ScheduledTaskCapability::Full)
             } else {
                 let grep = shell_quote(&task.name);
                 (
-                    format!(
+                    encoded_posix_shell_command(&format!(
                         "if [ -r /var/log/syslog ]; then grep -F {grep} /var/log/syslog | tail -n {limit}; elif [ -r /var/log/cron ]; then grep -F {grep} /var/log/cron | tail -n {limit}; else echo 'Cron logs are not available for this host.'; fi"
-                    ),
+                    )),
                     ScheduledTaskCapability::Partial,
                 )
             }
         }
         ScheduledTaskOs::MacOs => (
             if follow {
-                format!(
+                encoded_posix_shell_command(&format!(
                     "log stream --style compact --predicate {}",
                     shell_quote(&format!("process CONTAINS[c] \"{}\"", task.name))
-                )
+                ))
             } else {
-                format!(
+                encoded_posix_shell_command(&format!(
                     "log show --last 1h --style compact --predicate {} | tail -n {limit}",
                     shell_quote(&format!("process CONTAINS[c] \"{}\"", task.name))
-                )
+                ))
             },
             ScheduledTaskCapability::Partial,
         ),
         ScheduledTaskOs::Bsd => (
             if follow {
-                "tail -f /var/log/cron /var/log/messages 2>/dev/null".to_string()
+                posix_shell_command("tail -f /var/log/cron /var/log/messages 2>/dev/null")
             } else {
-                format!("tail -n {limit} /var/log/cron /var/log/messages 2>/dev/null")
+                posix_shell_command(&format!(
+                    "tail -n {limit} /var/log/cron /var/log/messages 2>/dev/null"
+                ))
             },
             ScheduledTaskCapability::Partial,
         ),
@@ -258,7 +268,10 @@ pub fn build_scheduled_task_action_command(
             };
             validate_systemd_unit(&target)?;
             Ok(ScheduledTaskActionCommand {
-                command: format!("systemctl start {}", shell_quote(&target)),
+                command: encoded_posix_shell_command(&format!(
+                    "systemctl start {}",
+                    shell_quote(&target)
+                )),
                 capability: ScheduledTaskCapability::Full,
             })
         }
@@ -273,7 +286,10 @@ pub fn build_scheduled_task_action_command(
             }
             validate_systemd_unit(&id)?;
             Ok(ScheduledTaskActionCommand {
-                command: format!("systemctl enable {}", shell_quote(&id)),
+                command: encoded_posix_shell_command(&format!(
+                    "systemctl enable {}",
+                    shell_quote(&id)
+                )),
                 capability: ScheduledTaskCapability::Full,
             })
         }
@@ -288,7 +304,10 @@ pub fn build_scheduled_task_action_command(
             }
             validate_systemd_unit(&id)?;
             Ok(ScheduledTaskActionCommand {
-                command: format!("systemctl disable {}", shell_quote(&id)),
+                command: encoded_posix_shell_command(&format!(
+                    "systemctl disable {}",
+                    shell_quote(&id)
+                )),
                 capability: ScheduledTaskCapability::Full,
             })
         }
@@ -336,14 +355,17 @@ pub fn build_scheduled_task_diagnostic_command(os_type: &str) -> String {
         ScheduledTaskOs::Windows => {
             "powershell -NoProfile -ExecutionPolicy Bypass -Command \"[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;$OutputEncoding=[System.Text.Encoding]::UTF8;Get-ScheduledTask | Format-Table -AutoSize; Get-ScheduledTaskInfo -TaskName * | Format-Table -AutoSize\"".to_string()
         }
-        ScheduledTaskOs::MacOs => "launchctl list; find ~/Library/LaunchAgents /Library/LaunchAgents /Library/LaunchDaemons -maxdepth 1 -name '*.plist' -print 2>/dev/null".to_string(),
-        ScheduledTaskOs::Bsd => "crontab -l 2>/dev/null; cat /etc/crontab 2>/dev/null; find /etc/cron.d /etc/periodic -maxdepth 2 -type f -print 2>/dev/null".to_string(),
-        ScheduledTaskOs::Linux | ScheduledTaskOs::Unknown => concat!(
+        ScheduledTaskOs::MacOs => posix_shell_command(
+            "launchctl list; find ~/Library/LaunchAgents /Library/LaunchAgents /Library/LaunchDaemons -maxdepth 1 -name '*.plist' -print 2>/dev/null",
+        ),
+        ScheduledTaskOs::Bsd => posix_shell_command(
+            "crontab -l 2>/dev/null; cat /etc/crontab 2>/dev/null; find /etc/cron.d /etc/periodic -maxdepth 2 -type f -print 2>/dev/null",
+        ),
+        ScheduledTaskOs::Linux | ScheduledTaskOs::Unknown => posix_shell_command(concat!(
             "if command -v systemctl >/dev/null 2>&1; then systemctl list-timers --all --no-pager --plain; fi; ",
             "crontab -l 2>/dev/null; cat /etc/crontab 2>/dev/null; ",
             "find /etc/cron.d /etc/cron.hourly /etc/cron.daily /etc/cron.weekly /etc/cron.monthly -maxdepth 1 -type f -print 2>/dev/null"
-        )
-        .to_string(),
+        )),
     }
 }
 
@@ -1196,7 +1218,10 @@ mod tests {
             },
         )
         .expect("safe systemd unit");
-        assert_eq!(action.command, "systemctl start 'safe.service'");
+        assert_eq!(
+            crate::shell::decoded_posix_script(&action.command),
+            "systemctl start 'safe.service'"
+        );
         let enable = build_scheduled_task_action_command(
             "Linux",
             ScheduledTaskActionKind::Enable {
@@ -1205,7 +1230,10 @@ mod tests {
             },
         )
         .expect("safe systemd enable");
-        assert_eq!(enable.command, "systemctl enable 'safe.timer'");
+        assert_eq!(
+            crate::shell::decoded_posix_script(&enable.command),
+            "systemctl enable 'safe.timer'"
+        );
         let disable = build_scheduled_task_action_command(
             "Linux",
             ScheduledTaskActionKind::Disable {
@@ -1214,7 +1242,42 @@ mod tests {
             },
         )
         .expect("safe systemd disable");
-        assert_eq!(disable.command, "systemctl disable 'safe.timer'");
+        assert_eq!(
+            crate::shell::decoded_posix_script(&disable.command),
+            "systemctl disable 'safe.timer'"
+        );
+        let cron_logs = build_scheduled_task_logs_command(
+            "Linux",
+            &ResourceScheduledTask {
+                id: "cron:nightly".to_string(),
+                name: "nightly\\backup".to_string(),
+                source: "cron".to_string(),
+                schedule: String::new(),
+                command: String::new(),
+                user: String::new(),
+                enabled: String::new(),
+                active: String::new(),
+                last_run: String::new(),
+                next_run: String::new(),
+                last_result: String::new(),
+                description: String::new(),
+                unit: String::new(),
+            },
+            false,
+            50,
+        )
+        .expect("cron logs");
+        assert!(cron_logs.command.starts_with("/bin/sh -c "));
+        assert!(
+            crate::shell::decoded_posix_script(&cron_logs.command)
+                .contains("if [ -r /var/log/syslog ]; then grep -F 'nightly\\backup'")
+        );
+        let diagnostic = build_scheduled_task_diagnostic_command("Linux");
+        assert!(diagnostic.starts_with("/bin/sh -c "));
+        assert!(
+            crate::shell::decoded_posix_script(&diagnostic)
+                .contains("if command -v systemctl >/dev/null 2>&1;")
+        );
         let windows_enable = build_scheduled_task_action_command(
             "Windows",
             ScheduledTaskActionKind::Enable {

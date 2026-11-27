@@ -4,7 +4,7 @@ use std::hash::{Hash, Hasher};
 use serde::{Deserialize, Serialize};
 
 use crate::capture::capture_failure_message;
-use crate::shell::posix_shell_command;
+use crate::shell::{encoded_posix_shell_command, posix_shell_command};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -128,24 +128,21 @@ pub fn build_filesystem_diagnostic_command(os_type: &str) -> String {
             "\""
         )
         .to_string(),
-        FilesystemOs::MacOs => concat!(
+        FilesystemOs::MacOs => encoded_posix_shell_command(concat!(
             "df -h; df -ih; mount; diskutil list; ",
             "du -x -h -d 2 / 2>/dev/null | sort -hr | head -n 80; ",
             "find -x / -type f -size +100M -exec stat -f '%z %N' {} \\; 2>/dev/null | sort -nr | head -n 40"
-        )
-        .to_string(),
-        FilesystemOs::Bsd => concat!(
+        )),
+        FilesystemOs::Bsd => encoded_posix_shell_command(concat!(
             "df -h; df -ih; mount; ",
             "du -x -h -d 2 / 2>/dev/null | sort -hr | head -n 80; ",
             "find -x / -type f -size +100M -exec stat -f '%z %N' {} \\; 2>/dev/null | sort -nr | head -n 40"
-        )
-        .to_string(),
-        FilesystemOs::Linux | FilesystemOs::Unknown => concat!(
+        )),
+        FilesystemOs::Linux | FilesystemOs::Unknown => encoded_posix_shell_command(concat!(
             "df -hT; df -ih; findmnt -rn -o TARGET,SOURCE,FSTYPE,OPTIONS 2>/dev/null; ",
             "lsblk -f; du -xhd2 / 2>/dev/null | sort -hr | head -n 80; ",
             "find / -xdev -type f -size +100M -printf '%s %p\\n' 2>/dev/null | sort -nr | head -n 40"
-        )
-        .to_string(),
+        )),
     }
 }
 
