@@ -56,6 +56,80 @@ pub fn custom_underline_for_cell(
     }
 }
 
+/// Copyable per-cell style key matching `text_run_style_matches` within one row's
+/// fixed font/metrics, so run merging does not clone `Font` / `FontFallbacks` per cell.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CellTextRunStyleKey {
+    color: Hsla,
+    weight: FontWeight,
+    italic: bool,
+    underline: Option<UnderlineStyle>,
+    strikethrough: Option<StrikethroughStyle>,
+}
+
+impl CellTextRunStyleKey {
+    #[inline]
+    pub fn for_cell(cell: &TerminalCell, color: Hsla, link: bool, font: &Font) -> Self {
+        let weight = if cell.attrs.bold() {
+            FontWeight(font.weight.0.max(FontWeight::BOLD.0))
+        } else {
+            font.weight
+        };
+        let italic = cell.attrs.italic();
+        let (ul_color, _) = resolved_underline_color(cell, color, link);
+        let underline = match resolved_underline_style(cell, link) {
+            TerminalUnderlineStyle::Single => Some(UnderlineStyle {
+                thickness: px(1.0),
+                color: Some(ul_color),
+                wavy: false,
+            }),
+            TerminalUnderlineStyle::Curly => Some(UnderlineStyle {
+                thickness: px(1.0),
+                color: Some(ul_color),
+                wavy: true,
+            }),
+            TerminalUnderlineStyle::None
+            | TerminalUnderlineStyle::Double
+            | TerminalUnderlineStyle::Dotted
+            | TerminalUnderlineStyle::Dashed => None,
+        };
+        let strikethrough = cell.attrs.strikeout().then_some(StrikethroughStyle {
+            thickness: px(1.0),
+            color: Some(color),
+        });
+        Self {
+            color: if link { rgb(0x61afef).into() } else { color },
+            weight,
+            italic,
+            underline,
+            strikethrough,
+        }
+    }
+
+    #[inline]
+    pub fn into_text_run(self, len: usize, font: &Font, letter_spacing: Option<Pixels>) -> TextRun {
+        TextRun {
+            len,
+            font: Font {
+                family: font.family.clone(),
+                features: font.features.clone(),
+                fallbacks: font.fallbacks.clone(),
+                weight: self.weight,
+                style: if self.italic {
+                    FontStyle::Italic
+                } else {
+                    FontStyle::Normal
+                },
+            },
+            color: self.color,
+            background_color: None,
+            underline: self.underline,
+            strikethrough: self.strikethrough,
+            letter_spacing,
+        }
+    }
+}
+
 pub fn text_run_for_cell(
     cell: &TerminalCell,
     color: Hsla,
@@ -64,52 +138,11 @@ pub fn text_run_for_cell(
     letter_spacing: Option<Pixels>,
 ) -> TextRun {
     let text_len = cell.ch.len_utf8() + cell.zerowidth().len();
-    let weight = if cell.attrs.bold() {
-        FontWeight(font.weight.0.max(FontWeight::BOLD.0))
-    } else {
-        font.weight
-    };
-    let style = if cell.attrs.italic() {
-        FontStyle::Italic
-    } else {
-        FontStyle::Normal
-    };
-    let (ul_color, _) = resolved_underline_color(cell, color, link);
-    let underline = match resolved_underline_style(cell, link) {
-        TerminalUnderlineStyle::Single => Some(UnderlineStyle {
-            thickness: px(1.0),
-            color: Some(ul_color),
-            wavy: false,
-        }),
-        TerminalUnderlineStyle::Curly => Some(UnderlineStyle {
-            thickness: px(1.0),
-            color: Some(ul_color),
-            wavy: true,
-        }),
-        TerminalUnderlineStyle::None
-        | TerminalUnderlineStyle::Double
-        | TerminalUnderlineStyle::Dotted
-        | TerminalUnderlineStyle::Dashed => None,
-    };
-
-    TextRun {
-        len: text_len,
-        font: Font {
-            family: font.family.clone(),
-            features: font.features.clone(),
-            fallbacks: font.fallbacks.clone(),
-            weight,
-            style,
-        },
-        color: if link { rgb(0x61afef).into() } else { color },
-        background_color: None,
-        underline,
-        strikethrough: cell.attrs.strikeout().then_some(StrikethroughStyle {
-            thickness: px(1.0),
-            color: Some(color),
-        }),
+    CellTextRunStyleKey::for_cell(cell, color, link, font).into_text_run(
+        text_len,
+        font,
         letter_spacing,
-    }
+    )
 }
 
 pub fn marked_text_run(

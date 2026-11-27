@@ -24,6 +24,7 @@ impl<H: 'static> TerminalElement<H> {
         let mut current_selection: Option<TerminalRowRect> = None;
         let mut current_run: Option<PendingTerminalRowTextRun> = None;
         let mut current_run_is_drawing = false;
+        let mut current_run_style_key: Option<CellTextRunStyleKey> = None;
         let visual_line = visual_line_for_row_with_bidi(row, self.bidi_enabled);
         let transition_colors = self.transition_colors.as_ref();
 
@@ -124,6 +125,17 @@ impl<H: 'static> TerminalElement<H> {
                 continue;
             }
 
+            // The trailing cell still contributes its background and cursor above.
+            if cell.ch == ' '
+                && cell.zerowidth().is_empty()
+                && !cell.cursor
+                && current_run
+                    .as_ref()
+                    .is_some_and(|run| run.simple_han && run.col + run.cells == col_index + 1)
+            {
+                continue;
+            }
+
             if cutout.is_some() || cell.ch == '\u{10eeee}' {
                 if let Some(run) = current_run.take() {
                     text_runs.push(run);
@@ -149,7 +161,7 @@ impl<H: 'static> TerminalElement<H> {
                         row_index,
                         col_index,
                     );
-                let style = canvas_text_run_for_cell(cell, fg, link, &self.metrics);
+                let style_key = CellTextRunStyleKey::for_cell(cell, fg, link, &self.metrics.font);
                 let custom_underline = custom_underline_for_cell(cell, fg, link);
                 let is_drawing =
                     cell.zerowidth().is_empty() && cell_drawing::is_cell_drawing(cell.ch);
@@ -159,23 +171,30 @@ impl<H: 'static> TerminalElement<H> {
                     }
                     text_runs.push(PendingTerminalRowTextRun {
                         col: col_index,
+                        simple_han: false,
                         text: cell_text(cell),
                         cells: cell_width,
-                        style,
+                        style: style_key.into_text_run(
+                            cell_text_len(cell),
+                            &self.metrics.font,
+                            self.metrics.letter_spacing,
+                        ),
                         custom_underline,
                         transition_key: fg_key,
                     });
                     continue;
                 }
+                let simple_han = is_simple_han(cell);
                 if let Some(run) = &mut current_run
+                    && run.simple_han == simple_han
                     && run.col + run.cells == col_index
-                    && text_run_style_matches(&run.style, &style)
+                    && current_run_style_key == Some(style_key)
                     && run.custom_underline == custom_underline
                     && run.transition_key == fg_key
                     && current_run_is_drawing == is_drawing
                 {
                     // Append directly to the existing run so ordinary rows do not
-                    // allocate a temporary String for every visible cell.
+                    // allocate a temporary String or clone Font/Fallbacks per cell.
                     push_cell_text(&mut run.text, cell);
                     run.cells += cell_width;
                     run.style.len += cell_text_len(cell);
@@ -186,11 +205,17 @@ impl<H: 'static> TerminalElement<H> {
                     text_runs.push(run);
                 }
                 current_run_is_drawing = is_drawing;
+                current_run_style_key = Some(style_key);
                 current_run = Some(PendingTerminalRowTextRun {
                     col: col_index,
+                    simple_han,
                     text: cell_text(cell),
                     cells: cell_width,
-                    style,
+                    style: style_key.into_text_run(
+                        cell_text_len(cell),
+                        &self.metrics.font,
+                        self.metrics.letter_spacing,
+                    ),
                     custom_underline,
                     transition_key: fg_key,
                 });
@@ -734,6 +759,7 @@ fn push_visual_text_runs(
 ) {
     let mut current_run: Option<PendingTerminalRowTextRun> = None;
     let mut current_run_is_drawing = false;
+    let mut current_run_style_key: Option<CellTextRunStyleKey> = None;
     for cluster in &visual_line.clusters {
         let Some(cell) = row.cells.get(cluster.logical_col) else {
             continue;
@@ -777,7 +803,7 @@ fn push_visual_text_runs(
                 source_row_index,
                 cluster.logical_col,
             );
-        let style = canvas_text_run_for_cell(cell, fg, link, metrics);
+        let style_key = CellTextRunStyleKey::for_cell(cell, fg, link, &metrics.font);
         let custom_underline = custom_underline_for_cell(cell, fg, link);
         let is_drawing = cell.zerowidth().is_empty() && cell_drawing::is_cell_drawing(cell.ch);
         if cell.zerowidth().is_empty() && powerline_separator(cell.ch).is_some() {
@@ -786,22 +812,30 @@ fn push_visual_text_runs(
             }
             text_runs.push(PendingTerminalRowTextRun {
                 col: cluster.visual_col,
+                simple_han: false,
                 text: cluster.text.clone(),
                 cells: cluster.cells,
-                style,
+                style: style_key.into_text_run(
+                    cluster.text.len(),
+                    &metrics.font,
+                    metrics.letter_spacing,
+                ),
                 custom_underline,
                 transition_key: fg_key,
             });
             continue;
         }
 
-        // Runs are painted with a one-cell forced advance, so a wide glyph must stay alone
-        // in its run, matching the logical path where its spacer cell ends the run.
         let wide = cluster.cells > 1;
-        if !wide
+        let simple_han = cluster.cells == 2
+            && !cluster.rtl
+            && is_simple_han(cell)
+            && cluster.text.len() == cell.ch.len_utf8();
+        if (!wide || simple_han)
             && let Some(run) = &mut current_run
+            && run.simple_han == simple_han
             && run.col + run.cells == cluster.visual_col
-            && text_run_style_matches(&run.style, &style)
+            && current_run_style_key == Some(style_key)
             && run.custom_underline == custom_underline
             && run.transition_key == fg_key
             && current_run_is_drawing == is_drawing
@@ -817,16 +851,22 @@ fn push_visual_text_runs(
         }
         let run = PendingTerminalRowTextRun {
             col: cluster.visual_col,
+            simple_han,
             text: cluster.text.clone(),
             cells: cluster.cells,
-            style,
+            style: style_key.into_text_run(
+                cluster.text.len(),
+                &metrics.font,
+                metrics.letter_spacing,
+            ),
             custom_underline,
             transition_key: fg_key,
         };
-        if wide {
+        if wide && !simple_han {
             text_runs.push(run);
         } else {
             current_run_is_drawing = is_drawing;
+            current_run_style_key = Some(style_key);
             current_run = Some(run);
         }
     }
@@ -869,6 +909,12 @@ pub(super) fn map_rects_to_visual(
         }
     }
     mapped
+}
+
+fn is_simple_han(cell: &oxideterm_terminal_emulator::TerminalCell) -> bool {
+    cell.wide
+        && matches!(cell.ch, '\u{3400}'..='\u{4dbf}' | '\u{4e00}'..='\u{9fff}')
+        && cell.zerowidth().is_empty()
 }
 
 fn cell_text(cell: &oxideterm_terminal_emulator::TerminalCell) -> String {

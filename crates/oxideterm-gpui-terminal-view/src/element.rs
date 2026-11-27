@@ -222,7 +222,8 @@ pub struct BatchedTextRun {
 
 #[derive(Default)]
 struct TerminalTextRunCache {
-    layout: OnceLock<Arc<LineLayout>>,
+    double_cell: bool,
+    layout: OnceLock<Option<Arc<LineLayout>>>,
     paint: LinePaintCache,
 }
 
@@ -302,6 +303,7 @@ struct TerminalRowTextRun {
 }
 
 struct PendingTerminalRowTextRun {
+    simple_han: bool,
     col: usize,
     text: String,
     cells: usize,
@@ -312,11 +314,13 @@ struct PendingTerminalRowTextRun {
 
 impl PendingTerminalRowTextRun {
     fn finish(self, previous: Option<&TerminalRowTextRun>) -> TerminalRowTextRun {
+        let double_cell = self.simple_han && self.cells > 2;
         let cache = previous
             .filter(|run| {
                 // `TerminalTextRunCache.layout` depends only on glyph shaping inputs;
                 // `DecorationRun` colors are supplied at paint time and keyed inside `LinePaintCache`.
                 run.col == self.col
+                    && run.cache.double_cell == double_cell
                     && run.cells == self.cells
                     && run.text.as_ref() == self.text
                     && run.style.len == self.style.len
@@ -326,7 +330,12 @@ impl PendingTerminalRowTextRun {
                     && run.style.strikethrough == self.style.strikethrough
             })
             .map(|run| run.cache.clone())
-            .unwrap_or_else(|| Arc::new(TerminalTextRunCache::default()));
+            .unwrap_or_else(|| {
+                Arc::new(TerminalTextRunCache {
+                    double_cell,
+                    ..Default::default()
+                })
+            });
         TerminalRowTextRun {
             col: self.col,
             text: SharedString::from(self.text),

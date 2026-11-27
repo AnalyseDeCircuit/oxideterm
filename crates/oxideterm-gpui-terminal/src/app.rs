@@ -5439,6 +5439,67 @@ mod tests {
         TerminalAttrs, TerminalCell, TerminalColor, TerminalCursorShape, TerminalRow,
     };
 
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore = "requires native fonts and a Metal device"]
+    fn wide_han_run_renders_at_the_same_pixels_as_independent_cells() {
+        let mut cx = gpui::HeadlessAppContext::with_platform(
+            Arc::new(gpui_apple::AppleTextSystem::new()),
+            Arc::new(()),
+            gpui_platform::current_headless_renderer,
+        );
+        let window = cx
+            .open_window(gpui::size(px(320.), px(120.)), |window, cx| {
+                cx.new(|cx| {
+                    TerminalPane::new_recording_playback(
+                        32,
+                        5,
+                        TerminalUiPreferences {
+                            character_spacing: 1.12,
+                            cursor_blink: false,
+                            ..Default::default()
+                        },
+                        window,
+                        cx,
+                    )
+                    .unwrap()
+                })
+            })
+            .unwrap();
+        let mut frame = |text: &str| {
+            cx.update(|cx| {
+                window
+                    .update(cx, |pane, _, cx| {
+                        pane.feed_recording_output(
+                            format!("\x1b[?25l\x1b[H\x1b[2K{text}").as_bytes(),
+                            cx,
+                        );
+                    })
+                    .unwrap()
+            });
+            cx.update_window(window.into(), |_, window, cx| window.draw(cx).clear(cx))
+                .unwrap();
+            cx.capture_screenshot(window.into()).unwrap()
+        };
+        let empty = frame("");
+        let odd = frame("连  成");
+        let even = frame("  接  功");
+        let together = frame("连接成功");
+        assert!(
+            odd != empty && even != empty,
+            "both reference frames must contain ink"
+        );
+        for (x, y, pixel) in together.enumerate_pixels() {
+            let first = odd.get_pixel(x, y);
+            let expected = if first != empty.get_pixel(x, y) {
+                first
+            } else {
+                even.get_pixel(x, y)
+            };
+            assert_eq!(pixel, expected, "glyph placement differs at ({x}, {y})");
+        }
+    }
+
     #[gpui::test]
     fn plugin_text_action_captures_selection_before_focus_or_output_changes(
         cx: &mut TestAppContext,

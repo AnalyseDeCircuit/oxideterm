@@ -684,6 +684,7 @@ fn kitty_image_bounds(
     cells
 }
 
+#[derive(Clone, Copy)]
 struct TerminalPaintRun<'a> {
     row: usize,
     col: usize,
@@ -696,39 +697,113 @@ struct TerminalPaintRun<'a> {
     cache: Option<&'a TerminalTextRunCache>,
 }
 
-fn paint_text_run_with_layer(
-    run: &BatchedTextRun,
+fn paint_grid_run(
+    run: TerminalPaintRun<'_>,
     origin: gpui::Point<Pixels>,
     metrics: &TerminalMetrics,
-    establish_layer: bool,
+    edge_mode: gpui::GlyphEdgeEnhancement,
+    exclusions: Option<&[Vec<bool>]>,
     window: &mut Window,
     cx: &mut App,
 ) {
-    paint_text_run_parts(
-        TerminalPaintRun {
-            row: run.row,
-            col: run.col,
-            text: &run.text,
-            cells: run.cells,
-            style: &run.style,
-            custom_underline: run.custom_underline,
-            color: run.style.color,
-            dilation_color_hint: None,
-            cache: run.cache.as_deref(),
-        },
-        origin,
-        metrics,
-        establish_layer,
-        window,
-        cx,
-    );
+    let mode_at = |col, cells| enhance_run_glyph_edges(edge_mode, exclusions, run.row, col, cells);
+    let mode = mode_at(run.col, run.cells);
+    if run.cache.is_some_and(|cache| cache.double_cell)
+        && mode != edge_mode
+        && (0..run.cells)
+            .step_by(2)
+            .any(|offset| mode_at(run.col + offset, 2) != mode)
+    {
+        paint_han_cells(run, origin, metrics, mode_at, window, cx);
+    } else {
+        window.with_glyph_edge_enhancement(mode, |window| {
+            paint_text_run_parts(run, origin, metrics, mode, window, cx);
+        });
+    }
+}
+
+// A partial highlight or a font that substitutes several ideographs with a ligature
+// needs the original per-cell paint boundaries.
+fn paint_han_cells(
+    run: TerminalPaintRun<'_>,
+    origin: Point<Pixels>,
+    metrics: &TerminalMetrics,
+    mode_at: impl Fn(usize, usize) -> gpui::GlyphEdgeEnhancement,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    for (i, (byte, ch)) in run.text.char_indices().enumerate() {
+        let col = run.col + 2 * i;
+        let text = SharedString::from(&run.text[byte..byte + ch.len_utf8()]);
+        let style = TextRun {
+            len: text.len(),
+            ..run.style.clone()
+        };
+        let cache = TerminalTextRunCache::default();
+        let mode = mode_at(col, 2);
+        window.with_glyph_edge_enhancement(mode, |window| {
+            paint_text_run_parts(
+                TerminalPaintRun {
+                    col,
+                    text: &text,
+                    cells: 2,
+                    style: &style,
+                    cache: Some(&cache),
+                    ..run
+                },
+                origin,
+                metrics,
+                mode,
+                window,
+                cx,
+            );
+        });
+    }
+}
+
+fn align_han_layout(
+    layout: &std::sync::Arc<gpui::LineLayout>,
+    text: &str,
+    advance: Pixels,
+) -> Option<std::sync::Arc<gpui::LineLayout>> {
+    let mut chars = text.char_indices();
+    let mut count = 0;
+    let mut aligned = true;
+    for glyph in layout.runs.iter().flat_map(|run| &run.glyphs) {
+        if glyph.index != chars.next()?.0 {
+            return None;
+        }
+        aligned &= glyph.position.x == advance * count as f32;
+        count += 1;
+    }
+    if chars.next().is_some() {
+        return None;
+    }
+    let width = advance * count as f32;
+    if aligned && layout.width == width {
+        return Some(layout.clone());
+    }
+    // GPUI normally tolerates a pixel of horizontal drift. Terminal columns are exact,
+    // including at font fallback boundaries and with custom character spacing.
+    let mut runs = layout.runs.clone();
+    for (i, glyph) in runs.iter_mut().flat_map(|run| &mut run.glyphs).enumerate() {
+        glyph.position.x = advance * i as f32;
+    }
+    Some(std::sync::Arc::new(gpui::LineLayout {
+        width,
+        runs,
+        font_size: layout.font_size,
+        ascent: layout.ascent,
+        descent: layout.descent,
+        len: layout.len,
+    }))
 }
 
 fn paint_text_run_parts(
     run: TerminalPaintRun<'_>,
     origin: gpui::Point<Pixels>,
     metrics: &TerminalMetrics,
-    establish_layer: bool,
+    mode: gpui::GlyphEdgeEnhancement,
     window: &mut Window,
     cx: &mut App,
 ) {
@@ -756,7 +831,7 @@ fn paint_text_run_parts(
                 },
                 origin,
                 metrics,
-                establish_layer,
+                mode,
                 window,
                 cx,
             );
@@ -779,13 +854,27 @@ fn paint_text_run_parts(
         // Stable terminal rows retain only glyph layout; one explicit decoration avoids the
         // large inline decoration capacity carried by `ShapedLine` for every cached run.
         let layout = cache.layout.get_or_init(|| {
-            window.text_system().layout_line(
+            let advance = if cache.double_cell {
+                metrics.cell_width * 2.0
+            } else {
+                metrics.cell_width
+            };
+            let layout = window.text_system().layout_line(
                 run.text,
                 metrics.font_size,
                 std::slice::from_ref(run.style),
-                Some(metrics.cell_width),
-            )
+                Some(advance),
+            );
+            if cache.double_cell {
+                align_han_layout(&layout, run.text, advance)
+            } else {
+                Some(layout)
+            }
         });
+        let Some(layout) = layout else {
+            paint_han_cells(run, origin, metrics, |_, _| mode, window, cx);
+            return;
+        };
         position.y = aligned_run_position_y(
             position.y,
             metrics.primary_ascent,
@@ -808,37 +897,12 @@ fn paint_text_run_parts(
         };
         let decorations = std::slice::from_ref(&decoration);
         let _ = if run.dilation_color_hint.is_some() {
-            if establish_layer {
-                let row_bounds = Bounds::new(position, size(layout.width, metrics.line_height));
-                window.paint_layer(row_bounds, |window| {
-                    let _ = layout.paint_cached_in_current_layer_recolored(
-                        position,
-                        metrics.line_height,
-                        decorations,
-                        &cache.paint,
-                        run.dilation_color_hint,
-                        window,
-                        cx,
-                    );
-                });
-                Ok(())
-            } else {
-                layout.paint_cached_in_current_layer_recolored(
-                    position,
-                    metrics.line_height,
-                    decorations,
-                    &cache.paint,
-                    run.dilation_color_hint,
-                    window,
-                    cx,
-                )
-            }
-        } else if establish_layer {
-            layout.paint_cached(
+            layout.paint_cached_in_current_layer_recolored(
                 position,
                 metrics.line_height,
                 decorations,
                 &cache.paint,
+                run.dilation_color_hint,
                 window,
                 cx,
             )
@@ -1049,16 +1113,25 @@ pub(crate) fn paint_text_runs_in_layer(
     cx: &mut App,
 ) {
     for run in runs {
-        let mode = enhance_run_glyph_edges(
+        paint_grid_run(
+            TerminalPaintRun {
+                row: run.row,
+                col: run.col,
+                text: &run.text,
+                cells: run.cells,
+                style: &run.style,
+                custom_underline: run.custom_underline,
+                color: run.style.color,
+                dilation_color_hint: None,
+                cache: run.cache.as_deref(),
+            },
+            origin,
+            metrics,
             glyph_edge_mode,
             glyph_edge_exclusions,
-            run.row,
-            run.col,
-            run.cells,
+            window,
+            cx,
         );
-        window.with_glyph_edge_enhancement(mode, |window| {
-            paint_text_run_with_layer(run, origin, metrics, false, window, cx);
-        });
     }
 }
 
@@ -1076,13 +1149,6 @@ pub(crate) fn paint_cached_text_runs_in_layer(
     cx: &mut App,
 ) {
     for run in runs {
-        let mode = enhance_run_glyph_edges(
-            glyph_edge_mode,
-            glyph_edge_exclusions,
-            row,
-            run.col,
-            run.cells,
-        );
         let live_color = transition_colors.map_or(run.style.color, |transition| {
             transition.resolve_row_color(
                 run.transition_key,
@@ -1103,26 +1169,25 @@ pub(crate) fn paint_cached_text_runs_in_layer(
         } else {
             None
         };
-        window.with_glyph_edge_enhancement(mode, |window| {
-            paint_text_run_parts(
-                TerminalPaintRun {
-                    row,
-                    col: run.col,
-                    text: &run.text,
-                    cells: run.cells,
-                    style: &run.style,
-                    custom_underline,
-                    color: live_color,
-                    dilation_color_hint,
-                    cache: Some(&run.cache),
-                },
-                origin,
-                metrics,
-                false,
-                window,
-                cx,
-            );
-        });
+        paint_grid_run(
+            TerminalPaintRun {
+                row,
+                col: run.col,
+                text: &run.text,
+                cells: run.cells,
+                style: &run.style,
+                custom_underline,
+                color: live_color,
+                dilation_color_hint,
+                cache: Some(&run.cache),
+            },
+            origin,
+            metrics,
+            glyph_edge_mode,
+            glyph_edge_exclusions,
+            window,
+            cx,
+        );
     }
 }
 

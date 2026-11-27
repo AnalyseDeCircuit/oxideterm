@@ -350,6 +350,40 @@ fn cell_drawings_are_batched_separately_from_text_and_combining_marks() {
 }
 
 #[test]
+fn wide_han_runs_keep_grid_columns_in_logical_and_visual_order() {
+    for bidi in [false, true] {
+        let mut row = row_with_text_and_cursor(0, "X连 接 成 功 界 🦀 א", 13);
+        for i in [1, 3, 5, 7, 9, 11] {
+            row.cells_mut()[i].wide = true;
+        }
+        row.cells_mut()[9].set_zerowidth("\u{fe00}".into());
+        row.refresh_signature();
+        let mut input = snapshot(0, vec![row]);
+        input.cols = 14;
+        input.cursor_shape = TerminalCursorShape::Hidden;
+        let mut view = element(input);
+        view.bidi_enabled = bidi;
+        let layout = view.layout();
+        let runs: Vec<_> = layout
+            .text_runs
+            .iter()
+            .map(|run| (run.col, run.cells, run.text.as_ref()))
+            .collect();
+        assert_eq!(
+            runs,
+            [
+                (0, 1, "X"),
+                (1, 8, "连接成功"),
+                (9, 2, "界\u{fe00}"),
+                (11, 2, "🦀"),
+                (13, 1, "א")
+            ],
+            "bidi={bidi}"
+        );
+    }
+}
+
+#[test]
 fn edited_row_reuses_only_unchanged_runs_with_matching_metrics() {
     use crate::selection::{TerminalGridPoint, TerminalSelectionMode};
 

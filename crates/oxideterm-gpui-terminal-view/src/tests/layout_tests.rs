@@ -230,7 +230,7 @@ fn bidi_text_runs_preserve_content_start_and_wide_cell_geometry() {
         (
             "wide mixed row",
             mixed,
-            vec![(0, "中", 2), (2, "文", 2), (4, "a\u{05fc}", 2)],
+            vec![(0, "中文", 4), (4, "a\u{05fc}", 2)],
         ),
         (
             "Hebrew with trailing blanks",

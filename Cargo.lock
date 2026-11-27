@@ -7932,6 +7932,7 @@ dependencies = [
  "crossbeam-channel",
  "futures",
  "gpui-pre",
+ "gpui-pre-apple",
  "gpui-pre-platform",
  "image",
  "oxideterm-audit",

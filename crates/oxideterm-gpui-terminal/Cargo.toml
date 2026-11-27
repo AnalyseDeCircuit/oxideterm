@@ -56,6 +56,9 @@ criterion = { version = "0.8.2", features = ["html_reports"] }
 gpui = { workspace = true, features = ["bench", "test-support"] }
 gpui_platform = { workspace = true, features = ["font-kit", "bench-support"] }
 
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+gpui_apple = { package = "gpui-pre-apple", path = "../gpui-pre/gpui_apple", features = ["font-kit"] }
+
 [[bench]]
 name = "terminal_render"
 harness = false
