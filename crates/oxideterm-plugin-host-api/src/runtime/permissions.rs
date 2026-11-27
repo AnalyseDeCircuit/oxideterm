@@ -5,6 +5,7 @@
 
 use super::*;
 use crate::capabilities::*;
+use oxideterm_plugin_manifest::discovery::NativePluginDiscoveryProviderDef;
 
 pub(super) fn install_process_host_call_handler(
     runtime: &mut NativeProcessPluginRuntime,
@@ -56,14 +57,47 @@ pub(super) fn validate_outbound_effect_permissions(
     Ok(())
 }
 
+pub(super) const DISCOVERY_INSTANCE_INVALIDATED: &str = "discovery.instanceInvalidated";
+
+pub(super) fn validate_discovery_invalidation(
+    event: &PluginEvent,
+    providers: &[NativePluginDiscoveryProviderDef],
+) -> Result<(), PluginError> {
+    let payload = &event.payload;
+    let provider = payload["providerId"].as_str();
+    if !providers.iter().any(|p| Some(p.id.as_str()) == provider) {
+        return Err(PluginError::protocol(
+            "plugin_capability_not_allowed",
+            "Only a registered discovery provider may invalidate its instances",
+        ));
+    }
+    if payload.as_object().is_none_or(|fields| fields.len() != 3)
+        || payload["sourceId"].as_str().is_none()
+        || payload["instanceId"].as_str().is_none()
+    {
+        return Err(PluginError::protocol(
+            "invalidDiscoveryMessage",
+            "Invalid discovery instance identity",
+        ));
+    }
+    Ok(())
+}
+
 pub(super) fn validate_outbound_message_permissions(
     messages: &[PluginOutboundMessage],
     permissions: &PluginPermissionSet,
+    discovery_providers: &[NativePluginDiscoveryProviderDef],
 ) -> Result<(), PluginError> {
     for message in messages {
         match message {
             PluginOutboundMessage::RegisterContribution { registration } => {
                 validate_registration_permissions(registration, permissions)?;
+            }
+            PluginOutboundMessage::EmitEvent { event }
+                if event.name == DISCOVERY_INSTANCE_INVALIDATED =>
+            {
+                require_capabilities(permissions, &[NATIVE_PLUGIN_CAPABILITY_UI_WRITE])?;
+                validate_discovery_invalidation(event, discovery_providers)?;
             }
             PluginOutboundMessage::EmitEvent { .. }
                 if !capability_allowed(permissions, NATIVE_PLUGIN_CAPABILITY_EVENTS_EMIT) =>
@@ -160,7 +194,7 @@ fn require_capabilities(
     Ok(())
 }
 
-fn capability_allowed(permissions: &PluginPermissionSet, capability: &str) -> bool {
+pub(super) fn capability_allowed(permissions: &PluginPermissionSet, capability: &str) -> bool {
     permissions
         .capabilities
         .iter()
@@ -186,6 +220,54 @@ fn host_api_allowed(permissions: &PluginPermissionSet, namespace: &str, method: 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn discovery_invalidation_requires_the_senders_provider_and_ui_permission() {
+        let inventory = serde_json::from_value(serde_json::json!({
+            "id": "inventory", "title": "Inventory", "icon": "server",
+            "protocolVersion": 1, "launchKinds": ["ssh"], "form": {}
+        }))
+        .unwrap();
+        let registered = std::slice::from_ref(&inventory);
+        let owner = serde_json::json!({"providerId":"inventory","sourceId":"s","instanceId":"i"});
+        let wrong = serde_json::json!({"providerId":"other","sourceId":"s","instanceId":"i"});
+        let partial = serde_json::json!({"providerId":"inventory","sourceId":"s"});
+        let denied = Some("plugin_capability_not_allowed");
+        let revoked = DISCOVERY_INSTANCE_INVALIDATED;
+        for (event, payload, providers, capability, error) in [
+            (revoked, &owner, registered, "ui.write", None),
+            (revoked, &owner, &[][..], "ui.write", denied),
+            (revoked, &wrong, registered, "ui.write", denied),
+            (revoked, &owner, registered, "events.emit", denied),
+            (
+                revoked,
+                &partial,
+                registered,
+                "ui.write",
+                Some("invalidDiscoveryMessage"),
+            ),
+            ("custom.event", &owner, registered, "ui.write", denied),
+            ("custom.event", &owner, &[][..], "events.emit", None),
+        ] {
+            let message = PluginOutboundMessage::EmitEvent {
+                event: PluginEvent {
+                    name: event.into(),
+                    payload: payload.clone(),
+                },
+            };
+            let permissions = PluginPermissionSet {
+                capabilities: vec![capability.into()],
+                ..Default::default()
+            };
+            let result = validate_outbound_message_permissions(&[message], &permissions, providers);
+            assert_eq!(
+                result.as_ref().err().map(|e| e.code.as_str()),
+                error,
+                "{event} {payload} with {capability} and {} provider(s)",
+                providers.len()
+            );
+        }
+    }
 
     #[test]
     fn registrations_require_their_declared_capabilities() {
@@ -287,6 +369,7 @@ mod tests {
                     capabilities: capabilities.into_iter().map(str::to_string).collect(),
                     allowed_host_apis: Vec::new(),
                 },
+                &[],
             );
             assert_eq!(
                 result.map_err(|error| error.code),

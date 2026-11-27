@@ -18,6 +18,7 @@ pub struct HostKeyChallenge {
     pub status: HostKeyStatus,
     pub intent: SshConnectionIntent,
     pub session_tree_challenge: bool,
+    pub checked_hop: Option<usize>,
     pub host: String,
     pub port: u16,
 }
@@ -223,24 +224,19 @@ impl crate::entity::ConnectionFlowEntity {
             });
         }
         challenge.config.host_key_replacement = replacement;
-        let routed_sftp = challenge
-            .config
-            .proxy_chain
-            .as_ref()
-            .is_some_and(|chain| !chain.is_empty())
-            && matches!(
-                &challenge.intent,
-                SshConnectionIntent::StandaloneSftp { .. }
-                    | SshConnectionIntent::StandaloneSftpSecondary { .. }
-                    | SshConnectionIntent::TestStandaloneSftp
-            );
-        let challenge_matches_endpoint =
-            challenge.config.host == challenge.host && challenge.config.port == challenge.port;
-        if routed_sftp && !challenge_matches_endpoint {
+        let embedded_route = challenge.intent.uses_embedded_route(&challenge.config);
+        let challenge_matches_endpoint = challenge.checked_hop.is_none()
+            && challenge.config.host == challenge.host
+            && challenge.config.port == challenge.port;
+        if embedded_route && !challenge_matches_endpoint {
             let hop = challenge.config.proxy_chain.as_mut().and_then(|chain| {
-                chain
-                    .iter_mut()
-                    .find(|hop| hop.host == challenge.host && hop.port == challenge.port)
+                let matches = |hop: &oxideterm_ssh::ProxyHopConfig| {
+                    hop.host == challenge.host && hop.port == challenge.port
+                };
+                match challenge.checked_hop {
+                    Some(index) => chain.get_mut(index).filter(|hop| matches(hop)),
+                    None => chain.iter_mut().find(|hop| matches(hop)),
+                }
             });
             let Some(hop) = hop else {
                 let message = i18n.t("sftp.standalone.route_host_key_unavailable");
@@ -255,19 +251,23 @@ impl crate::entity::ConnectionFlowEntity {
             challenge.config.trust_host_key = Some(persist);
             challenge.config.expected_host_key_fingerprint = Some(fingerprint);
         }
-        Some(if routed_sftp {
-            self.set_form_feedback(Some(true), Some(i18n.t("ssh.form.checking_host_key")), cx);
-            HostKeyApproval::Retry {
-                config: challenge.config,
-                title: challenge.title,
-                intent: challenge.intent,
-            }
-        } else {
-            HostKeyApproval::Continue {
-                config: challenge.config,
-                title: challenge.title,
-                intent: challenge.intent,
-            }
-        })
+        Some(
+            if embedded_route
+                && (!challenge_matches_endpoint || challenge.config.discovery_origin.is_none())
+            {
+                self.set_form_feedback(Some(true), Some(i18n.t("ssh.form.checking_host_key")), cx);
+                HostKeyApproval::Retry {
+                    config: challenge.config,
+                    title: challenge.title,
+                    intent: challenge.intent,
+                }
+            } else {
+                HostKeyApproval::Continue {
+                    config: challenge.config,
+                    title: challenge.title,
+                    intent: challenge.intent,
+                }
+            },
+        )
     }
 }

@@ -1,5 +1,31 @@
 {
   "settings_view": {
+    "discovery": {
+      "install_provider_hint": "ソースを追加するには、動的検出プラグインをインストールするか有効にしてください。",
+      "toggle_failed": "ソースの有効状態を変更できませんでした。",
+      "edit_source": "ソースを編集",
+      "confirm_ssh_form": "接続前に接続フォームを確認する",
+      "separate_session": "別のセッションを開く",
+      "identity_changed": "以前と同じアクセス主体であることを確認できません。別のセッションを開きますか？",
+      "reopen": "対象を開き直す",
+      "refresh": "一覧を更新",
+      "refreshing": "接続先一覧を更新中…",
+      "refreshed": "{time} に一覧を更新 · 接続先 {count} 件",
+      "refresh_failed": "一覧を更新できませんでした：{reason}",
+      "title": "動的検出",
+      "description": "一時接続の検出元を管理します。",
+      "interval": "更新間隔（分）",
+      "scheduled_refresh": "定期更新",
+      "add": "検出元を追加",
+      "save_before_action": "表示中の設定でこの操作を行うには、ソースを保存して有効にしてください。",
+      "unavailable": "検出元を利用できません",
+      "permission_denied": "アクセスが拒否されました",
+      "stale_target": "接続先が変更されました。検出元を更新してください。",
+      "invalid_response": "プロバイダーの応答が無効です",
+      "no_targets": "利用可能な接続先がありません",
+      "source_in_use": "すべてのウィンドウでこの検出元のセッションを閉じ、「アクティブセッション」からアイドル状態のノードを切断してから削除してください。",
+      "removal_pending": "検出元の削除が完了していません。「削除」を選んで再試行してください。"
+    },
     "known_hosts": {
       "title": "信頼済みホスト",
       "description": "保存済みの SSH ホストキーを管理します。",

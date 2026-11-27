@@ -1,5 +1,31 @@
 {
   "settings_view": {
+    "discovery": {
+      "install_provider_hint": "Installez ou activez un plugin de découverte pour ajouter une source.",
+      "toggle_failed": "Impossible de modifier l’état d’activation de la source.",
+      "edit_source": "Modifier la source",
+      "confirm_ssh_form": "Confirmer le formulaire avant la connexion",
+      "separate_session": "Ouvrir une autre session",
+      "identity_changed": "Le fournisseur ne peut pas confirmer l’identité utilisée précédemment. Ouvrir une session distincte ?",
+      "reopen": "Rouvrir la cible",
+      "refresh": "Actualiser la liste",
+      "refreshing": "Actualisation de la liste des cibles…",
+      "refreshed": "Liste actualisée à {time} · Cibles : {count}",
+      "refresh_failed": "Échec de l’actualisation : {reason}",
+      "title": "Découverte dynamique",
+      "description": "Gérez les sources de connexions temporaires.",
+      "interval": "Intervalle d’actualisation (minutes)",
+      "scheduled_refresh": "Actualisation automatique",
+      "add": "Ajouter une source",
+      "save_before_action": "Enregistrez et activez cette source pour utiliser cette action avec les paramètres affichés.",
+      "unavailable": "Source indisponible",
+      "permission_denied": "Accès refusé",
+      "stale_target": "La cible a changé. Actualisez la source.",
+      "invalid_response": "Réponse du fournisseur non valide",
+      "no_targets": "Aucune cible disponible",
+      "source_in_use": "Fermez les sessions de cette source dans toutes les fenêtres et déconnectez ses nœuds inactifs depuis les sessions actives avant de la supprimer.",
+      "removal_pending": "La suppression de la source est incomplète. Sélectionnez Supprimer pour réessayer."
+    },
     "known_hosts": {
       "title": "Hôtes de confiance",
       "description": "Gérez les clés d’hôte SSH enregistrées.",

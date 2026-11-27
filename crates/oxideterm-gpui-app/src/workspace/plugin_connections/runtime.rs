@@ -279,6 +279,7 @@ impl WorkspaceApp {
         terminal: &SharedTerminalSession,
         cx: &mut Context<Self>,
     ) {
+        self.plugin_entity.update(cx, |plugins,_| plugins.release_discovery_terminal(terminal));
         let instance = self
             .plugin_entity
             .read(cx)

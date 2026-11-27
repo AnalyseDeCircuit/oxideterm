@@ -13,6 +13,9 @@ impl WorkspaceApp {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if !self.node_allows_session_tools(&node_id) {
+            return;
+        }
         let node_title = self
             .ssh_nodes
             .get(&node_id)

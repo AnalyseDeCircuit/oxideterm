@@ -34,7 +34,7 @@ pub enum ShellPaletteRequest {
 pub fn key_request<A>(
     stroke: &gpui::Keystroke,
     query: &str,
-    selected: usize,
+    selected: Option<usize>,
     items: impl FnOnce() -> Vec<RankedItem<A>>,
 ) -> Option<ShellPaletteRequest> {
     use ShellPaletteRequest::*;
@@ -64,7 +64,15 @@ pub fn key_request<A>(
             .then(|| QueryChanged(format!("{query}{text}")));
         }
     };
-    next_enabled_palette_index(&items(), selected, step).map(Select)
+    let items = items();
+    let index = match selected {
+        Some(index) => next_enabled_palette_index(&items, index, step),
+        None if matches!(step, PaletteStep::Last | PaletteStep::Backward(_)) => {
+            items.iter().rposition(|row| !row.item.disabled)
+        }
+        None => items.iter().position(|row| !row.item.disabled),
+    };
+    index.map(Select)
 }
 
 pub fn query_input(
@@ -114,7 +122,7 @@ pub struct PaletteFrame<A> {
     pub mono_font: SharedString,
     pub palette: CommandPaletteView,
     pub ranked_items: Vec<RankedItem<A>>,
-    pub selected: usize,
+    pub selected: Option<usize>,
     pub preview_selected: bool,
     pub titlebar_height: f32,
     pub scope_counts: Option<String>,

@@ -210,6 +210,15 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
+        if let Some(node_id) = effect.reconnect_node()
+            && let Some(origin) = self.node_router.runtime_store().discovery_origin(node_id)
+            && origin.invalidation().is_cancelled()
+        {
+            self.workspace_runtime.update(cx, |runtime, cx| {
+                runtime.cancel_discovery_reconnect(&origin.instance_id, cx);
+            });
+            return false;
+        }
         let mut changed = false;
         for result in std::iter::once(effect) {
             match result {
@@ -223,6 +232,13 @@ impl WorkspaceApp {
                         != Some(connection_id)
                     {
                         continue;
+                    }
+                    if let Some(metadata) = self.node_router.node_metadata(&node_id)
+                        && let Some(node) = self.ssh_nodes.get_mut(&node_id)
+                    {
+                        node.endpoint = WorkspaceSshNodeEndpoint {
+                            host: metadata.host, port: metadata.port, username: metadata.username,
+                        };
                     }
                     self.rebind_sftp_surfaces_for_node(&node_id, cx);
                     self.public_mcp.rebind_node_leases(&node_id, connection_id);
@@ -425,6 +441,9 @@ impl WorkspaceApp {
                             self.finish_reconnect_job(&node_id, Err(error.clone()), cx);
                         }
                         runtime_entity::ReconnectFailureAction::InitialConnect => {
+                            if let Some(origin) = self.node_router.runtime_store().discovery_origin(&node_id) {
+                                origin.finish_open_request();
+                            }
                             if let Some((title, description)) = connection_failure_notice {
                                 self.push_notification_entry(
                                     WorkspaceNotificationKind::Connection,
@@ -1036,12 +1055,20 @@ impl WorkspaceApp {
             .read(cx)
             .reconnect_terminal_session_ids(node_id);
         let mut remounted = 0;
+        let initial_only = self
+            .node_router
+            .runtime_store()
+            .discovery_origin(node_id)
+            .is_some_and(|origin| !origin.allows_asset_channels());
         for old_session_id in old_session_ids {
+            if initial_only && remounted > 0 {
+                break;
+            }
             let Ok(raw_old_session_id) = old_session_id.parse::<u64>() else {
                 continue;
             };
             let old_session_id = TerminalSessionId(raw_old_session_id);
-            if self.reconnect_ssh_terminal_session(old_session_id, node_id, cx) {
+            if self.reconnect_ssh_terminal_session(old_session_id, node_id, initial_only, cx) {
                 remounted += 1;
             }
         }
@@ -1184,7 +1211,9 @@ impl WorkspaceApp {
     }
 
     fn schedule_grace_period_reconnect(&mut self, node_id: &NodeId, cx: &mut Context<Self>) {
-        if !self.settings_store.settings().reconnect.enabled {
+        if !self.settings_store.settings().reconnect.enabled
+            || self.node_router.runtime_store().discovery_origin(node_id).is_some()
+        {
             return;
         }
         if self
@@ -1200,6 +1229,9 @@ impl WorkspaceApp {
     }
 
     fn start_grace_period_reconnect(&mut self, node_id: &NodeId, cx: &mut Context<Self>) {
+        if self.node_router.runtime_store().discovery_origin(node_id).is_some() {
+            return;
+        }
         let Some(node) = self.ssh_nodes.get(node_id) else {
             return;
         };
@@ -1232,69 +1264,9 @@ impl WorkspaceApp {
 
         let mut affected_nodes = self.node_router.subtree_postorder(node_id);
         affected_nodes.reverse();
-        let terminal_sessions_by_node = affected_nodes
-            .iter()
-            .filter_map(|affected_node_id| {
-                let terminal_ids = self
-                    .workspace_runtime
-                    .read(cx)
-                    .ssh_terminal_session_ids_for_node(affected_node_id)
-                    .into_iter()
-                    .map(|session_id| session_id.0.to_string())
-                    .collect::<Vec<_>>();
-                (!terminal_ids.is_empty()).then_some(ReconnectNodeTerminalSnapshot {
-                    node_id: affected_node_id.0.clone(),
-                    old_terminal_session_ids: terminal_ids,
-                })
-            })
-            .collect::<Vec<_>>();
-        let old_terminal_session_ids = terminal_sessions_by_node
-            .iter()
-            .flat_map(|entry| entry.old_terminal_session_ids.iter().cloned())
-            .collect::<Vec<_>>();
-        let old_connections_by_node = affected_nodes
-            .iter()
-            .filter_map(|affected_node_id| {
-                self.node_router
-                    .connection_id_for_node(affected_node_id)
-                    .map(|old_connection_id| ReconnectNodeConnectionSnapshot {
-                        node_id: affected_node_id.0.clone(),
-                        old_connection_id,
-                    })
-            })
-            .collect::<Vec<_>>();
-        let old_connection_ids = old_connections_by_node
-            .iter()
-            .map(|entry| entry.old_connection_id.clone())
-            .collect::<Vec<_>>();
-        let snapshot_reader = self.forwarding_service.track_forward_restore();
-        let forward_rules = self.forward_rules_snapshot_for_nodes(&affected_nodes);
-        self.workspace_runtime.update(cx, |runtime, _| {
-            if forward_rules.is_empty() {
-                runtime.reconnect_forward_snapshot_readers.remove(node_id);
-            } else {
-                runtime
-                    .reconnect_forward_snapshot_readers
-                    .insert(node_id.clone(), snapshot_reader);
-            }
-        });
-        let active_port_forward_ids = forward_rules
-            .iter()
-            .flat_map(|entry| entry.rules.iter().map(|rule| rule.id.clone()))
-            .collect::<Vec<_>>();
-        let ide_snapshot = self.ide_snapshot_for_nodes(&affected_nodes, cx);
-        let snapshot = ReconnectSnapshot {
-            node_id: node_id.0.clone(),
-            old_terminal_session_ids,
-            terminal_sessions_by_node,
-            forward_rules,
-            active_port_forward_ids,
-            old_connections_by_node: old_connections_by_node.clone(),
-            old_connection_ids: old_connection_ids.clone(),
-            ide_snapshot,
-            snapshot_at: Some(SystemTime::now()),
-            ..ReconnectSnapshot::default()
-        };
+        let snapshot = self.node_reconnect_snapshot(node_id, &affected_nodes, cx);
+        let old_connections_by_node = snapshot.old_connections_by_node.clone();
+        let old_connection_ids = snapshot.old_connection_ids.clone();
         let reconnect_job = self
             .workspace_runtime
             .read(cx)
@@ -1336,6 +1308,77 @@ impl WorkspaceApp {
         self.workspace_runtime.update(cx, |runtime, _cx| {
             runtime.start_reconnect_grace_probe(grace_probe_request);
         });
+    }
+
+    pub(in crate::workspace) fn node_reconnect_snapshot(
+        &mut self,
+        node_id: &NodeId,
+        affected_nodes: &[NodeId],
+        cx: &mut Context<Self>,
+    ) -> ReconnectSnapshot {
+        let terminal_sessions_by_node = affected_nodes
+            .iter()
+            .filter_map(|affected_node_id| {
+                let terminal_ids = self
+                    .workspace_runtime
+                    .read(cx)
+                    .ssh_terminal_session_ids_for_node(affected_node_id)
+                    .into_iter()
+                    .map(|session_id| session_id.0.to_string())
+                    .collect::<Vec<_>>();
+                (!terminal_ids.is_empty()).then_some(ReconnectNodeTerminalSnapshot {
+                    node_id: affected_node_id.0.clone(),
+                    old_terminal_session_ids: terminal_ids,
+                })
+            })
+            .collect::<Vec<_>>();
+        let old_terminal_session_ids = terminal_sessions_by_node
+            .iter()
+            .flat_map(|entry| entry.old_terminal_session_ids.iter().cloned())
+            .collect::<Vec<_>>();
+        let old_connections_by_node = affected_nodes
+            .iter()
+            .filter_map(|affected_node_id| {
+                self.node_router
+                    .connection_id_for_node(affected_node_id)
+                    .map(|old_connection_id| ReconnectNodeConnectionSnapshot {
+                        node_id: affected_node_id.0.clone(),
+                        old_connection_id,
+                    })
+            })
+            .collect::<Vec<_>>();
+        let old_connection_ids = old_connections_by_node
+            .iter()
+            .map(|entry| entry.old_connection_id.clone())
+            .collect::<Vec<_>>();
+        let snapshot_reader = self.forwarding_service.track_forward_restore();
+        let forward_rules = self.forward_rules_snapshot_for_nodes(affected_nodes);
+        self.workspace_runtime.update(cx, |runtime, _| {
+            if forward_rules.is_empty() {
+                runtime.reconnect_forward_snapshot_readers.remove(node_id);
+            } else {
+                runtime
+                    .reconnect_forward_snapshot_readers
+                    .insert(node_id.clone(), snapshot_reader);
+            }
+        });
+        let active_port_forward_ids = forward_rules
+            .iter()
+            .flat_map(|entry| entry.rules.iter().map(|rule| rule.id.clone()))
+            .collect::<Vec<_>>();
+        let ide_snapshot = self.ide_snapshot_for_nodes(affected_nodes, cx);
+        ReconnectSnapshot {
+            node_id: node_id.0.clone(),
+            old_terminal_session_ids,
+            terminal_sessions_by_node,
+            forward_rules,
+            active_port_forward_ids,
+            old_connections_by_node,
+            old_connection_ids,
+            ide_snapshot,
+            snapshot_at: Some(SystemTime::now()),
+            ..ReconnectSnapshot::default()
+        }
     }
 
     fn start_reconnect_cascade_after_grace_expired(
@@ -1401,7 +1444,9 @@ impl WorkspaceApp {
             })
         {
             // An independently recovered child will not deliver a second connection completion.
-            if self.node_is_ready_for_terminal(&node_id) {
+            if self.node_is_ready_for_terminal(&node_id)
+                || self.node_router.runtime_store().discovery_origin(&node_id).is_some()
+            {
                 continue;
             }
             let parent_ready = self

@@ -353,6 +353,7 @@ pub fn toggle_remote_desktop_feature(
     }
 }
 
+#[derive(PartialEq)]
 pub struct NewConnectionProxyHop {
     pub totp_credential_id: Option<String>,
     pub totp_picker_expanded: bool,
@@ -773,6 +774,10 @@ pub enum ConnectionFormDrawer {
 }
 
 pub struct NewConnectionForm {
+    #[cfg(not(target_family = "wasm"))]
+    pub discovery_origin: Option<oxideterm_discovery::DiscoveryOrigin>,
+    #[cfg(not(target_family = "wasm"))]
+    pub saved_identity: Option<oxideterm_connections::SavedSshIdentity>,
     pub tunnel_target_host: String,
     pub tunnel_target_port: String,
     pub totp_credential_id: Option<String>,
@@ -1386,6 +1391,10 @@ impl Default for NewConnectionForm {
             terminal: ConnectionTerminalOptions::default(),
             agent_available: None,
             save_connection: false,
+            #[cfg(not(target_family = "wasm"))]
+            discovery_origin: None,
+            #[cfg(not(target_family = "wasm"))]
+            saved_identity: None,
             field_focused: true,
             focused_field: NewConnectionField::Name,
             selected_field: None,

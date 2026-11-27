@@ -294,6 +294,7 @@ impl<'a> SettingsPageFrame<'a> {
             | ConnectionsIdleTimeout
             | ConnectionsRetention
             | ConnectionsSshKeys
+            | DiscoverySources
             | ConnectionsSshConfigImport
             | ConnectionsImporters => {
                 SettingsPageData::Connections(host.connections(), host.footer_focus())

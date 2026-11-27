@@ -122,7 +122,7 @@ impl WorkspaceApp {
             .unwrap_or(0);
         self.command_palette.update(cx, |palette, cx| {
             palette.open_content(PaletteContent::QuickBarCategories, cx);
-            palette.set_selected_index(index, cx);
+            palette.set_selected_index(Some(index), cx);
         });
         self.scroll_selected_command_palette_item_into_view(cx);
         self.clear_ime_selection();
@@ -147,7 +147,7 @@ impl WorkspaceApp {
             .unwrap_or(0);
         self.command_palette.update(cx, |palette, cx| {
             palette.open_content(PaletteContent::TabScopes, cx);
-            palette.set_selected_index(index, cx);
+            palette.set_selected_index(Some(index), cx);
         });
         self.scroll_selected_command_palette_item_into_view(cx);
         self.clear_ime_selection();
@@ -184,6 +184,7 @@ impl WorkspaceApp {
         }
         self.bootstrap_native_plugin_runtime(cx);
         self.prepare_modal_interaction_boundary(cx);
+        self.discovery.ensure_visible();
         let auto_load_hosts = self.settings_store.settings().ssh_config.auto_load_hosts;
         let existing_names = self.command_palette_existing_connection_names();
         self.command_palette.update(cx, |palette, cx| {
@@ -335,7 +336,7 @@ impl WorkspaceApp {
             ShellPaletteRequest::Close => self.close_command_palette(cx),
             ShellPaletteRequest::Select(index) => {
                 self.command_palette
-                    .update(cx, |p, cx| p.set_selected_index(index, cx));
+                    .update(cx, |p, cx| p.set_selected_index(Some(index), cx));
             }
             ShellPaletteRequest::QueryChanged(text) => {
                 let len = self.command_palette.read(cx).query().encode_utf16().count();
@@ -921,6 +922,22 @@ impl WorkspaceApp {
         self.edit_settings(|settings| settings.terminal.theme = next_theme, cx);
     }
 
+    pub(super) fn selected_palette_item_id(&self, cx: &Context<Self>) -> Option<String> {
+        let palette = self.command_palette.read(cx);
+        if !palette.is_open() || palette.content() != PaletteContent::Commands {
+            return None;
+        }
+        let ranked = self.ranked_command_palette_items(cx);
+        palette.selected_item_id(&ranked).map(str::to_owned)
+    }
+
+    pub(super) fn restore_palette_item(&self, id: &str, cx: &mut Context<Self>) {
+        let items = self.ranked_command_palette_items(cx);
+        self.command_palette.update(cx, |palette, cx| {
+            palette.restore_item_selection(id, &items, cx)
+        });
+    }
+
     fn filtered_command_palette_items(&self, cx: &Context<Self>) -> Vec<PaletteItem> {
         self.ranked_command_palette_items(cx)
             .into_iter()
@@ -1081,6 +1098,9 @@ impl WorkspaceApp {
             self.saved_ssh_tunnels(),
         );
         connection_items.extend(self.command_palette_ssh_config_items(&ssh_config_hosts));
+        connection_items.extend(Self::command_palette_discovery_items(
+            &self.connections.session_manager.read(cx).discovery_entries,
+        ));
         let plugin_items = self.command_palette_plugin_items(cx);
         let help_items = self.command_palette_help_items();
 
@@ -1176,8 +1196,13 @@ impl WorkspaceApp {
             count: None,
             active: false,
             value: format!("{} {}", label, spec.id),
+            disabled: matches!(spec.action, PaletteAction::OpenSftp)
+                && self
+                    .embedded_sftp_node_id
+                    .as_ref()
+                    .or(self.active_ssh_node_id.as_ref())
+                    .is_some_and(|node| !self.node_allows_session_tools(node)),
             action: spec.action,
-            disabled: false,
         }
     }
 
@@ -1234,7 +1259,7 @@ impl WorkspaceApp {
     ) -> Vec<PaletteItem> {
         saved_session_manager_items(store, tunnels)
             .into_iter()
-            .map(|item| {
+            .filter_map(|item| {
                 let (prefix, icon) = match &item {
                     SessionManagerDisplayItem::Connection(_) => ("conn", LucideIcon::Server),
                     SessionManagerDisplayItem::LocalTerminal(_) => {
@@ -1258,6 +1283,7 @@ impl WorkspaceApp {
                     SessionManagerDisplayItem::SshConfig(_) => {
                         ("ssh-config", LucideIcon::FileTerminal)
                     }
+                    SessionManagerDisplayItem::Discovery(_) => return None,
                 };
                 let (label, mut detail, action) = match &item {
                     SessionManagerDisplayItem::Connection(conn) => {
@@ -1321,7 +1347,7 @@ impl WorkspaceApp {
                     }
                     detail.push_str(group);
                 }
-                PaletteItem {
+                Some(PaletteItem {
                     id: format!("{prefix}:{}", item.id()),
                     label,
                     section: PaletteSection::Connections,
@@ -1333,7 +1359,7 @@ impl WorkspaceApp {
                     value: item.search_text(),
                     action,
                     disabled: false,
-                }
+                })
             })
             .collect()
     }
@@ -1373,6 +1399,32 @@ impl WorkspaceApp {
                     active: false,
                     value: format!("{alias} {detail}"),
                     action: PaletteAction::QuickConnectAlias(alias),
+                    disabled: false,
+                }
+            })
+            .collect()
+    }
+
+    fn command_palette_discovery_items(
+        entries: &[oxideterm_discovery::CatalogEntry],
+    ) -> Vec<PaletteItem> {
+        entries
+            .iter()
+            .map(|entry| {
+                let detail = entry.display_detail();
+                PaletteItem {
+                    id: entry.row_id.clone(),
+                    label: entry.label.clone(),
+                    section: PaletteSection::Discovery,
+                    icon: LucideIcon::FileTerminal,
+                    value: format!("{} {}", entry.label, detail),
+                    detail: Some(detail),
+                    shortcut: None,
+                    count: None,
+                    active: false,
+                    action: PaletteAction::OpenSavedProfile(SessionManagerOpenTarget::Discovery(
+                        entry.key(),
+                    )),
                     disabled: false,
                 }
             })
@@ -1517,6 +1569,9 @@ impl WorkspaceApp {
         let selected_connection = selected_index
             .and_then(|index| ranked_items.get(index))
             .filter(|ranked| {
+                if ranked.item.section == PaletteSection::Discovery {
+                    return true;
+                }
                 matches!(
                     ranked.item.action,
                     PaletteAction::OpenSavedConnection(_) | PaletteAction::OpenSavedProfile(_)
@@ -2756,6 +2811,26 @@ mod panel_layout_tests {
                 assert!(matches!(&results[0].item.action, PaletteAction::QuickConnectAlias(alias) if alias == "prod"));
             }
         });
+        let discovered = oxideterm_discovery::CatalogEntry {
+            row_id: "discovery:4:west42".into(),
+            source_id: "west".into(),
+            target_id: "42".into(),
+            label: "Palette Desktop".into(),
+            source_name: "West".into(),
+            scope: Some("databases".into()),
+            detail: Some("10.2.3.4".into()),
+            tags: vec!["sql".into()],
+            group_paths: [["Prod", "DB/A"].as_slice(), &["Duty"]]
+                .map(|path| {
+                    path.iter()
+                        .map(|label| oxideterm_discovery::DiscoveryGroupSegment {
+                            id: format!("internal-{label}"),
+                            label: (*label).to_owned(),
+                        })
+                        .collect()
+                })
+                .to_vec(),
+        };
         cx.update(|window, cx| workspace.update(cx, |workspace, cx| {
             workspace.settings_store.settings_mut().ssh_config.auto_load_hosts = false;
             workspace.connection_store.upsert_remote_desktop_profile(
@@ -2771,8 +2846,47 @@ mod panel_layout_tests {
                     ..Default::default()
                 }
             ).unwrap();
+            workspace.connections.session_manager.update(cx, |manager, cx| {
+                manager.update_discovery(vec![discovered], vec![], cx);
+            });
+            for query in ["Palette Desktop", "#Palette Desktop"] {
+                workspace.open_command_palette(window, cx);
+                workspace.command_palette.update(cx, |palette, cx| {
+                    palette.push_query_text(query, cx)
+                });
+                let matches = workspace.filtered_command_palette_items(cx);
+                let headings = matches.iter()
+                    .filter(|item| item.label == "Palette Desktop")
+                    .map(|item| (item.id.as_str(), section_label_key(item.section)))
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    headings,
+                    [
+                        ("remote-desktop-profile:palette-rdp", "command_palette.section_connections"),
+                        ("discovery:4:west42", "settings_view.discovery.title"),
+                    ],
+                    "{query}"
+                );
+            }
+            for query in ["#Palette Desktop databases", "#Duty", "#DB/A", "#10.2.3.4"] {
+                workspace.open_command_palette(window, cx);
+                workspace.command_palette.update(cx, |palette, cx| {
+                    palette.push_query_text(query, cx)
+                });
+                let results = workspace.filtered_command_palette_items(cx);
+                let [target] = results.as_slice() else {
+                    panic!("expected only the discovered database")
+                };
+                assert_eq!(target.detail.as_deref(), Some("West · databases · 10.2.3.4 · sql · Prod › DB/A · Duty"));
+                assert!(workspace.palette_frame(window, cx).preview_selected);
+                assert!(matches!(
+                    &target.action,
+                    PaletteAction::OpenSavedProfile(SessionManagerOpenTarget::Discovery((source, target)))
+                        if source == "west" && target == "42"
+                ));
+            }
             workspace.open_command_palette(window, cx);
-            workspace.command_palette.update(cx, |palette, cx| palette.push_query_text("#Palette Desktop", cx));
+            workspace.command_palette.update(cx, |palette, cx| palette.push_query_text("#desktop.example", cx));
             let results = workspace.filtered_command_palette_items(cx);
             assert_eq!(results.iter().map(|item| item.id.as_str()).collect::<Vec<_>>(), vec!["remote-desktop-profile:palette-rdp"]);
             workspace.handle_command_palette_key(&KeyDownEvent{keystroke:gpui::Keystroke::parse("enter").unwrap(),is_held:false,prefer_character_input:false},window,cx);
@@ -3004,7 +3118,10 @@ mod panel_layout_tests {
             })
             .collect::<Vec<_>>();
 
-        assert_eq!(resolve_command_palette_selected_index(&ranked, 0), Some(1));
+        assert_eq!(
+            resolve_command_palette_selected_index(&ranked, Some(0)),
+            Some(1)
+        );
         assert_eq!(
             next_enabled_palette_index(&ranked, 1, PaletteStep::Forward(1)),
             Some(3)

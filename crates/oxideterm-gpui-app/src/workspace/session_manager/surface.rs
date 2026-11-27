@@ -118,6 +118,7 @@ impl WorkspaceApp {
             self.set_sidebar_section(SidebarSection::Sessions, cx);
         }
         self.refresh_session_manager_ssh_config_hosts(cx);
+        self.discovery.ensure_visible();
         let tab_id = if let Some(tab) = self
             .tabs(cx)
             .iter()

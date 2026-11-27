@@ -935,15 +935,19 @@ impl Render for TerminalPane {
                             .flex()
                             .items_center()
                             .gap_3()
-                            .child(self.render_terminal_toolbar_status(
-                                self.preferences.reconnect_hint.clone(),
-                            ))
+                            .when(self.discovery_reopen_label.is_none(), |bar| {
+                                bar.child(self.render_terminal_toolbar_status(
+                                    self.preferences.reconnect_hint.clone(),
+                                ))
+                            })
                             .child(
                                 self.render_terminal_toolbar_action(
                                     if self.ssh_reconnect_pending() {
                                         self.preferences.reconnecting_label.clone()
                                     } else {
-                                        self.preferences.reconnect_label.clone()
+                                        self.discovery_reopen_label.clone().unwrap_or_else(|| {
+                                            self.preferences.reconnect_label.clone()
+                                        })
                                     },
                                     !self.ssh_reconnect_pending(),
                                     true,
@@ -2691,7 +2695,8 @@ impl TerminalPane {
             if menu.link.is_some() {
                 label_rows.push((open_link_label.as_str(), None));
             }
-            if self.session_kind == TerminalSessionKind::SshPty {
+            let can_open_shell_ide = self.can_open_shell_ide();
+            if can_open_shell_ide {
                 label_rows.push((
                     self.preferences.command_selection_labels.shell_ide.as_str(),
                     None,
@@ -2747,7 +2752,7 @@ impl TerminalPane {
                             cx,
                         )
                     }))
-                    .when(self.session_kind == TerminalSessionKind::SshPty, |menu| {
+                    .when(can_open_shell_ide, |menu| {
                         menu.child(self.render_terminal_context_menu_item(
                             "lucide/code-2.svg",
                             self.preferences.command_selection_labels.shell_ide.clone(),

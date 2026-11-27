@@ -50,6 +50,9 @@ pub fn is_surface_input(input: SettingsInput) -> bool {
             | SettingsInput::AiModelContextWindow(_, _)
             | SettingsInput::KeybindingSearch
             | SettingsInput::KnownHostsSearch
+            | SettingsInput::DiscoverySecret(_)
+            | SettingsInput::DiscoveryField(_)
+            | SettingsInput::DiscoveryMultiline(_)
             | SettingsInput::ConnectionImportTargetGroup
             | SettingsInput::NetworkProxyPassword
             | SettingsInput::NetworkProxyTestHost
@@ -304,6 +307,7 @@ pub type SettingsEdit = Box<dyn FnOnce(&mut PersistedSettings)>;
 pub type SettingsWindowDispatch = Rc<dyn Fn(SettingsWindowRequest, &mut Window, &mut App)>;
 
 pub enum SettingsWindowRequest {
+    OpenPluginManager,
     ConfirmAiEnable,
     OpenAiTextEditor(crate::ai::text_editor::AiTextEditorDialog),
     ProbeAcpAgent(String),

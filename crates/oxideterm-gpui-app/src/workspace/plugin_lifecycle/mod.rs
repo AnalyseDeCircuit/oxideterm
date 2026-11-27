@@ -623,7 +623,7 @@ impl WorkspaceApp {
                     .contributions()
                     .runtime_terminal_input_interceptors
                     .clone(),
-                plugins.runtime_host(),
+                plugins.runtime_hosts().clone(),
             )
         };
         let interceptor = if hooks.is_empty() {
@@ -636,7 +636,7 @@ impl WorkspaceApp {
                     bytes,
                     session_id,
                     &hooks,
-                    runtime_host.clone(),
+                    &runtime_host,
                     runtime.clone(),
                     host_api_resolver.clone(),
                 )
@@ -667,7 +667,7 @@ impl WorkspaceApp {
                     .contributions()
                     .runtime_terminal_output_processors
                     .clone(),
-                plugins.runtime_host(),
+                plugins.runtime_hosts().clone(),
             )
         };
         let processor = if hooks.is_empty() {
@@ -679,7 +679,7 @@ impl WorkspaceApp {
                 native_plugin_apply_output_processors(
                     bytes,
                     &hooks,
-                    runtime_host.clone(),
+                    &runtime_host,
                     runtime.clone(),
                     host_api_resolver.clone(),
                 )
@@ -1375,6 +1375,11 @@ impl WorkspaceApp {
             .update(cx, |plugins, _cx| plugins.take_runtime_intents());
         for intent in intents {
             match intent {
+                plugin_entity::PluginRuntimeIntent::DiscoveryInstanceInvalidated(instance_id) => {
+                    self.workspace_runtime.update(cx, |runtime, cx| {
+                        runtime.cancel_discovery_reconnect(&instance_id, cx);
+                    });
+                }
                 plugin_entity::PluginRuntimeIntent::PreparePush { resolver } => {
                     let _ = resolver.send(self.native_plugin_host_api_resolver(cx));
                 }
@@ -1383,6 +1388,7 @@ impl WorkspaceApp {
                     audit_context,
                     effects,
                     refresh,
+                    ..
                 } => {
                     let audit_context = audit_context.or_else(|| {
                         oxideterm_audit::AuditContext::current().map(|mut context| {
@@ -1425,6 +1431,9 @@ impl WorkspaceApp {
             }
         }
         self.start_pending_plugin_connections(cx);
+        if self.plugin_entity.update(cx, |entity,_|entity.take_discovery_catalog_changed()) {
+            self.reconcile_discovery_sources(cx);
+        }
         cx.notify();
     }
 

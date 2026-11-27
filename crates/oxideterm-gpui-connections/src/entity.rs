@@ -281,6 +281,7 @@ impl ConnectionFlowEntity {
             status,
             intent: run.intent.clone(),
             session_tree_challenge: true,
+            checked_hop: None,
             host: step.host.clone(),
             port: step.port,
         };

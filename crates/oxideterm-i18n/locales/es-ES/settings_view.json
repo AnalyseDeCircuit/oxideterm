@@ -1,5 +1,31 @@
 {
   "settings_view": {
+    "discovery": {
+      "install_provider_hint": "Instala o activa un complemento de descubrimiento para añadir una fuente.",
+      "toggle_failed": "No se pudo cambiar el estado de activación de la fuente.",
+      "edit_source": "Editar fuente",
+      "confirm_ssh_form": "Confirmar el formulario antes de conectar",
+      "separate_session": "Abrir otra sesión",
+      "identity_changed": "El proveedor no pudo confirmar la identidad de acceso anterior. ¿Abrir una sesión aparte?",
+      "reopen": "Volver a abrir el recurso",
+      "refresh": "Actualizar lista",
+      "refreshing": "Actualizando la lista de destinos…",
+      "refreshed": "Lista actualizada a las {time} · Destinos: {count}",
+      "refresh_failed": "No se pudo actualizar la lista: {reason}",
+      "title": "Descubrimiento dinámico",
+      "description": "Gestiona las fuentes de conexiones temporales.",
+      "interval": "Intervalo de actualización (minutos)",
+      "scheduled_refresh": "Actualización automática",
+      "add": "Añadir fuente",
+      "save_before_action": "Guarda y activa esta fuente para usar esta acción con la configuración mostrada.",
+      "unavailable": "Fuente no disponible",
+      "permission_denied": "Acceso denegado",
+      "stale_target": "El destino ha cambiado. Actualiza la fuente.",
+      "invalid_response": "Respuesta del proveedor no válida",
+      "no_targets": "No hay destinos disponibles",
+      "source_in_use": "Cierra las sesiones de esta fuente en todas las ventanas y desconecta sus nodos inactivos desde Sesiones activas antes de eliminarla.",
+      "removal_pending": "La eliminación de la fuente está incompleta. Selecciona Eliminar para volver a intentarlo."
+    },
     "known_hosts": {
       "title": "Hosts de confianza",
       "description": "Administra las claves SSH de host guardadas.",

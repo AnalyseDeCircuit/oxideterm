@@ -41,6 +41,32 @@ pub(super) use ssh_flow::{
 pub(super) use oxideterm_gpui_connections::preflight::ssh_connection_display_title;
 
 impl WorkspaceApp {
+    pub(in crate::workspace) fn report_discovery_open_error(
+        &self,
+        message: String,
+        cx: &mut Context<Self>,
+    ) {
+        self.push_command_palette_toast(
+            self.i18n.t("modals.new_connection.connect_failed"),
+            Some(message),
+            super::TerminalNoticeVariant::Error,
+            cx,
+        );
+    }
+
+    fn report_ssh_preflight_error(
+        &mut self,
+        message: String,
+        discovery: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if discovery {
+            self.report_discovery_open_error(message, cx);
+        } else {
+            self.set_connection_status(Some(message), cx);
+        }
+    }
+
     pub(in crate::workspace) fn connections_view_bindings(
         owner: WeakEntity<Self>,
     ) -> ConnectionsViewBindings {
@@ -237,6 +263,7 @@ impl WorkspaceApp {
                 intent,
                 message,
                 inline,
+                discovery,
             } => {
                 if matches!(&intent, SshConnectionIntent::Mosh(_))
                     && self.plugin_entity.read(cx).mosh_executable().is_none()
@@ -245,7 +272,7 @@ impl WorkspaceApp {
                 }
                 self.fail_public_mcp_mosh_open_for_intent(&intent, message.clone());
                 if !inline {
-                    self.set_connection_status(Some(message), cx);
+                    self.report_ssh_preflight_error(message, discovery, cx);
                 }
             }
             ConnectionsWindowRequest::AdvanceProxyChain => {

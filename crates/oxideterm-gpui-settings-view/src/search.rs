@@ -541,6 +541,12 @@ fn settings_search_specs(desktop_operations: bool) -> Vec<SettingsSearchEntrySpe
             &["settings_view.reconnect.description"],
         ),
         settings_search_entry(
+            SettingsTab::Discovery,
+            SettingsSectionId::DiscoverySources,
+            "settings_view.discovery.title",
+            &["settings_view.discovery.interval"],
+        ),
+        settings_search_entry(
             SettingsTab::Connections,
             SettingsSectionId::ConnectionsSshConfigImport,
             "settings_view.connections.ssh_config.title",

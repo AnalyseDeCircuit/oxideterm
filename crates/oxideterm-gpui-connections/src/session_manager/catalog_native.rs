@@ -158,6 +158,7 @@ pub enum SessionManagerDisplayItem {
     Plugin(oxideterm_connections::PluginConnectionProfile),
     Connection(ConnectionInfo),
     SshConfig(SessionManagerSshConfigDisplayItem),
+    Discovery(oxideterm_discovery::CatalogEntry),
     Serial(SerialProfile),
     Ble(BleProfile),
     LocalTerminal(LocalTerminalProfile),
@@ -247,6 +248,12 @@ impl super::SessionManagerState {
                     .filter(|host| !host.already_imported)
                     .map(SessionManagerSshConfigDisplayItem::from)
                     .map(SessionManagerDisplayItem::SshConfig),
+            )
+            .chain(
+                self.discovery_entries
+                    .iter()
+                    .cloned()
+                    .map(SessionManagerDisplayItem::Discovery),
             );
         super::catalog::filtered_catalog(items, self)
     }
@@ -287,6 +294,7 @@ impl SessionManagerDisplayItem {
             Self::Tunnel(item) => &item.forward.id,
             Self::Connection(connection) => &connection.id,
             Self::SshConfig(host) => &host.alias,
+            Self::Discovery(host) => &host.row_id,
             Self::Serial(profile) => &profile.id,
             Self::Ble(profile) => &profile.id,
             Self::LocalTerminal(profile) => &profile.id,
@@ -300,7 +308,7 @@ impl SessionManagerDisplayItem {
     }
 
     pub fn selection_target(&self) -> Option<SessionManagerSelectionTarget> {
-        // Only SSH config discoveries are transient; every saved profile can use batch actions.
+        // Only saved profiles participate in batch edits.
         match self {
             Self::Tunnel(item) => Some(SessionManagerSelectionTarget::Tunnel(
                 item.forward.id.clone(),
@@ -330,6 +338,7 @@ impl SessionManagerDisplayItem {
                 profile.id.clone(),
             )),
             Self::SshConfig(_) => None,
+            Self::Discovery(_) => None,
         }
     }
 
@@ -365,6 +374,7 @@ impl SessionManagerDisplayItem {
             Self::SshConfig(host) => {
                 Some(SessionManagerRowActionTarget::SshConfig(host.alias.clone()))
             }
+            Self::Discovery(host) => Some(SessionManagerRowActionTarget::Discovery(host.key())),
         }
     }
 
@@ -376,6 +386,7 @@ impl SessionManagerDisplayItem {
                 SessionManagerOpenTarget::Connection(connection.id.clone())
             }
             Self::SshConfig(host) => SessionManagerOpenTarget::SshConfig(host.alias.clone()),
+            Self::Discovery(host) => SessionManagerOpenTarget::Discovery(host.key()),
             Self::Serial(profile) => SessionManagerOpenTarget::Serial(profile.id.clone()),
             Self::Ble(profile) => SessionManagerOpenTarget::Ble(profile.id.clone()),
             Self::LocalTerminal(profile) => {
@@ -399,6 +410,7 @@ impl SessionManagerDisplayItem {
             Self::Plugin(profile) => &profile.name,
             Self::Connection(connection) => &connection.name,
             Self::SshConfig(host) => &host.alias,
+            Self::Discovery(host) => &host.label,
             Self::Serial(profile) => &profile.name,
             Self::Ble(profile) => &profile.name,
             Self::LocalTerminal(profile) => &profile.name,
@@ -416,6 +428,7 @@ impl SessionManagerDisplayItem {
             Self::Plugin(profile) => profile.group.as_deref(),
             Self::Connection(connection) => connection.group.as_deref(),
             Self::SshConfig(_) => None,
+            Self::Discovery(_) => None,
             Self::Serial(profile) => profile.group.as_deref(),
             Self::Ble(profile) => profile.group.as_deref(),
             Self::LocalTerminal(profile) => profile.group.as_deref(),
@@ -433,6 +446,7 @@ impl SessionManagerDisplayItem {
             Self::Plugin(profile) => profile.last_used_at.map(|time| time.to_rfc3339()),
             Self::Connection(connection) => connection.last_used_at.clone(),
             Self::SshConfig(_) => None,
+            Self::Discovery(_) => None,
             Self::Serial(profile) => profile.last_used_at.map(|time| time.to_rfc3339()),
             Self::Ble(profile) => profile.last_used_at.map(|time| time.to_rfc3339()),
             Self::LocalTerminal(profile) => profile.last_used_at.map(|time| time.to_rfc3339()),
@@ -450,6 +464,7 @@ impl SessionManagerDisplayItem {
             Self::Plugin(profile) => &profile.plugin_id,
             Self::Connection(connection) => &connection.host,
             Self::SshConfig(host) => host.hostname.as_deref().unwrap_or(&host.alias),
+            Self::Discovery(host) => host.scope.as_deref().unwrap_or_default(),
             Self::Serial(profile) => &profile.port_path,
             Self::Ble(profile) => profile
                 .device_name
@@ -471,6 +486,7 @@ impl SessionManagerDisplayItem {
             Self::Plugin(_) => 0,
             Self::Connection(connection) => u32::from(connection.port),
             Self::SshConfig(host) => u32::from(host.port.unwrap_or(22)),
+            Self::Discovery(_) => 0,
             Self::Serial(profile) => profile.baud_rate,
             Self::Ble(_) => 0,
             Self::LocalTerminal(_) => 0,
@@ -488,6 +504,7 @@ impl SessionManagerDisplayItem {
             Self::Plugin(_) => "",
             Self::Connection(connection) => &connection.username,
             Self::SshConfig(host) => host.user.as_deref().unwrap_or_default(),
+            Self::Discovery(_) => "",
             Self::Serial(_) | Self::Ble(_) | Self::Telnet(_) => "",
             Self::LocalTerminal(_) => "",
             Self::Ftp(profile) => &profile.username,
@@ -503,6 +520,7 @@ impl SessionManagerDisplayItem {
             Self::Plugin(profile) => profile.type_id.clone(),
             Self::Connection(connection) => auth_label(connection.auth_type).to_lowercase(),
             Self::SshConfig(_) => "ssh config".to_string(),
+            Self::Discovery(host) => host.source_name.clone(),
             Self::Serial(_) => "serial".to_string(),
             Self::Ble(_) => "ble".to_string(),
             Self::LocalTerminal(_) => "local".to_string(),
@@ -548,6 +566,10 @@ impl SessionManagerDisplayItem {
                     host.hostname.as_deref().unwrap_or(&host.alias),
                     host.port.unwrap_or(22)
                 ),
+            },
+            Self::Discovery(host) => match &host.detail {
+                Some(detail) => format!("{detail} · {}", host.subtitle()),
+                None => host.subtitle(),
             },
             Self::Serial(profile) => format!("{} · {}", profile.port_path, profile.baud_rate),
             Self::Ble(profile) => format!(
@@ -600,6 +622,7 @@ impl SessionManagerDisplayItem {
                 host.port.unwrap_or(22),
                 host.user.as_deref().unwrap_or_default()
             ),
+            Self::Discovery(host) => host.search_text(),
             Self::Serial(profile) => format!(
                 "{}\n{}\n{}\n{}",
                 profile.name,
@@ -674,6 +697,7 @@ impl SessionManagerDisplayItem {
                     .unwrap_or(LucideIcon::Server.into())
             }
             Self::SshConfig(_) => LucideIcon::FileTerminal.into(),
+            Self::Discovery(_) => LucideIcon::Server.into(),
             Self::Serial(profile) => session_icons::session_icon_from_id(profile.icon.as_deref())
                 .unwrap_or(LucideIcon::Radio.into()),
             Self::Ble(profile) => session_icons::session_icon_from_id(profile.icon.as_deref())
@@ -713,6 +737,7 @@ impl SessionManagerDisplayItem {
             Self::StandaloneSftp(profile) => profile.color.as_deref(),
             Self::RemoteDesktop(profile) => profile.color.as_deref(),
             Self::SshConfig(_) => None,
+            Self::Discovery(_) => None,
         }
     }
 
@@ -730,6 +755,7 @@ impl SessionManagerDisplayItem {
             Self::StandaloneSftp(profile) => profile.icon_background_color.as_deref(),
             Self::RemoteDesktop(profile) => profile.icon_background_color.as_deref(),
             Self::SshConfig(_) => None,
+            Self::Discovery(_) => None,
         }
     }
 }
@@ -821,6 +847,18 @@ pub fn saved_session_manager_items(
 }
 
 impl CatalogEntry for SessionManagerDisplayItem {
+    fn group_paths(&self) -> &[Vec<oxideterm_discovery::DiscoveryGroupSegment>] {
+        match self {
+            Self::Discovery(entry) => &entry.group_paths,
+            _ => &[],
+        }
+    }
+    fn discovery_source(&self) -> Option<&str> {
+        match self {
+            Self::Discovery(entry) => Some(&entry.source_id),
+            _ => None,
+        }
+    }
     fn id(&self) -> &str {
         self.id()
     }
@@ -868,9 +906,16 @@ impl CatalogEntry for SessionManagerDisplayItem {
 
 impl From<SessionManagerDisplayItem> for CatalogRow {
     fn from(item: SessionManagerDisplayItem) -> Self {
+        let discovery_row_id = match &item {
+            SessionManagerDisplayItem::Discovery(entry) => entry.row_id.clone(),
+            _ => String::new(),
+        };
         Self {
+            discovery_row_id,
+            group_paths: item.group_paths().to_vec(),
             tags: match &item {
                 SessionManagerDisplayItem::Connection(connection) => connection.tags.clone(),
+                SessionManagerDisplayItem::Discovery(entry) => entry.tags.clone(),
                 _ => Vec::new(),
             },
             protocol_badge: None,

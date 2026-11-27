@@ -6,10 +6,13 @@ use oxideterm_connections::{
     SavedProxyCommand, SavedUpstreamProxyProtocol, SecretString, first_available_default_key_path,
 };
 use oxideterm_remote_desktop::RemoteDesktopProtocol;
-use oxideterm_session_adapter::{auth_method_from_saved_auth, proxy_command_from_value};
+use oxideterm_session_adapter::{
+    auth_method_from_saved_auth, proxy_command_from_value,
+};
 use oxideterm_ssh::{
-    AuthMethod, NativeSessionTreeConnectEndpoint, NodeId, NodeRouter, ProxyHopConfig, SshConfig,
-    UpstreamProxyAuth, UpstreamProxyProtocol, X11ForwardPolicy, X11ForwardTrust,
+    AuthMethod, NativeSessionTreeConnectEndpoint, NodeId, NodeRouter, ProxyCommandConfig,
+    ProxyHopConfig, SshConfig, UpstreamProxyAuth, UpstreamProxyProtocol, X11ForwardPolicy,
+    X11ForwardTrust,
 };
 
 pub fn runtime_proxy_hops_for_parent_path(
@@ -173,8 +176,11 @@ pub fn build_ssh_config(
             }
         }
     };
-    // Resolve every fallible route input before moving authentication drafts.
-    let proxy_command = if form.proxy_command_enabled {
+    let proxy_command = if !form.proxy_command_enabled {
+        None
+    } else if form.discovery_origin.is_some() {
+        Some(ProxyCommandConfig::AuthorizationRequired)
+    } else {
         let command = if form.proxy_command.trim().is_empty() {
             let saved_command = SavedProxyCommand {
                 keychain_id: form.proxy_command_keychain_id.clone(),
@@ -202,8 +208,6 @@ pub fn build_ssh_config(
             Some(&username),
             port,
         ))
-    } else {
-        None
     };
     let upstream_proxy = if proxy_command.is_some() {
         None
@@ -263,7 +267,17 @@ pub fn build_ssh_config(
     } else {
         proxy_chain_from_form(store, form, secret_handoff, saved_proxy_hop_auth)
     };
+    let discovery_origin = form.discovery_origin.clone().map(|origin| {
+        if proxy_command.is_none()
+            && form.upstream_proxy_policy == NewConnectionUpstreamProxyPolicy::UseGlobal
+        {
+            origin.with_global_proxy(&settings.network.upstream_proxy)
+        } else {
+            origin
+        }
+    });
     let config = SshConfig {
+        discovery_origin,
         totp: store.totp_binding(form.totp_credential_id.as_deref()),
         host: host.clone(),
         port: port.unwrap_or(22),
@@ -769,6 +783,49 @@ mod runtime_save_tests {
                 assert_eq!(password.as_ptr(), allocation);
             }
         }
+    }
+
+    #[test]
+    fn discovery_login_uses_its_own_credentials_even_when_a_saved_connection_matches() {
+        let mut file = NamedTempFile::new().unwrap();
+        // The legacy inline value avoids invoking the operating system keychain.
+        file.write_all(br#"{"connections":[{"id":"gateway","name":"Gateway","host":"gateway.test","port":2200,"username":"operator","auth":{"type":"password","keychain_id":"login-ref","password":"fixture-login"},"post_connect_command":"run-on-saved-host","options":{"pre_connect_command":"local-before-saved-host","open_sftp_on_connect":true},"created_at":"2026-01-01T00:00:00Z"}]}"#).unwrap();
+        let store = ConnectionStore::load_read_only(file.path()).unwrap();
+        let mut form = NewConnectionForm::default();
+        form.port = "2200".into();
+        form.auth_tab = SshAuthTab::Password;
+        form.discovery_origin = Some(
+            oxideterm_discovery::DiscoveryOrigin::new(
+                "inventory".into(),
+                "asset".into(),
+                uuid::Uuid::new_v4(),
+            )
+            .with_endpoint("gateway.test".into(), 2200, Some("operator".into())),
+        );
+        form.host = "gateway.test".into();
+        form.username = "operator".into();
+        let (config, _) = build_ssh_config(
+            &mut form,
+            &store,
+            &Default::default(),
+            &Default::default(),
+            RuntimeSecretHandoff::Move,
+        )
+        .unwrap();
+        assert_eq!(config.post_connect_command, None);
+        assert!(matches!(config.auth, AuthMethod::Password { password, prompt: true } if password.as_str().is_empty()));
+        form.password = "user-selected".into();
+        let (config, _) = build_ssh_config(
+            &mut form,
+            &store,
+            &Default::default(),
+            &Default::default(),
+            RuntimeSecretHandoff::Move,
+        )
+        .unwrap();
+        assert!(
+            matches!(config.auth, AuthMethod::Password { password, prompt: false } if password.as_str() == "user-selected")
+        );
     }
 
     #[test]

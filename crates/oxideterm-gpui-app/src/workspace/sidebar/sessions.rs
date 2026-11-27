@@ -36,7 +36,7 @@ fn active_connection_count(rows: &[ActiveSessionSidebarRow]) -> usize {
             )
         })
         .map(|row| {
-            if row.local_group {
+            if row.terminal_group.is_some() {
                 row.active_local_session_count
             } else {
                 1
@@ -140,7 +140,7 @@ fn active_session_row_selection_target(
 fn active_session_row_removal_target(
     row: &ActiveSessionSidebarRow,
 ) -> Option<ActiveSessionSelectionTarget> {
-    if row.local_group
+    if row.terminal_group.is_some()
         || !matches!(
             row.node_view.status(),
             ActiveSessionStatus::Idle | ActiveSessionStatus::Error
@@ -198,6 +198,25 @@ pub(in crate::workspace) struct ActiveSessionRemovalOutcome {
     skipped: usize,
 }
 
+#[derive(Clone, Eq, Hash, Ord, PartialEq, PartialOrd)]
+enum TerminalGroup {
+    Local,
+    Profile(String),
+    Discovery(String),
+}
+
+impl TerminalGroup {
+    fn node_id(&self) -> NodeId {
+        match self {
+            Self::Local => NodeId::new("local-terminal-group"),
+            Self::Profile(id) => super::super::local_sessions::local_profile_node_id(id),
+            Self::Discovery(id) => {
+                super::super::local_sessions::DiscoveryTerminalDisplay::group_id(id)
+            }
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(in crate::workspace) struct ActiveSessionSidebarRow {
     node_id: NodeId,
@@ -212,8 +231,7 @@ pub(in crate::workspace) struct ActiveSessionSidebarRow {
     is_last: bool,
     has_children: bool,
     standalone_session: Option<StandaloneActiveSession>,
-    local_group: bool,
-    local_profile_id: Option<String>,
+    terminal_group: Option<TerminalGroup>,
     active_local_session_count: usize,
     group: Option<SessionGroupRow>,
 }
@@ -264,6 +282,7 @@ fn session_endpoint_label(username: &str, host: &str, port: u16) -> String {
 struct LocalSessionRowState {
     terminal_ids: Vec<TerminalSessionId>,
     search: String,
+    source_name: Option<String>,
     readiness: ActiveSessionReadiness,
     active_count: usize,
 }
@@ -273,8 +292,38 @@ impl Default for LocalSessionRowState {
         Self {
             terminal_ids: Vec::new(),
             search: String::new(),
+            source_name: None,
             readiness: ActiveSessionReadiness::Disconnected,
             active_count: 0,
+        }
+    }
+}
+
+impl LocalSessionRowState {
+    fn into_sidebar_row(self, group: TerminalGroup, title: String) -> ActiveSessionSidebarRow {
+        let node_id = group.node_id();
+        ActiveSessionSidebarRow {
+            node_id: node_id.clone(),
+            parent_id: None,
+            saved_connection_id: None,
+            title: title.clone(),
+            host: self.search,
+            username: String::new(),
+            port: 0,
+            node_view: ActiveSessionNode {
+                id: node_id.0,
+                title,
+                port: 0,
+                terminal_ids: self.terminal_ids,
+                readiness: self.readiness,
+            },
+            depth: 0,
+            is_last: true,
+            has_children: false,
+            standalone_session: None,
+            terminal_group: Some(group),
+            active_local_session_count: self.active_count,
+            group: None,
         }
     }
 }
@@ -453,7 +502,9 @@ fn filter_active_session_rows(
         .collect();
     let mut retained = HashSet::new();
     for row in &rows {
-        let protocol = if row.local_group {
+        let protocol = if matches!(row.terminal_group, Some(TerminalGroup::Discovery(_))) {
+            "discovery".to_string()
+        } else if row.terminal_group.is_some() {
             "local".to_string()
         } else {
             row.standalone_session
@@ -599,7 +650,7 @@ fn group_active_session_rows_by_host_user(
 
     for row in rows {
         let host = row.host.trim();
-        let is_ssh_node = !row.local_group && row.standalone_session.is_none();
+        let is_ssh_node = row.terminal_group.is_none() && row.standalone_session.is_none();
         if !is_ssh_node || host.is_empty() {
             // Local groups, local profiles, standalone connections, and jump
             // hosts without a known endpoint keep their original row shape.
@@ -680,8 +731,7 @@ fn group_active_session_rows_by_host_user(
                 depth: 1,
                 is_last: user_position + 1 == user_count,
                 has_children: false,
-                local_group: false,
-                local_profile_id: None,
+                terminal_group: None,
                 active_local_session_count: 0,
                 standalone_session: None,
                 group: Some(SessionGroupRow {
@@ -712,8 +762,7 @@ fn group_active_session_rows_by_host_user(
             // order early-returns without recomputing them.
             is_last: host_position + 1 == root_count,
             has_children: user_count > 0,
-            local_group: false,
-            local_profile_id: None,
+            terminal_group: None,
             active_local_session_count: 0,
             standalone_session: None,
             group: Some(SessionGroupRow {
@@ -1336,6 +1385,9 @@ impl WorkspaceApp {
             &node_id,
         );
         if self.node_is_ready_for_terminal(&node_id) {
+            if !self.allow_discovery_channel_request(&node_id, window, cx) {
+                return Ok(());
+            }
             let open_sftp_on_connect = open_sftp_on_connect_override
                 || saved_connection_id
                     .as_deref()
@@ -1351,6 +1403,15 @@ impl WorkspaceApp {
             );
         }
 
+        if self
+            .node_router
+            .runtime_store()
+            .discovery_origin(&node_id)
+            .is_some()
+        {
+            self.reconnect_discovered_node(&node_id, window, cx);
+            return Ok(());
+        }
         let config = self
             .node_router
             .node_runtime_snapshot(&node_id)
@@ -1508,8 +1569,7 @@ impl WorkspaceApp {
                     has_children: flat_node_child_counts
                         .get(&flat_node_id)
                         .is_some_and(|count| *count > 0),
-                    local_group: false,
-                    local_profile_id: None,
+                    terminal_group: None,
                     active_local_session_count: 0,
                     standalone_session: None,
                     group: None,
@@ -1532,7 +1592,8 @@ impl WorkspaceApp {
             .iter()
             .map(|profile| profile.id.as_str())
             .collect::<HashSet<_>>();
-        let mut local_rows = HashMap::<Option<String>, LocalSessionRowState>::new();
+        let mut local_rows =
+            std::collections::BTreeMap::<TerminalGroup, LocalSessionRowState>::new();
         for (id, instance) in local_instances {
             let Some(location) = host.terminal_location(*id) else {
                 continue;
@@ -1540,12 +1601,21 @@ impl WorkspaceApp {
             let Some(pane) = host.panes().get(&location.pane_id) else {
                 continue;
             };
-            let profile_id = instance
-                .profile_id
-                .as_deref()
-                .filter(|profile_id| known_profiles.contains(*profile_id))
-                .map(str::to_owned);
-            let state = local_rows.entry(profile_id).or_default();
+            let group = match &instance.discovery {
+                Some(source) => TerminalGroup::Discovery(source.source_id.clone()),
+                None => instance
+                    .profile_id
+                    .as_ref()
+                    .filter(|id| known_profiles.contains(id.as_str()))
+                    .map(|id| TerminalGroup::Profile(id.clone()))
+                    .unwrap_or(TerminalGroup::Local),
+            };
+            let state = local_rows.entry(group).or_default();
+            if let Some(source) = &instance.discovery {
+                state
+                    .source_name
+                    .get_or_insert_with(|| source.source_name.clone());
+            }
             state.terminal_ids.push(*id);
             state.search.push(' ');
             state.search.push_str(&instance.title);
@@ -1573,68 +1643,31 @@ impl WorkspaceApp {
             {
                 continue;
             }
-            let state = local_rows
-                .remove(&Some(profile.id.clone()))
-                .unwrap_or_default();
-            let node_id = super::super::local_sessions::local_profile_node_id(&profile.id);
-            rows.push(ActiveSessionSidebarRow {
-                node_id: node_id.clone(),
-                parent_id: None,
-                saved_connection_id: None,
-                title: profile.name.clone(),
-                host: format!(
-                    "{} {}",
-                    profile.cwd.as_deref().unwrap_or_default(),
-                    state.search
-                ),
-                username: String::new(),
-                port: 0,
-                node_view: ActiveSessionNode {
-                    id: node_id.0,
-                    title: profile.name.clone(),
-                    port: 0,
-                    terminal_ids: state.terminal_ids,
-                    readiness: state.readiness,
-                },
-                depth: 0,
-                is_last: true,
-                has_children: false,
-                standalone_session: None,
-                local_group: true,
-                local_profile_id: Some(profile.id.clone()),
-                active_local_session_count: state.active_count,
-                group: None,
-            });
+            let group = TerminalGroup::Profile(profile.id.clone());
+            let mut state = local_rows.remove(&group).unwrap_or_default();
+            if let Some(cwd) = profile.cwd.as_deref() {
+                state.search.push(' ');
+                state.search.push_str(cwd);
+            }
+            rows.push(state.into_sidebar_row(group, profile.name.clone()));
         }
-        if let Some(state) = local_rows.remove(&None) {
-            let title = self
-                .i18n
-                .t("modals.new_connection.transport_local_terminal");
-            let node_id = "local-terminal-group".to_string();
-            rows.push(ActiveSessionSidebarRow {
-                node_id: NodeId::new(node_id.clone()),
-                parent_id: None,
-                saved_connection_id: None,
-                title: title.clone(),
-                host: state.search,
-                username: String::new(),
-                port: 0,
-                node_view: ActiveSessionNode {
-                    id: node_id,
-                    title,
-                    port: 0,
-                    terminal_ids: state.terminal_ids,
-                    readiness: state.readiness,
-                },
-                depth: 0,
-                is_last: true,
-                has_children: false,
-                standalone_session: None,
-                local_group: true,
-                local_profile_id: None,
-                active_local_session_count: state.active_count,
-                group: None,
-            });
+        for (group, mut state) in local_rows {
+            let title = match &group {
+                TerminalGroup::Local => self
+                    .i18n
+                    .t("modals.new_connection.transport_local_terminal"),
+                TerminalGroup::Discovery(id) => self
+                    .settings_store
+                    .settings()
+                    .discovery_sources
+                    .iter()
+                    .find(|source| &source.id == id)
+                    .map(|source| source.name.clone())
+                    .or_else(|| state.source_name.take())
+                    .unwrap_or_else(|| self.i18n.t("settings_view.discovery.title")),
+                TerminalGroup::Profile(_) => continue,
+            };
+            rows.push(state.into_sidebar_row(group, title));
         }
         rows
     }
@@ -1811,8 +1844,7 @@ impl WorkspaceApp {
             depth: 0,
             is_last: true,
             has_children: false,
-            local_group: false,
-            local_profile_id: None,
+            terminal_group: None,
             active_local_session_count: 0,
             group: None,
             standalone_session: Some(StandaloneActiveSession {
@@ -1846,8 +1878,7 @@ impl WorkspaceApp {
             depth: 0,
             is_last: true,
             has_children: false,
-            local_group: false,
-            local_profile_id: None,
+            terminal_group: None,
             active_local_session_count: 0,
             group: None,
             standalone_session: Some(StandaloneActiveSession {
@@ -1924,27 +1955,19 @@ impl WorkspaceApp {
         row.is_last.hash(&mut hasher);
         row.has_children.hash(&mut hasher);
         row.standalone_session.hash(&mut hasher);
-        row.local_group.hash(&mut hasher);
-        row.local_profile_id.hash(&mut hasher);
+        row.terminal_group.hash(&mut hasher);
         // Owning a saved connection swaps "save as connection" for the
         // port-forwarding row, so it changes the option stack height.
         row.saved_connection_id.hash(&mut hasher);
+        self.node_allows_session_tools(&row.node_id).hash(&mut hasher);
         self.can_save_runtime_node_as_connection(&row.node_id, row.saved_connection_id.as_deref())
             .hash(&mut hasher);
-        if row.local_group {
+        if row.terminal_group.is_some() {
             row.active_local_session_count.hash(&mut hasher);
-            if row.local_profile_id.is_none() {
+            if matches!(row.terminal_group, Some(TerminalGroup::Local)) {
                 self.local_session_group_expanded.hash(&mut hasher);
             }
             self.active_terminal_session_id(cx).hash(&mut hasher);
-        }
-        // Saved local profile rows light their icon from the active terminal
-        // session; the group row above already re-renders via that id.
-        if row.local_profile_id.is_some() && !row.local_group {
-            (self
-                .active_terminal_session_id(cx)
-                .is_some_and(|id| row.node_view.terminal_ids.contains(&id)))
-            .hash(&mut hasher);
         }
         row.standalone_session
             .as_ref()
@@ -2023,7 +2046,7 @@ impl WorkspaceApp {
         row: ActiveSessionSidebarRow,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let expanded = if row.local_profile_id.is_some() {
+        let expanded = if !matches!(row.terminal_group, Some(TerminalGroup::Local)) {
             self.expanded_ssh_nodes.contains(&row.node_id)
         } else {
             self.local_session_group_expanded
@@ -2039,23 +2062,29 @@ impl WorkspaceApp {
         let motion_key = format!("session:{}:children", row.node_id.0);
         let mut children = Vec::new();
         if self.disclosure_motions.retained(&motion_key, expanded) {
-            let profile_id = row.local_profile_id.clone();
-            let tools = vec![SessionActionSpec {
-                debug_key: "new-terminal",
-                icon: LucideIcon::Plus,
-                label: self.i18n.t("sessions.tree.actions.new_terminal"),
-                variant: SessionActionVariant::Primary,
-                listener: Box::new(cx.listener(move |this, _, window, cx| {
-                    if let Some(profile_id) = profile_id.as_deref() {
-                        this.open_saved_local_terminal_profile(profile_id, window, cx);
-                    } else {
-                        this.open_local_shell_launcher(cx);
-                    }
-                    cx.stop_propagation();
-                })),
-            }];
+            let mut tools = Vec::new();
+            if !matches!(row.terminal_group, Some(TerminalGroup::Discovery(_))) {
+                let profile_id = match &row.terminal_group {
+                    Some(TerminalGroup::Profile(id)) => Some(id.clone()),
+                    _ => None,
+                };
+                tools.push(SessionActionSpec {
+                    debug_key: "new-terminal",
+                    icon: LucideIcon::Plus,
+                    label: self.i18n.t("sessions.tree.actions.new_terminal"),
+                    variant: SessionActionVariant::Primary,
+                    listener: Box::new(cx.listener(move |this, _, window, cx| {
+                        if let Some(profile_id) = profile_id.as_deref() {
+                            this.open_saved_local_terminal_profile(profile_id, window, cx);
+                        } else {
+                            this.open_local_shell_launcher(cx);
+                        }
+                        cx.stop_propagation();
+                    })),
+                });
+            }
             let mut lifecycle = Vec::new();
-            if let Some(profile_id) = row.local_profile_id.clone() {
+            if let Some(TerminalGroup::Profile(profile_id)) = row.terminal_group.clone() {
                 lifecycle.push(SessionActionSpec {
                     debug_key: "remove",
                     icon: LucideIcon::Trash2,
@@ -2085,8 +2114,7 @@ impl WorkspaceApp {
             selected,
             in_selection,
             status,
-            true,
-            row.local_profile_id,
+            row.terminal_group,
             cx,
         );
 
@@ -2272,48 +2300,51 @@ impl WorkspaceApp {
                     variant: SessionActionVariant::Primary,
                     listener: Box::new(listener),
                 });
-                let listener = cx.listener({
-                    let node_id = node_id.clone();
-                    move |this, _event, window, cx| {
-                        this.open_sftp_tab(node_id.clone(), window, cx);
-                        cx.stop_propagation();
-                    }
-                });
-                tools.push(SessionActionSpec {
-                    debug_key: "sftp",
-                    icon: LucideIcon::FolderOpen,
-                    label: self.i18n.t("sessions.tree.actions.sftp"),
-                    variant: SessionActionVariant::Primary,
-                    listener: Box::new(listener),
-                });
-                let listener = cx.listener({
-                    let node_id = node_id.clone();
-                    move |this, _event, window, cx| {
-                        this.open_ide_folder_picker_tab(node_id.clone(), window, cx);
-                        cx.stop_propagation();
-                    }
-                });
-                tools.push(SessionActionSpec {
-                    debug_key: "ide",
-                    icon: LucideIcon::Code2,
-                    label: "IDE".to_string(),
-                    variant: SessionActionVariant::Primary,
-                    listener: Box::new(listener),
-                });
-                let listener = cx.listener({
-                    let node_id = node_id.clone();
-                    move |this, _event, window, cx| {
-                        this.open_forwards_tab(node_id.clone(), window, cx);
-                        cx.stop_propagation();
-                    }
-                });
-                tools.push(SessionActionSpec {
-                    debug_key: "port-forwarding",
-                    icon: LucideIcon::ArrowLeftRight,
-                    label: self.i18n.t("sessions.tree.actions.port_forwarding"),
-                    variant: SessionActionVariant::Primary,
-                    listener: Box::new(listener),
-                });
+                let show_tools = self.node_allows_session_tools(node_id);
+                if show_tools {
+                    let listener = cx.listener({
+                        let node_id = node_id.clone();
+                        move |this, _event, window, cx| {
+                            this.open_sftp_tab(node_id.clone(), window, cx);
+                            cx.stop_propagation();
+                        }
+                    });
+                    tools.push(SessionActionSpec {
+                        debug_key: "sftp",
+                        icon: LucideIcon::FolderOpen,
+                        label: self.i18n.t("sessions.tree.actions.sftp"),
+                        variant: SessionActionVariant::Primary,
+                        listener: Box::new(listener),
+                    });
+                    let listener = cx.listener({
+                        let node_id = node_id.clone();
+                        move |this, _event, window, cx| {
+                            this.open_ide_folder_picker_tab(node_id.clone(), window, cx);
+                            cx.stop_propagation();
+                        }
+                    });
+                    tools.push(SessionActionSpec {
+                        debug_key: "ide",
+                        icon: LucideIcon::Code2,
+                        label: self.i18n.t("connections.monitor.ide"),
+                        variant: SessionActionVariant::Primary,
+                        listener: Box::new(listener),
+                    });
+                    let listener = cx.listener({
+                        let node_id = node_id.clone();
+                        move |this, _event, window, cx| {
+                            this.open_forwards_tab(node_id.clone(), window, cx);
+                            cx.stop_propagation();
+                        }
+                    });
+                    tools.push(SessionActionSpec {
+                        debug_key: "port-forwarding",
+                        icon: LucideIcon::ArrowLeftRight,
+                        label: self.i18n.t("sessions.tree.actions.port_forwarding"),
+                        variant: SessionActionVariant::Primary,
+                        listener: Box::new(listener),
+                    });
+                }
                 if self.can_save_runtime_node_as_connection(node_id, saved_connection_id) {
                     let listener = cx.listener({
                         let node_id = node_id.clone();
@@ -2330,21 +2361,29 @@ impl WorkspaceApp {
                         listener: Box::new(listener),
                     });
                 }
-                let listener = cx.listener({
-                    let node_id = node_id.clone();
-                    move |this, _event, window, cx| {
-                        this.open_drill_down_form(node_id.clone(), window, cx);
-                        cx.stop_propagation();
-                    }
-                });
-                tools.push(SessionActionSpec {
-                    debug_key: "drill-in",
-                    icon: LucideIcon::ArrowDownRight,
-                    label: self.i18n.t("sessions.tree.actions.drill_in"),
-                    variant: SessionActionVariant::Primary,
-                    listener: Box::new(listener),
-                });
-            } else if matches!(node_view.status(), ActiveSessionStatus::Error) {
+                if self.node_allows_drill_down(node_id) {
+                    let listener = cx.listener({
+                        let node_id = node_id.clone();
+                        move |this, _event, window, cx| {
+                            this.open_drill_down_form(node_id.clone(), window, cx);
+                            cx.stop_propagation();
+                        }
+                    });
+                    tools.push(SessionActionSpec {
+                        debug_key: "drill-in",
+                        icon: LucideIcon::ArrowDownRight,
+                        label: self.i18n.t("sessions.tree.actions.drill_in"),
+                        variant: SessionActionVariant::Primary,
+                        listener: Box::new(listener),
+                    });
+                }
+            } else if matches!(node_view.status(), ActiveSessionStatus::Error)
+                && self
+                    .node_router
+                    .runtime_store()
+                    .discovery_origin(node_id)
+                    .is_none()
+            {
                 let listener = cx.listener({
                     let node_id = node_id.clone();
                     let saved_connection_id = saved_connection_id.map(str::to_owned);
@@ -2373,6 +2412,11 @@ impl WorkspaceApp {
         }
 
         if saved_connection_id.is_some()
+            && self
+                .node_router
+                .runtime_store()
+                .discovery_origin(node_id)
+                .is_none()
             && !matches!(
                 node_view.status(),
                 ActiveSessionStatus::Active | ActiveSessionStatus::Connected
@@ -3015,7 +3059,7 @@ impl WorkspaceApp {
         if row.group.is_some() {
             return self.render_session_group_row(&row, rows, cx);
         }
-        if row.local_group {
+        if row.terminal_group.is_some() {
             return self.render_local_session_sidebar_row(row, cx);
         }
         if row.standalone_session.is_some() {
@@ -3067,7 +3111,6 @@ impl WorkspaceApp {
             selected,
             in_selection,
             status,
-            false,
             None,
             cx,
         );
@@ -3120,6 +3163,20 @@ impl WorkspaceApp {
             .flatten()
             .map(|action| {
                 let (debug_key, icon, key, danger) = match action {
+                    SessionNodeRowAction::Connect
+                        if self
+                            .node_router
+                            .runtime_store()
+                            .discovery_origin(node_id)
+                            .is_some() =>
+                    {
+                        (
+                            "reconnect",
+                            LucideIcon::RefreshCw,
+                            "sessions.actions.reconnect",
+                            false,
+                        )
+                    }
                     SessionNodeRowAction::Connect => (
                         "connect",
                         LucideIcon::Power,
@@ -3476,7 +3533,13 @@ impl WorkspaceApp {
         node_id: &NodeId,
         saved_connection_id: Option<&str>,
     ) -> bool {
-        if saved_connection_id.is_some() {
+        if saved_connection_id.is_some()
+            || self
+                .node_router
+                .runtime_store()
+                .discovery_origin(node_id)
+                .is_some()
+        {
             return false;
         }
         let Some(snapshot) = self.node_router.node_metadata(node_id) else {
@@ -3491,7 +3554,7 @@ impl WorkspaceApp {
         )
     }
 
-    pub(in crate::workspace) fn render_session_node_header(
+    fn render_session_node_header(
         &self,
         node_id: NodeId,
         node: ActiveSessionNode,
@@ -3499,10 +3562,14 @@ impl WorkspaceApp {
         selected: bool,
         accent_bar: bool,
         status: SessionStatusStyle,
-        local_group: bool,
-        local_profile_id: Option<String>,
+        terminal_group: Option<TerminalGroup>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let local_group = terminal_group.is_some();
+        let local_profile_id = match &terminal_group {
+            Some(TerminalGroup::Profile(id)) => Some(id.as_str()),
+            _ => None,
+        };
         let theme = self.tokens.ui;
         let node_height = self.session_tree_node_height();
         let text_size = self.tokens.metrics.ui_text_xs;
@@ -3527,7 +3594,7 @@ impl WorkspaceApp {
         let port_text = format!(":{}", node.port);
         let terminal_count = node.terminal_ids.len();
         let chevron_node_id = node_id.clone();
-        let chevron_is_unsaved_local_group = local_group && local_profile_id.is_none();
+        let chevron_is_unsaved_local_group = matches!(terminal_group, Some(TerminalGroup::Local));
         let chevron_label = self.i18n.t(if expanded {
             "settings_view.tool_use_collapse"
         } else {
@@ -3546,12 +3613,11 @@ impl WorkspaceApp {
                 cx,
             )
         } else if local_group {
-            self.local_profile_session_icon(local_profile_id.as_deref())
-                .render(
-                    SESSION_TREE_ICON_SIZE,
-                    owned_tab_icon_color,
-                    owns_active_tab,
-                )
+            self.local_profile_session_icon(local_profile_id).render(
+                SESSION_TREE_ICON_SIZE,
+                owned_tab_icon_color,
+                owns_active_tab,
+            )
         } else {
             self.node_session_icon(&node_id).render(
                 SESSION_TREE_ICON_SIZE,
@@ -3722,12 +3788,7 @@ impl WorkspaceApp {
                     cx.notify();
                     return;
                 }
-                let expanded = if local_profile_id.is_some() {
-                    if !this.expanded_ssh_nodes.insert(node_id.clone()) {
-                        this.expanded_ssh_nodes.remove(&node_id);
-                    }
-                    this.expanded_ssh_nodes.contains(&node_id)
-                } else if local_group {
+                let expanded = if chevron_is_unsaved_local_group {
                     this.local_session_group_expanded = !this.local_session_group_expanded;
                     this.local_session_group_expanded
                 } else {
@@ -3795,12 +3856,19 @@ impl WorkspaceApp {
         index: usize,
         cx: &App,
     ) -> (String, super::super::session_icons::SessionIcon) {
-        let local_instance = self
-            .tab_host
-            .read(cx)
-            .local_sessions
-            .get(&session_id)
-            .map(|instance| (instance.title.clone(), instance.profile_id.clone()));
+        let local_instance =
+            self.tab_host
+                .read(cx)
+                .local_sessions
+                .get(&session_id)
+                .map(|instance| {
+                    let label = instance
+                        .discovery
+                        .as_ref()
+                        .map(|source| &source.target_label)
+                        .unwrap_or(&instance.title);
+                    (label.clone(), instance.profile_id.clone())
+                });
         let text = local_instance
             .as_ref()
             .map(|(title, _)| format!("{title} #{}", session_id.0))
@@ -4318,8 +4386,7 @@ mod sorting_tests {
             depth: usize::from(parent.is_some()),
             is_last: false,
             has_children: false,
-            local_group: false,
-            local_profile_id: None,
+            terminal_group: None,
             active_local_session_count: 0,
             standalone_session: None,
             group: None,
@@ -4403,7 +4470,7 @@ mod sorting_tests {
             assert_eq!(active_connection_count(&rows), 4 + index, "{kind:?}");
         }
         let mut local = row("local", "Local Terminal", None, true);
-        local.local_group = true;
+        local.terminal_group = Some(TerminalGroup::Local);
         local.node_view.terminal_ids = vec![
             TerminalSessionId(3),
             TerminalSessionId(4),
@@ -4480,7 +4547,7 @@ mod sorting_tests {
         });
         assert_eq!(active_session_row_removal_target(&group), None);
         let mut local = row("local", "Local", None, false);
-        local.local_group = true;
+        local.terminal_group = Some(TerminalGroup::Local);
         assert_eq!(active_session_row_removal_target(&local), None);
     }
 
@@ -4558,7 +4625,7 @@ mod sorting_tests {
     #[test]
     fn local_session_search_keeps_the_group_and_its_terminal_instances() {
         let mut local = row("local-terminal-group", "Local Terminal", None, true);
-        local.local_group = true;
+        local.terminal_group = Some(TerminalGroup::Local);
         local.host = "Zsh /projects Bash /tmp".into();
         local.node_view.terminal_ids = vec![TerminalSessionId(7), TerminalSessionId(8)];
         let remote = row("ssh", "Zsh server", None, true);
@@ -4808,8 +4875,7 @@ mod host_view_tests {
             depth: 0,
             is_last: false,
             has_children: false,
-            local_group: false,
-            local_profile_id: None,
+            terminal_group: None,
             active_local_session_count: 0,
             standalone_session: None,
             group: None,
@@ -4841,7 +4907,7 @@ mod host_view_tests {
             "",
             ActiveSessionReadiness::Ready,
         );
-        local.local_group = true;
+        local.terminal_group = Some(TerminalGroup::Local);
 
         let grouped = group_active_session_rows_by_host_user(vec![
             session_row(
@@ -5031,7 +5097,7 @@ mod host_view_tests {
             "",
             ActiveSessionReadiness::Ready,
         );
-        local.local_group = true;
+        local.terminal_group = Some(TerminalGroup::Local);
         let ordered = arrange_active_session_group_rows(
             vec![
                 local,
@@ -5314,6 +5380,93 @@ mod host_view_render_tests {
             String::from_utf8_lossy(&output.stderr)
         );
         None
+    }
+
+    #[gpui::test]
+    fn discovery_pty_sidebar_groups_by_source_in_both_views(cx: &mut TestAppContext) {
+        let Some(_dir) = isolated_fixture(cx, "OXIDETERM_DISCOVERY_SIDEBAR_TEST_DIR") else {
+            return;
+        };
+        cx.executor().allow_parking();
+        let (shell, cx) = cx.add_window_view(|window, cx| {
+            let ws = cx.new(|cx| WorkspaceApp::new(window, cx, None, None).unwrap());
+            WorkspaceWindowShell::new(ws, window, cx)
+        });
+        let ws = shell.read_with(cx, |shell, _| shell.session_entity());
+        cx.update(|window, cx| {
+            ws.update(cx, |ws, cx| {
+                let config = || {
+                    #[cfg(unix)]
+                    let shell = oxideterm_terminal::ShellInfo::new("fixture", "Fixture", "/bin/sh");
+                    #[cfg(windows)]
+                    let shell = oxideterm_terminal::ShellInfo::new("fixture", "Fixture", "cmd.exe");
+                    LocalPtyConfig {
+                        shell: Some(shell),
+                        load_profile: false,
+                        ..Default::default()
+                    }
+                };
+                let (local, _) = ws
+                    .create_local_terminal_tab_with_owned_session(
+                        config(),
+                        "Shell".into(),
+                        window,
+                        cx,
+                    )
+                    .unwrap();
+                assert!(ws.active_terminal_cwd_scope_and_pane(cx).is_some());
+                let mut open = |id: &str| {
+                    let source = oxideterm_discovery::DiscoverySource {
+                        id: id.into(),
+                        name: "Machines".into(),
+                        ..Default::default()
+                    };
+                    ws.create_discovery_terminal_tab(config(), &source, "web".into(), window, cx)
+                        .unwrap()
+                        .0
+                };
+                let first = open("one");
+                let sibling = open("one");
+                let other = open("two");
+                assert!(ws.active_terminal_cwd_scope_and_pane(cx).is_none());
+                let context = ws.terminal_command_context(cx);
+                assert!(context.is_remote_terminal());
+                assert_eq!(context.target_label, "Machines · web");
+                for view in [
+                    ActiveSessionSidebarViewMode::Host,
+                    ActiveSessionSidebarViewMode::Tree,
+                ] {
+                    ws.active_session_sidebar_view_mode = view;
+                    let rows = ws.active_session_sidebar_display_rows(cx);
+                    let row = |group: TerminalGroup| {
+                        rows.iter()
+                            .find(|r| r.terminal_group.as_ref() == Some(&group))
+                            .unwrap()
+                    };
+                    assert!(
+                        row(TerminalGroup::Local)
+                            .node_view
+                            .terminal_ids
+                            .contains(&local)
+                    );
+                    assert!(
+                        !row(TerminalGroup::Local)
+                            .node_view
+                            .terminal_ids
+                            .contains(&first)
+                    );
+                    let production = row(TerminalGroup::Discovery("one".into()));
+                    assert_eq!(production.title, "Machines");
+                    assert_eq!(production.node_view.terminal_ids, [first, sibling]);
+                    assert_eq!(
+                        row(TerminalGroup::Discovery("two".into()))
+                            .node_view
+                            .terminal_ids,
+                        [other]
+                    );
+                }
+            })
+        });
     }
 
     #[gpui::test]

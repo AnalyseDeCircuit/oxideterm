@@ -36,7 +36,7 @@ use ssh_encoding::Encode;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     sync::Semaphore,
-    sync::mpsc,
+    sync::{mpsc, oneshot},
     task::JoinSet,
     time::{Instant, sleep_until, timeout},
 };
@@ -526,6 +526,7 @@ pub trait SshPromptHandler: Send + Sync {
 }
 
 pub struct SshPtyHandle {
+    terminal_route: Option<Arc<crate::ConnectionConsumerLease>>,
     audit: Option<oxideterm_audit::AuditContext>,
     pub session_id: String,
     pub command_tx: mpsc::Sender<SshTransportCommand>,

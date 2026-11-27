@@ -30,6 +30,9 @@ impl std::fmt::Debug for SshCommandExecution {
 impl SshConnectionHandle {
     /// Shares verified capabilities with commands without opening a second physical connection.
     pub async fn select_command_channel(&self) -> Result<SshCommandChannel, SshTransportError> {
+        if !self.allows_additional_channels() {
+            return Err(SshTransportError::CommandChannelUnavailable);
+        }
         let pooled = self.physical::<PooledSshConnection>().ok_or_else(|| {
             SshTransportError::ConnectionFailed("SSH connection is unavailable".into())
         })?;
@@ -48,6 +51,9 @@ impl SshConnectionHandle {
         timeout: Duration,
         max_output_size: usize,
     ) -> Result<SshCommandExecution, SshTransportError> {
+        if !self.allows_additional_channels() {
+            return Err(SshTransportError::CommandChannelUnavailable);
+        }
         let pooled = self.physical::<PooledSshConnection>().ok_or_else(|| {
             SshTransportError::ConnectionFailed("no active SSH connection is available".into())
         })?;

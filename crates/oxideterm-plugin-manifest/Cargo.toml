@@ -9,5 +9,6 @@ version.workspace = true
 
 [dependencies]
 oxideterm-remote-desktop = { path = "../oxideterm-remote-desktop" }
+uuid.workspace = true
 serde.workspace = true
 serde_json.workspace = true

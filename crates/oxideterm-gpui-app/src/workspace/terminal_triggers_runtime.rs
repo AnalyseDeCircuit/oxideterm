@@ -341,12 +341,22 @@ impl WorkspaceApp {
         trigger: &TerminalTrigger,
         cx: &App,
     ) -> bool {
+        if !self.discovery_pane_allows_target(pane_id, cx) {
+            return false;
+        }
         let is_local = self
             .tab_host
             .read(cx)
             .panes()
             .get(&pane_id)
-            .is_some_and(|pane| pane.read(cx).session_kind() == TerminalSessionKind::LocalPty);
+            .is_some_and(|pane| {
+                let pane = pane.read(cx);
+                pane.session_kind() == TerminalSessionKind::LocalPty
+                    && !self
+                        .plugin_entity
+                        .read(cx)
+                        .discovery_terminal(&pane.shared_session())
+            });
         let saved_connection = self
             .session_id_for_pane(pane_id, cx)
             .and_then(|session_id| self.terminal_saved_connection_refs.get(&session_id));

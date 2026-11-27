@@ -647,6 +647,7 @@ pub struct TerminalPane {
     terminal_exited: bool,
     crt_power_off_started_at: Option<Instant>,
     ssh_reconnect_state: SshReconnectState,
+    discovery_reopen_label: Option<String>,
     scroll_input_remainder_px: Pixels,
     smooth_scroll_offset_px: Pixels,
     smooth_scroll_animation: Option<SmoothScrollAnimation>,
@@ -1470,6 +1471,7 @@ impl TerminalPane {
             terminal_exited: false,
             crt_power_off_started_at: None,
             ssh_reconnect_state: SshReconnectState::Idle,
+            discovery_reopen_label: None,
             scroll_input_remainder_px: px(0.0),
             smooth_scroll_offset_px: px(0.0),
             smooth_scroll_animation: None,
@@ -2564,8 +2566,13 @@ impl TerminalPane {
         self.terminal.lock().lifecycle()
     }
 
+    pub fn set_discovery_reopen_label(&mut self, label: String, cx: &mut Context<Self>) {
+        self.discovery_reopen_label = Some(label);
+        cx.notify();
+    }
+
     pub fn can_reconnect_ssh(&self) -> bool {
-        self.session_kind == TerminalSessionKind::SshPty
+        (self.session_kind == TerminalSessionKind::SshPty || self.discovery_reopen_label.is_some())
             && self.terminal_exited
             && self.ssh_reconnect_state == SshReconnectState::Idle
     }
@@ -2954,6 +2961,13 @@ impl TerminalPane {
         }
         self.toolbar_actions = actions;
         cx.notify();
+    }
+
+    pub fn can_open_shell_ide(&self) -> bool {
+        self.session_kind == TerminalSessionKind::SshPty
+            && self
+                .ssh_connection_handle()
+                .is_none_or(|connection| connection.allows_additional_channels())
     }
 
     pub fn ssh_connection_handle(&self) -> Option<SshConnectionHandle> {

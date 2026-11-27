@@ -2384,37 +2384,15 @@ mod tests {
     }
 
     #[gpui::test]
-    fn saved_local_profile_palette_failure_is_visible_without_session_manager(
-        cx: &mut TestAppContext,
-    ) {
-        let executable = std::env::current_exe().unwrap();
-        let fixture_key = "OXIDETERM_PALETTE_FAILURE_TEST_DIR";
-        let Some(fixture_dir) = std::env::var_os(fixture_key) else {
-            // The real workspace uses process-wide storage discovery. A separate
-            // portable process isolates it without changing the user's home or stores.
-            let directory = tempfile::tempdir_in(executable.parent().unwrap()).unwrap();
-            let child = directory.path().join(executable.file_name().unwrap());
-            fs::hard_link(&executable, &child).unwrap();
-            fs::write(directory.path().join("portable"), []).unwrap();
-            let output = std::process::Command::new(child)
-                .arg(cx.test_function_name().unwrap())
-                .arg("--nocapture")
-                .env(fixture_key, directory.path())
-                .env_remove("APPIMAGE")
-                .current_dir(directory.path())
-                .output()
-                .unwrap();
-            assert!(
-                output.status.success(),
-                "portable palette regression failed:\n{}\n{}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
-            );
+    fn palette_open_failures_are_visible_without_session_manager(cx: &mut TestAppContext) {
+        use crate::workspace::session_manager::tests::isolated_workspace_fixture;
+        use oxideterm_gpui_connections::launch::SshConnectionWorkerResult;
+
+        let Some(fixture_dir) = isolated_workspace_fixture(cx, "OXIDETERM_PALETTE_FAILURE_TEST_DIR")
+        else {
             return;
         };
-        let fixture_dir = PathBuf::from(fixture_dir);
         let settings_path = default_settings_path();
-        assert!(settings_path.starts_with(&fixture_dir));
         let mut settings = SettingsStore::load_from_path(settings_path).unwrap();
         settings.settings_mut().onboarding_completed = true;
         settings.settings_mut().general.language = oxideterm_settings::Language::En;
@@ -2452,25 +2430,85 @@ mod tests {
                     )
                     .unwrap();
                 fs::remove_dir(&directory).unwrap();
-                workspace.open_command_palette(window, cx);
-                workspace.command_palette.update(cx, |palette, cx| {
-                    palette.push_query_text("Unavailable palette profile", cx);
-                });
-                workspace.handle_command_palette_key(
-                    &KeyDownEvent {
-                        keystroke: gpui::Keystroke::parse("enter").unwrap(),
-                        is_held: false,
-                        prefer_character_input: false,
-                    },
-                    window,
-                    cx,
-                );
-                assert!(!workspace.command_palette.read(cx).is_open());
+                // A cached search result can outlive its source in this window.
+                let cached_target = oxideterm_discovery::CatalogEntry {
+                    row_id: "discovery:4:west42".into(),
+                    source_id: "west".into(),
+                    target_id: "42".into(),
+                    source_name: "West".into(),
+                    label: "Withdrawn discovery target".into(),
+                    detail: None,
+                    group_paths: vec![],
+                    scope: None,
+                    tags: vec![],
+                };
+                workspace
+                    .connections
+                    .session_manager
+                    .update(cx, |manager, cx| {
+                        manager.update_discovery(vec![cached_target], vec![], cx);
+                    });
+                for query in ["Unavailable palette profile", "Withdrawn discovery target"] {
+                    workspace.open_command_palette(window, cx);
+                    workspace.command_palette.update(cx, |palette, cx| {
+                        palette.push_query_text(query, cx);
+                    });
+                    workspace.handle_command_palette_key(
+                        &KeyDownEvent {
+                            keystroke: gpui::Keystroke::parse("enter").unwrap(),
+                            is_held: false,
+                            prefer_character_input: false,
+                        },
+                        window,
+                        cx,
+                    );
+                    assert!(!workspace.command_palette.read(cx).is_open(), "{query}");
+                }
                 assert!(
                     workspace
                         .tabs(cx)
                         .iter()
                         .all(|tab| tab.kind != TabKind::SessionManager)
+                );
+
+                // A worker may also return a failed handshake after the palette closed.
+                let discovered = oxideterm_discovery::DiscoveryOrigin::new(
+                    "east".into(),
+                    "ssh".into(),
+                    uuid::Uuid::new_v4(),
+                );
+                for (origin, message) in [
+                    (Some(discovered), "Fixture SSH handshake failed"),
+                    (None, "Saved SSH handshake failed"),
+                ] {
+                    let result = SshConnectionWorkerResult::Preflight {
+                        config: SshConfig {
+                            host: "fixture.invalid".into(),
+                            discovery_origin: origin,
+                            ..Default::default()
+                        },
+                        upstream_proxy: None,
+                        title: "SSH".into(),
+                        intent: SshConnectionIntent::Connect(Default::default()),
+                        host: "fixture.invalid".into(),
+                        port: 22,
+                        checked_hop: None,
+                        status: oxideterm_ssh::HostKeyStatus::Error {
+                            message: message.into(),
+                        },
+                    };
+                    let request = workspace
+                        .connections
+                        .flow
+                        .update(cx, |flow, cx| {
+                            flow.apply_ssh_worker_result(result, &workspace.i18n, cx)
+                        })
+                        .unwrap();
+                    workspace.dispatch_connections_request(request, Some(window), cx);
+                }
+                assert_eq!(
+                    workspace.connections.session_manager.read(cx).status.as_deref(),
+                    Some("Saved SSH handshake failed")
                 );
             });
         });
@@ -2478,13 +2516,33 @@ mod tests {
         let overlay = workspace.read_with(cx, |workspace, _| workspace.overlay.clone());
         overlay.read_with(cx, |overlay, _| {
             assert_eq!(
-                overlay.transients.standard_toasts.iter().map(|toast| (
-                    toast.notice.title.as_str(), toast.notice.variant
-                )).collect::<Vec<_>>(),
-                vec![(
-                    "The startup directory is unavailable. Edit the session to choose an existing directory.",
-                    TerminalNoticeVariant::Error,
-                )]
+                overlay
+                    .transients
+                    .standard_toasts
+                    .iter()
+                    .map(|toast| (
+                        toast.notice.title.as_str(),
+                        toast.notice.description.as_deref(),
+                        toast.notice.variant
+                    ))
+                    .collect::<Vec<_>>(),
+                [
+                    (
+                        "The startup directory is unavailable. Edit the session to choose an existing directory.",
+                        None,
+                        TerminalNoticeVariant::Error,
+                    ),
+                    (
+                        "Connection Failed",
+                        Some("Target has changed. Refresh the source."),
+                        TerminalNoticeVariant::Error,
+                    ),
+                    (
+                        "Connection Failed",
+                        Some("Fixture SSH handshake failed"),
+                        TerminalNoticeVariant::Error,
+                    ),
+                ]
             );
         });
         let error_background: gpui::Hsla = workspace.read_with(cx, |workspace, _| {

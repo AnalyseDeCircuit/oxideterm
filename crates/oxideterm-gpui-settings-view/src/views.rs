@@ -221,10 +221,20 @@ impl SettingsViews {
             theme_editor_dialog: cx
                 .new(|cx| ThemeEditorDialog::new(settings, bindings.theme_editor, background, cx)),
             ssh_import_dialog_view: cx.new(|cx| {
-                ConnectionDialog::new(settings, false, dialog(SettingsDialog::SshImport), cx)
+                ConnectionDialog::new(
+                    settings,
+                    SettingsWorkspaceEntity::ssh_config_import_dialog_open,
+                    dialog(SettingsDialog::SshImport),
+                    cx,
+                )
             }),
             managed_key_dialog_view: cx.new(|cx| {
-                ConnectionDialog::new(settings, true, dialog(SettingsDialog::ManagedKeys), cx)
+                ConnectionDialog::new(
+                    settings,
+                    SettingsWorkspaceEntity::managed_key_dialog_open,
+                    dialog(SettingsDialog::ManagedKeys),
+                    cx,
+                )
             }),
             mcp_client_dialog: cx
                 .new(|cx| McpClientDialog::new(settings, dialog(SettingsDialog::McpClient), cx)),

@@ -80,6 +80,13 @@ pub enum SavedAuth {
 }
 
 impl SavedAuth {
+    pub(super) fn has_secret_draft(&self) -> bool {
+        match self.conventional_fallback() {
+            Self::Password { plaintext_password, .. } => plaintext_password.is_some(),
+            Self::Key { plaintext_passphrase, .. } | Self::Certificate { plaintext_passphrase, .. } | Self::ManagedKey { plaintext_passphrase, .. } => plaintext_passphrase.is_some(),
+            _ => false,
+        }
+    }
     pub fn uses_empty_password(&self) -> bool {
         matches!(
             self.conventional_fallback(),
@@ -2385,6 +2392,8 @@ impl fmt::Debug for SavedConnectionRuntimeSecrets {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ConnectionStoreData {
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub ssh_identity_generations: std::collections::BTreeMap<String, Uuid>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub plugin_tombstones: Vec<DeletedConnectionTombstone>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -2457,6 +2466,7 @@ impl Default for ConnectionStoreData {
     fn default() -> Self {
         Self {
             plugin_tombstones: Vec::new(),
+            ssh_identity_generations: Default::default(),
             plugin_profiles: Vec::new(),
             totp_credentials: Vec::new(),
             version: CONFIG_VERSION,
@@ -2701,6 +2711,7 @@ impl SavedConnectionsConflictStrategy {
 
 #[derive(Clone, Debug)]
 pub struct ConnectionStore {
+    revision: write_coordination::StoreRevision,
     path: PathBuf,
     data: ConnectionStoreData,
     storage_format: ConnectionStoreStorageFormat,

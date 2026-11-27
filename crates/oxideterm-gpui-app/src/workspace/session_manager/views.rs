@@ -29,6 +29,9 @@ impl WorkspaceApp {
             SessionManagerOpenTarget::SshConfig(alias) => {
                 self.open_ssh_config_alias_from_palette(alias, window, cx)
             }
+            SessionManagerOpenTarget::Discovery((source, target)) => {
+                self.open_discovery_target(&source, target, window, cx)
+            }
             SessionManagerOpenTarget::Serial(profile_id) => {
                 self.open_saved_serial_profile(&profile_id, window, cx)
             }

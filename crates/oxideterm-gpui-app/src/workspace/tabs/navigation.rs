@@ -234,6 +234,7 @@ impl WorkspaceApp {
                 }
             }
             Some(TabKind::SessionManager) => {
+                self.discovery.ensure_visible();
                 self.active_ssh_node_id = None;
                 self.active_surface = ActiveSurface::Terminal;
             }
@@ -380,6 +381,9 @@ impl WorkspaceApp {
         });
         if !registered {
             return Err(anyhow::anyhow!("workspace runtime is shutting down"));
+        }
+        if let Some(origin) = self.node_router.runtime_store().discovery_origin(node_id) {
+            origin.finish_open_request();
         }
         if let Some(node) = self.ssh_nodes.get_mut(node_id)
             && !node.terminal_ids.contains(&session_id)
@@ -575,6 +579,7 @@ impl WorkspaceApp {
             nodes_to_disconnect.push(node_id.clone());
         }
         for affected_node_id in &nodes_to_disconnect {
+            self.cancel_discovery_open_for_node(affected_node_id);
             // A later connection must not reuse an in-flight operation's old browsing slot.
             self.dedicated_sftp_connections
                 .lock()
@@ -1283,9 +1288,7 @@ impl WorkspaceApp {
             self.unregister_ssh_terminal_session(session_id, cx);
         }
         for pane_id in pane_ids {
-            if let Some(pane) = self.remove_terminal_pane(&pane_id, cx) {
-                let _ = pane.update(cx, |pane, _cx| pane.shutdown());
-            }
+            self.close_terminal_pane(&pane_id, cx);
         }
 
         self.sync_collapsed_workspace_tabs(cx);

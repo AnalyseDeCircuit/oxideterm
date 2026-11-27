@@ -33,7 +33,10 @@ use oxideterm_i18n::I18n;
 use oxideterm_settings::PersistedSettings;
 use std::{collections::HashSet, ops::Deref, rc::Rc};
 mod actions;
+mod discovery;
 mod importer;
+pub use discovery::DiscoveryProviderChoice;
+pub(crate) use discovery::DiscoverySettingsState;
 pub use importer::{
     connection_import_duplicate_strategy_label, connection_import_source_label,
     connection_import_source_options,
@@ -53,6 +56,17 @@ pub enum ConnectionRequest {
     ProxyCommand(bool),
     OpenSsh,
     CloseSsh,
+    SaveDiscovery {
+        source: oxideterm_settings::DiscoverySource,
+        secrets: Vec<(String, zeroize::Zeroizing<String>)>,
+    },
+    DeleteDiscovery(String),
+    RefreshDiscovery(String),
+    SetDiscoveryEnabled(String, bool),
+    RunDiscoverySourceAction {
+        source_id: String,
+        action_id: String,
+    },
     PickImport(bool),
     PickKey,
     CloseKey,
@@ -135,6 +149,7 @@ impl ConnectionPage<'_> {
             }
             ConnectionsSshKeys => self.settings_ssh_section(0, cx),
             ConnectionsSshConfigImport => self.ssh_config_import_section(cx),
+            DiscoverySources => self.discovery_section(cx),
             ConnectionsImporters => self.connection_importers_section(cx),
             _ => div().into_any_element(),
         }
@@ -1582,17 +1597,13 @@ pub struct ConnectionDialog {
 impl ConnectionDialog {
     pub fn new(
         settings: &Entity<SettingsWorkspaceEntity>,
-        managed_key: bool,
+        is_open: fn(&SettingsWorkspaceEntity) -> bool,
         body: Rc<dyn Fn(&App) -> Option<AnyElement>>,
         cx: &mut Context<Self>,
     ) -> Self {
         let state_changed = cx.observe(settings, move |_, state, cx| {
             let state = state.read(cx);
-            if if managed_key {
-                state.managed_key_dialog_open()
-            } else {
-                state.ssh_config_import_dialog_open()
-            } {
+            if is_open(state) {
                 cx.notify();
             }
         });

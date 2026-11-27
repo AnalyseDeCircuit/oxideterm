@@ -1195,6 +1195,61 @@ fn ssh_deferred_shell_starts_after_layout_and_closes_without_stale_events() {
 }
 
 #[test]
+fn discovery_target_runs_its_startup_command_without_lending_a_single_terminal_to_the_ide() {
+    let mut peer = ssh_peer::SshPeer::new();
+    let mut config = peer.config.take().unwrap();
+    config.post_connect_command = Some("only-on-target".into());
+    config.discovery_origin = Some(
+        oxideterm_discovery::DiscoveryOrigin::new(
+            "inventory".into(),
+            "asset".into(),
+            uuid::Uuid::new_v4(),
+        )
+        .with_instance("prepared-asset".into(), Default::default(), std::sync::Arc::new(())),
+    );
+    let config = SshSessionConfig::from(config)
+        .with_registry(
+            peer.registry.clone(),
+            ConnectionConsumer::Terminal("asset".into()),
+        )
+        .with_runtime(peer.runtime.clone())
+        .with_deferred_pty(true);
+    let mut terminal = SshPtySession::new(
+        config,
+        80,
+        24,
+        Default::default(),
+        TerminalEncoding::Utf8,
+        100,
+    );
+    wait_until(|| terminal.is_interactive());
+    terminal
+        .resize_with_cell_size(TerminalResize::new(100, 30, 8, 16))
+        .unwrap();
+    peer.ready.recv_timeout(Duration::from_secs(5)).unwrap();
+    let acquisition = terminal.acquire_shell_channel().unwrap();
+    let denied = peer
+        .runtime
+        .block_on(acquisition)
+        .unwrap()
+        .err()
+        .expect("single-terminal instance lent the IDE a shell");
+    assert_eq!(denied.to_string(), oxideterm_ssh::SshTransportError::CommandChannelUnavailable.to_string());
+    assert_eq!(
+        peer.input.recv_timeout(Duration::from_secs(5)).unwrap().0,
+        b"only-on-target\r"
+    );
+    terminal.write_text("manual-input").unwrap();
+    assert_eq!(
+        peer.input.recv_timeout(Duration::from_secs(5)).unwrap().0,
+        b"manual-input"
+    );
+    terminal.shutdown();
+    wait_until(|| terminal.shared.finished.load(Ordering::Acquire));
+    reap_workers();
+}
+
+#[test]
 fn ssh_single_large_input_is_delivered_without_truncation() {
     let mut fixture = Fixture::new();
     fixture.barrier();

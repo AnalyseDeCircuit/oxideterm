@@ -1,5 +1,31 @@
 {
   "settings_view": {
+    "discovery": {
+      "install_provider_hint": "Instale ou ative um plugin de descoberta para adicionar uma fonte.",
+      "toggle_failed": "Não foi possível alterar o estado de ativação da fonte.",
+      "edit_source": "Editar fonte",
+      "confirm_ssh_form": "Confirmar o formulário antes de conectar",
+      "separate_session": "Abrir outra sessão",
+      "identity_changed": "O provedor não conseguiu confirmar a identidade de acesso anterior. Abrir uma sessão separada?",
+      "reopen": "Reabrir destino",
+      "refresh": "Atualizar lista",
+      "refreshing": "Atualizando a lista de destinos…",
+      "refreshed": "Lista atualizada às {time} · Destinos: {count}",
+      "refresh_failed": "Falha ao atualizar a lista: {reason}",
+      "title": "Descoberta dinâmica",
+      "description": "Gerencie as fontes de conexões temporárias.",
+      "interval": "Intervalo de atualização (minutos)",
+      "scheduled_refresh": "Atualização automática",
+      "add": "Adicionar fonte",
+      "save_before_action": "Salve e ative esta fonte para usar esta ação com as configurações exibidas.",
+      "unavailable": "Fonte indisponível",
+      "permission_denied": "Acesso negado",
+      "stale_target": "O destino mudou. Atualize a fonte.",
+      "invalid_response": "Resposta inválida do provedor",
+      "no_targets": "Nenhum destino disponível",
+      "source_in_use": "Antes de excluir esta fonte, feche suas sessões em todas as janelas e desconecte os nós ociosos em Sessões ativas.",
+      "removal_pending": "A exclusão da fonte está incompleta. Selecione Excluir para tentar novamente."
+    },
     "known_hosts": {
       "title": "Hosts confiáveis",
       "description": "Gerencie as chaves de host SSH salvas.",

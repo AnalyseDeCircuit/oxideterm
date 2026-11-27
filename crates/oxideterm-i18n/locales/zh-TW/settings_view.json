@@ -1,5 +1,31 @@
 {
   "settings_view": {
+    "discovery": {
+      "install_provider_hint": "若要新增來源，請先安裝或啟用動態探索外掛程式。",
+      "toggle_failed": "無法變更來源的啟用狀態。",
+      "edit_source": "編輯來源",
+      "confirm_ssh_form": "連線前再次確認連線表單",
+      "separate_session": "另開工作階段",
+      "identity_changed": "提供方無法確認存取身分與原工作階段一致。要另開工作階段嗎？",
+      "reopen": "重新開啟目標",
+      "refresh": "重新整理清單",
+      "refreshing": "正在重新整理目標清單…",
+      "refreshed": "清單已更新 · {time} · 目標數：{count}",
+      "refresh_failed": "無法重新整理清單：{reason}",
+      "title": "動態探索",
+      "description": "管理臨時連線的探索來源。",
+      "interval": "重新整理間隔（分鐘）",
+      "scheduled_refresh": "定時重新整理",
+      "add": "新增來源",
+      "save_before_action": "請先儲存並啟用此來源，再使用目前設定執行此操作。",
+      "unavailable": "來源無法使用",
+      "permission_denied": "存取遭拒",
+      "stale_target": "目標已變更，請重新整理來源。",
+      "invalid_response": "提供者傳回的資料無效",
+      "no_targets": "沒有可用的目標",
+      "source_in_use": "請關閉各視窗中此來源的工作階段，並在使用中的工作階段中斷開閒置節點，再刪除來源。",
+      "removal_pending": "來源尚未刪除完成，可再次點選「刪除」。"
+    },
     "known_hosts": {
       "title": "已信任主機",
       "description": "管理已儲存的 SSH 主機金鑰。",

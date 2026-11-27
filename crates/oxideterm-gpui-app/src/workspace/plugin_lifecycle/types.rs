@@ -35,6 +35,7 @@ pub(in crate::workspace) enum NativePluginRuntimeDelivery {
     Push {
         plugin_id: String,
         generation: u64,
+        source_action_authority: Option<tokio_util::sync::CancellationToken>,
         result: Result<plugin_runtime::NativePluginRuntimePush, plugin_runtime::PluginError>,
         consumed: tokio::sync::oneshot::Sender<()>,
     },

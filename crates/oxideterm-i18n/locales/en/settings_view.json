@@ -1,5 +1,31 @@
 {
   "settings_view": {
+    "discovery": {
+      "install_provider_hint": "Install or enable a discovery plugin to add a source.",
+      "toggle_failed": "Could not change the source’s enabled state.",
+      "edit_source": "Edit source",
+      "confirm_ssh_form": "Confirm connection form before connecting",
+      "separate_session": "Open a new session",
+      "identity_changed": "The provider could not confirm the previous access identity. Open a separate session?",
+      "reopen": "Reopen target",
+      "refresh": "Refresh list",
+      "refreshing": "Refreshing target list…",
+      "refreshed": "List refreshed at {time} · Targets: {count}",
+      "refresh_failed": "Refresh failed: {reason}",
+      "title": "Dynamic discovery",
+      "description": "Manage sources of temporary connections.",
+      "interval": "Refresh interval (minutes)",
+      "scheduled_refresh": "Scheduled refresh",
+      "add": "Add source",
+      "save_before_action": "Save and enable this source to use this action with the displayed settings.",
+      "unavailable": "Source unavailable",
+      "permission_denied": "Access denied",
+      "stale_target": "Target has changed. Refresh the source.",
+      "invalid_response": "Invalid provider response",
+      "no_targets": "No targets available",
+      "source_in_use": "Close this source’s sessions in all windows and disconnect its idle nodes from Active Sessions before deleting it.",
+      "removal_pending": "Source deletion is incomplete. Select Delete to try again."
+    },
     "known_hosts": {
       "title": "Trusted hosts",
       "description": "Manage saved SSH host keys.",

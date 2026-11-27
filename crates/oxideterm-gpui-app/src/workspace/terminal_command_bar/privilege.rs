@@ -8,6 +8,14 @@ impl WorkspaceApp {
         &self,
         cx: &App,
     ) -> Option<PrivilegeCredentialScope> {
+        let pane = self.active_pane(cx)?;
+        if self
+            .plugin_entity
+            .read(cx)
+            .discovery_terminal(&pane.read(cx).shared_session())
+        {
+            return None;
+        }
         match self.active_terminal_kind(cx)? {
             oxideterm_terminal::TerminalSessionKind::LocalPty => {
                 // Local shell sudo/su prompts have no SavedConnection owner. Use a
@@ -46,6 +54,15 @@ impl WorkspaceApp {
                     ));
                     return None;
                 };
+                // The authenticated SSH login alone does not establish the effective shell account.
+                if self
+                    .node_router
+                    .runtime_store()
+                    .discovery_origin(&node_id)
+                    .is_some()
+                {
+                    return None;
+                }
                 let connection_id = self
                     .ssh_privilege_scope_id_for_node(&node_id)
                     .filter(|id| self.connection_store.get(id).is_some());

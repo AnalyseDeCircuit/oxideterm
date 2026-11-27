@@ -201,6 +201,14 @@ impl ConnectionFlowEntity {
         cx: &mut Context<Self>,
     ) -> Option<ConnectionSubmission> {
         use ConnectionSubmissionEffect::*;
+        if let Some(expected) = self.form.form.as_ref().and_then(|form| form.saved_identity)
+            && let Some(id) = &self.form.editing_saved_connection_id
+            && (store.refresh_if_changed().is_err()
+                || store.saved_ssh_identity(id) != Some(expected))
+        {
+            self.set_form_feedback(None, Some(i18n.t("modals.new_connection.saved_identity_changed")), cx);
+            return None;
+        }
         Some(match self.plan_submission(action, i18n, cx)? {
             FormSubmission::Ftp => effect(Ftp),
             FormSubmission::LocalTerminal => {

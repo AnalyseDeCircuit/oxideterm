@@ -6,6 +6,7 @@
 mod config;
 mod connection;
 mod contributions;
+pub mod discovery;
 mod language;
 mod manifest;
 mod registry;

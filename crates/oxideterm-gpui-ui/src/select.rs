@@ -254,6 +254,8 @@ pub enum SelectAnchorId {
     NewConnectionX11Mode,
     NewConnectionX11Timeout,
     NewConnectionPrimaryAction,
+    SettingsDiscoveryProvider,
+    SettingsDiscoveryChoice(usize),
     SettingsConnectionImportSource,
     SettingsConnectionImportDuplicateStrategy,
     CloudSyncBackend,
@@ -350,6 +352,8 @@ impl SelectAnchorId {
                 | Self::SettingsHighlightPreset
                 | Self::SettingsHighlightRenderMode(_)
                 | Self::SettingsHighlightMatchScope(_)
+                | Self::SettingsDiscoveryProvider
+                | Self::SettingsDiscoveryChoice(_)
                 | Self::SettingsConnectionImportSource
                 | Self::SettingsConnectionImportDuplicateStrategy
         )

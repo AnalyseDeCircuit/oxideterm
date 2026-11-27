@@ -1,5 +1,31 @@
 {
   "settings_view": {
+    "discovery": {
+      "install_provider_hint": "Installiere oder aktiviere ein Erkennungs-Plugin, um eine Quelle hinzuzufügen.",
+      "toggle_failed": "Der Aktivierungsstatus der Quelle konnte nicht geändert werden.",
+      "edit_source": "Quelle bearbeiten",
+      "confirm_ssh_form": "Verbindungsformular vor dem Verbinden bestätigen",
+      "separate_session": "Neue Sitzung öffnen",
+      "identity_changed": "Der Anbieter konnte die bisherige Zugriffsidentität nicht bestätigen. Eine separate Sitzung öffnen?",
+      "reopen": "Ziel erneut öffnen",
+      "refresh": "Liste aktualisieren",
+      "refreshing": "Zielliste wird aktualisiert…",
+      "refreshed": "Liste aktualisiert · {time} · Ziele: {count}",
+      "refresh_failed": "Aktualisierung fehlgeschlagen: {reason}",
+      "title": "Dynamische Erkennung",
+      "description": "Quellen für temporäre Verbindungen verwalten.",
+      "interval": "Aktualisierungsintervall (Minuten)",
+      "scheduled_refresh": "Automatisch aktualisieren",
+      "add": "Quelle hinzufügen",
+      "save_before_action": "Speichern und aktivieren Sie diese Quelle, um die Aktion mit den angezeigten Einstellungen auszuführen.",
+      "unavailable": "Quelle nicht verfügbar",
+      "permission_denied": "Zugriff verweigert",
+      "stale_target": "Ziel geändert. Bitte die Quelle aktualisieren.",
+      "invalid_response": "Ungültige Anbieterantwort",
+      "no_targets": "Keine Ziele verfügbar",
+      "source_in_use": "Schließe die Sitzungen dieser Quelle in allen Fenstern und trenne ihre inaktiven Knoten unter „Aktive Sitzungen“, bevor du die Quelle löschst.",
+      "removal_pending": "Die Quelle wurde noch nicht vollständig gelöscht. Wähle „Löschen“, um es erneut zu versuchen."
+    },
     "known_hosts": {
       "title": "Vertrauenswürdige Hosts",
       "description": "Gespeicherte SSH-Hostschlüssel verwalten.",

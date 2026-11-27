@@ -260,6 +260,13 @@ impl WorkspaceApp {
                 let Some(pane) = self.tab_host.read(cx).panes().get(&pane_id).cloned() else {
                     return;
                 };
+                if self
+                    .plugin_entity
+                    .read(cx)
+                    .discovery_terminal(&pane.read(cx).shared_session())
+                {
+                    return;
+                }
                 let history = self
                     .local_terminal_histories
                     .entry(file)
@@ -279,6 +286,20 @@ impl WorkspaceApp {
                 oxideterm_gpui_background::note_input_activity(window_handle.window_id(), cx);
             }
             TerminalPaneEvent::Exited { .. } => {
+                let Some(terminal) = self
+                    .tab_host
+                    .read(cx)
+                    .terminal_pane_for_target(pane_id, session_id)
+                    .map(|pane| pane.read(cx).shared_session())
+                else {
+                    return;
+                };
+                if self
+                    .plugin_entity
+                    .update(cx, |entity, _| entity.finish_discovery_terminal(&terminal))
+                {
+                    return;
+                }
                 self.queue_auto_close_terminal_session(session_id, cx);
             }
             // TabHost consumes this signal before ordinary pane delivery.
@@ -626,7 +647,14 @@ impl WorkspaceApp {
         }
     }
 
-    pub(super) fn remove_terminal_pane(
+    pub(super) fn close_terminal_pane(&mut self, pane_id: &PaneId, cx: &mut Context<Self>) {
+        if let Some(pane) = self.unmount_terminal_pane(pane_id, cx) {
+            self.close_plugin_connection_terminal(&pane.read(cx).shared_session(), cx);
+            pane.update(cx, |pane, _| pane.shutdown());
+        }
+    }
+
+    pub(super) fn unmount_terminal_pane(
         &mut self,
         pane_id: &PaneId,
         cx: &mut Context<Self>,
@@ -640,15 +668,6 @@ impl WorkspaceApp {
             .terminal_session_id_for_pane(*pane_id);
         self.release_shell_ide_for_pane(*pane_id, cx);
         self.clear_workspace_tooltip(&format!("terminal-timestamp-{}", pane_id.0), cx);
-        if let Some(terminal) = self
-            .tab_host
-            .read(cx)
-            .panes()
-            .get(pane_id)
-            .map(|pane| pane.read(cx).shared_session())
-        {
-            self.close_plugin_connection_terminal(&terminal, cx);
-        }
         // Drop the BLE GATT registry entry with the pane. Notification pumps
         // observe the session worker's drop and tear down their routes
         // themselves, so no explicit cancellation is needed here.
@@ -773,7 +792,18 @@ impl WorkspaceApp {
             return None;
         }
         let source = match kind {
-            oxideterm_terminal::TerminalSessionKind::LocalPty => TerminalSplitSource::Local,
+            oxideterm_terminal::TerminalSessionKind::LocalPty => {
+                let pane = self.tab_host.read(cx).panes().get(&active_pane_id)?;
+                // Discovery PTYs need a new provider authorization for every launch.
+                if self
+                    .plugin_entity
+                    .read(cx)
+                    .discovery_terminal(&pane.read(cx).shared_session())
+                {
+                    return None;
+                }
+                TerminalSplitSource::Local
+            }
             oxideterm_terminal::TerminalSessionKind::SshPty => {
                 let node = self.active_ssh_terminal_node_id(cx)?;
                 if !self.node_is_ready_for_terminal(&node) {
@@ -927,9 +957,7 @@ impl WorkspaceApp {
         self.terminal_saved_connection_refs.remove(&session_id);
         self.clear_terminal_trigger_session_overrides(session_id);
         self.unregister_ssh_terminal_session(session_id, cx);
-        if let Some(pane) = self.remove_terminal_pane(&pane_id, cx) {
-            let _ = pane.update(cx, |pane, _cx| pane.shutdown());
-        }
+        self.close_terminal_pane(&pane_id, cx);
     }
 
     pub(super) fn close_active_pane(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -996,9 +1024,7 @@ impl WorkspaceApp {
         }
         self.sync_session_retention(cx);
 
-        if let Some(pane) = self.remove_terminal_pane(&active_pane_id, cx) {
-            let _ = pane.update(cx, |pane, _cx| pane.shutdown());
-        }
+        self.close_terminal_pane(&active_pane_id, cx);
 
         if self
             .tab_host

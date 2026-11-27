@@ -107,6 +107,9 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if !self.node_allows_drill_down(&parent) {
+            return;
+        }
         if !self
             .node_router
             .node_metadata(&parent)

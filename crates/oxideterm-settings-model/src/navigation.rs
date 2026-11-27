@@ -63,6 +63,7 @@ pub enum SettingsSectionId {
     ConnectionsSshKeys,
     ConnectionsKnownHosts,
     ConnectionsSshConfigImport,
+    DiscoverySources,
     ConnectionsImporters,
     PrivilegeCredentials,
     PrivilegeTotp,
@@ -389,6 +390,7 @@ pub fn settings_tab_sections(
             SettingsSectionId::AppearanceAppIcon,
         ],
         // Reconnect controls share one card and therefore one virtual section.
+        SettingsTab::Discovery => vec![SettingsSectionId::DiscoverySources],
         SettingsTab::Connections => vec![
             SettingsSectionId::ConnectionsDefaults,
             SettingsSectionId::ConnectionsIdleTimeout,
@@ -611,6 +613,7 @@ mod tests {
                 ],
                 vec![
                     SettingsTab::Connections,
+                    SettingsTab::Discovery,
                     SettingsTab::Sftp,
                     SettingsTab::Privilege,
                     SettingsTab::Network,

@@ -7253,6 +7253,7 @@ dependencies = [
  "oxideterm-portable-runtime",
  "oxideterm-remote-desktop",
  "oxideterm-secret-store",
+ "parking_lot",
  "quick-xml 0.39.4",
  "rand 0.10.2",
  "rand 0.8.6",
@@ -7284,6 +7285,22 @@ dependencies = [
  "raw-window-handle",
  "tokio",
  "windows 0.61.3",
+]
+
+[[package]]
+name = "oxideterm-discovery"
+version = "2.4.2"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "oxideterm-connections",
+ "oxideterm-plugin-protocol",
+ "oxideterm-settings",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "uuid",
 ]
 
 [[package]]
@@ -7446,6 +7463,7 @@ dependencies = [
  "oxideterm-connection-monitor",
  "oxideterm-connections",
  "oxideterm-desktop-presence",
+ "oxideterm-discovery",
  "oxideterm-editor-core",
  "oxideterm-editor-syntax",
  "oxideterm-environment",
@@ -7597,6 +7615,7 @@ dependencies = [
  "oxideterm-audit",
  "oxideterm-ble",
  "oxideterm-connections",
+ "oxideterm-discovery",
  "oxideterm-editor-core",
  "oxideterm-forwarding",
  "oxideterm-ftp",
@@ -7606,6 +7625,7 @@ dependencies = [
  "oxideterm-i18n",
  "oxideterm-local-files",
  "oxideterm-mosh",
+ "oxideterm-plugin-protocol",
  "oxideterm-portable-runtime",
  "oxideterm-quick-commands",
  "oxideterm-remote-desktop",
@@ -7847,6 +7867,7 @@ dependencies = [
  "oxideterm-gpui-terminal",
  "oxideterm-gpui-ui",
  "oxideterm-i18n",
+ "oxideterm-plugin-manifest",
  "oxideterm-portable-runtime",
  "oxideterm-public-mcp",
  "oxideterm-render-policy",
@@ -7866,6 +7887,7 @@ dependencies = [
  "sha2 0.10.9",
  "tempfile",
  "tokio",
+ "uuid",
  "zeroize",
 ]
 
@@ -8222,6 +8244,7 @@ dependencies = [
  "oxideterm-remote-desktop",
  "serde",
  "serde_json",
+ "uuid",
 ]
 
 [[package]]
@@ -8459,6 +8482,7 @@ dependencies = [
  "anyhow",
  "oxideterm-atomic-file",
  "oxideterm-audit",
+ "oxideterm-plugin-manifest",
  "oxideterm-portable-runtime",
  "oxideterm-render-policy",
  "oxideterm-terminal-semantic",
@@ -8468,6 +8492,7 @@ dependencies = [
  "tempfile",
  "uuid",
  "web-time",
+ "zeroize",
 ]
 
 [[package]]
@@ -8547,6 +8572,7 @@ dependencies = [
  "oxideterm-backend-classification",
  "oxideterm-connection-monitor",
  "oxideterm-connections",
+ "oxideterm-discovery",
  "oxideterm-local-command",
  "oxideterm-network-proxy",
  "oxideterm-portable-runtime",
@@ -8601,6 +8627,7 @@ dependencies = [
  "memchr",
  "oxideterm-audit",
  "oxideterm-ble",
+ "oxideterm-discovery",
  "oxideterm-i18n",
  "oxideterm-local-command",
  "oxideterm-modem-transfer",

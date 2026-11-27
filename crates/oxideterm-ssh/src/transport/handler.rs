@@ -134,6 +134,7 @@ async fn authenticate_proxy_hop(
 
 struct NativeClientHandler {
     audit: Option<oxideterm_audit::AuditContext>,
+    discovery_disconnect: Option<oneshot::Sender<()>>,
     host: String,
     port: u16,
     strict: bool,
@@ -179,6 +180,7 @@ impl NativeClientHandler {
         };
         Ok(Self {
             audit: None,
+            discovery_disconnect: None,
             host,
             port,
             strict,
@@ -430,6 +432,8 @@ impl client::Handler for NativeClientHandler {
         &mut self,
         reason: client::DisconnectReason<Self::Error>,
     ) -> Result<(), Self::Error> {
+        // Dropping the signal also covers a transport that dies before any terminal is attached.
+        self.discovery_disconnect.take();
         match reason {
             client::DisconnectReason::ReceivedDisconnect(info) => {
                 // Server descriptions may contain arbitrary text; log only the protocol code.

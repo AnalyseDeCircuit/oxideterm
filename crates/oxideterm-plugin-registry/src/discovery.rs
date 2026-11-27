@@ -34,7 +34,12 @@ pub(crate) fn discover_native_plugins_in_dir(
             continue;
         }
         match load_native_plugin_manifest(&plugin_dir, config) {
-            Ok(info) => plugins.push(info),
+            Ok((info, warnings)) => {
+                diagnostics.extend(warnings.into_iter().map(|warning| {
+                    native_plugin_diagnostic(&plugin_dir, Some(info.manifest.id.clone()), warning)
+                }));
+                plugins.push(info);
+            }
             Err(diagnostic) => diagnostics.push(diagnostic),
         }
     }
@@ -86,7 +91,7 @@ pub(crate) fn discover_native_plugins_in_dir(
 pub(crate) fn load_native_plugin_manifest(
     plugin_dir: &Path,
     config: &NativePluginGlobalConfig,
-) -> Result<NativePluginInfo, NativePluginDiagnostic> {
+) -> Result<(NativePluginInfo, Vec<String>), NativePluginDiagnostic> {
     let manifest_path = plugin_dir.join(PLUGIN_MANIFEST_FILENAME);
     let manifest_text = fs::read_to_string(&manifest_path).map_err(|error| {
         native_plugin_diagnostic(
@@ -95,10 +100,8 @@ pub(crate) fn load_native_plugin_manifest(
             format!("Cannot read plugin.json: {error}"),
         )
     })?;
-    let manifest =
-        serde_json::from_str::<NativePluginManifest>(&manifest_text).map_err(|error| {
-            native_plugin_diagnostic(plugin_dir, None, format!("Invalid plugin.json: {error}"))
-        })?;
+    let (manifest, warnings) = discovery_providers::parse_manifest(&manifest_text, plugin_dir)
+        .map_err(|error| native_plugin_diagnostic(plugin_dir, None, error))?;
     validate_native_plugin_manifest(&manifest)
         .map_err(|error| native_plugin_diagnostic(plugin_dir, Some(manifest.id.clone()), error))?;
     let runtime_plan = native_runtime_plan_for_manifest(&manifest)
@@ -114,13 +117,16 @@ pub(crate) fn load_native_plugin_manifest(
     if let Err(error) = validate_native_plugin_host(&manifest) {
         config_entry.last_error = Some(error);
     }
-    Ok(NativePluginInfo {
-        manifest,
-        install_dir: plugin_dir.to_path_buf(),
-        runtime_plan,
-        state,
-        config: config_entry,
-    })
+    Ok((
+        NativePluginInfo {
+            manifest,
+            install_dir: plugin_dir.to_path_buf(),
+            runtime_plan,
+            state,
+            config: config_entry,
+        },
+        warnings,
+    ))
 }
 
 pub(crate) fn native_plugin_diagnostic(

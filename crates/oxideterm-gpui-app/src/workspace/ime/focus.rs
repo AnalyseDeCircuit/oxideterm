@@ -671,6 +671,9 @@ impl WorkspaceApp {
             | SettingsInput::ManagedKeyPastePrivateKey
             | SettingsInput::ManagedKeyPastePassphrase
             | SettingsInput::ManagedKeyRenameName
+            | SettingsInput::DiscoverySecret(_)
+            | SettingsInput::DiscoveryField(_)
+            | SettingsInput::DiscoveryMultiline(_)
             | SettingsInput::ConnectionImportTargetGroup => String::new(),
             SettingsInput::LocalPrivilegeLabel
             | SettingsInput::TotpName

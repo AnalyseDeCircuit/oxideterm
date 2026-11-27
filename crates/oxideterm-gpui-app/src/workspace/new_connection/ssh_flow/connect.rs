@@ -468,6 +468,9 @@ impl WorkspaceApp {
                 }
             }
             SshConnectionIntent::Connect(connection_options) => {
+                if config.discovery_origin.is_some() {
+                    self.set_connection_status(None, cx);
+                }
                 self.open_verified_manual_ssh(config, title, connection_options, window, cx);
             }
             SshConnectionIntent::ConnectSaved {
@@ -671,6 +674,15 @@ impl WorkspaceApp {
         let route = self.connections.flow.update(cx, |flow, cx| {
             flow.prepare_verified_manual_terminal(&config, cx)
         });
+        if let Some((node, _)) = config
+            .discovery_origin
+            .as_ref()
+            .and_then(|origin| origin.reconnect_from.as_ref())
+        {
+            let node = NodeId::new(node.clone());
+            self.restore_discovery_transport(node, config, cx);
+            return;
+        }
         let (node_id, direct_config) = match route {
             VerifiedManualSshRoute::Direct => (
                 self.materialize_ssh_root_node(config.clone(), title.clone(), None),
@@ -695,8 +707,9 @@ impl WorkspaceApp {
         }) else {
             return;
         };
+        let discovery = config.discovery_origin.is_some();
         let post_connect_command = config.post_connect_command.clone();
-        let _ = self.queue_ssh_terminal_tab_for_node_with_mark_used(
+        if let Err(error) = self.queue_ssh_terminal_tab_for_node_with_mark_used(
             node_id,
             post_connect_command,
             config,
@@ -707,7 +720,9 @@ impl WorkspaceApp {
             options.open_sftp_on_connect,
             window,
             cx,
-        );
+        ) && discovery {
+            self.report_discovery_open_error(error.to_string(), cx);
+        }
     }
 
     fn start_standalone_sftp_test(&mut self, config: SshConfig, cx: &mut Context<Self>) {

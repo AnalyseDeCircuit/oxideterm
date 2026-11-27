@@ -123,9 +123,10 @@ mod tests {
 
     use gpui::{AppContext, TestAppContext};
 
-    use super::super::{PaletteAction, PaletteItem, PaletteSection};
+    use super::super::{PaletteAction, PaletteItem, PaletteSection, RankedItem};
     use super::*;
     use crate::workspace::LucideIcon;
+    use oxideterm_gpui_shell::palette::{ShellPaletteRequest, key_request};
     use oxideterm_workspace::CommandPaletteMode as PaletteMode;
     use std::time::Duration;
 
@@ -154,14 +155,14 @@ mod tests {
         let entity = cx.new(|_| CommandPaletteEntity::new(test_runtime()));
         entity.update(cx, |entity, cx| {
             entity.open(false, HashSet::new(), cx);
-            entity.set_selected_index(3, cx);
+            entity.set_selected_index(Some(3), cx);
             entity.set_error("stale".to_string(), cx);
             let previous_scroll = entity.scroll_handle().clone();
 
             entity.push_query_text("> command", cx);
             let view = entity.view();
             assert_eq!(view.mode, PaletteMode::Commands);
-            assert_eq!(entity.selected_index(), 0);
+            assert_eq!(entity.selected_index(), Some(0));
             assert!(view.error.is_none());
             assert!(!Rc::ptr_eq(&view.scroll_handle.0, &previous_scroll.0));
 
@@ -239,6 +240,40 @@ mod tests {
             assert_ne!(entity.view().motion_generation, motion_generation);
             entity.begin_close(Duration::ZERO, cx);
             assert!(!entity.is_open());
+        });
+    }
+
+    #[gpui::test]
+    fn discovery_refresh_preserves_identity_and_removed_selection_cannot_execute(
+        cx: &mut TestAppContext,
+    ) {
+        let row = |id: &str| RankedItem {
+            item: PaletteItem {
+                id: id.into(),
+                ..palette_item(false)
+            },
+            score: 1.0,
+            highlights: Vec::new(),
+        };
+        let enter = gpui::Keystroke::parse("enter").unwrap();
+        let entity = cx.new(|_| CommandPaletteEntity::new(test_runtime()));
+        entity.update(cx, |palette, cx| {
+            palette.open(false, HashSet::new(), cx);
+            let previous = [row("west:gamma"), row("west:beta")];
+            palette.set_selected_index(Some(1), cx);
+            let selected = palette.selected_item_id(&previous).unwrap();
+            // Sync can insert a saved connection without changing either discovery row.
+            let refreshed = vec![row("saved:alpha"), row("west:gamma"), row("west:beta")];
+            palette.restore_item_selection(selected, &refreshed, cx);
+            assert!(matches!(
+                key_request(&enter, palette.query(), palette.selected_index(), || refreshed),
+                Some(ShellPaletteRequest::Execute(id)) if id == "west:beta"
+            ));
+            let replaced = vec![row("west:gamma"), row("east:beta")];
+            palette.restore_item_selection(selected, &replaced, cx);
+            assert!(
+                key_request(&enter, palette.query(), palette.selected_index(), || replaced).is_none()
+            );
         });
     }
 

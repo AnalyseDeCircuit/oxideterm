@@ -33,6 +33,7 @@ pub enum SettingsTab {
     Terminal,
     Appearance,
     Connections,
+    Discovery,
     Privilege,
     Network,
     Sftp,
@@ -152,6 +153,8 @@ pub enum SettingsSelect {
     HighlightPreset,
     HighlightRenderMode(usize),
     HighlightMatchScope(usize),
+    DiscoveryProvider,
+    DiscoveryChoice(usize),
     ConnectionImportSource,
     ConnectionImportDuplicateStrategy,
 }
@@ -347,6 +350,9 @@ pub enum SettingsInput {
     ManagedKeyPastePrivateKey,
     ManagedKeyPastePassphrase,
     ManagedKeyRenameName,
+    DiscoveryField(usize),
+    DiscoverySecret(usize),
+    DiscoveryMultiline(usize),
     PluginSetting(usize),
 }
 
@@ -463,6 +469,7 @@ impl SettingsTab {
             Self::Ide,
             Self::Keybindings,
             Self::Connections,
+            Self::Discovery,
             Self::Sftp,
             Self::Privilege,
             Self::Network,
@@ -479,6 +486,7 @@ impl SettingsTab {
             Self::Terminal => "terminal",
             Self::Appearance => "appearance",
             Self::Connections => "connections",
+            Self::Discovery => "discovery",
             Self::Privilege => "privilege",
             Self::Network => "network",
             Self::Sftp => "sftp",
@@ -502,6 +510,7 @@ impl SettingsTab {
             &[Self::Terminal, Self::Ide, Self::Keybindings],
             &[
                 Self::Connections,
+                Self::Discovery,
                 Self::Sftp,
                 Self::Privilege,
                 Self::Network,
@@ -518,6 +527,7 @@ impl SettingsTab {
             Self::Terminal => "settings.terminal.title",
             Self::Appearance => "settings_view.tabs.appearance",
             Self::Connections => "settings_view.connections.keys_and_connections_title",
+            Self::Discovery => "settings_view.discovery.title",
             Self::Privilege => "settings_view.tabs.privilege",
             Self::Network => "settings_view.tabs.network",
             Self::Sftp => "settings_view.tabs.sftp",
@@ -536,6 +546,7 @@ impl SettingsTab {
             Self::Terminal => "settings_view.terminal.title",
             Self::Appearance => "settings_view.appearance.title",
             Self::Connections => "settings_view.connections.keys_and_connections_title",
+            Self::Discovery => "settings_view.discovery.title",
             Self::Privilege => "settings_view.credentials.title",
             Self::Network => "settings_view.network.title",
             Self::Sftp => "settings_view.sftp.title",
@@ -554,6 +565,7 @@ impl SettingsTab {
             Self::Terminal => "settings_view.terminal.description",
             Self::Appearance => "settings_view.appearance.description",
             Self::Connections => "settings_view.connections.keys_and_connections_description",
+            Self::Discovery => "settings_view.discovery.description",
             Self::Privilege => "settings_view.credentials.description",
             Self::Network => "settings_view.network.description",
             Self::Sftp => "settings_view.sftp.description",
@@ -572,7 +584,7 @@ impl SettingsTab {
             Self::Terminal => SettingsTabIcon::Terminal,
             Self::Connections => SettingsTabIcon::Shield,
             Self::Privilege => SettingsTabIcon::Key,
-            Self::Network => SettingsTabIcon::Network,
+            Self::Discovery | Self::Network => SettingsTabIcon::Network,
             Self::Ide => SettingsTabIcon::Code2,
             Self::Ai => SettingsTabIcon::Sparkles,
             Self::Knowledge => SettingsTabIcon::BookOpen,
@@ -598,7 +610,8 @@ impl SettingsInput {
         // render controls cannot drift when new settings fields are added.
         matches!(
             self,
-            Self::TerminalCommandBarFocusHandoff
+            Self::DiscoveryMultiline(_)
+                | Self::TerminalCommandBarFocusHandoff
                 | Self::TerminalCommandSpecsJson
                 | Self::TerminalTriggerArguments
                 | Self::TerminalTriggerTooltipText
@@ -791,6 +804,9 @@ impl SettingsInput {
             Self::ManagedKeyPastePrivateKey => 30_004,
             Self::ManagedKeyPastePassphrase => 30_005,
             Self::ManagedKeyRenameName => 30_006,
+            Self::DiscoveryField(index) | Self::DiscoverySecret(index) | Self::DiscoveryMultiline(index) => {
+                (1 << 48) + index as u64
+            }
             Self::PluginSetting(index) => PLUGIN_SETTING_INPUT_ANCHOR_BASE + index as u64,
         }
     }
@@ -799,6 +815,7 @@ impl SettingsInput {
         matches!(
             self,
             Self::AiProviderApiKey(_)
+                | Self::DiscoverySecret(_)
                 | Self::AiMcpAuthToken
                 | Self::CloudSyncToken
                 | Self::CloudSyncGitToken
