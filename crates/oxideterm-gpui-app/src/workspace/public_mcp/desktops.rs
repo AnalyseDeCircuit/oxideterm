@@ -75,35 +75,66 @@ impl WorkspaceApp {
         request: DomainRequest,
         cx: &mut Context<Self>,
     ) {
-        let PublicToolCall::DesktopFrame(args) = &request.call else {
-            return;
+        let desktop_ref = match &request.call {
+            PublicToolCall::DesktopFrame(args) => &args.desktop_ref,
+            PublicToolCall::DesktopAct(args) => &args.desktop_ref,
+            _ => return,
         };
-        let desktop_ref = args.desktop_ref.clone();
         let Ok((record, session)) =
-            self.public_mcp_desktop_session(&request.client_ref, &desktop_ref, cx)
+            self.public_mcp_desktop_session(&request.client_ref, desktop_ref, cx)
         else {
             request.finish(ToolEnvelope::failed(
                 "The remote desktop handle is unavailable",
             ));
             return;
         };
-        let Some(frame) = session.read(cx).public_mcp_frame_snapshot() else {
-            request.finish(ToolEnvelope::failed(
-                "The remote desktop has not produced a framebuffer",
-            ));
-            return;
+        let task = if let PublicToolCall::DesktopAct(args) = &request.call {
+            let token = request.cancellation_token();
+            match session.update(cx, |s, cx| {
+                s.run_public_mcp_gesture(
+                    args.graphics_epoch,
+                    args.action.clone(),
+                    move || token.is_cancelled(),
+                    cx,
+                )
+            }) {
+                Ok(task) => task,
+                Err(error) => {
+                    request.finish(ToolEnvelope::failed(error));
+                    return;
+                }
+            }
+        } else {
+            gpui::Task::ready(
+                session
+                    .read(cx)
+                    .public_mcp_frame_snapshot()
+                    .ok_or_else(|| "The remote desktop has not produced a framebuffer".into()),
+            )
         };
-        self.public_mcp.background().desktop_frame(
-            request,
-            record.tab_id,
-            PublicMcpDesktopFrame {
-                size: frame.size,
-                generation: frame.generation,
-                graphics_epoch: frame.graphics_epoch,
-                bgra_bytes: zeroize::Zeroizing::new(frame.bgra_bytes),
-            },
-            session.read(cx).audit_context(),
-        );
+        let background = self.public_mcp.background().clone();
+        let audit = session.read(cx).audit_context();
+        cx.spawn(async move |_, _| {
+            let frame = match task.await {
+                Ok(frame) => frame,
+                Err(error) => {
+                    request.finish(ToolEnvelope::failed(error));
+                    return;
+                }
+            };
+            background.desktop_frame(
+                request,
+                record.tab_id,
+                PublicMcpDesktopFrame {
+                    size: frame.size,
+                    generation: frame.generation,
+                    graphics_epoch: frame.graphics_epoch,
+                    bgra_bytes: zeroize::Zeroizing::new(frame.bgra_bytes),
+                },
+                audit,
+            );
+        })
+        .detach();
     }
 
     pub(super) fn handle_public_mcp_desktop_input(

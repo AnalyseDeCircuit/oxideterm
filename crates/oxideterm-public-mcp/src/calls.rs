@@ -862,6 +862,8 @@ pub struct DesktopFrameArgs {
     pub after_generation: Option<u64>,
 }
 
+pub const DESKTOP_MAX_FRAME_PIXELS: u64 = 16_777_216;
+
 #[derive(Debug, Clone, Copy, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum PublicDesktopMouseButton {
@@ -941,6 +943,53 @@ pub struct DesktopInputArgs {
     pub desktop_ref: DesktopRef,
     pub graphics_epoch: u64,
     pub event: DesktopInputEvent,
+}
+
+#[derive(Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, tag = "kind", rename_all = "snake_case")]
+pub enum DesktopGesture {
+    Click {
+        x: u32,
+        y: u32,
+        button: PublicDesktopMouseButton,
+    },
+    Drag {
+        from_x: u32,
+        from_y: u32,
+        to_x: u32,
+        to_y: u32,
+        button: PublicDesktopMouseButton,
+    },
+    KeyChord {
+        /// Remote key code, for example "s", "enter", or "f4".
+        code: String,
+        #[serde(default)]
+        ctrl: bool,
+        #[serde(default)]
+        alt: bool,
+        #[serde(default)]
+        shift: bool,
+        #[serde(default)]
+        meta: bool,
+    },
+}
+
+impl fmt::Debug for DesktopGesture {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Click { .. } => "click",
+            Self::Drag { .. } => "drag",
+            Self::KeyChord { .. } => "key_chord",
+        })
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DesktopActArgs {
+    pub desktop_ref: DesktopRef,
+    pub graphics_epoch: u64,
+    pub action: DesktopGesture,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -1336,6 +1385,7 @@ impl fmt::Debug for QuickCommandsRunArgs {
     }
 }
 
+#[derive(Clone)]
 pub struct PreparedQuickCommandRunArgs {
     pub quickcommand_ref: QuickCommandRef,
     pub node_ref: NodeRef,
@@ -1719,6 +1769,7 @@ pub enum PublicToolCall {
     DesktopState(DesktopHandleArgs),
     DesktopFrame(DesktopFrameArgs),
     DesktopInput(DesktopInputArgs),
+    DesktopAct(DesktopActArgs),
     ResizeDesktop(ResizeDesktopArgs),
     ReadDesktopClipboard(ReadDesktopClipboardArgs),
     WriteDesktopClipboard(WriteDesktopClipboardArgs),
@@ -1814,6 +1865,7 @@ impl PublicToolCall {
             Self::DesktopState(_) => "desktops_state",
             Self::DesktopFrame(_) => "desktops_frame",
             Self::DesktopInput(_) => "desktops_input",
+            Self::DesktopAct(_) => "desktops_act",
             Self::ResizeDesktop(_) => "desktops_resize",
             Self::ReadDesktopClipboard(_) => "desktops_clipboard_read",
             Self::WriteDesktopClipboard(_) => "desktops_clipboard_write",
@@ -1904,7 +1956,9 @@ impl PublicToolCall {
                 ToolGroup::DesktopSession
             }
             Self::DesktopState(_) | Self::DesktopFrame(_) => ToolGroup::DesktopObserve,
-            Self::DesktopInput(_) | Self::ResizeDesktop(_) => ToolGroup::DesktopInput,
+            Self::DesktopInput(_) | Self::DesktopAct(_) | Self::ResizeDesktop(_) => {
+                ToolGroup::DesktopInput
+            }
             Self::ReadDesktopClipboard(_) | Self::WriteDesktopClipboard(_) => {
                 ToolGroup::DesktopClipboard
             }
@@ -1955,6 +2009,7 @@ impl PublicToolCall {
 
     pub fn additional_required_groups(&self) -> &'static [ToolGroup] {
         match self {
+            Self::DesktopAct(_) => &[ToolGroup::DesktopObserve, ToolGroup::ArtifactTransfer],
             Self::RecordingsExport(_)
             | Self::DesktopFrame(_)
             | Self::AddonsInstall(_)
@@ -1981,6 +2036,41 @@ impl PublicToolCall {
     }
 
     pub fn requires_approval(&self) -> bool {
+        // Only classify standalone diagnostics, never arbitrary text sent to a live shell.
+        let diagnostic = |source: &str| {
+            // MCP receives shell text without the AI conversation's intent. Do not
+            // classify a command by its first token or send it to a model for review.
+            let mut words = source.split([' ', '\t']).filter(|word| !word.is_empty());
+            match words.next() {
+                Some("pwd" | "whoami" | "id" | "uptime") => words.next().is_none(),
+                Some(command @ ("uname" | "ls" | "df")) => {
+                    let flags = match command {
+                        "ls" => "lahArRt1",
+                        "df" => "hikPT",
+                        _ => "asnrvmpio",
+                    };
+                    words.all(|word| {
+                        word.strip_prefix('-').is_some_and(|arg| {
+                            !arg.is_empty() && arg.chars().all(|c| flags.contains(c))
+                        })
+                    })
+                }
+                _ => false,
+            }
+        };
+        match self {
+            Self::StartCommand(args) => {
+                return args.working_directory.is_some() || !diagnostic(&args.command);
+            }
+            Self::PreparedQuickCommandRun(args) => return !diagnostic(&args.command),
+            Self::DesktopInput(args) if matches!(args.event, DesktopInputEvent::ReleaseAll) => {
+                return false;
+            }
+            Self::OpenTerminal(args) if matches!(args.source, TerminalOpenSource::Node { .. }) => {
+                return false;
+            }
+            _ => {}
+        }
         matches!(
             self,
             Self::RequestAccess(_)
@@ -2000,9 +2090,9 @@ impl PublicToolCall {
                 | Self::RecordingsExport(_)
                 | Self::OpenDesktop(_)
                 | Self::DesktopInput(_)
+                | Self::DesktopAct(_)
                 | Self::WriteDesktopClipboard(_)
                 | Self::ReconnectDesktop(_)
-                | Self::StartCommand(_)
                 | Self::HostToolsOperate(_)
                 | Self::QuickCommandsSave(_)
                 | Self::QuickCommandsRemove(_)
@@ -2025,10 +2115,6 @@ impl PublicToolCall {
                 })
                 | Self::WorkspaceApplyEdits(_)
         )
-    }
-
-    pub fn requires_explicit_app_approval(&self) -> bool {
-        matches!(self, Self::RequestAccess(_))
     }
 
     pub fn requires_domain_preparation(&self) -> bool {
@@ -2135,6 +2221,7 @@ impl PublicToolCall {
                 args.desktop_ref.to_string()
             }
             Self::DesktopFrame(args) => args.desktop_ref.to_string(),
+            Self::DesktopAct(args) => format!("{} {:?}", args.desktop_ref, args.action),
             Self::DesktopInput(args) => {
                 format!("{} {:?}", args.desktop_ref, args.event)
             }
@@ -2370,8 +2457,22 @@ pub enum ToolOutcome {
     Failed,
 }
 
+#[derive(Clone)]
+pub struct InlinePng(pub Zeroizing<Vec<u8>>);
+
+impl fmt::Debug for InlinePng {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("InlinePng([redacted])")
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ToolEnvelope {
+    /// Passed from workspace preparation to the approval policy, never to the wire.
+    #[serde(skip)]
+    pub prepared_quick_command: Option<(PreparedQuickCommandRunArgs, bool)>,
+    #[serde(skip)]
+    pub inline_png: Option<InlinePng>,
     pub outcome: ToolOutcome,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data: Option<Value>,
@@ -2383,6 +2484,8 @@ impl ToolEnvelope {
     pub fn completed(data: impl Serialize) -> Result<Self, serde_json::Error> {
         Ok(Self {
             outcome: ToolOutcome::Completed,
+            prepared_quick_command: None,
+            inline_png: None,
             data: Some(serde_json::to_value(data)?),
             error: None,
         })
@@ -2391,6 +2494,8 @@ impl ToolEnvelope {
     pub fn failed(error: impl Into<String>) -> Self {
         Self {
             outcome: ToolOutcome::Failed,
+            prepared_quick_command: None,
+            inline_png: None,
             data: None,
             error: Some(error.into()),
         }
@@ -2399,6 +2504,8 @@ impl ToolEnvelope {
     pub fn accepted(data: impl Serialize) -> Result<Self, serde_json::Error> {
         Ok(Self {
             outcome: ToolOutcome::Accepted,
+            prepared_quick_command: None,
+            inline_png: None,
             data: Some(serde_json::to_value(data)?),
             error: None,
         })

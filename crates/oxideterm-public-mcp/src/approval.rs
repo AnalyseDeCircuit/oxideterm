@@ -71,6 +71,62 @@ struct PendingApproval {
     projection: ApprovalProjection,
     call: Option<PublicToolCall>,
     audit: Option<oxideterm_audit::AuditOperation>,
+    inline: bool,
+    decision: Option<tokio::sync::oneshot::Sender<ApprovalStatus>>,
+}
+
+impl PendingApproval {
+    fn wake(&mut self, status: ApprovalStatus) {
+        if let Some(decision) = self.decision.take() {
+            let _ = decision.send(status);
+        }
+    }
+}
+
+pub(crate) struct WaitingApproval<'a> {
+    store: &'a ApprovalStore,
+    broker: &'a crate::DomainBroker,
+    client: ClientRef,
+    id: ApprovalRef,
+    decision: tokio::sync::oneshot::Receiver<ApprovalStatus>,
+}
+
+impl WaitingApproval<'_> {
+    pub async fn wait(
+        mut self,
+    ) -> Result<(PublicToolCall, Option<oxideterm_audit::AuditOperation>), ApprovalError> {
+        match tokio::time::timeout(APPROVAL_LIFETIME, &mut self.decision).await {
+            Ok(Ok(ApprovalStatus::Approved)) => {
+                self.store.take_decided(&self.client, &self.id, true)
+            }
+            Ok(Ok(ApprovalStatus::Expired)) | Err(_) => {
+                let _ = self.store.set_status(&self.id, ApprovalStatus::Expired);
+                Err(ApprovalError::Expired)
+            }
+            _ => Err(ApprovalError::Rejected),
+        }
+    }
+}
+
+impl Drop for WaitingApproval<'_> {
+    fn drop(&mut self) {
+        // Dropping the original MCP request must also discard its frozen payload.
+        if let Some(mut entry) = self.store.entries.lock().remove(&self.id)
+            && let Some(mut audit) = entry.audit.take()
+        {
+            audit.authorization(
+                oxideterm_audit::AuditAuthorization::Cancelled,
+                Some("mcp_app_approval"),
+            );
+            audit.finish(
+                oxideterm_audit::AuditOutcome::Cancelled,
+                oxideterm_audit::AuditEvidence::Lifecycle,
+                None,
+                None,
+            );
+        }
+        self.broker.notify_state_changed();
+    }
 }
 
 #[derive(Default)]
@@ -122,6 +178,36 @@ impl ApprovalStore {
         call: PublicToolCall,
         audit_context: Option<&oxideterm_audit::AuditContext>,
     ) -> Result<ApprovalProjection, ApprovalError> {
+        self.insert(client_ref, call, audit_context, None)
+    }
+
+    pub(crate) fn stage_waiting<'a>(
+        &'a self,
+        broker: &'a crate::DomainBroker,
+        client: ClientRef,
+        call: PublicToolCall,
+    ) -> Result<WaitingApproval<'a>, ApprovalError> {
+        let (sender, decision) = tokio::sync::oneshot::channel();
+        let context = oxideterm_audit::AuditContext::current_request()
+            .or_else(oxideterm_audit::AuditContext::current);
+        let projection = self.insert(client, call, context.as_ref(), Some(sender))?;
+        broker.notify_state_changed();
+        Ok(WaitingApproval {
+            store: self,
+            broker,
+            client: projection.client_ref,
+            id: projection.approval_ref,
+            decision,
+        })
+    }
+
+    fn insert(
+        &self,
+        client_ref: ClientRef,
+        call: PublicToolCall,
+        audit_context: Option<&oxideterm_audit::AuditContext>,
+        decision: Option<tokio::sync::oneshot::Sender<ApprovalStatus>>,
+    ) -> Result<ApprovalProjection, ApprovalError> {
         let created_at_ms = unix_time_ms();
         let mut entries = self.entries.lock();
         expire_entries(&mut entries);
@@ -168,6 +254,8 @@ impl ApprovalStore {
                 projection: projection.clone(),
                 call: Some(call),
                 audit,
+                inline: decision.is_some(),
+                decision,
             },
         );
         Ok(projection)
@@ -207,6 +295,9 @@ impl ApprovalStore {
             ApprovalStatus::Pending => {}
         }
         entry.projection.status = status;
+        if status != ApprovalStatus::Pending {
+            entry.wake(status);
+        }
         if let Some(audit) = entry.audit.as_mut() {
             let decision = match status {
                 ApprovalStatus::Pending => oxideterm_audit::AuditAuthorization::Pending,
@@ -242,6 +333,7 @@ impl ApprovalStore {
                 )
             {
                 entry.projection.status = ApprovalStatus::Rejected;
+                entry.wake(ApprovalStatus::Rejected);
                 entry.call.take();
                 if let Some(mut audit) = entry.audit.take() {
                     audit.authorization(
@@ -277,6 +369,7 @@ impl ApprovalStore {
                 )
             {
                 entry.projection.status = ApprovalStatus::Rejected;
+                entry.wake(ApprovalStatus::Rejected);
                 entry.call.take();
                 if let Some(mut audit) = entry.audit.take() {
                     audit.authorization(
@@ -318,6 +411,15 @@ impl ApprovalStore {
         client_ref: &ClientRef,
         approval_ref: &ApprovalRef,
     ) -> Result<(PublicToolCall, Option<oxideterm_audit::AuditOperation>), ApprovalError> {
+        self.take_decided(client_ref, approval_ref, false)
+    }
+
+    fn take_decided(
+        &self,
+        client_ref: &ClientRef,
+        approval_ref: &ApprovalRef,
+        inline: bool,
+    ) -> Result<(PublicToolCall, Option<oxideterm_audit::AuditOperation>), ApprovalError> {
         let mut entries = self.entries.lock();
         expire_entries(&mut entries);
         let entry = entries
@@ -325,6 +427,9 @@ impl ApprovalStore {
             .ok_or(ApprovalError::NotFound)?;
         if &entry.projection.client_ref != client_ref {
             return Err(ApprovalError::WrongClient);
+        }
+        if entry.inline != inline {
+            return Err(ApprovalError::Consumed);
         }
         match entry.projection.status {
             ApprovalStatus::Pending => Err(ApprovalError::Pending),
@@ -370,6 +475,7 @@ fn expire_entries(entries: &mut HashMap<ApprovalRef, PendingApproval>) {
         ) && now >= entry.projection.expires_at_ms
         {
             entry.projection.status = ApprovalStatus::Expired;
+            entry.wake(ApprovalStatus::Expired);
             entry.call.take();
             if let Some(mut audit) = entry.audit.take() {
                 audit.authorization(

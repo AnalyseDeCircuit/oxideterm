@@ -2154,7 +2154,7 @@
       "mcp_running": "Running",
       "mcp_create_client": "Create client",
       "mcp_approval_mode": "Approval mode",
-      "mcp_approval_mode_hint": "Approval on demand keeps action confirmations. Automatic approval applies only to allowed tools; requests for additional permissions still need approval.",
+      "mcp_approval_mode_hint": "On demand pauses risky actions until you approve. Automatic approval runs enabled tools without asking. Add permissions in this client’s settings.",
       "mcp_permission_count": "{{count}} permissions allowed",
       "mcp_family_connections": "Connections and credentials",
       "mcp_family_terminal": "Terminal and commands",

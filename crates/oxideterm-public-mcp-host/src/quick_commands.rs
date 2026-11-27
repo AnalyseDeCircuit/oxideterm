@@ -379,31 +379,19 @@ impl PublicMcpHost {
             ));
             return;
         };
-        if request.requires_standard_approval() || confirmation_required {
-            let prepared_call =
-                PublicToolCall::PreparedQuickCommandRun(PreparedQuickCommandRunArgs {
-                    quickcommand_ref: args.quickcommand_ref.clone(),
-                    node_ref: node_ref,
-                    command: prepared_target.command,
-                });
-            let approval = match self.state.approvals.stage_with_context(
-                request.client_ref.clone(),
-                prepared_call,
-                request.audit_context.as_ref(),
-            ) {
-                Ok(approval) => approval,
-                Err(error) => {
-                    request.finish(ToolEnvelope::failed(error.to_string()));
-                    return;
-                }
+        if request.requires_standard_approval() {
+            let frozen = PreparedQuickCommandRunArgs {
+                quickcommand_ref: args.quickcommand_ref.clone(),
+                node_ref,
+                command: prepared_target.command,
             };
-            self.state.broker.notify_state_changed();
-            let response = ToolEnvelope::accepted(json!({
-                "outcome": "approval_required",
-                "approval": approval,
-            }))
-            .unwrap_or_else(|error| ToolEnvelope::failed(error.to_string()));
-            request.finish(response);
+            request.finish(ToolEnvelope {
+                outcome: oxideterm_public_mcp::ToolOutcome::Completed,
+                prepared_quick_command: Some((frozen, confirmation_required)),
+                data: None,
+                error: None,
+                inline_png: None,
+            });
             return;
         }
         background.start_public_mcp_node_command(

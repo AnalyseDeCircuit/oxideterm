@@ -1049,8 +1049,11 @@ async fn desktop_frame_generation_and_artifact_lifetime_follow_the_tab() {
     use oxideterm_public_mcp::calls::DesktopFrameArgs;
     use oxideterm_remote_desktop::RemoteDesktopSize;
 
-    let (_path, host, backend, client, mut requests) =
-        dispatch_fixture(&[ToolGroup::DesktopObserve, ToolGroup::ArtifactTransfer]);
+    let (_path, host, backend, client, mut requests) = dispatch_fixture(&[
+        ToolGroup::DesktopObserve,
+        ToolGroup::DesktopInput,
+        ToolGroup::ArtifactTransfer,
+    ]);
     let desktop = DesktopRef::new();
     let tab = TabId(17);
     host.register_desktop(desktop.clone(), client.clone(), tab, "fixture".into(), true);
@@ -1086,7 +1089,7 @@ async fn desktop_frame_generation_and_artifact_lifetime_follow_the_tab() {
         &mut requests,
         &client,
         PublicToolCall::DesktopFrame(DesktopFrameArgs {
-            desktop_ref: desktop,
+            desktop_ref: desktop.clone(),
             after_generation: Some(4),
         }),
     )
@@ -1108,6 +1111,27 @@ async fn desktop_frame_generation_and_artifact_lifetime_follow_the_tab() {
         .unwrap()
         .to_rgba8();
     assert_eq!(image.get_pixel(0, 0).0, [30, 20, 10, 255]);
+    use oxideterm_public_mcp::calls::{DesktopActArgs, DesktopGesture, PublicDesktopMouseButton};
+    let (request, response) = queued_request(
+        &host,
+        &mut requests,
+        &client,
+        PublicToolCall::DesktopAct(DesktopActArgs {
+            desktop_ref: desktop,
+            graphics_epoch: 3,
+            action: DesktopGesture::Click {
+                x: 0,
+                y: 0,
+                button: PublicDesktopMouseButton::Left,
+            },
+        }),
+    )
+    .await;
+    backend.desktop_frame(request, tab, frame(), None);
+    let result = response.await.unwrap();
+    let png = result.inline_png.unwrap();
+    let inline = image::load_from_memory_with_format(&png.0, image::ImageFormat::Png).unwrap();
+    assert_eq!(inline.to_rgba8().get_pixel(0, 0).0, [30, 20, 10, 255]);
     host.remove_closed_desktop(tab);
     assert!(!host.state.artifacts.is_available(&client, &artifact));
 }

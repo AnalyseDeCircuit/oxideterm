@@ -44,6 +44,7 @@ use zeroize::Zeroizing;
 
 mod certificate;
 mod clipboard;
+mod gesture;
 mod input;
 mod interaction;
 mod lifecycle;
@@ -458,6 +459,7 @@ pub struct RemoteDesktopSessionEntity {
     frame_slot: RemoteDesktopFrameDeliverySlot,
     ui_frame_visible: bool,
     public_mcp_frame_observers: usize,
+    active_gesture: Option<Arc<()>>,
     public_mcp_clipboard: Option<RemoteDesktopPublicClipboard>,
     clipboard_activation: Option<Subscription>,
     last_clipboard_files: Option<(u64, Option<u32>)>,
@@ -545,6 +547,7 @@ impl RemoteDesktopSessionEntity {
             frame_slot,
             ui_frame_visible: false,
             public_mcp_frame_observers: 0,
+            active_gesture: None,
             public_mcp_clipboard: None,
             clipboard_activation: None,
             last_clipboard_files: None,

@@ -85,6 +85,8 @@ pub(crate) fn all_tool_groups() -> BTreeSet<ToolGroup> {
 
 pub fn finish_serialized(request: DomainRequest, value: serde_json::Value) {
     request.finish(ToolEnvelope {
+        prepared_quick_command: None,
+        inline_png: None,
         outcome: ToolOutcome::Completed,
         data: Some(value),
         error: None,

@@ -10,7 +10,7 @@ use oxideterm_remote_desktop::{
     RemoteDesktopProtocol, RemoteDesktopSecret, RemoteDesktopSize,
 };
 
-const PUBLIC_MCP_DESKTOP_MAX_FRAME_PIXELS: u64 = 16_777_216;
+use oxideterm_public_mcp::calls::DESKTOP_MAX_FRAME_PIXELS;
 const PUBLIC_MCP_DESKTOP_CLIPBOARD_IMAGE_LIMIT_BYTES: u64 = 16 * 1024 * 1024;
 const PUBLIC_MCP_DESKTOP_CAPACITY: usize = 32;
 const PUBLIC_MCP_DESKTOP_CAPACITY_PER_CLIENT: usize = 8;
@@ -247,10 +247,13 @@ impl PublicMcpBackground {
         frame: PublicMcpDesktopFrame,
         audit_context: Option<AuditContext>,
     ) {
-        let PublicToolCall::DesktopFrame(args) = &request.call else {
-            return;
+        let (desktop_ref, after_generation, inline) = match &request.call {
+            PublicToolCall::DesktopFrame(args) => {
+                (args.desktop_ref.clone(), args.after_generation, false)
+            }
+            PublicToolCall::DesktopAct(args) => (args.desktop_ref.clone(), None, true),
+            _ => return,
         };
-        let desktop_ref = args.desktop_ref.clone();
         let mut audit = audit_context.map(|ctx| {
             ctx.for_request()
                 .operation(AuditCategory::File, "desktop_screenshot", Some("png"))
@@ -261,7 +264,7 @@ impl PublicMcpBackground {
             size,
             ..
         } = frame;
-        if args.after_generation == Some(generation) {
+        if after_generation == Some(generation) {
             if let Some(audit) = audit.take() {
                 audit.finish(AuditOutcome::Unchanged, AuditEvidence::Protocol, None, None);
             }
@@ -271,9 +274,7 @@ impl PublicMcpBackground {
             );
             return;
         }
-        if u64::from(size.width).saturating_mul(u64::from(size.height))
-            > PUBLIC_MCP_DESKTOP_MAX_FRAME_PIXELS
-        {
+        if u64::from(size.width).saturating_mul(u64::from(size.height)) > DESKTOP_MAX_FRAME_PIXELS {
             if let Some(audit) = audit.take() {
                 audit.finish(AuditOutcome::Failed, AuditEvidence::Request, None, None);
             }
@@ -284,9 +285,38 @@ impl PublicMcpBackground {
         }
         let backend = self.clone();
         self.forwarding_runtime.spawn_blocking(move || {
-            let result = encode_public_mcp_desktop_png(frame).and_then(|png|
-                backend.state.artifacts.stage(request.client_ref.clone(), &png, "image/png".to_owned(),
-                    Some(format!("remote-desktop-{generation}.png"))).map_err(|error|error.to_string()));
+            let png = match encode_public_mcp_desktop_png(frame) {
+                Ok(png) => png,
+                Err(error) => {
+                    if let Some(audit) = audit.take() { audit.finish(AuditOutcome::Failed, AuditEvidence::Protocol, None, None); }
+                    request.finish(ToolEnvelope::failed(error));
+                    return;
+                }
+            };
+            if inline {
+                let suspended = backend.admission.lock();
+                let desktops = backend.desktops.lock();
+                let owned = desktops.get(&desktop_ref).is_some_and(|record|
+                    record.client_ref == request.client_ref && record.tab_id == tab_id && record.observing_frames);
+                let permitted = backend.state.clients.get(&request.client_ref).is_some_and(|client|
+                    client.enabled && client.tool_groups.contains(&request.call.required_group()) &&
+                    request.call.additional_required_groups().iter().all(|group| client.tool_groups.contains(group)));
+                if *suspended || !owned || !permitted || request.is_cancelled() {
+                    if let Some(audit) = audit.take() { audit.finish(AuditOutcome::Denied, AuditEvidence::Lifecycle, None, None); }
+                    request.finish(ToolEnvelope::failed("Desktop image access is no longer available"));
+                    return;
+                }
+                if let Some(audit) = audit.take() { audit.finish(AuditOutcome::Succeeded, AuditEvidence::Protocol, None, Some(png.len() as u64)); }
+                request.finish(ToolEnvelope {
+                    prepared_quick_command: None,
+                    outcome: ToolOutcome::Completed, error: None,
+                    data: Some(json!({"desktop_ref":desktop_ref, "generation":generation, "graphics_epoch":graphics_epoch, "width":size.width, "height":size.height})),
+                    inline_png: Some(oxideterm_public_mcp::calls::InlinePng(png)),
+                });
+                return;
+            }
+            let result = backend.state.artifacts.stage(request.client_ref.clone(), &png, "image/png".to_owned(),
+                    Some(format!("remote-desktop-{generation}.png"))).map_err(|error|error.to_string());
             let artifact = match result {
                 Ok(artifact) => artifact,
                 Err(error) => {

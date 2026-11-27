@@ -71,6 +71,16 @@ impl RemoteDesktopSessionEntity {
             self.release_inputs();
             return Ok(());
         }
+        if self.active_gesture.is_some() {
+            return Err("A desktop gesture is active".into());
+        }
+        self.send_gesture_event(graphics_epoch, event)
+    }
+
+    pub(super) fn input_frame_size(
+        &self,
+        graphics_epoch: u64,
+    ) -> Result<RemoteDesktopSize, String> {
         let snapshot = self.state.snapshot();
         if snapshot.status != RemoteDesktopSessionStatus::Connected {
             return Err("The remote desktop session is not connected".to_owned());
@@ -78,12 +88,20 @@ impl RemoteDesktopSessionEntity {
         if snapshot.read_only {
             return Err("The remote desktop session is read-only".to_owned());
         }
-        if snapshot.graphics_epoch != Some(graphics_epoch) {
+        if !self.state.is_current_graphics_epoch(graphics_epoch) {
             return Err("The framebuffer epoch is stale".to_owned());
         }
-        let size = snapshot
+        snapshot
             .size
-            .ok_or_else(|| "The framebuffer size is unavailable".to_owned())?;
+            .ok_or_else(|| "The framebuffer size is unavailable".to_owned())
+    }
+
+    pub(super) fn send_gesture_event(
+        &mut self,
+        graphics_epoch: u64,
+        event: &DesktopInputEvent,
+    ) -> Result<(), String> {
+        let size = self.input_frame_size(graphics_epoch)?;
         match event {
             DesktopInputEvent::MouseMove { x, y } => {
                 require_public_mcp_frame_point(size, *x, *y)?;
@@ -93,7 +111,7 @@ impl RemoteDesktopSessionEntity {
                     width: 0,
                     height: 0,
                 });
-                self.send_request(RemoteDesktopHelperRequest::MouseMove { x: *x, y: *y });
+                self.send_mcp_request(RemoteDesktopHelperRequest::MouseMove { x: *x, y: *y })?;
             }
             DesktopInputEvent::MouseButton {
                 x,
@@ -114,8 +132,8 @@ impl RemoteDesktopSessionEntity {
                 }
                 // Pointer edges are atomic at the public boundary: every button event
                 // first establishes its exact framebuffer coordinate.
-                self.send_request(RemoteDesktopHelperRequest::MouseMove { x: *x, y: *y });
-                self.send_request(RemoteDesktopHelperRequest::MouseButton { button, state });
+                self.send_mcp_request(RemoteDesktopHelperRequest::MouseMove { x: *x, y: *y })?;
+                self.send_mcp_request(RemoteDesktopHelperRequest::MouseButton { button, state })?;
             }
             DesktopInputEvent::Wheel {
                 x,
@@ -124,13 +142,13 @@ impl RemoteDesktopSessionEntity {
                 delta_y,
             } => {
                 require_public_mcp_frame_point(size, *x, *y)?;
-                self.send_request(RemoteDesktopHelperRequest::MouseMove { x: *x, y: *y });
-                self.send_request(RemoteDesktopHelperRequest::Wheel {
+                self.send_mcp_request(RemoteDesktopHelperRequest::MouseMove { x: *x, y: *y })?;
+                self.send_mcp_request(RemoteDesktopHelperRequest::Wheel {
                     delta: RemoteDesktopWheelDelta {
                         x: *delta_x,
                         y: *delta_y,
                     },
-                });
+                })?;
             }
             DesktopInputEvent::Key {
                 code,
@@ -141,7 +159,7 @@ impl RemoteDesktopSessionEntity {
                 meta,
                 state,
             } => {
-                self.send_request(RemoteDesktopHelperRequest::Key {
+                self.send_mcp_request(RemoteDesktopHelperRequest::Key {
                     key: RemoteDesktopKey {
                         code: code.clone(),
                         text: text.as_deref().map(ToOwned::to_owned),
@@ -154,16 +172,22 @@ impl RemoteDesktopSessionEntity {
                         DesktopButtonState::Pressed => RemoteDesktopKeyState::Pressed,
                         DesktopButtonState::Released => RemoteDesktopKeyState::Released,
                     },
-                });
+                })?;
             }
             DesktopInputEvent::Text { text } => {
-                self.send_request(RemoteDesktopHelperRequest::Text {
+                self.send_mcp_request(RemoteDesktopHelperRequest::Text {
                     text: text.to_string(),
-                });
+                })?;
             }
             DesktopInputEvent::ReleaseAll => unreachable!("release-all returns before validation"),
         }
         Ok(())
+    }
+
+    fn send_mcp_request(&mut self, request: RemoteDesktopHelperRequest) -> Result<(), String> {
+        self.try_send_request(request)
+            .then_some(())
+            .ok_or_else(|| "The remote desktop input channel is closed".into())
     }
 
     pub fn apply_public_mcp_resize(&mut self, size: RemoteDesktopSize) -> Result<(), String> {
@@ -262,7 +286,11 @@ impl RemoteDesktopSessionEntity {
     }
 }
 
-fn require_public_mcp_frame_point(size: RemoteDesktopSize, x: u32, y: u32) -> Result<(), String> {
+pub(super) fn require_public_mcp_frame_point(
+    size: RemoteDesktopSize,
+    x: u32,
+    y: u32,
+) -> Result<(), String> {
     (x < size.width && y < size.height)
         .then_some(())
         .ok_or_else(|| "The input coordinate is outside the current framebuffer".to_owned())

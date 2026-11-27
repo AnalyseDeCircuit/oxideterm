@@ -2154,7 +2154,7 @@
       "mcp_running": "Em execução",
       "mcp_create_client": "Criar cliente",
       "mcp_approval_mode": "Modo de aprovação",
-      "mcp_approval_mode_hint": "A aprovação sob demanda mantém as confirmações. A automática vale apenas para ferramentas permitidas; novos pedidos de permissão ainda exigem aprovação.",
+      "mcp_approval_mode_hint": "Sob demanda, ações de risco aguardam sua aprovação. No modo automático, as ferramentas permitidas são executadas sem confirmação. Adicione permissões aqui.",
       "mcp_permission_count": "{{count}} permissões concedidas",
       "mcp_family_connections": "Conexões e credenciais",
       "mcp_family_terminal": "Terminal e comandos",

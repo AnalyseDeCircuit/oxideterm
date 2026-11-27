@@ -2154,7 +2154,7 @@
       "mcp_running": "In esecuzione",
       "mcp_create_client": "Crea client",
       "mcp_approval_mode": "Modalità di approvazione",
-      "mcp_approval_mode_hint": "L’approvazione su richiesta mantiene le conferme. Quella automatica riguarda solo gli strumenti consentiti; l’aggiunta di permessi richiede comunque approvazione.",
+      "mcp_approval_mode_hint": "Su richiesta, le azioni rischiose attendono la tua approvazione. In modalità automatica gli strumenti autorizzati vengono eseguiti senza conferma. Aggiungi qui i permessi.",
       "mcp_permission_count": "{{count}} permessi concessi",
       "mcp_family_connections": "Connessioni e credenziali",
       "mcp_family_terminal": "Terminale e comandi",

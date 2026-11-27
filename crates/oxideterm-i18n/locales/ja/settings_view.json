@@ -2154,7 +2154,7 @@
       "mcp_running": "稼働中",
       "mcp_create_client": "クライアントを作成",
       "mcp_approval_mode": "承認方式",
-      "mcp_approval_mode_hint": "必要に応じて承認する場合は操作の確認を維持します。自動承認は許可済みのツールにのみ適用され、権限の追加には引き続き承認が必要です。",
+      "mcp_approval_mode_hint": "オンデマンドではリスクのある操作のみ承認を待ち、許可すると続行します。自動承認では許可済みのツールを確認なしで実行します。権限の追加はここで行います。",
       "mcp_permission_count": "{{count}} 件の権限を許可",
       "mcp_family_connections": "接続と認証情報",
       "mcp_family_terminal": "ターミナルとコマンド",

@@ -2154,7 +2154,7 @@
       "mcp_running": "En ejecución",
       "mcp_create_client": "Crear cliente",
       "mcp_approval_mode": "Modo de aprobación",
-      "mcp_approval_mode_hint": "La aprobación bajo demanda mantiene las confirmaciones. La automática solo se aplica a herramientas permitidas; ampliar permisos sigue requiriendo aprobación.",
+      "mcp_approval_mode_hint": "A petición, las acciones de riesgo esperan tu aprobación. La aprobación automática ejecuta las herramientas permitidas sin preguntar. Añade permisos aquí.",
       "mcp_permission_count": "{{count}} permisos concedidos",
       "mcp_family_connections": "Conexiones y credenciales",
       "mcp_family_terminal": "Terminal y comandos",

@@ -208,6 +208,138 @@ fn response_json(response: &str) -> Value {
     serde_json::from_str(body).expect("JSON response")
 }
 
+#[tokio::test]
+async fn approval_returns_the_domain_result_on_the_original_http_call() {
+    use oxideterm_public_mcp::{ApprovalStatus, PublicToolCall};
+    let clients = Arc::new(ClientRegistry::default());
+    let (broker, mut receiver) = DomainBroker::channel(8);
+    let state = Arc::new(PublicMcpState {
+        clients: clients.clone(),
+        approvals: Arc::default(),
+        audit: Arc::new(AuditStore::new(16)),
+        artifacts: Arc::default(),
+        broker,
+    });
+    let server = start_http_server(&tokio::runtime::Handle::current(), state.clone(), 0).unwrap();
+    let port = server.port();
+    for (mode, command, decision) in [
+        (ClientApprovalMode::Standard, "ls -la", None),
+        (
+            ClientApprovalMode::Standard,
+            "touch example",
+            Some(ApprovalStatus::Approved),
+        ),
+        (
+            ClientApprovalMode::Standard,
+            "touch example",
+            Some(ApprovalStatus::Rejected),
+        ),
+        (ClientApprovalMode::Unattended, "touch example", None),
+    ] {
+        let registered = clients
+            .register("test", mode, [ToolGroup::CommandExecute])
+            .unwrap();
+        let auth = Zeroizing::new(format!("Bearer {}", registered.credential.expose()));
+        let body = json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{
+            "name":"commands_start","arguments":{"node_ref":"node_00000000000000000000000000000000","command":command}
+        }}).to_string();
+        let execute = send_request(port, Some(&auth), &body, Some("2025-06-18"));
+        let user_and_host = async {
+            if let Some(decision) = decision {
+                loop {
+                    assert!(matches!(
+                        receiver.recv().await,
+                        Some(DomainMessage::StateChanged)
+                    ));
+                    if let Some(entry) = state
+                        .approvals
+                        .list()
+                        .into_iter()
+                        .find(|entry| entry.client_ref == registered.projection.client_ref)
+                    {
+                        assert_eq!(entry.review.command(), Some(command));
+                        state
+                            .approvals
+                            .set_status(&entry.approval_ref, decision)
+                            .unwrap();
+                        break;
+                    }
+                }
+                if decision == ApprovalStatus::Rejected {
+                    return;
+                }
+            }
+            loop {
+                if let DomainMessage::Request(request) = receiver.recv().await.unwrap() {
+                    assert_eq!(request.client_ref, registered.projection.client_ref);
+                    assert!(
+                        matches!(&request.call, PublicToolCall::StartCommand(args) if args.command.as_str() == command)
+                    );
+                    request.finish(
+                        ToolEnvelope::completed(json!({"command_ref":"dispatched"})).unwrap(),
+                    );
+                    break;
+                }
+            }
+        };
+        let (response, ()) = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            tokio::join!(execute, user_and_host)
+        })
+        .await
+        .expect("the original call must finish without a commit request");
+        let result = &response_json(&response)["result"];
+        if decision == Some(ApprovalStatus::Rejected) {
+            assert_eq!(result["isError"], true);
+        } else {
+            assert_eq!(
+                result["structuredContent"]["data"]["command_ref"],
+                "dispatched"
+            );
+        }
+        if mode == ClientApprovalMode::Unattended {
+            let response = send_request(port, Some(&auth),
+                r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"mcp_request_access","arguments":{"groups":["credential_manage"]}}}"#,
+                Some("2025-06-18")).await;
+            assert_eq!(
+                response_json(&response)["result"]["structuredContent"]["error_code"],
+                "tool_group_disabled"
+            );
+            assert!(state.approvals.list().is_empty());
+        }
+    }
+    let owner = clients
+        .register(
+            "disconnect",
+            ClientApprovalMode::Standard,
+            [ToolGroup::NodeSession],
+        )
+        .unwrap();
+    let auth = Zeroizing::new(format!("Bearer {}", owner.credential.expose()));
+    let mut waiting = Box::pin(send_request(
+        port,
+        Some(&auth),
+        r#"{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"nodes_connect","arguments":{"connection_ref":"connection_00000000000000000000000000000000"}}}"#,
+        Some("2025-06-18"),
+    ));
+    tokio::select! {
+        _ = &mut waiting => panic!("the pending call returned before the user decided"),
+        update = receiver.recv() => assert!(matches!(update, Some(DomainMessage::StateChanged))),
+    }
+    let pending = state.approvals.list().pop().unwrap();
+    drop(waiting);
+    let update = tokio::time::timeout(std::time::Duration::from_secs(3), receiver.recv())
+        .await
+        .expect("disconnect must withdraw the pending action");
+    assert!(matches!(update, Some(DomainMessage::StateChanged)));
+    assert_eq!(
+        state
+            .approvals
+            .set_status(&pending.approval_ref, ApprovalStatus::Approved),
+        Err(oxideterm_public_mcp::ApprovalError::NotFound)
+    );
+    server.shutdown().await;
+}
+
 async fn assert_overview(port: u16, authorization: &str, protocol: Option<&str>) {
     let response = send_request(port, Some(authorization),
         r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"mcp_overview","arguments":{}}}"#, protocol).await;

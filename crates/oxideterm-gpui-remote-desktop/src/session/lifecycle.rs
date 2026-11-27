@@ -117,6 +117,7 @@ impl RemoteDesktopSessionEntity {
     }
 
     pub(super) fn shutdown_worker(&mut self) {
+        self.interrupt_gesture();
         self.last_clipboard_files = None;
         self.reset_vnc_file_browser_connection();
         if let Some(mut worker) = self.worker.take() {

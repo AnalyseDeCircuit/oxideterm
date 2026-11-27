@@ -2154,7 +2154,7 @@
       "mcp_running": "Đang chạy",
       "mcp_create_client": "Tạo ứng dụng khách",
       "mcp_approval_mode": "Chế độ phê duyệt",
-      "mcp_approval_mode_hint": "Phê duyệt khi cần giữ lại bước xác nhận thao tác. Tự động phê duyệt chỉ áp dụng cho công cụ được phép; yêu cầu thêm quyền vẫn cần phê duyệt.",
+      "mcp_approval_mode_hint": "Ở chế độ theo yêu cầu, thao tác có rủi ro sẽ chờ bạn phê duyệt rồi tiếp tục. Chế độ tự động chạy các công cụ được phép mà không hỏi. Hãy thêm quyền tại đây.",
       "mcp_permission_count": "Đã cho phép {{count}} quyền",
       "mcp_family_connections": "Kết nối và thông tin xác thực",
       "mcp_family_terminal": "Terminal và lệnh",

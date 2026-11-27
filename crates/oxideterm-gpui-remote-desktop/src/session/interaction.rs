@@ -43,6 +43,7 @@ impl RemoteDesktopSessionEntity {
         matcher: DesktopShortcutMatcher,
         cx: &mut App,
     ) {
+        self.interrupt_gesture();
         if desktop_shortcut_matches(&event.keystroke, "remoteDesktop.paste", overrides, matcher) {
             self.release_shortcut_modifiers(&event.keystroke);
             self.paste_from_system_clipboard(cx);
@@ -66,6 +67,7 @@ impl RemoteDesktopSessionEntity {
         overrides: &serde_json::Map<String, serde_json::Value>,
         matcher: DesktopShortcutMatcher,
     ) {
+        self.interrupt_gesture();
         if !desktop_shortcut_matches(&event.keystroke, "remoteDesktop.paste", overrides, matcher)
             && !desktop_shortcut_matches(&event.keystroke, "remoteDesktop.copy", overrides, matcher)
         {
@@ -74,10 +76,14 @@ impl RemoteDesktopSessionEntity {
     }
 
     pub(super) fn send_request(&mut self, request: RemoteDesktopHelperRequest) {
+        self.try_send_request(request);
+    }
+
+    pub(super) fn try_send_request(&mut self, request: RemoteDesktopHelperRequest) -> bool {
         if matches!(request, RemoteDesktopHelperRequest::Resize { .. })
             && !self.provider.capabilities.resize
         {
-            return;
+            return false;
         }
         if let RemoteDesktopHelperRequest::Resize { size, .. } = &request {
             self.state.mark_resize_requested(*size);
@@ -168,12 +174,14 @@ impl RemoteDesktopSessionEntity {
                 }
             }
         }
+        sent
     }
 
     fn map_pointer_position(
         &mut self,
         position: Point<Pixels>,
     ) -> Option<RemoteDesktopMappedPoint> {
+        self.interrupt_gesture();
         let point = self.geometry.map_window_point(position)?;
         // Servers do not always echo pointer moves. Keep the custom cursor
         // responsive without waiting for a round trip.
@@ -223,6 +231,7 @@ impl RemoteDesktopSessionEntity {
     }
 
     pub(super) fn release_mouse_button_out(&mut self, button: RemoteDesktopMouseButton) -> bool {
+        self.interrupt_gesture();
         if !self.pressed_mouse_buttons.remove(&button) {
             return false;
         }
@@ -271,6 +280,7 @@ impl RemoteDesktopSessionEntity {
     }
 
     pub fn sync_modifiers(&mut self, modifiers: gpui::Modifiers) {
+        self.interrupt_gesture();
         let next = RemoteDesktopModifierState::from_gpui(modifiers);
         let previous = std::mem::replace(&mut self.last_input_modifiers, next);
         if previous == next {
@@ -303,6 +313,7 @@ impl RemoteDesktopSessionEntity {
     }
 
     pub fn release_inputs(&mut self) {
+        self.active_gesture = None;
         self.last_input_modifiers = RemoteDesktopModifierState::default();
         self.last_lock_keys = None;
         self.pressed_mouse_buttons.clear();

@@ -395,7 +395,7 @@ impl WorkspaceApp {
                 PublicToolCall::DesktopState(_) => {
                     self.handle_public_mcp_desktop_state(request, cx)
                 }
-                PublicToolCall::DesktopFrame(_) => {
+                PublicToolCall::DesktopFrame(_) | PublicToolCall::DesktopAct(_) => {
                     self.handle_public_mcp_desktop_frame(request, cx)
                 }
                 PublicToolCall::DesktopInput(_) => {

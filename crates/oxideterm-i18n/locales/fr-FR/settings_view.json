@@ -2154,7 +2154,7 @@
       "mcp_running": "En cours",
       "mcp_create_client": "Créer un client",
       "mcp_approval_mode": "Mode d’approbation",
-      "mcp_approval_mode_hint": "L’approbation à la demande conserve les confirmations. L’approbation automatique concerne uniquement les outils autorisés ; tout ajout de permissions reste soumis à approbation.",
+      "mcp_approval_mode_hint": "À la demande, les actions à risque attendent votre accord. En mode automatique, les outils autorisés s’exécutent sans confirmation. Ajoutez les permissions ici.",
       "mcp_permission_count": "{{count}} permissions accordées",
       "mcp_family_connections": "Connexions et identifiants",
       "mcp_family_terminal": "Terminal et commandes",

@@ -2154,7 +2154,7 @@
       "mcp_running": "실행 중",
       "mcp_create_client": "클라이언트 만들기",
       "mcp_approval_mode": "승인 방식",
-      "mcp_approval_mode_hint": "필요 시 승인하면 작업 확인을 유지합니다. 자동 승인은 허용된 도구에만 적용되며, 권한 추가 요청은 계속 승인이 필요합니다.",
+      "mcp_approval_mode_hint": "필요 시 승인 모드에서는 위험한 작업만 승인을 기다렸다가 계속합니다. 자동 승인 모드는 허용된 도구를 확인 없이 실행합니다. 추가 권한은 여기에서 설정하세요.",
       "mcp_permission_count": "권한 {{count}}개 허용",
       "mcp_family_connections": "연결 및 자격 증명",
       "mcp_family_terminal": "터미널 및 명령",

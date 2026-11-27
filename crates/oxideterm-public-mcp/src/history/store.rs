@@ -143,7 +143,7 @@ impl HistoryError {
         }
     }
     pub fn envelope(self) -> ToolEnvelope {
-        ToolEnvelope { outcome: ToolOutcome::Failed, data: Some(json!({"reason": self.reason()})), error: Some(match self {
+        ToolEnvelope { prepared_quick_command: None, inline_png: None, outcome: ToolOutcome::Failed, data: Some(json!({"reason": self.reason()})), error: Some(match self {
         Self::SnapshotUnavailable => "The snapshot is unavailable. Request a new snapshot without after_revision.",
         Self::ResourceLimit => "The history cache is full. Release an owned snapshot or slot before retrying.",
         _ => "The terminal history request could not be completed.",

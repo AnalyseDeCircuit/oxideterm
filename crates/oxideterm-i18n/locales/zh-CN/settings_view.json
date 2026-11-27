@@ -2154,7 +2154,7 @@
       "mcp_running": "运行中",
       "mcp_create_client": "创建客户端",
       "mcp_approval_mode": "审批方式",
-      "mcp_approval_mode_hint": "按需批准会保留操作确认；自动批准仅适用于已允许的工具。申请新增权限仍需批准。",
+      "mcp_approval_mode_hint": "按需批准只在操作有风险时询问，允许后自动继续。免审模式直接运行已授权工具；新增权限请在此处勾选。",
       "mcp_permission_count": "已允许 {{count}} 项权限",
       "mcp_family_connections": "连接与凭据",
       "mcp_family_terminal": "终端与命令",

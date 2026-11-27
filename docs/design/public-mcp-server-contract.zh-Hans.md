@@ -82,7 +82,7 @@ OxideTerm 应当作为 **MCP 服务端**，让经过用户授权的 Codex、Clau
 - 终端录制控制和录制内容分别授权。`recordings_control` 复用真实 `TerminalPane` recorder，同一终端不会覆盖既有应用录制；当前后端只支持 output-only，因此 `capture_input=true` 会明确拒绝。停止时保留十五分钟有效的有界 asciicast 正文，搜索只给有界片段，导出只生成客户端私有且会独立过期的 artifact，不接受任意本机路径。终端关闭或控制授权关闭会先停止活动录制；客户端撤销会零化保留正文并撤销导出 artifact。
 - 远程桌面会话、画面观察、键鼠控制和剪贴板分别授权。`desktops_open` 只解析保存的 RDP/VNC `connection_ref`，凭据由设备受保护存储直接移交真实 provider，会话仍由可见标签页和 `RemoteDesktopSessionEntity` 持有，最多全局 32 个、每客户端 8 个。隐藏标签页只有在客户端启用画面观察时才继续消费最新帧；`desktops_frame` 把有界 CPU framebuffer 在后台编码成客户端私有 PNG artifact。输入必须携带当前 graphics epoch，坐标按 server framebuffer 校验；远端剪贴板来自会话内零化缓存，绝不读取系统剪贴板冒充远端内容。关闭、撤权或用户从界面关闭对应 tab 时会释放所有输入、关闭 helper，并撤销该桌面的句柄、帧和剪贴板 artifact。
 - 云同步按配置范围或调用方显式选择的分区冻结 pull/publish 预览；`sync_plan_ref` 绑定客户端、十分钟过期且只能消费一次。应用前同时比较完整本地状态和远端 revision/etag/content hash，任一变化都会拒绝陈旧计划。pull 只在能精确恢复的分区返回十五分钟有效的 `undo_ref`；SSH、Mosh 和凭据分区仍可保留产品已有的加密本地恢复备份，但不会把它伪装成严格撤销。publish 是远端写入，成功后明确不返回撤销句柄。撤权或断线可取消尚在远端一致性检查阶段的请求；进入本地 apply 或远端 upload 提交段后必须完成真实状态收尾，已撤权客户端不会因此重新获得 `undo_ref`。
-- 连接和命令执行、物理节点断开先冻结原参数并进入应用内批准；批准票据绑定客户端、五分钟过期且只能消费一次。批准界面显示实际客户端、目标和命令，但命令不进入 MCP 批准结果或审计。
+- 按需模式将需要确认的原调用挂起，批准后执行固定的参数。批准界面可查看客户端、目标和命令；命令正文不进入 MCP 审计。
 - 停用或撤销客户端会撤销待批准动作、取消命令并释放其 Public MCP 消费者；`nodes_release` 不会把其他终端、SFTP 或转发消费者仍在使用的物理节点断开。
 - 应用锁定时会拒绝新的 MCP 领域请求、撤销待批准动作、取消 MCP 命令并释放 MCP 节点消费者；解锁后客户端凭据仍有效，但必须重新取得运行时句柄。
 
@@ -116,7 +116,7 @@ MCP `2026-07-28` 请求使用 `server/discover` 做可选发现，并在每次�
   ∩ 当前应用实际可用的功能
 ```
 
-基础目录工具始终可见；其余工具组由用户对具体客户端授予后才出现在 `tools/list`。客户端可调用 `mcp_catalog` 获得全部可选工具组的稳定 ID、启用状态，以及已启用工具的主工具组、附加工具组和确认要求；隐藏工具的完整 schema 不会提前公开。`tools/list` 按稳定顺序返回，并使用私有 cache scope 与一秒 `ttlMs`；授权变化后，客户端重新拉取目录即可观察变化。
+基础目录工具始终可见；其余工具组由用户对具体客户端授予后才出现在 `tools/list`。客户端可调用 `mcp_catalog` 获得全部可选工具组的稳定 ID、启用状态，以及已启用工具的主工具组、附加工具组和是否可能要求确认（实际按调用参数判断）；隐藏工具的完整 schema 不会提前公开。`tools/list` 按稳定顺序返回，并使用私有 cache scope 与一秒 `ttlMs`；授权变化后，客户端重新拉取目录即可观察变化。
 
 ### 2.3 统一请求和结果信封
 
@@ -130,7 +130,7 @@ MCP `2026-07-28` 请求使用 `server/discover` 做可选发现，并在每次�
 | `expected_revision` | 乐观并发条件；文件、配置、同步计划和快速命令写入应优先使用。 |
 | `dry_run` | 为支持安全预检的后续领域保留；当前云同步使用独立 preview 工具，其他写工具不接受通用 `dry_run`。 |
 
-普通领域工具结果的 `structuredContent` 使用以下稳定信封；批准请求由协议层直接返回 `outcome:"approval_required"` 与 `approval` 投影：
+领域工具通过 `structuredContent` 返回以下信封。需要批准时原调用保持等待，不先返回中间票据：
 
 ```json
 {
@@ -150,11 +150,11 @@ MCP `2026-07-28` 请求使用 `server/discover` 做可选发现，并在每次�
 
 二进制和大内容必须作为 MCP image content 或带大小/过期限制的 `artifact_ref` 返回。画面、录制、文件和剪贴板不能以无限制 base64 JSON 塞入普通结果。`artifacts_read` 分段读取，且所有 artifact 都继承产生它的客户端和内容授权范围。
 
-### 2.4 确认、提交和撤销
+### 2.4 确认和撤销
 
-高风险工具的首次调用只固化动作摘要，返回 `approval_required` 和 `approval_ref`。应用内确认页显示客户端、目标、影响、是否可撤销、敏感参数的存在性及经脱敏后的摘要。用户在应用中批准后，客户端调用 `mcp_commit_action`，只传入该 `approval_ref`，服务端才执行原始、不可变的动作。新协议的 MRTR `input_required` 可改善客户端交互，但不能代替设备所有者在 OxideTerm 内的批准。
+按需模式在执行风险操作前固定目标与参数，原调用等待应用内决定。允许后，服务端复查客户端权限并执行一次，将结果返回原调用；拒绝或超时则返回错误。
 
-批准票据默认五分钟有效、仅能提交一次，并在客户端断开、权限撤销、目标 revision 变化或应用锁定时失效。`mcp_commit_action` 不接受替换后的命令、路径、内容或目标，因此不能把一次确认挪作另一项操作。
+等待上限为五分钟。取消原调用或撤销权限会使待批准动作失效。免审模式不创建审批请求，也不能自行启用未授权工具组。
 
 可真实回滚的副作用才返回 `undo_ref`；`mcp_revert` 会按原工具组和批准模式再次检查。不能可靠回滚的操作不返回句柄，并在结果或确认语义中说明。例如已经发送的终端输入、命令、SFTP 写入或远端发布不能假装可撤销；当前只有云同步本地 apply 的严格 checkpoint 进入通用撤销入口。
 
@@ -224,10 +224,9 @@ NodeRouter / connection registry ── 物理 SSH node
 |---|---|---|---|
 | `mcp_overview` | 基础 / D / 否 | 无 | 服务版本、批准策略、当前客户端已启用与可选工具组；不含端口或令牌。 |
 | `mcp_catalog` | 基础 / D / 否 | `group?` | 当前可用工具的 schema 摘要，及未开放组的用途/风险/请求条件。 |
-| `mcp_request_access` | 基础 / W / 始终应用内批准 | `groups` | 请求为当前客户端持久启用一组工具；即使客户端处于完全权限模式，也必须由用户批准后才改变 `tools/list`。 |
+| `mcp_request_access` | 基础 / W | `groups` | 按需模式下经用户确认后启用额外工具组。免审模式只报告已授权或要求在设置中启用，不会弹出审批。 |
 | `mcp_access_state` | 基础 / D / 否 | 无 | 当前客户端的模式、已授予组、全部可选组，以及自己的授权请求状态。 |
 | `mcp_revoke_access` | 基础 / W / 否 | `groups` | 客户端主动关闭自己的工具组，立即收回该组对应的待批准动作、操作和运行时句柄；基础组不可撤销。 |
-| `mcp_commit_action` | 基础 / X / 已批准票据 | `approval_ref` | 提交一份不可变高风险动作；返回 `operation_ref`、结果或 `undo_ref`。 |
 | `mcp_operation` | 基础 / D / 否 | `operation_ref` | 查询后台命令或 SFTP 传输的阶段、进度、可取消性、脱敏错误与产出句柄；仍会重新检查创建该操作的原工具组。 |
 | `mcp_cancel_operation` | 基础 / W / 否 | `operation_ref` | 请求取消后台命令或 SFTP 传输；返回是否可能已产生外部副作用，不把取消伪装成回滚。 |
 | `mcp_revert` | 基础 + 原工具组 / X / 必须 | `undo_ref` | 复用当前真实可撤销领域的精确反向操作；现阶段只接受云同步本地 apply 返回的 `undo_ref`，并再次要求云同步组。目标 revision 不匹配时返回冲突。 |
@@ -260,7 +259,7 @@ NodeRouter / connection registry ── 物理 SSH node
 | `terminals_read` | 终端观察 / R / 否 | `terminal_ref`、`cursor?`、`line_limit`、`tail?` | 当前视口快照、变化检测 generation cursor、视口内截断标记；不是历史分页或输出增量接口。原始内容按敏感数据处理。 |
 | `terminals_history` | 终端观察 / R / 否 | `request`、`line_limit?`、`byte_limit?`；terminal_ref 仅属于 snapshot 分支 | 按 primary/alternate 与 all/screen 冻结并分页；返回正文片段、内容版本、覆盖范围和缺口状态。支持 snapshot/page/release/release_slot；具体字段见本节，句柄与限额见第 3 节。 |
 | `terminals_find` | 终端观察 / R / 否 | `terminal_ref`、`query`、`limit?` | 复用终端后端的字面量 scrollback 搜索并返回有界网格坐标；当前不接受正则、大小写或整词选项。 |
-| `commands_start` | 命令执行 / X / 必须 | `node_ref`、`command`、`working_directory?` | 在已取得的 SSH node 上使用当前物理连接的独立 exec channel；固定超时 5 分钟、合并输出上限 1 MiB，返回 `command_ref` 与 `operation_ref`。交互终端精确输入使用 `terminals_submit`，不会伪装成有退出码的 exec。 |
+| `commands_start` | 命令执行 / X / 按需 | `node_ref`、`command`、`working_directory?` | 在已取得的 SSH node 上使用当前物理连接的独立 exec channel；固定超时 5 分钟、合并输出上限 1 MiB，返回 `command_ref` 与 `operation_ref`。交互终端精确输入使用 `terminals_submit`，不会伪装成有退出码的 exec。 |
 | `commands_state` | 命令观察 / R / 否 | `command_ref` | `running/succeeded/cancelled/failed`、真实退出码、截断状态和脱敏错误。 |
 | `commands_output` | 命令观察 / R / 否 | `command_ref`、`offset?`、`limit?` | 分段返回 SSH exec 的 stdout/stderr，单次最多 256 KiB；内容按终端敏感读取处理。 |
 | `commands_cancel` | 命令执行 / W / 否 | `command_ref` | 取消该客户端拥有的 SSH exec channel；已经发生的远端副作用不会被称为回滚。交互终端 interrupt 必须显式调用 `terminals_control`。 |
@@ -378,7 +377,8 @@ Host Tools 的已安装插件扩展不能通过 Public MCP 取得任意调用入
 | `desktops_open` | 远程桌面 / X / 必须 | `connection_ref` | 开启保存的真实 RDP/VNC provider 会话，返回 `desktop_ref`、连接状态、协商能力、安全状态和 framebuffer epoch；认证只通过设备受保护槽移交，不接受秘密明文或内部凭据引用。短暂 profile 待凭据交互契约完成后再开放。 |
 | `desktops_state` | 远程桌面观察 / D / 否 | `desktop_ref` | provider、连接状态、尺寸、epoch、加密/证书状态、支持的输入和剪贴板方向；不返回画面。 |
 | `desktops_frame` | 远程桌面观察 + 传输数据 / R / 否 | `desktop_ref`、`after_generation?` | 最新完整帧编码为客户端私有 PNG `artifact_ref`，并返回 generation、graphics epoch 和尺寸；generation 未变化时返回 `unchanged`，不在 JSON 中塞入 framebuffer Base64。 |
-| `desktops_input` | 远程桌面控制 / X / 必须 | `desktop_ref`、`graphics_epoch`、`event` | 严格联合类型：鼠标移动/按键/滚轮、键按下/松开、文本、释放全部输入。坐标以 server framebuffer 为准；不转发任意 helper 协议消息。 |
+| `desktops_input` | 远程桌面控制 / X / 按需 | `desktop_ref`、`graphics_epoch`、`event` | 严格联合类型：鼠标移动/按键/滚轮、键按下/松开、文本、释放全部输入。坐标以 server framebuffer 为准；不转发任意 helper 协议消息。 |
+| `desktops_act` | 远程桌面控制 + 观察 + 传输数据 / X / 必须 | `desktop_ref`、`graphics_epoch`、`action` | 一次执行一个 `click`、`drag` 或 `key_chord`，以 MCP 图像内容直接返回操作后的最新 PNG。坐标使用远端帧像素；静止画面也会返回。用户在该桌面移动鼠标、滚动或按键会中断当前操作并释放输入。 |
 | `desktops_resize` | 远程桌面控制 / W / 否 | `desktop_ref`、`width`、`height` | 请求远端 resize，实际结果以协商能力为准。 |
 | `desktops_clipboard_read` | 远程桌面剪贴板（图像另需传输数据） / R / 否 | `desktop_ref`、`kind` | 在双方都授权且 provider 支持时读取会话实际收到的最新远端文本或图像 artifact；绝不把系统剪贴板当成远端内容，文件剪贴板尚不公开。 |
 | `desktops_clipboard_write` | 远程桌面剪贴板（图像另需传输数据） / X / 必须 | `desktop_ref`、严格 `payload`（文本或图像 `artifact_ref` + 格式） | 写入远端剪贴板；校验 artifact media type 和 16 MiB 限额，不把剪贴板正文写进审计。 |
@@ -386,6 +386,8 @@ Host Tools 的已安装插件扩展不能通过 Public MCP 取得任意调用入
 | `desktops_close` | 远程桌面 / W / 确认未保存工作提示时 | `desktop_ref` | 关闭 provider/helper 及会话，撤销帧和剪贴板句柄；界面直接关闭 tab 具有相同的公开句柄清理语义。 |
 
 RDP/VNC helper 的 JSON line、二进制帧、证书材料、凭据和进程控制都是内部实现。Public MCP 只看到版本化 DTO、图像/ artifact 和严格输入事件。若会话借助 SSH tunnel，tunnel 仍归相应 SSH node/forward owner 所有，而非远程桌面视图或 MCP HTTP 请求。
+
+例如按 Ctrl+S 时，传入 `"action": {"kind":"key_chord","code":"s","ctrl":true}`。按需模式一次确认整个操作，原调用直接返回截图；免审模式直接执行。用户接管后不要自动重试。
 
 ### 4.7 云同步、插件、快速命令和终端录制
 
@@ -404,7 +406,7 @@ RDP/VNC helper 的 JSON line、二进制帧、证书材料、凭据和进程控�
 | `quickcommands_describe` | 快速命令正文读取 / R / 否 | `quickcommand_ref` | 在独立正文读取组下返回保存的精确命令、元数据和当前存储 revision。 |
 | `quickcommands_save` | 快速命令管理 / X / 必须 | `quickcommand_ref?`、`name`、`command`、`category`、`description?`、`host_pattern?`、`expected_revision` | 新建或更新保存命令并刷新应用内 store；当前格式没有参数 schema，也没有持久撤销句柄。此工具不执行命令。 |
 | `quickcommands_remove` | 快速命令管理 / X / 必须 | `quickcommand_ref`、`expected_revision` | 在 store revision 匹配时删除保存命令并刷新应用状态；当前不返回撤销句柄。 |
-| `quickcommands_run` | 快速命令执行 / X / 必须 | `quickcommand_ref`、`node_ref`、`expected_revision`、空 `arguments` | 读取已保存的精确命令，重新核对 store revision、节点所有权和 host pattern，再通过 SSH exec 执行并返回 `command_ref`/`operation_ref`。当前模型没有参数 schema，因此非空 `arguments` 明确拒绝。 |
+| `quickcommands_run` | 快速命令执行 / X / 按需 | `quickcommand_ref`、`node_ref`、`expected_revision`、`arguments` | 校验版本、目标与参数后展开命令。按需模式展示并执行同一份展开结果；标记为始终确认的命令即使只读也会询问。免审模式直接执行。 |
 | `recordings_control` | 录制控制 / X / 仅 `start` 必须 | 严格 tagged action：`start {terminal_ref,title?,capture_input}`，或 `pause/resume/stop {recording_ref}` | 返回 `recording_ref`、状态和时长；当前真实 recorder 为 output-only，拒绝 `capture_input=true`。录制可能包含敏感终端文本，默认不公开。 |
 | `recordings_status` | 录制控制 / D / 否 | `target` 严格为 `{kind:"recording",recording_ref}` 或 `{kind:"terminal",terminal_ref}` | 状态、时长、尺寸、事件数、是否由当前客户端管理、是否可读取正文及截断状态，不含事件正文。 |
 | `recordings_search` | 终端录制 / R / 否 | `recording_ref`、`query`、`limit` | 有界时间点与片段；内容按终端敏感读取策略处理。 |
@@ -432,9 +434,9 @@ RDP/VNC helper 的 JSON line、二进制帧、证书材料、凭据和进程控�
 
 ### 5.2 哪些行为必须动作确认
 
-普通模式下，除工具组授权外，以下必须经 `approval_ref` 的动作确认。用户把具体客户端显式切换为完全权限模式后，这些动作可在已勾选工具组内直接执行，但仍会审计，并继续受应用锁、句柄所有权、参数 schema、秘密边界和生命周期规则约束：
+按需模式根据操作与参数决定是否询问。查看状态、已连接节点上打开终端，以及 `pwd`、`ls -la` 等受支持的只读诊断直接执行。以下操作通常需要确认；免审模式在已授权工具组内跳过确认，保留应用锁、句柄所有权、参数验证和审计。
 
-- 创建共享 node、打开新终端、写入新凭据、保存/删除连接；
+- 建立新连接、从配置打开终端、写入凭据、保存或删除连接；
 - 终端提交、kill/terminate、串口 break 与 Telnet 控制；
 - 文件写入、覆盖、移动、删除、递归删除和目录传输覆盖；
 - Host Tools 的状态改变、公开或持久化端口转发；

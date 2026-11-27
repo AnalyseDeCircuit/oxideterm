@@ -2154,7 +2154,7 @@
       "mcp_running": "執行中",
       "mcp_create_client": "建立用戶端",
       "mcp_approval_mode": "核准方式",
-      "mcp_approval_mode_hint": "按需核准會保留操作確認；自動核准僅適用於已允許的工具。申請新增權限仍需核准。",
+      "mcp_approval_mode_hint": "按需核准只在操作有風險時詢問，允許後自動繼續。免審模式直接執行已授權工具；請在此勾選其他權限。",
       "mcp_permission_count": "已允許 {{count}} 項權限",
       "mcp_family_connections": "連線與憑證",
       "mcp_family_terminal": "終端機與命令",

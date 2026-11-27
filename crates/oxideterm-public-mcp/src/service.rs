@@ -29,19 +29,19 @@ use crate::{
         AddonsInstallArgs, AddonsListArgs, AddonsRemoveArgs, AddonsSetEnabledArgs, AuditSearchArgs,
         BrowseConnectionsArgs, CancelCommandArgs, CancelOperationArgs, CommandOutputArgs,
         CommandStateArgs, ConnectNodeArgs, CredentialStatusArgs, DescribeConnectionArgs,
-        DesktopButtonState, DesktopClipboardImageFormat, DesktopClipboardPayload, DesktopFrameArgs,
-        DesktopHandleArgs, DesktopInputArgs, DesktopInputEvent, DisconnectNodeArgs, FilesCloseArgs,
-        FilesCompareArgs, FilesListArgs, FilesMoveArgs, FilesOpenArgs, FilesReadArgs,
-        FilesRemoveArgs, FilesStatArgs, FilesWriteArgs, ForgetCredentialArgs, ForwardHandleArgs,
-        ForwardKind, ForwardsChangeArgs, ForwardsDiscoverPortsArgs, ForwardsListArgs,
-        ForwardsOpenArgs, ForwardsRemoveArgs, HostToolsCaptureArgs, HostToolsCatalogArgs,
-        HostToolsOperateArgs, InspectNodeArgs, OpenDesktopArgs, OpenTerminalArgs,
-        OperationStateArgs, PublicCredentialSlot, PublicDesktopMouseButton, PublicToolCall,
-        QuickCommandsDescribeArgs, QuickCommandsListArgs, QuickCommandsRemoveArgs,
-        QuickCommandsRunArgs, QuickCommandsSaveArgs, ReadArtifactArgs, ReadDesktopClipboardArgs,
-        ReadTerminalArgs, RecordingsControlArgs, RecordingsExportArgs, RecordingsSearchArgs,
-        RecordingsStatusArgs, ReleaseNodeArgs, RemovePublicConnectionArgs, RequestAccessArgs,
-        ResizeDesktopArgs, ResizeTerminalArgs, RevertArgs, RevokeAccessArgs,
+        DesktopActArgs, DesktopButtonState, DesktopClipboardImageFormat, DesktopClipboardPayload,
+        DesktopFrameArgs, DesktopGesture, DesktopHandleArgs, DesktopInputArgs, DesktopInputEvent,
+        DisconnectNodeArgs, FilesCloseArgs, FilesCompareArgs, FilesListArgs, FilesMoveArgs,
+        FilesOpenArgs, FilesReadArgs, FilesRemoveArgs, FilesStatArgs, FilesWriteArgs,
+        ForgetCredentialArgs, ForwardHandleArgs, ForwardKind, ForwardsChangeArgs,
+        ForwardsDiscoverPortsArgs, ForwardsListArgs, ForwardsOpenArgs, ForwardsRemoveArgs,
+        HostToolsCaptureArgs, HostToolsCatalogArgs, HostToolsOperateArgs, InspectNodeArgs,
+        OpenDesktopArgs, OpenTerminalArgs, OperationStateArgs, PublicCredentialSlot,
+        PublicDesktopMouseButton, PublicToolCall, QuickCommandsDescribeArgs, QuickCommandsListArgs,
+        QuickCommandsRemoveArgs, QuickCommandsRunArgs, QuickCommandsSaveArgs, ReadArtifactArgs,
+        ReadDesktopClipboardArgs, ReadTerminalArgs, RecordingsControlArgs, RecordingsExportArgs,
+        RecordingsSearchArgs, RecordingsStatusArgs, ReleaseNodeArgs, RemovePublicConnectionArgs,
+        RequestAccessArgs, ResizeDesktopArgs, ResizeTerminalArgs, RevertArgs, RevokeAccessArgs,
         SavePublicConnectionArgs, StageArtifactArgs, StartCommandArgs, StartTransferArgs,
         StoreCredentialArgs, SubmitTerminalArgs, SyncApplyPlanArgs, SyncPublishPreviewArgs,
         SyncPullPreviewArgs, SyncRestoreArgs, SyncStatusArgs, TerminalHandleArgs, ToolEnvelope,
@@ -451,15 +451,51 @@ impl PublicMcpService {
             );
         }
 
-        // Domain-prepared tools stage their frozen payload after workspace-side validation.
-        if call.requires_approval()
-            && !call.requires_domain_preparation()
-            && (client.approval_mode == ClientApprovalMode::Standard
-                || call.requires_explicit_app_approval())
+        if client.approval_mode == ClientApprovalMode::Unattended
+            && matches!(&call, PublicToolCall::RequestAccess(_))
+        {
+            return tool_error(
+                "tool_group_disabled",
+                "Enable additional tool groups in OxideTerm settings",
+            );
+        }
+        let (call, confirm_saved_command) = if call.requires_domain_preparation()
+            && client.approval_mode == ClientApprovalMode::Standard
+        {
+            // Expand saved commands on the host before showing the exact payload to the user.
+            match self
+                .state
+                .broker
+                .execute(
+                    &self.state.clients,
+                    client.approval_mode,
+                    client.client_ref.clone(),
+                    call,
+                    oxideterm_audit::AuditContext::current_request(),
+                )
+                .await
+            {
+                Ok(mut result) => match result.prepared_quick_command.take() {
+                    Some((args, confirm)) => {
+                        (PublicToolCall::PreparedQuickCommandRun(args), confirm)
+                    }
+                    None => return envelope_result(result),
+                },
+                Err(error) => return tool_error("workspace_unavailable", error.to_string()),
+            }
+        } else {
+            (call, false)
+        };
+        if (call.requires_approval() || confirm_saved_command)
+            && client.approval_mode == ClientApprovalMode::Standard
         {
             let tool_name = call.tool_name();
             let target = call.target_summary();
-            let approval = match self.state.approvals.stage(client.client_ref.clone(), call) {
+            let approval = match self.state.approvals.stage_waiting(
+                &self.state.broker,
+                client.client_ref.clone(),
+                call,
+            ) {
                 Ok(approval) => approval,
                 Err(error) => return tool_error("approval_unavailable", error.to_string()),
             };
@@ -470,11 +506,11 @@ impl PublicMcpService {
                 AuditAuthorization::AppApproval,
                 ToolOutcome::Accepted,
             );
-            self.state.broker.notify_state_changed();
-            return CallToolResult::structured(json!({
-                "outcome": "approval_required",
-                "approval": approval,
-            }));
+            let decision = approval.wait().await;
+            return match decision {
+                Ok((call, audit)) => self.dispatch_after_approval(client, call, audit).await,
+                Err(error) => tool_error("approval_unavailable", error.to_string()),
+            };
         }
 
         let authorization =
@@ -620,6 +656,16 @@ impl PublicMcpService {
             Ok(call) => call,
             Err(error) => return tool_error("approval_unavailable", error.to_string()),
         };
+        self.dispatch_after_approval(client, call, approval_audit)
+            .await
+    }
+
+    async fn dispatch_after_approval(
+        &self,
+        client: &ClientProjection,
+        call: PublicToolCall,
+        approval_audit: Option<oxideterm_audit::AuditOperation>,
+    ) -> CallToolResult {
         if !client.tool_groups.contains(&call.required_group())
             || call
                 .additional_required_groups()
@@ -675,7 +721,7 @@ impl ServerHandler for PublicMcpService {
                     .with_description("Authorized automation for the active OxideTerm workspace"),
             )
             .with_instructions(
-                "Use only opaque public references. Mutating tools may require approval in OxideTerm before mcp_commit_action succeeds.",
+                "Use only opaque public references. When a call needs approval, it waits for the user in OxideTerm and returns its result directly.",
             )
     }
 
@@ -721,6 +767,20 @@ impl ServerHandler for PublicMcpService {
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, McpError> {
         let client = self.resolve_client(&context)?;
+        tokio::select! {
+            biased;
+            _ = context.ct.cancelled() => Ok(tool_error("request_cancelled", "The request was cancelled").into()),
+            result = self.dispatch_tool(request, client) => result,
+        }
+    }
+}
+
+impl PublicMcpService {
+    async fn dispatch_tool(
+        &self,
+        request: CallToolRequestParams,
+        client: ClientProjection,
+    ) -> Result<CallToolResponse, McpError> {
         let arguments = request.arguments.unwrap_or_default();
         let result = match request.name.as_ref() {
             "mcp_overview" => {
@@ -746,8 +806,7 @@ impl ServerHandler for PublicMcpService {
                         tool_group: definition.group,
                         additional_tool_groups: definition.additional_groups,
                         requires_approval: definition.requires_approval
-                            && (client.approval_mode == ClientApprovalMode::Standard
-                                || definition.requires_explicit_app_approval),
+                            && client.approval_mode == ClientApprovalMode::Standard,
                     })
                     .collect::<Vec<_>>();
                 let tool_groups = ToolGroup::selectable()
@@ -1119,6 +1178,17 @@ impl ServerHandler for PublicMcpService {
                     self.execute_call(&client, PublicToolCall::DesktopFrame(args))
                         .await
                 }
+                Err(error) => *error,
+            },
+            "desktops_act" => match parse_arguments::<DesktopActArgs>(arguments) {
+                Ok(args)
+                    if !matches!(&args.action, DesktopGesture::KeyChord { code, .. }
+                    if code.trim().is_empty() || code.len() > DESKTOP_KEY_CODE_LIMIT_BYTES) =>
+                {
+                    self.execute_call(&client, PublicToolCall::DesktopAct(args))
+                        .await
+                }
+                Ok(_) => tool_error("invalid_arguments", "Supply a bounded remote key code"),
                 Err(error) => *error,
             },
             "desktops_input" => match parse_arguments::<DesktopInputArgs>(arguments) {
@@ -1555,7 +1625,6 @@ struct ToolDefinition {
     group: ToolGroup,
     additional_groups: &'static [ToolGroup],
     requires_approval: bool,
-    requires_explicit_app_approval: bool,
 }
 
 impl ToolDefinition {
@@ -1596,10 +1665,11 @@ fn tool_definitions() -> Vec<ToolDefinition> {
             true,
             false,
         ),
-        define_explicit_approval_tool::<RequestAccessArgs>(
+        define_tool::<RequestAccessArgs>(
             "mcp_request_access",
-            "Request additional tool groups for this client through an in-app approval.",
+            "Request additional tool groups in on-demand mode. In unattended mode, configure new groups in OxideTerm settings.",
             ToolGroup::Basic,
+            false, true,
         ),
         define_tool::<RevokeAccessArgs>(
             "mcp_revoke_access",
@@ -1628,13 +1698,6 @@ fn tool_definitions() -> Vec<ToolDefinition> {
             ToolGroup::Basic,
             false,
             true,
-        ),
-        define_tool::<CommitActionArgs>(
-            "mcp_commit_action",
-            "Commit an action that the user already approved in OxideTerm.",
-            ToolGroup::Basic,
-            false,
-            false,
         ),
         define_tool::<BrowseConnectionsArgs>(
             "connections_browse",
@@ -1862,6 +1925,11 @@ fn tool_definitions() -> Vec<ToolDefinition> {
             false,
         )
         .with_additional_groups(&[ToolGroup::ArtifactTransfer]),
+        define_tool::<DesktopActArgs>(
+            "desktops_act",
+            "Click, drag, or press a key chord in framebuffer pixel coordinates; returns the resulting desktop as a PNG image. Local input interrupts the gesture.",
+            ToolGroup::DesktopInput, false, true,
+        ).with_additional_groups(&[ToolGroup::DesktopObserve, ToolGroup::ArtifactTransfer]),
         define_tool::<DesktopInputSchema>(
             "desktops_input",
             "Send one strict mouse, wheel, key, text, or release-all event for the current framebuffer epoch.",
@@ -2245,18 +2313,7 @@ fn define_tool<T: JsonSchema>(
         group,
         additional_groups: &[],
         requires_approval,
-        requires_explicit_app_approval: false,
     }
-}
-
-fn define_explicit_approval_tool<T: JsonSchema>(
-    name: &'static str,
-    description: &'static str,
-    group: ToolGroup,
-) -> ToolDefinition {
-    let mut definition = define_tool::<T>(name, description, group, false, true);
-    definition.requires_explicit_app_approval = true;
-    definition
 }
 
 fn schema_object<T: JsonSchema>() -> JsonObject {
@@ -2891,10 +2948,19 @@ fn envelope_result(envelope: ToolEnvelope) -> CallToolResult {
                 .data
                 .unwrap_or_else(|| json!({ "outcome": "accepted" })),
         ),
-        ToolOutcome::Completed => CallToolResult::structured(json!({
+        ToolOutcome::Completed => {
+            let mut result = CallToolResult::structured(json!({
             "outcome": envelope.outcome,
             "data": envelope.data,
-        })),
+            }));
+            if let Some(image) = envelope.inline_png {
+                result.content.push(rmcp::model::ContentBlock::image(
+                    base64::engine::general_purpose::STANDARD.encode(&*image.0),
+                    "image/png",
+                ));
+            }
+            result
+        }
     }
 }
 
@@ -3229,7 +3295,7 @@ mod tests {
             )
             .unwrap();
         let client = clients.get(&registered.projection.client_ref).unwrap();
-        let (broker, mut receiver) = DomainBroker::channel(1);
+        let (broker, mut receiver) = DomainBroker::channel(4);
         let state = Arc::new(PublicMcpState {
             clients,
             approvals: Arc::default(),
@@ -3249,10 +3315,44 @@ mod tests {
         let Some(DomainMessage::Request(request)) = receiver.recv().await else {
             panic!("Quick Command run must reach workspace preparation");
         };
-        assert!(matches!(&request.call, PublicToolCall::QuickCommandsRun(_)));
+        let PublicToolCall::QuickCommandsRun(args) = &request.call else {
+            panic!("expected preparation");
+        };
         assert!(state.approvals.list().is_empty());
-        request.finish(ToolEnvelope::accepted(json!({ "outcome": "approval_required" })).unwrap());
-        let _ = execution.await.unwrap();
+        let mut prepared = ToolEnvelope::completed(()).unwrap();
+        prepared.prepared_quick_command = Some((
+            crate::PreparedQuickCommandRunArgs {
+                quickcommand_ref: args.quickcommand_ref.clone(),
+                node_ref: args.node_ref.clone(),
+                command: Zeroizing::new("uptime".into()),
+            },
+            true,
+        ));
+        request.finish(prepared);
+        assert!(matches!(
+            receiver.recv().await,
+            Some(DomainMessage::StateChanged)
+        ));
+        let review = state.approvals.list().pop().unwrap();
+        assert_eq!(review.review.command(), Some("uptime"));
+        state
+            .approvals
+            .set_status(&review.approval_ref, crate::ApprovalStatus::Approved)
+            .unwrap();
+        let request = loop {
+            match receiver.recv().await.unwrap() {
+                DomainMessage::Request(request) => break request,
+                DomainMessage::StateChanged => continue,
+            }
+        };
+        assert!(
+            matches!(&request.call, PublicToolCall::PreparedQuickCommandRun(args) if args.command.as_str() == "uptime")
+        );
+        request.finish(ToolEnvelope::completed(json!({"command_ref":"fixture"})).unwrap());
+        assert_eq!(
+            execution.await.unwrap().structured_content.unwrap()["data"]["command_ref"],
+            "fixture"
+        );
     }
 
     #[test]

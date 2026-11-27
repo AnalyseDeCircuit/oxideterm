@@ -12,6 +12,144 @@ use oxideterm_theme::theme_by_id;
 struct RemoteDesktopSessionTestRoot;
 
 #[gpui::test]
+async fn desktop_gesture_returns_current_pixels_and_yields_drag_to_local_input(
+    cx: &mut TestAppContext,
+) {
+    use oxideterm_public_mcp::calls::{DesktopGesture, PublicDesktopMouseButton};
+    let window = cx.add_window(|_, _| RemoteDesktopSessionTestRoot);
+    let (tx, rx) = mpsc::channel();
+    let protocol = RemoteDesktopProtocol::Rdp;
+    let provider = builtin_preview_provider_registry()
+        .unwrap()
+        .get_for_protocol(protocol)
+        .unwrap()
+        .clone();
+    let frame = |byte| RemoteDesktopHelperEvent::Frame {
+        frame: RemoteDesktopFrame::new(
+            RemoteDesktopSize {
+                width: 8,
+                height: 1,
+            },
+            RemoteDesktopFrameFormat::Bgra8,
+            [byte, byte, byte, 255].repeat(8),
+        )
+        .with_graphics_epoch(2),
+    };
+    let session = cx.new(|_| {
+        let mut session = RemoteDesktopSessionEntity::new(
+            TabId(17),
+            preview_remote_desktop_profile(protocol),
+            provider,
+            None,
+            PathBuf::new(),
+            RemoteDesktopFrameDeliverySlot::new(),
+            window.into(),
+        );
+        session.worker = Some(RemoteDesktopWorkerOwner::new(tx, thread::spawn(|| {})));
+        session.state.apply_event(frame(1));
+        session.geometry.update(
+            Some(gpui::Bounds::new(
+                point(px(0.), px(0.)),
+                size(px(8.), px(1.)),
+            )),
+            session.state.frame_size(),
+            None,
+        );
+        session
+    });
+    let run = |action, cx: &mut TestAppContext| {
+        session.update(cx, |s, cx| {
+            s.run_public_mcp_gesture(2, action, || false, cx).unwrap()
+        })
+    };
+    let chord = run(
+        DesktopGesture::KeyChord {
+            code: "s".into(),
+            ctrl: true,
+            alt: false,
+            shift: false,
+            meta: false,
+        },
+        cx,
+    );
+    cx.run_until_parked();
+    cx.executor().advance_clock(Duration::from_millis(16));
+    cx.run_until_parked();
+    for state in [
+        RemoteDesktopKeyState::Pressed,
+        RemoteDesktopKeyState::Released,
+    ] {
+        assert!(
+            matches!(rx.try_recv().unwrap(), RemoteDesktopHelperRequest::Key {key, state: actual}
+            if actual == state && key.code == "s" && key.ctrl)
+        );
+    }
+    session.update(cx, |s, _| s.state.apply_event(frame(7)));
+    cx.executor().advance_clock(Duration::from_millis(50));
+    assert_eq!(chord.await.unwrap().bgra_bytes, [7, 7, 7, 255].repeat(8));
+
+    let click = run(
+        DesktopGesture::Click {
+            x: 4,
+            y: 0,
+            button: PublicDesktopMouseButton::Right,
+        },
+        cx,
+    );
+    cx.run_until_parked();
+    cx.executor().advance_clock(Duration::from_millis(500));
+    assert_eq!(click.await.unwrap().bgra_bytes, [7, 7, 7, 255].repeat(8));
+    for edge in [
+        RemoteDesktopMouseButtonState::Pressed,
+        RemoteDesktopMouseButtonState::Released,
+    ] {
+        assert!(matches!(
+            rx.try_recv().unwrap(),
+            RemoteDesktopHelperRequest::MouseMove { x: 4, y: 0 }
+        ));
+        assert!(
+            matches!(rx.try_recv().unwrap(), RemoteDesktopHelperRequest::MouseButton {
+            button: RemoteDesktopMouseButton::Right, state } if state == edge)
+        );
+    }
+
+    let drag = run(
+        DesktopGesture::Drag {
+            from_x: 7,
+            from_y: 0,
+            to_x: 0,
+            to_y: 0,
+            button: PublicDesktopMouseButton::Left,
+        },
+        cx,
+    );
+    cx.run_until_parked();
+    assert!(matches!(
+        rx.try_recv().unwrap(),
+        RemoteDesktopHelperRequest::MouseMove { x: 7, y: 0 }
+    ));
+    assert!(matches!(
+        rx.try_recv().unwrap(),
+        RemoteDesktopHelperRequest::MouseButton {
+            state: RemoteDesktopMouseButtonState::Pressed,
+            ..
+        }
+    ));
+    assert!(session.update(cx, |s, _| s.handle_mouse_move(point(px(1.), px(0.)))));
+    cx.executor().advance_clock(Duration::from_millis(16));
+    assert_eq!(drag.await.unwrap_err(), "Desktop gesture interrupted");
+    assert!(matches!(
+        rx.try_recv().unwrap(),
+        RemoteDesktopHelperRequest::ReleaseAllInputs
+    ));
+    assert!(matches!(
+        rx.try_recv().unwrap(),
+        RemoteDesktopHelperRequest::MouseMove { x: 1, y: 0 }
+    ));
+    assert!(matches!(rx.try_recv(), Err(mpsc::TryRecvError::Empty)));
+}
+
+#[gpui::test]
 fn display_topology_owns_size_until_the_last_external_screen_is_removed(cx: &mut TestAppContext) {
     let window = cx.add_window(|_, _| RemoteDesktopSessionTestRoot);
     let mut profile = preview_remote_desktop_profile(RemoteDesktopProtocol::Rdp);

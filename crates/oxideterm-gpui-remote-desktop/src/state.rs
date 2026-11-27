@@ -537,7 +537,7 @@ impl RemoteDesktopViewState {
                 }
             }
             RemoteDesktopHelperEvent::FrameUpdate { update } => {
-                if self.can_apply_frame_update(update.graphics_epoch)
+                if self.is_current_graphics_epoch(update.graphics_epoch)
                     && let Some(frame_image) = self.frame_image.as_mut()
                     && frame_image.apply_update(&update)
                 {
@@ -705,7 +705,7 @@ impl RemoteDesktopViewState {
     ) {
         stats.frame_updates += 1;
         record_frame_trace(stats, update.trace_id);
-        if self.can_apply_frame_update(update.graphics_epoch)
+        if self.is_current_graphics_epoch(update.graphics_epoch)
             && let Some(frame_image) = self.frame_image.as_mut()
             && let Some(texture_stats) = frame_image.apply_update_with_stats(&update)
         {
@@ -774,7 +774,7 @@ impl RemoteDesktopViewState {
                 .is_some_and(|awaiting_epoch| graphics_epoch < awaiting_epoch)
     }
 
-    fn can_apply_frame_update(&self, graphics_epoch: u64) -> bool {
+    pub(crate) fn is_current_graphics_epoch(&self, graphics_epoch: u64) -> bool {
         self.awaiting_graphics_epoch.is_none() && self.active_graphics_epoch == Some(graphics_epoch)
     }
 

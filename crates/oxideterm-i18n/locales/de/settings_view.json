@@ -2154,7 +2154,7 @@
       "mcp_running": "Aktiv",
       "mcp_create_client": "Client erstellen",
       "mcp_approval_mode": "Genehmigungsmodus",
-      "mcp_approval_mode_hint": "Bei Bedarf bleiben Aktionsbestätigungen erhalten. Automatische Genehmigung gilt nur für erlaubte Werkzeuge; zusätzliche Berechtigungen müssen weiterhin genehmigt werden.",
+      "mcp_approval_mode_hint": "Bei Bedarf warten riskante Aktionen auf Ihre Zustimmung. Bei automatischer Genehmigung laufen erlaubte Werkzeuge ohne Rückfrage. Weitere Berechtigungen legen Sie hier fest.",
       "mcp_permission_count": "{{count}} Berechtigungen erlaubt",
       "mcp_family_connections": "Verbindungen und Zugangsdaten",
       "mcp_family_terminal": "Terminal und Befehle",
