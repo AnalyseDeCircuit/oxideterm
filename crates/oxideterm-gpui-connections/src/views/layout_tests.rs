@@ -288,12 +288,12 @@ fn standalone_sftp_keeps_transport_switcher_and_scrolls_vertically(cx: &mut gpui
         );
         view.views.form_scroll("standalone-sftp-form-scroll", cx)
     });
-    cx.simulate_resize(gpui::size(px(960.0), px(460.0)));
     draw(cx);
-    let primary_nav = cx
-        .debug_bounds("studio-category-Some(StandaloneSftpPrimary)")
-        .expect("standalone SFTP keeps Remote Host 1 in its horizontal section tab bar");
-    cx.simulate_click(primary_nav.center(), gpui::Modifiers::default());
+    let primary_row = cx
+        .debug_bounds("standalone-sftp-summary-Primary")
+        .expect("the SFTP overview shows Remote Host 1");
+    cx.simulate_click(primary_row.center(), gpui::Modifiers::default());
+    cx.simulate_resize(gpui::size(px(960.0), px(460.0)));
     draw(cx);
     view.read_with(cx, |view, cx| {
         assert_eq!(
@@ -332,10 +332,16 @@ fn standalone_sftp_keeps_transport_switcher_and_scrolls_vertically(cx: &mut gpui
         "the vertical protocol rail stays pinned outside the scrolling fields",
     );
 
-    let secondary_nav = cx
-        .debug_bounds("studio-category-Some(StandaloneSftpSecondary)")
-        .expect("remote-to-remote mode shows Remote Host 2 in section tab bar");
-    cx.simulate_click(secondary_nav.center(), gpui::Modifiers::default());
+    let back = cx
+        .debug_bounds("standalone-sftp-subpage-back")
+        .expect("the endpoint page has a back button");
+    cx.simulate_click(back.center(), gpui::Modifiers::default());
+    cx.simulate_resize(gpui::size(px(1000.0), px(750.0)));
+    draw(cx);
+    let secondary_row = cx
+        .debug_bounds("standalone-sftp-summary-Secondary")
+        .expect("the remote-to-remote overview shows Remote Host 2");
+    cx.simulate_click(secondary_row.center(), gpui::Modifiers::default());
     draw(cx);
     view.read_with(cx, |view, cx| {
         assert_eq!(
