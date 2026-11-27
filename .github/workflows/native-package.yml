@@ -131,9 +131,9 @@ jobs:
             target: aarch64-apple-darwin
             xcode: '26.3'
           - label: macos-x64
-            # Use an Intel runner so Cargo build scripts run on the same host
-            # architecture as the x86_64 release target.
-            os: macos-15-intel
+            # Cross-compile on Apple Silicon with the universal Xcode macOS SDK;
+            # GitHub's hosted Intel runner is much slower for ThinLTO release builds.
+            os: macos-15
             target: x86_64-apple-darwin
             xcode: '26.3'
           - label: linux-x64
