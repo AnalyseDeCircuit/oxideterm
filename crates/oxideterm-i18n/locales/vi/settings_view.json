@@ -24,6 +24,7 @@
       "invalid_response": "Phản hồi của nhà cung cấp không hợp lệ",
       "no_targets": "Không có đích khả dụng",
       "source_in_use": "Trước khi xóa nguồn, hãy đóng các phiên của nguồn trong tất cả cửa sổ và ngắt kết nối các nút nhàn rỗi trong mục Phiên đang hoạt động.",
+      "cleanup_pending": "Đã lưu nguồn. Hãy lưu lại để thử xóa thông tin xác thực cũ.",
       "removal_pending": "Chưa xóa xong nguồn. Chọn Xóa để thử lại."
     },
     "known_hosts": {

@@ -24,6 +24,7 @@
       "invalid_response": "Risposta del provider non valida",
       "no_targets": "Nessuna destinazione disponibile",
       "source_in_use": "Prima di eliminare l’origine, chiudi le sue sessioni in tutte le finestre e disconnetti i nodi inattivi da Sessioni attive.",
+      "cleanup_pending": "Sorgente salvata. Salva di nuovo per riprovare a rimuovere le vecchie credenziali.",
       "removal_pending": "L’eliminazione dell’origine è incompleta. Seleziona Elimina per riprovare."
     },
     "known_hosts": {

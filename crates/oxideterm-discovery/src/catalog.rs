@@ -18,6 +18,12 @@ const ENUMERATION_TIMEOUT: Duration = Duration::from_secs(120);
 mod tests;
 type Provider = Arc<dyn DiscoveryProvider>;
 
+pub enum ProviderAvailability {
+    Active(Arc<dyn DiscoveryProvider>),
+    AwaitingActivation,
+    Unavailable,
+}
+
 /// Every consumer of a discovered instance keeps a clone until it releases its channel.
 #[derive(Clone, Debug)]
 pub struct DiscoveryLease {
@@ -337,16 +343,17 @@ impl DiscoveryService {
         let slot = slots
             .get_mut(id)
             .ok_or_else(|| anyhow::anyhow!("Unknown source"))?;
-        let record = settings
-            .settings_mut()
-            .discovery_sources
+        let mut sources = settings.settings().discovery_sources.clone();
+        let record = sources
             .iter_mut()
             .find(|source| source.id == id)
             .ok_or_else(|| anyhow::anyhow!("Unknown source"))?;
-        let persist = !record.removal_pending || record.enabled;
-        if persist {
+        if !record.removal_pending || record.enabled {
             record.enabled = false;
             record.removal_pending = true;
+            // Keep acquisition serialized with the durable transition. A failed write must
+            // leave active grants, workers and the caller's settings intact.
+            settings.replace_discovery_sources(sources)?;
         }
         slot.pending.take();
         slot.directory_targets.clear();
@@ -359,9 +366,6 @@ impl DiscoveryService {
         let drained = slot.drained.clone();
         drop(slots);
         self.changed();
-        if persist {
-            settings.replace_discovery_sources(settings.settings().discovery_sources.clone())?;
-        }
         Ok(Some(drained))
     }
 
@@ -431,7 +435,7 @@ impl DiscoveryService {
     pub fn configure_saved(
         self: &Arc<Self>,
         settings: &oxideterm_settings::SettingsStore,
-        mut resolve: impl FnMut(&DiscoverySource) -> Option<Provider>,
+        mut resolve: impl FnMut(&DiscoverySource) -> ProviderAvailability,
     ) {
         self.set_global_proxy(&settings.settings().network.upstream_proxy);
         let sources = settings
@@ -440,7 +444,7 @@ impl DiscoveryService {
             .iter()
             .map(|source| {
                 if source.removal_pending {
-                    return (source.clone(), None);
+                    return (source.clone(), ProviderAvailability::Unavailable);
                 }
                 (source.clone(), resolve(source))
             })
@@ -448,7 +452,7 @@ impl DiscoveryService {
         self.configure(sources);
     }
 
-    fn configure(self: &Arc<Self>, sources: Vec<(DiscoverySource, Option<Provider>)>) {
+    fn configure(self: &Arc<Self>, sources: Vec<(DiscoverySource, ProviderAvailability)>) {
         let ids: HashSet<_> = sources.iter().map(|(s, _)| s.id.clone()).collect();
         let mut slots = self.sources.lock().unwrap();
         let mut changed = false;
@@ -457,7 +461,13 @@ impl DiscoveryService {
             changed |= !keep;
             keep
         });
-        for (mut source, mut provider) in sources {
+        for (mut source, availability) in sources {
+            // A window without a running process may still confirm the declaration is approved.
+            let approved = !matches!(availability, ProviderAvailability::Unavailable);
+            let mut provider = match availability {
+                ProviderAvailability::Active(provider) => Some(provider),
+                _ => None,
+            };
             if source.removal_pending {
                 source.enabled = false;
             }
@@ -468,7 +478,7 @@ impl DiscoveryService {
                 if slot.source.provider_id == source.provider_id
                     && slot.source.plugin_id == source.plugin_id
                     && slot.provider.as_ref().is_some_and(|p| p.is_live())
-                    && provider.is_some()
+                    && approved
                 {
                     provider = slot.provider.clone();
                 }

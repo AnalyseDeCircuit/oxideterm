@@ -24,6 +24,7 @@
       "invalid_response": "提供者傳回的資料無效",
       "no_targets": "沒有可用的目標",
       "source_in_use": "請關閉各視窗中此來源的工作階段，並在使用中的工作階段中斷開閒置節點，再刪除來源。",
+      "cleanup_pending": "來源已儲存。再次儲存可重試清除舊憑證。",
       "removal_pending": "來源尚未刪除完成，可再次點選「刪除」。"
     },
     "known_hosts": {

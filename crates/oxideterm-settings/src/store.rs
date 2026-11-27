@@ -18,7 +18,7 @@ use crate::{
 };
 
 mod discovery_secrets;
-pub use discovery_secrets::DiscoverySecretBinding;
+pub use discovery_secrets::{DiscoverySaveOutcome, DiscoverySecretBinding};
 
 pub const SETTINGS_FILENAME: &str = "settings.json";
 const MAX_SETTINGS_FILE_BYTES: u64 = 2 * 1024 * 1024;

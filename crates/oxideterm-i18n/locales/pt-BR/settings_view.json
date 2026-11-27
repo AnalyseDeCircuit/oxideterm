@@ -24,6 +24,7 @@
       "invalid_response": "Resposta inválida do provedor",
       "no_targets": "Nenhum destino disponível",
       "source_in_use": "Antes de excluir esta fonte, feche suas sessões em todas as janelas e desconecte os nós ociosos em Sessões ativas.",
+      "cleanup_pending": "Fonte salva. Salve novamente para tentar remover as credenciais antigas.",
       "removal_pending": "A exclusão da fonte está incompleta. Selecione Excluir para tentar novamente."
     },
     "known_hosts": {

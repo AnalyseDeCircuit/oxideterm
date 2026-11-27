@@ -2,7 +2,7 @@ mod open;
 pub(super) use open::{DiscoveryOpenKey, PendingDiscoveryOpen};
 
 use super::*;
-use oxideterm_discovery::{DiscoveryFailure, DiscoveryProvider, DiscoverySource};
+use oxideterm_discovery::{DiscoveryFailure, DiscoverySource, ProviderAvailability};
 use oxideterm_gpui_settings_view::connections_page::DiscoveryProviderChoice;
 
 fn discovery_secret_account(
@@ -125,10 +125,17 @@ impl WorkspaceApp {
             providers.push(DiscoveryProviderChoice::new(plugin_id.into(), title, def));
         }
         self.discovery.configure_saved(&saved, |s| {
-            s.plugin_id
+            match s
+                .plugin_id
                 .as_ref()
-                .and_then(|id| plugin.discovery_process(id, &s.provider_id))
-                .map(|p| Arc::new(p) as Arc<dyn DiscoveryProvider>)
+                .filter(|_| providers.iter().any(|choice| choice.matches(s)))
+            {
+                Some(id) => plugin
+                    .discovery_process(id, &s.provider_id)
+                    .map(|p| ProviderAvailability::Active(Arc::new(p)))
+                    .unwrap_or(ProviderAvailability::AwaitingActivation),
+                None => ProviderAvailability::Unavailable,
+            }
         });
         self.apply_discovery_settings(&saved, cx);
         self.settings_workspace.update(cx, |settings, cx| {
@@ -312,7 +319,7 @@ impl WorkspaceApp {
                 .clone()
                 .ok_or_else(|| anyhow::anyhow!("Missing provider"))?;
             let store = self.ai.state.read(cx).key_store().clone();
-            settings.save_discovery_source(
+            let outcome = settings.save_discovery_source(
                 source,
                 previous_source.is_none(),
                 secrets,
@@ -322,6 +329,14 @@ impl WorkspaceApp {
                 |key| store.delete_provider_key(&discovery_secret_account(&plugin, key)?),
             )?;
             self.apply_discovery_settings(&settings, cx);
+            if outcome == oxideterm_settings::DiscoverySaveOutcome::CleanupPending {
+                self.push_command_palette_toast(
+                    self.i18n.t("settings_view.discovery.title"),
+                    Some(self.i18n.t("settings_view.discovery.cleanup_pending")),
+                    TerminalNoticeVariant::Warning,
+                    cx,
+                );
+            }
             Ok(())
         })();
         if result.is_err() {
@@ -358,7 +373,7 @@ impl WorkspaceApp {
             Err(_) => {
                 self.push_command_palette_toast(
                     self.i18n.t("settings_view.discovery.title"),
-                    Some(self.i18n.t("settings_view.discovery.removal_pending")),
+                    Some(self.i18n.t("settings_view.discovery.unavailable")),
                     TerminalNoticeVariant::Error,
                     cx,
                 );
@@ -386,7 +401,7 @@ impl WorkspaceApp {
                 && let Some(plugin) = &source.plugin_id
             {
                 let store = self.ai.state.read(cx).key_store().clone();
-                for key in source.secret_bindings().into_values() {
+                for key in source.deletion_bindings() {
                     let account = discovery_secret_account(plugin, &key)?;
                     store.delete_provider_key(&account)?;
                 }

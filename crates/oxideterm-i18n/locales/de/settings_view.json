@@ -24,6 +24,7 @@
       "invalid_response": "Ungültige Anbieterantwort",
       "no_targets": "Keine Ziele verfügbar",
       "source_in_use": "Schließe die Sitzungen dieser Quelle in allen Fenstern und trenne ihre inaktiven Knoten unter „Aktive Sitzungen“, bevor du die Quelle löschst.",
+      "cleanup_pending": "Quelle gespeichert. Speichere erneut, um alte Zugangsdaten zu entfernen.",
       "removal_pending": "Die Quelle wurde noch nicht vollständig gelöscht. Wähle „Löschen“, um es erneut zu versuchen."
     },
     "known_hosts": {

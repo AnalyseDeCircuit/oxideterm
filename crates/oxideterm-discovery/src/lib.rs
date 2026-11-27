@@ -6,6 +6,7 @@ pub use origin::DiscoveryOrigin;
 
 pub use catalog::{
     CatalogEntry, CatalogSnapshot, DiscoveryLease, DiscoveryPendingOpen, DiscoveryService,
+    ProviderAvailability,
 };
 pub use oxideterm_plugin_protocol::discovery::{
     DiscoveryGroupSegment, DiscoveryPage, DiscoveryTarget,

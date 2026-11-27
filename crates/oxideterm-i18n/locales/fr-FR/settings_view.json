@@ -24,6 +24,7 @@
       "invalid_response": "Réponse du fournisseur non valide",
       "no_targets": "Aucune cible disponible",
       "source_in_use": "Fermez les sessions de cette source dans toutes les fenêtres et déconnectez ses nœuds inactifs depuis les sessions actives avant de la supprimer.",
+      "cleanup_pending": "Source enregistrée. Enregistrez à nouveau pour réessayer de supprimer les anciens identifiants.",
       "removal_pending": "La suppression de la source est incomplète. Sélectionnez Supprimer pour réessayer."
     },
     "known_hosts": {

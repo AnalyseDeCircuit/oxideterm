@@ -57,10 +57,11 @@ pub fn secret_scope(config: &Value, fields: &[String]) -> Value {
 
 pub fn secret_key(source: &str, field: &str, binding: &Value) -> Option<String> {
     let revision = uuid::Uuid::parse_str(binding.get("discoverySecret")?.as_str()?).ok()?;
-    Some(format!(
-        "discovery:{}:{source}:{field}:{revision}",
-        source.len()
-    ))
+    Some(secret_revision_key(source, field, revision))
+}
+
+pub fn secret_revision_key(source: &str, field: &str, revision: uuid::Uuid) -> String {
+    format!("discovery:{}:{source}:{field}:{revision}", source.len())
 }
 
 impl NativePluginDiscoveryProviderDef {

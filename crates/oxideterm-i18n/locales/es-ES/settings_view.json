@@ -24,6 +24,7 @@
       "invalid_response": "Respuesta del proveedor no válida",
       "no_targets": "No hay destinos disponibles",
       "source_in_use": "Cierra las sesiones de esta fuente en todas las ventanas y desconecta sus nodos inactivos desde Sesiones activas antes de eliminarla.",
+      "cleanup_pending": "Fuente guardada. Vuelve a guardar para intentar eliminar las credenciales anteriores.",
       "removal_pending": "La eliminación de la fuente está incompleta. Selecciona Eliminar para volver a intentarlo."
     },
     "known_hosts": {

@@ -391,10 +391,18 @@ pub const DISCOVERY_SSH_PASSPHRASE_FIELD: &str = "ssh-passphrase";
 
 impl DiscoverySshPreferences {
     pub fn passphrase_account(&self, source: &str) -> Option<String> {
+        Some(Self::revision_account(source, self.active_passphrase_revision()?))
+    }
+
+    pub(crate) fn revision_account(source: &str, revision: uuid::Uuid) -> String {
+        format!("discovery-ssh:{}:{source}:{revision}", source.len())
+    }
+
+    pub(crate) fn active_passphrase_revision(&self) -> Option<uuid::Uuid> {
         match self.auth {
             DiscoverySshAuth::DefaultKey | DiscoverySshAuth::KeyFile(_)
             | DiscoverySshAuth::ManagedKey(_) | DiscoverySshAuth::Certificate { .. } => {
-                Some(format!("discovery-ssh:{}:{source}:{}", source.len(), self.passphrase_revision?))
+                self.passphrase_revision
             }
             _ => None,
         }
@@ -415,6 +423,9 @@ pub struct DiscoverySource {
     pub enabled: bool,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub removal_pending: bool,
+    // Rebuild keychain accounts from this source's ID; never persist a raw account to delete.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub retired_secret_revisions: Vec<(String, uuid::Uuid)>,
     pub refresh_minutes: Option<std::num::NonZeroU32>,
     // Manual refresh can retain the user's interval without arming a timer.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -445,6 +456,7 @@ impl Default for DiscoverySource {
             name: String::new(),
             enabled: true,
             removal_pending: false,
+            retired_secret_revisions: Vec::new(),
             refresh_minutes: None,
             last_refresh_minutes: None,
             config: Value::Object(Map::new()),

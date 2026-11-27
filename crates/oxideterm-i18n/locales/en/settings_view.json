@@ -24,6 +24,7 @@
       "invalid_response": "Invalid provider response",
       "no_targets": "No targets available",
       "source_in_use": "Close this source’s sessions in all windows and disconnect its idle nodes from Active Sessions before deleting it.",
+      "cleanup_pending": "Source saved. Save again to retry removing old credentials.",
       "removal_pending": "Source deletion is incomplete. Select Delete to try again."
     },
     "known_hosts": {

@@ -1,4 +1,5 @@
 use super::*;
+use ProviderAvailability::{Active, AwaitingActivation, Unavailable};
 use oxideterm_connections::ConnectionStore;
 use tokio::sync::{mpsc, oneshot};
 
@@ -131,7 +132,7 @@ fn discovery_refresh_retires_directory_reuse_when_a_target_revision_changes() {
     let service = DiscoveryService::shared(&dir.path().join("library"), &runtime);
     runtime.block_on(async {
         let mut endpoint = Endpoint::new();
-        service.configure(vec![(source(), Some(endpoint.provider.clone()))]);
+        service.configure(vec![(source(), Active(endpoint.provider.clone()))]);
         let mut changes = service.subscribe();
         service.request_directory("inventory", true);
         let first = endpoint.next_page().await;
@@ -190,7 +191,7 @@ fn discovery_online_reuse_expires_with_route_or_issuer_but_cannot_authorize_a_ne
     let mut endpoint = Endpoint::new();
     let issuer = CancellationToken::new();
     let origin = runtime.block_on(async {
-        service.configure(vec![(source(), Some(endpoint.provider.clone()))]);
+        service.configure(vec![(source(), Active(endpoint.provider.clone()))]);
         let mut changes = service.subscribe();
         service.request_directory("inventory", true);
         let call = endpoint.next_page().await;
@@ -235,7 +236,7 @@ fn windows_share_a_refresh_and_leave_the_saved_library_untouched() {
         let src = source();
         std::fs::write(&path, br#"{"connections":[{"id":"manual","name":"temporary","host":"manual.example","username":"ops","auth":{"type":"agent"},"created_at":"2026-01-01T00:00:00Z"}]}"#).unwrap();
         for window in [&first, &second] {
-            window.configure(vec![(src.clone(), Some(endpoint.provider.clone()))]);
+            window.configure(vec![(src.clone(), Active(endpoint.provider.clone()))]);
         }
         assert!(second.visible_entries().is_empty());
         let before = std::fs::read(&path).unwrap();
@@ -268,12 +269,17 @@ fn windows_share_a_refresh_and_leave_the_saved_library_untouched() {
         assert_eq!(std::fs::read(&path).unwrap(), before);
 
         let entries = second.visible_entries();
+        let epoch = first.epoch("inventory").unwrap();
+        let grant = first.authority("inventory", epoch).unwrap();
+        second.configure(vec![(src.clone(), AwaitingActivation)]);
+        assert_eq!(second.visible_entries(), entries);
+        assert!(!grant.is_cancelled());
         assert_eq!(
             entries.iter().map(|entry| entry.target_id.as_str()).collect::<Vec<_>>(),
             ["second", "temporary"]
         );
         let disabled = DiscoverySource { enabled: false, ..src };
-        first.configure(vec![(disabled, Some(endpoint.provider.clone()))]);
+        first.configure(vec![(disabled, Active(endpoint.provider.clone()))]);
         second.ensure_visible();
         assert!(second.visible_entries().is_empty());
         assert!(!second.snapshot("inventory").unwrap().refreshing);
@@ -289,11 +295,11 @@ fn changing_the_open_binding_preserves_an_inflight_directory_page() {
     runtime.block_on(async {
         let mut endpoint = Endpoint::new();
         let mut src = source();
-        service.configure(vec![(src.clone(), Some(endpoint.provider.clone()))]);
+        service.configure(vec![(src.clone(), Active(endpoint.provider.clone()))]);
         service.request_directory("inventory", true);
         let directory = endpoint.next_page().await;
         src.ssh_preferences.skip_connection_form = true;
-        service.configure(vec![(src, Some(endpoint.provider.clone()))]);
+        service.configure(vec![(src.clone(), Active(endpoint.provider.clone()))]);
         let mut changes = service.subscribe();
         directory
             .reply
@@ -301,6 +307,12 @@ fn changing_the_open_binding_preserves_an_inflight_directory_page() {
             .unwrap();
         changes.changed().await.unwrap();
         assert_eq!(service.visible_entries()[0].target_id, "directory-only");
+        let grant = service
+            .authority("inventory", service.epoch("inventory").unwrap())
+            .unwrap();
+        service.configure(vec![(src, Unavailable)]);
+        assert!(grant.is_cancelled());
+        assert!(service.visible_entries().is_empty());
     });
 }
 
@@ -315,7 +327,7 @@ fn advancing_cursors_expire_at_the_round_deadline_then_retry_from_the_last_compl
             refresh_minutes: std::num::NonZeroU32::new(1),
             ..source()
         };
-        service.configure(vec![(src, Some(endpoint.provider.clone()))]);
+        service.configure(vec![(src, Active(endpoint.provider.clone()))]);
         service.request_directory("inventory", false);
         let mut changes = service.subscribe();
         endpoint
@@ -381,9 +393,12 @@ fn only_a_complete_manual_refresh_restores_access_to_the_source() {
         let mut endpoint = Endpoint::new();
         let mut changes = service.subscribe();
         let mut source = source();
-        service.configure(vec![(source.clone(), Some(endpoint.provider.clone()))]);
+        service.configure(vec![(source.clone(), Active(endpoint.provider.clone()))]);
         let mut other_process = Endpoint::new();
-        second_window.configure(vec![(source.clone(), Some(other_process.provider.clone()))]);
+        second_window.configure(vec![(
+            source.clone(),
+            Active(other_process.provider.clone()),
+        )]);
         service.request_directory("inventory", true);
         let first_refresh = endpoint.next_page().await;
         let failure = DiscoveryFailure::Provider(oxideterm_plugin_protocol::PluginError::runtime(
@@ -421,7 +436,7 @@ fn only_a_complete_manual_refresh_restores_access_to_the_source() {
         let (receipt, pending_action) = service.source_action("inventory", "configureKey").unwrap();
         let (_, old_action) = endpoint.actions.recv().await.unwrap();
         source.config = serde_json::json!({"root/site": "updated.example"});
-        service.configure(vec![(source, Some(endpoint.provider.clone()))]);
+        service.configure(vec![(source, Active(endpoint.provider.clone()))]);
         old_action.send(Ok(())).unwrap();
         pending_action.await.unwrap().unwrap();
         assert!(receipt.is_cancelled());
@@ -454,7 +469,7 @@ fn revocation_removes_snapshot_and_late_pages_cannot_restore_open_authority() {
     let service = DiscoveryService::shared(&dir.path().join("connections.json"), &runtime);
     runtime.block_on(async {
         let mut endpoint = Endpoint::new();
-        service.configure(vec![(source(), Some(endpoint.provider.clone()))]);
+        service.configure(vec![(source(), Active(endpoint.provider.clone()))]);
         let mut changes = service.subscribe();
         service.request_directory("inventory", true);
         changes.changed().await.unwrap();
@@ -517,7 +532,7 @@ fn discovery_removal_drains_both_windows_and_resumes_partial_cleanup_after_resta
     let first = DiscoveryService::shared(&path, &runtime);
     let second = DiscoveryService::shared(&path, &runtime);
     let endpoint = Endpoint::new();
-    first.configure_saved(&settings, |_| Some(endpoint.provider.clone()));
+    first.configure_saved(&settings, |_| Active(endpoint.provider.clone()));
     let epoch = first.epoch("inventory").unwrap();
     let connect = |window: &DiscoveryService| {
         let mut metadata = crate::DiscoveryOrigin::new("inventory".into(), "build".into(), epoch);
@@ -545,11 +560,20 @@ fn discovery_removal_drains_both_windows_and_resumes_partial_cleanup_after_resta
     );
     drop(right);
 
+    let backup = settings_path.with_extension("backup");
+    std::fs::rename(&settings_path, &backup).unwrap();
+    std::fs::create_dir(&settings_path).unwrap();
+    assert!(first.begin_remove("inventory", &mut settings).is_err());
+    assert_eq!(second.epoch("inventory"), Some(epoch));
+    assert!(settings.settings().discovery_sources[0].enabled);
+    std::fs::remove_dir(&settings_path).unwrap();
+    std::fs::rename(&backup, &settings_path).unwrap();
+
     let in_progress = second.track_open("inventory", epoch).unwrap();
     inventory.config = serde_json::json!({"scope":"changed"});
     first.configure(vec![
-        (inventory, Some(endpoint.provider.clone())),
-        (other.clone(), None),
+        (inventory, Active(endpoint.provider.clone())),
+        (other.clone(), Unavailable),
     ]);
     let mut drained = first
         .begin_remove("inventory", &mut settings)
@@ -560,7 +584,6 @@ fn discovery_removal_drains_both_windows_and_resumes_partial_cleanup_after_resta
     assert!(!drained.has_changed().unwrap());
     drop(in_progress);
     runtime.block_on(async { assert!(drained.changed().await.is_err()) });
-    let backup = settings_path.with_extension("backup");
     std::fs::rename(&settings_path, &backup).unwrap();
     std::fs::create_dir(&settings_path).unwrap();
     assert!(first.finish_remove("inventory", &mut settings).is_err());
@@ -572,7 +595,7 @@ fn discovery_removal_drains_both_windows_and_resumes_partial_cleanup_after_resta
 
     let mut settings = SettingsStore::load_from_path(&settings_path).unwrap();
     let restarted = DiscoveryService::shared(&path, &runtime);
-    restarted.configure_saved(&settings, |_| Some(endpoint.provider.clone()));
+    restarted.configure_saved(&settings, |_| Active(endpoint.provider.clone()));
     let pending = restarted.source("inventory").unwrap();
     assert!(pending.removal_pending && !pending.enabled);
     assert!(restarted.epoch("inventory").is_none());

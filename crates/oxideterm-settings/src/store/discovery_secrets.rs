@@ -3,8 +3,9 @@
 
 use super::{DiscoverySource, SettingsStore};
 use anyhow::{Result, ensure};
-use oxideterm_plugin_manifest::discovery::secret_key;
+use oxideterm_plugin_manifest::discovery::secret_revision_key;
 use std::collections::BTreeMap;
+use uuid::Uuid;
 use zeroize::Zeroizing;
 
 #[derive(Clone, PartialEq, Eq)]
@@ -13,27 +14,54 @@ pub enum DiscoverySecretBinding {
     SshPassphrase(String),
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum DiscoverySaveOutcome {
+    Saved,
+    CleanupPending,
+}
+
 impl DiscoverySource {
-    pub fn secret_bindings(&self) -> BTreeMap<String, DiscoverySecretBinding> {
+    fn secret_revisions(&self) -> BTreeMap<String, Uuid> {
         let mut bindings: BTreeMap<_, _> = self
             .config
             .as_object()
             .into_iter()
             .flatten()
             .filter_map(|(field, binding)| {
+                if field == crate::DISCOVERY_SSH_PASSPHRASE_FIELD {
+                    return None;
+                }
                 Some((
                     field.clone(),
-                    DiscoverySecretBinding::Plugin(secret_key(&self.id, field, binding)?),
+                    Uuid::parse_str(binding.get("discoverySecret")?.as_str()?).ok()?,
                 ))
             })
             .collect();
-        if let Some(account) = self.ssh_preferences.passphrase_account(&self.id) {
-            bindings.insert(
-                crate::DISCOVERY_SSH_PASSPHRASE_FIELD.into(),
-                DiscoverySecretBinding::SshPassphrase(account),
-            );
+        if let Some(revision) = self.ssh_preferences.active_passphrase_revision() {
+            bindings.insert(crate::DISCOVERY_SSH_PASSPHRASE_FIELD.into(), revision);
         }
         bindings
+    }
+
+    pub fn deletion_bindings(&self) -> impl Iterator<Item = DiscoverySecretBinding> + '_ {
+        self.secret_revisions()
+            .into_iter()
+            .chain(self.retired_secret_revisions.iter().cloned())
+            .map(|(field, revision)| {
+                DiscoverySecretBinding::for_revision(&self.id, &field, revision)
+            })
+    }
+}
+
+impl DiscoverySecretBinding {
+    fn for_revision(source: &str, field: &str, revision: Uuid) -> Self {
+        if field == crate::DISCOVERY_SSH_PASSPHRASE_FIELD {
+            Self::SshPassphrase(crate::DiscoverySshPreferences::revision_account(
+                source, revision,
+            ))
+        } else {
+            Self::Plugin(secret_revision_key(source, field, revision))
+        }
     }
 }
 
@@ -46,7 +74,7 @@ impl SettingsStore {
         replacements: Vec<(String, Zeroizing<String>)>,
         mut write: impl FnMut(&DiscoverySecretBinding, Zeroizing<String>) -> Result<()>,
         mut remove: impl FnMut(&DiscoverySecretBinding) -> Result<()>,
-    ) -> Result<()> {
+    ) -> Result<DiscoverySaveOutcome> {
         let mut sources = self.settings().discovery_sources.clone();
         let old = sources.iter_mut().find(|s| s.id == source.id);
         ensure!(
@@ -55,9 +83,10 @@ impl SettingsStore {
         );
         let previous = old
             .as_ref()
-            .map(|s| s.secret_bindings())
+            .map(|s| s.secret_revisions())
             .unwrap_or_default();
-        let current = source.secret_bindings();
+        let id = source.id.clone();
+        let current = source.secret_revisions();
         let mut pending = Vec::new();
         for (field, secret) in replacements {
             let key = current
@@ -67,15 +96,26 @@ impl SettingsStore {
                 previous.get(&field) != Some(key),
                 "Secret replacement requires a fresh revision"
             );
-            pending.push((key.clone(), secret));
+            pending.push((field, *key, secret));
         }
         ensure!(
             current
                 .iter()
                 .all(|(field, key)| previous.get(field) == Some(key)
-                    || pending.iter().any(|(new, _)| new == key)),
+                    || pending.iter().any(|(f, new, _)| f == field && new == key)),
             "Saved credential changed"
         );
+        source.retired_secret_revisions = old
+            .as_ref()
+            .map(|s| s.retired_secret_revisions.clone())
+            .unwrap_or_default();
+        source.retired_secret_revisions.extend(previous);
+        source
+            .retired_secret_revisions
+            .retain(|(f, r)| current.get(f) != Some(r));
+        source.retired_secret_revisions.sort_unstable();
+        source.retired_secret_revisions.dedup();
+        let cleanup_needed = !source.retired_secret_revisions.is_empty();
         if let Some(old) = old {
             ensure!(
                 !old.removal_pending
@@ -92,25 +132,41 @@ impl SettingsStore {
         }
         let mut staged = Vec::new();
         let result = (|| {
-            for (key, secret) in pending {
-                staged.push(key);
+            for (field, revision, secret) in pending {
+                staged.push(DiscoverySecretBinding::for_revision(&id, &field, revision));
                 write(staged.last().unwrap(), secret)?;
             }
             self.replace_discovery_sources(sources)?;
             Ok(())
         })();
         if let Err(error) = result {
+            let mut rollback = Ok(());
             for key in staged {
-                remove(&key)?;
+                rollback = rollback.and(remove(&key));
             }
+            rollback?;
             return Err(error);
         }
-        for (field, key) in previous {
-            if current.get(&field) != Some(&key) {
-                remove(&key)?;
-            }
+        if !cleanup_needed {
+            return Ok(DiscoverySaveOutcome::Saved);
         }
-        Ok(())
+        // The new references and the cleanup list are now durable together. If either the
+        // keychain or the acknowledgement fails, the next save/delete can retry idempotently.
+        let mut sources = self.settings().discovery_sources.clone();
+        let retired = &mut sources
+            .iter_mut()
+            .find(|s| s.id == id)
+            .unwrap()
+            .retired_secret_revisions;
+        let before = retired.len();
+        retired.retain(|(field, revision)| {
+            remove(&DiscoverySecretBinding::for_revision(&id, field, *revision)).is_err()
+        });
+        let done = retired.is_empty();
+        if retired.len() == before || self.replace_discovery_sources(sources).is_err() || !done {
+            return Ok(DiscoverySaveOutcome::CleanupPending);
+        }
+        Ok(DiscoverySaveOutcome::Saved)
     }
 }
 
@@ -294,9 +350,34 @@ mod tests {
             ["fixture-original"]
         );
         settings.writes_blocked = false;
-        settings
-            .save_discovery_source(updated.clone(), false, input("fixture-new"), write, remove)
-            .unwrap();
+        assert_eq!(
+            settings
+                .save_discovery_source(
+                    updated.clone(),
+                    false,
+                    input("fixture-new"),
+                    write,
+                    |_| anyhow::bail!("keychain locked")
+                )
+                .unwrap(),
+            DiscoverySaveOutcome::CleanupPending
+        );
+        let mut settings = SettingsStore::load_from_path(&path).unwrap();
+        let saved = &settings.settings().discovery_sources[0];
+        assert_eq!(saved.config, updated.config);
+        assert_eq!(
+            saved.retired_secret_revisions,
+            [(
+                "root/key".into(),
+                Uuid::parse_str("aaaa1111-0000-4000-8000-000000000000").unwrap()
+            )]
+        );
+        assert_eq!(
+            settings
+                .save_discovery_source(updated.clone(), false, vec![], write, remove)
+                .unwrap(),
+            DiscoverySaveOutcome::Saved
+        );
         assert_eq!(
             keys.borrow()
                 .values()
