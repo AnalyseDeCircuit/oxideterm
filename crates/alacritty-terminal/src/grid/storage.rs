@@ -148,13 +148,14 @@ impl<T: GridCell> Storage<T> {
         self.inner.swap(a, b);
     }
 
-    pub fn compact_history<D>(&mut self, history: Line, screen: Line, template: &T)
+    pub fn compact_history<D>(&mut self, history: Line, screen: Line, template: &T,
+        pack: impl FnOnce(&mut Row<T>, Option<T::History>) -> Option<(Vec<T>, usize)>)
     where T: crate::term::cell::ResetDiscriminant<D>, D: PartialEq {
         let indices = [self.compute_index(history), self.compute_index(screen)];
         let [history, screen] = self.inner.get_disjoint_mut(indices)
             .expect("retained history and exposed screen rows are distinct");
         let reuse = screen.take_history();
-        if let Some((buffer, occ)) = history.compact_reusing(reuse) {
+        if let Some((buffer, occ)) = pack(history, reuse) {
             screen.recycle(buffer, occ, template);
         } else {
             screen.reset(template);

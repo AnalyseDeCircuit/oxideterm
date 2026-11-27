@@ -279,6 +279,11 @@ impl<T: GridCell + Default> Grid<T> {
         T: ResetDiscriminant<D>,
         D: PartialEq,
     {
+        self.prepare_scroll_up(region, positions);
+        self.scroll_up_region(region, positions);
+    }
+
+    fn prepare_scroll_up(&mut self, region: &Range<Line>, positions: usize) {
         self.history_revision = self.history_revision.wrapping_add(1);
         // Reflow may temporarily exceed the row limit. Reclaim excess rows when scrolling
         // moves content into history, counting every eviction for command anchors.
@@ -287,8 +292,6 @@ impl<T: GridCell + Default> Grid<T> {
             self.decrease_scroll_limit(excess);
             self.scrolled_out_lines = self.scrolled_out_lines.wrapping_add(excess);
         }
-
-        self.scroll_up_region(region, positions);
     }
 
     // Resize rotates rows without ending the temporary reflow allowance.
@@ -297,6 +300,14 @@ impl<T: GridCell + Default> Grid<T> {
         T: ResetDiscriminant<D>,
         D: PartialEq,
     {
+        self.scroll_up_packing(region, positions, |row, reuse, _| row.compact_reusing(reuse));
+    }
+
+    fn scroll_up_packing<D>(
+        &mut self, region: &Range<Line>, positions: usize,
+        mut pack: impl FnMut(&mut Row<T>, Option<T::History>, usize) -> Option<(Vec<T>, usize)>,
+    )
+    where T: ResetDiscriminant<D>, D: PartialEq {
         if positions != 0 && region.start != 0 {
             // A partial region cannot move its discarded top rows into scrollback.
             self.history_cleared = self.history_cleared.wrapping_add(1);
@@ -364,7 +375,8 @@ impl<T: GridCell + Default> Grid<T> {
             // directly to the exposed screen rows instead of reallocating full rows per scroll.
             let history_line = i - region.end.0;
             if region.start == 0 && history_line >= self.topmost_line() {
-                self.raw.compact_history(history_line, i, &self.cursor.template);
+                let offset = (history_line.0 + positions as i32) as usize;
+                self.raw.compact_history(history_line, i, &self.cursor.template, |row, reuse| pack(row, reuse, offset));
                 continue;
             }
             self.raw[i].reset(&self.cursor.template);
@@ -418,6 +430,33 @@ impl<T: GridCell + Default> Grid<T> {
         for line in range.map(Line::from) {
             self.raw[line].reset(&self.cursor.template);
         }
+    }
+}
+
+impl Grid<crate::term::cell::Cell> {
+    pub(crate) fn scroll_up_ascii<'a>(
+        &mut self, region: &Range<Line>, positions: usize, style: &crate::term::cell::Cell,
+        text_at: impl Fn(usize) -> Option<&'a str>,
+    ) {
+        self.prepare_scroll_up(region, positions);
+        self.scroll_up_packing(region, positions, |row, reuse, index| match text_at(index) {
+            Some(line) => Some(row.pack_ascii(line, style, reuse)),
+            None => row.compact_reusing(reuse),
+        });
+    }
+
+    pub(crate) fn scroll_up_utf8<'a>(
+        &mut self,
+        region: &Range<Line>,
+        positions: usize,
+        style: &crate::term::cell::Cell,
+        line_at: impl Fn(usize) -> Option<(&'a str, usize, usize)>,
+    ) {
+        self.prepare_scroll_up(region, positions);
+        self.scroll_up_packing(region, positions, |row, reuse, index| match line_at(index) {
+            Some((line, cols, wide_count)) => Some(row.pack_utf8(line, cols, wide_count, style, reuse)),
+            None => row.compact_reusing(reuse),
+        });
     }
 }
 

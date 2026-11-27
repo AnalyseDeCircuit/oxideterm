@@ -72,6 +72,48 @@ fn printable_ascii_prefix(bytes: &[u8]) -> usize {
         + words.remainder().iter().copied().take_while(|&byte| matches!(byte, b' '..=b'~')).count()
 }
 
+/// Counts leading bytes of a valid UTF-8 slice that contain no C0 (`0x00..=0x1f`),
+/// DEL (`0x7f`), or C1 (`[0xC2, 0x80..=0x9F]`) control sequences.
+#[inline]
+fn printable_utf8_prefix(bytes: &[u8]) -> usize {
+    const HIGH: u64 = 0x8080_8080_8080_8080;
+    const LOW_MASK: u64 = 0x7f7f_7f7f_7f7f_7f7f;
+    const BELOW_SPACE: u64 = 0x6060_6060_6060_6060;
+    const ONES: u64 = 0x0101_0101_0101_0101;
+    const DEL_MASK: u64 = 0x7f7f_7f7f_7f7f_7f7f;
+    const C2_MASK: u64 = 0xc2c2_c2c2_c2c2_c2c2;
+
+    let mut offset = 0;
+    while offset + 8 <= bytes.len() {
+        let word = u64::from_ne_bytes(bytes[offset..offset + 8].try_into().unwrap());
+        let has_c0 = (((word & LOW_MASK).wrapping_add(BELOW_SPACE) | word) & HIGH) != HIGH;
+        let x_del = word ^ DEL_MASK;
+        let has_del = (x_del.wrapping_sub(ONES) & !x_del & HIGH) != 0;
+        let x_c2 = word ^ C2_MASK;
+        let has_c2 = (x_c2.wrapping_sub(ONES) & !x_c2 & HIGH) != 0;
+        if has_c0 || has_del || has_c2 {
+            break;
+        }
+        offset += 8;
+    }
+
+    while offset < bytes.len() {
+        let byte = bytes[offset];
+        if byte < 0x20 || byte == 0x7f {
+            break;
+        }
+        if byte == 0xc2
+            && bytes
+                .get(offset + 1)
+                .is_some_and(|next| (0x80..=0x9f).contains(next))
+        {
+            break;
+        }
+        offset += 1;
+    }
+    offset
+}
+
 /// Parser for raw _VTE_ protocol which delegates actions to a [`Perform`]
 ///
 /// [`Perform`]: trait.Perform.html
@@ -700,6 +742,25 @@ impl<const OSC_RAW_BUF_SIZE: usize> Parser<OSC_RAW_BUF_SIZE> {
         }
     }
 
+    #[inline(always)]
+    fn enter_escape_from_ground(&mut self, bytes: &[u8], esc_pos: usize) -> usize {
+        self.reset_params();
+        if bytes.get(esc_pos + 1) == Some(&b'[') {
+            if bytes
+                .get(esc_pos + 2)
+                .is_some_and(|&next| matches!(next, b'0'..=b'9' | b';' | b':'))
+            {
+                self.state = State::CsiParam;
+            } else {
+                self.state = State::CsiEntry;
+            }
+            esc_pos + 2
+        } else {
+            self.state = State::Escape;
+            esc_pos + 1
+        }
+    }
+
     /// Advance the parser state from ground.
     ///
     /// The ground state is handled separately since it can only be left using
@@ -713,12 +774,10 @@ impl<const OSC_RAW_BUF_SIZE: usize> Parser<OSC_RAW_BUF_SIZE> {
 
         // If the next character is ESC, just process it and short-circuit.
         if plain_chars == 0 {
-            self.state = State::Escape;
-            self.reset_params();
-            return 1;
+            return self.enter_escape_from_ground(bytes, 0);
         }
 
-        // Short control-heavy streams can dispatch one ASCII byte without UTF-8 validation.
+        // Short control-heavy streams can dispatch 1-2 ASCII bytes without UTF-8 validation.
         if plain_chars == 1 && bytes[0].is_ascii() {
             let byte = bytes[0];
             if byte <= 0x1f {
@@ -727,42 +786,37 @@ impl<const OSC_RAW_BUF_SIZE: usize> Parser<OSC_RAW_BUF_SIZE> {
                 performer.print(byte as char);
             }
 
-            let mut processed = 1;
-            if processed < num_bytes {
-                self.state = State::Escape;
-                self.reset_params();
-                processed += 1;
+            if 1 < num_bytes {
+                return self.enter_escape_from_ground(bytes, 1);
             }
-            return processed;
+            return 1;
+        }
+        if plain_chars == 2 && bytes[0] == b'\r' && bytes[1] == b'\n' {
+            performer.execute(b'\r');
+            performer.execute(b'\n');
+            if 2 < num_bytes {
+                return self.enter_escape_from_ground(bytes, 2);
+            }
+            return 2;
         }
 
         match str::from_utf8(&bytes[..plain_chars]) {
             Ok(parsed) => {
-                let batched_bytes = if parsed.len() >= MIN_BATCH_LINES_BYTES {
-                    Self::dispatch_ascii_lines(performer, parsed)
-                } else {
-                    0
-                };
-                if batched_bytes < parsed.len() {
-                    Self::ground_dispatch(performer, &parsed[batched_bytes..]);
-                }
-                let mut processed = plain_chars;
+                Self::dispatch_ground_str(performer, parsed);
 
                 // If there's another character, it must be escape so process it directly.
-                if processed < num_bytes {
-                    self.state = State::Escape;
-                    self.reset_params();
-                    processed += 1;
+                if plain_chars < num_bytes {
+                    return self.enter_escape_from_ground(bytes, plain_chars);
                 }
 
-                processed
+                plain_chars
             },
             // Handle invalid and partial utf8.
             Err(err) => {
-                // Dispatch all the valid bytes.
+                // Dispatch all the valid bytes (preserving line batching when a chunk splits a UTF-8 char).
                 let valid_bytes = err.valid_up_to();
                 let parsed = unsafe { str::from_utf8_unchecked(&bytes[..valid_bytes]) };
-                Self::ground_dispatch(performer, parsed);
+                Self::dispatch_ground_str(performer, parsed);
 
                 match err.error_len() {
                     Some(len) => {
@@ -861,6 +915,23 @@ impl<const OSC_RAW_BUF_SIZE: usize> Parser<OSC_RAW_BUF_SIZE> {
         }
     }
 
+    #[inline]
+    fn dispatch_ground_str<P: Perform>(performer: &mut P, parsed: &str) {
+        let batched_bytes = if parsed.len() >= MIN_BATCH_LINES_BYTES {
+            let ascii = Self::dispatch_ascii_lines(performer, parsed);
+            if ascii > 0 {
+                ascii
+            } else {
+                Self::dispatch_utf8_lines(performer, parsed)
+            }
+        } else {
+            0
+        };
+        if batched_bytes < parsed.len() {
+            Self::ground_dispatch(performer, &parsed[batched_bytes..]);
+        }
+    }
+
     /// Handle ground dispatch of print/execute for all characters in a string.
     #[inline]
     fn ground_dispatch<P: Perform>(performer: &mut P, text: &str) {
@@ -891,35 +962,29 @@ impl<const OSC_RAW_BUF_SIZE: usize> Parser<OSC_RAW_BUF_SIZE> {
                     remaining = &remaining[ascii..];
                 },
                 _ => {
-                    Self::ground_dispatch_utf8(performer, remaining);
-                    return;
+                    let consumed = Self::ground_dispatch_utf8(performer, remaining);
+                    remaining = &remaining[consumed..];
                 },
             }
         }
     }
 
-    #[inline]
-    fn ground_dispatch_utf8<P: Perform>(performer: &mut P, text: &str) {
-        // Unicode-heavy output needs only one character walk.
-        let mut ascii_start = None;
+    fn ground_dispatch_utf8<P: Perform>(performer: &mut P, text: &str) -> usize {
+        // Resume the ASCII scanner after a control; the next log line often starts with ASCII.
         for (index, character) in text.char_indices() {
-            if matches!(character, ' '..='~') {
-                ascii_start.get_or_insert(index);
+            if !matches!(character, '\x00'..='\x1f' | '\x7f'..='\u{9f}') {
                 continue;
             }
-
-            if let Some(start) = ascii_start.take() {
-                Self::dispatch_printable_text(performer, &text[start..index]);
+            Self::dispatch_printable_text(performer, &text[..index]);
+            if character == '\x7f' {
+                performer.print(character);
+            } else {
+                performer.execute(character as u8);
             }
-            match character {
-                '\x00'..='\x1f' | '\u{80}'..='\u{9f}' => performer.execute(character as u8),
-                _ => performer.print(character),
-            }
+            return index + character.len_utf8();
         }
-
-        if let Some(start) = ascii_start {
-            Self::dispatch_printable_text(performer, &text[start..]);
-        }
+        Self::dispatch_printable_text(performer, text);
+        text.len()
     }
 
     #[inline]
@@ -964,6 +1029,35 @@ impl<const OSC_RAW_BUF_SIZE: usize> Parser<OSC_RAW_BUF_SIZE> {
         }
 
         performer.print_text_lines(&text[..line_start], line_breaks, max_line_length);
+        line_start
+    }
+
+    #[inline]
+    fn dispatch_utf8_lines<P: Perform>(performer: &mut P, text: &str) -> usize {
+        let bytes = text.as_bytes();
+        let Some(last_newline) = memchr::memrchr(b'\n', bytes) else {
+            return 0;
+        };
+        let complete_prefix = &bytes[..=last_newline];
+        let mut line_breaks = 0;
+        let mut line_start = 0;
+        let mut index = 0;
+
+        while index < complete_prefix.len() {
+            index += printable_utf8_prefix(&complete_prefix[index..]);
+            if !complete_prefix[index..].starts_with(b"\r\n") {
+                break;
+            }
+            line_breaks += 1;
+            index += 2;
+            line_start = index;
+        }
+
+        if line_breaks < 2 {
+            return 0;
+        }
+
+        performer.print_utf8_lines(&text[..line_start], line_breaks);
         line_start
     }
 }
@@ -1012,6 +1106,19 @@ pub trait Perform {
     ///
     /// `line_count` and `max_line_length` describe the parser-validated `text`.
     fn print_text_lines(&mut self, text: &str, _line_count: usize, _max_line_length: usize) {
+        for line in text.split_inclusive("\r\n") {
+            if let Some(printable) = line.strip_suffix("\r\n") {
+                self.print_text(printable);
+                self.execute(b'\r');
+                self.execute(b'\n');
+            } else {
+                self.print_text(line);
+            }
+        }
+    }
+
+    /// Draw complete printable UTF-8 lines terminated by carriage return and line feed.
+    fn print_utf8_lines(&mut self, text: &str, _line_count: usize) {
         for line in text.split_inclusive("\r\n") {
             if let Some(printable) = line.strip_suffix("\r\n") {
                 self.print_text(printable);
@@ -1209,8 +1316,7 @@ mod tests {
                 TextDispatch::Execute(b'\r'),
                 TextDispatch::Execute(b'\n'),
                 TextDispatch::Print("beta".to_owned()),
-                TextDispatch::PrintCharacter('中'),
-                TextDispatch::PrintCharacter('文'),
+                TextDispatch::Print("中文".to_owned()),
                 TextDispatch::Execute(0x85),
                 TextDispatch::Print("gamma".to_owned()),
             ]

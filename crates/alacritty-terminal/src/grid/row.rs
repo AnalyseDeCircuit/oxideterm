@@ -8,6 +8,7 @@ use super::history::CellIter;
 use crate::grid::{CellView, GridCell, HistoryCursor, HistoryStorage};
 use crate::index::Column;
 use crate::term::cell::ResetDiscriminant;
+use crate::term::cell::{Cell, PackedHistory};
 
 #[derive(Debug)]
 pub struct Row<T: GridCell> {
@@ -25,6 +26,100 @@ pub struct Row<T: GridCell> {
 fn next_row_identity() -> usize {
     static NEXT: AtomicUsize = AtomicUsize::new(1);
     NEXT.fetch_add(1, Ordering::Relaxed)
+}
+
+impl Row<Cell> {
+    /// The row was exposed blank during this batch. Its dense allocation can go
+    /// straight back to the screen without clearing the text stored in history.
+    pub(super) fn pack_ascii(
+        &mut self, line: &str, style: &Cell, reuse: Option<PackedHistory>,
+    ) -> (Vec<Cell>, usize) {
+        debug_assert_eq!(self.occ, 0);
+        let blank = Cell::from(style.bg);
+        let (prefix, tail) = if line.len() == self.len {
+            let last = char::from(line.as_bytes()[line.len() - 1]);
+            (&line[..line.trim_end_matches(last).len() + 1], None)
+        } else {
+            let same_style = style.fg == blank.fg && style.flags == blank.flags && style.extra == blank.extra;
+            (if same_style { line.trim_end_matches(' ') } else { line }, Some(&blank))
+        };
+        self.invalidate_content();
+        self.occ = line.len();
+        let buffer = std::mem::take(&mut self.inner);
+        if prefix.len() + usize::from(tail.is_some()) <= 4 {
+            // A few literal cells cost less than a text row and its run table.
+            self.inner = prefix.bytes().map(|c| Cell { c: char::from(c), ..style.clone() })
+                .chain(tail.cloned()).collect();
+            self.packed = None;
+        } else {
+            self.packed = Some(PackedHistory::from_ascii(prefix, style, tail, reuse));
+        }
+        (buffer, 0)
+    }
+
+    /// Direct history packing for a single-row UTF-8 line (validated: no NUL, no
+    /// combining marks, total display width `cols <= self.len`).
+    pub(super) fn pack_utf8(
+        &mut self,
+        line: &str,
+        cols: usize,
+        wide_count: usize,
+        style: &Cell,
+        reuse: Option<PackedHistory>,
+    ) -> (Vec<Cell>, usize) {
+        if line.is_ascii() {
+            return self.pack_ascii(line, style, reuse);
+        }
+        debug_assert_eq!(self.occ, 0);
+        debug_assert!(cols <= self.len);
+        let blank = Cell::from(style.bg);
+        let (prefix, prefix_cols, tail) = if cols == self.len {
+            (line, cols, None)
+        } else {
+            let same_style =
+                style.fg == blank.fg && style.flags == blank.flags && style.extra == blank.extra;
+            let prefix = if same_style { line.trim_end_matches(' ') } else { line };
+            let prefix_cols = cols - (line.len() - prefix.len());
+            (prefix, prefix_cols, Some(&blank))
+        };
+        self.invalidate_content();
+        self.occ = cols;
+        let buffer = std::mem::take(&mut self.inner);
+        if prefix_cols + usize::from(tail.is_some()) <= 4 {
+            let mut cells = Vec::with_capacity(prefix_cols + usize::from(tail.is_some()));
+            for c in prefix.chars() {
+                if crate::term::char_width_fast(c) == Some(2) {
+                    cells.push(Cell {
+                        c,
+                        flags: style.flags | crate::term::cell::Flags::WIDE_CHAR,
+                        ..style.clone()
+                    });
+                    cells.push(Cell {
+                        c: ' ',
+                        flags: style.flags | crate::term::cell::Flags::WIDE_CHAR_SPACER,
+                        ..style.clone()
+                    });
+                } else {
+                    cells.push(Cell { c, ..style.clone() });
+                }
+            }
+            if let Some(tail) = tail {
+                cells.push(tail.clone());
+            }
+            self.inner = cells;
+            self.packed = None;
+        } else {
+            self.packed = Some(PackedHistory::from_utf8(
+                prefix,
+                prefix_cols,
+                wide_count,
+                style,
+                tail,
+                reuse,
+            ));
+        }
+        (buffer, 0)
+    }
 }
 
 impl<T: GridCell> Default for Row<T> {
@@ -211,6 +306,17 @@ impl<T: GridCell> Row<T> {
         self.make_dense();
         self.occ = max(self.occ, range.end);
         &mut self.inner[range]
+    }
+
+    /// A UTF-8 span's cell count is known only after writing its printable prefix.
+    pub(crate) fn write_prefix(&mut self, start: usize, write: impl FnOnce(&mut [T]) -> usize) -> usize {
+        self.make_dense();
+        let count = write(&mut self.inner[start..]);
+        if count != 0 {
+            self.invalidate_content();
+            self.occ = max(self.occ, start + count);
+        }
+        count
     }
 
     pub fn last_mut(&mut self) -> Option<&mut T> {

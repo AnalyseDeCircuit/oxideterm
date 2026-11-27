@@ -270,7 +270,13 @@ impl GridCell for Cell {
 
     #[inline]
     fn reset(&mut self, template: &Self) {
-        *self = Cell { bg: template.bg, ..Cell::default() };
+        self.c = ' ';
+        self.fg = Color::Named(NamedColor::Foreground);
+        self.bg = template.bg;
+        self.flags = Flags::empty();
+        if self.extra.is_some() {
+            self.extra = None;
+        }
     }
 }
 

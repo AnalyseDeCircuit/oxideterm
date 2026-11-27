@@ -51,6 +51,125 @@ const KEYBOARD_MODE_STACK_MAX_DEPTH: usize = TITLE_STACK_MAX_DEPTH;
 /// Default tab interval, corresponding to terminfo `it` value.
 const INITIAL_TABSTOPS: usize = 8;
 
+#[inline(always)]
+pub(crate) fn char_width_fast(c: char) -> Option<usize> {
+    let code = c as u32;
+    if (0x20..=0x7e).contains(&code)
+        || (0x00c0..=0x00ff).contains(&code)
+        || (0x0391..=0x03a1).contains(&code)
+        || (0x03a3..=0x03ce).contains(&code)
+        || (0x0400..=0x045f).contains(&code)
+    {
+        return Some(1);
+    }
+    // Common East Asian fullwidth ranges verified exhaustively against unicode_width.
+    if (0x4e00..=0x9fff).contains(&code)
+        || (0xac00..=0xd7a3).contains(&code)
+        || (0x3041..=0x3096).contains(&code)
+        || (0x30a0..=0x30ff).contains(&code)
+        || (0xff01..=0xff60).contains(&code)
+    {
+        return Some(2);
+    }
+    c.width()
+}
+
+#[inline]
+fn measure_utf8_single_row(line: &str, columns: usize) -> Option<(usize, usize)> {
+    let bytes = line.as_bytes();
+    let mut i = 0;
+    let mut cols = 0;
+    let mut wide_count = 0;
+    while i < bytes.len() {
+        let byte = bytes[i];
+        if byte < 0x80 {
+            if byte == 0 {
+                return None;
+            }
+            cols += 1;
+            i += 1;
+        } else if byte == 0xc3 {
+            // U+00C0..=U+00FF: Latin-1 Supplement letters, all width 1.
+            cols += 1;
+            i += 2;
+        } else if (0xe5..=0xe9).contains(&byte) || (0xeb..=0xec).contains(&byte) {
+            // U+5000..=U+9FFF (CJK Unified) and U+B000..=U+CFFF (Hangul): all 3-byte width 2.
+            cols += 2;
+            wide_count += 1;
+            i += 3;
+        } else {
+            let c = line[i..].chars().next().unwrap();
+            if c == '\u{10eeee}' {
+                return None;
+            }
+            let width = match char_width_fast(c) {
+                Some(w @ (1 | 2)) => w,
+                _ => return None,
+            };
+            cols += width;
+            wide_count += usize::from(width == 2);
+            i += c.len_utf8();
+        }
+        if cols > columns {
+            return None;
+        }
+    }
+    Some((cols, wide_count))
+}
+
+#[inline]
+fn write_utf8_cells_fresh(cells: &mut [Cell], line: &str, template: &Cell) {
+    let mut col = 0;
+    if template.extra.is_none() {
+        let fg = template.fg;
+        let bg = template.bg;
+        let flags = template.flags;
+        let wide_flags = flags | Flags::WIDE_CHAR;
+        let spacer_flags = flags | Flags::WIDE_CHAR_SPACER;
+        for c in line.chars() {
+            let width = char_width_fast(c).unwrap_or(1);
+            let cell = &mut cells[col];
+            cell.c = c;
+            cell.fg = fg;
+            cell.bg = bg;
+            if width == 2 {
+                cell.flags = wide_flags;
+                if cell.extra.is_some() {
+                    cell.extra = None;
+                }
+                let spacer = &mut cells[col + 1];
+                spacer.c = ' ';
+                spacer.fg = fg;
+                spacer.bg = bg;
+                spacer.flags = spacer_flags;
+                if spacer.extra.is_some() {
+                    spacer.extra = None;
+                }
+            } else {
+                cell.flags = flags;
+                if cell.extra.is_some() {
+                    cell.extra = None;
+                }
+            }
+            col += width;
+        }
+    } else {
+        for c in line.chars() {
+            let width = char_width_fast(c).unwrap_or(1);
+            cells[col] = Cell { c, ..template.clone() };
+            if width == 2 {
+                cells[col].flags.insert(Flags::WIDE_CHAR);
+                cells[col + 1] = Cell {
+                    c: ' ',
+                    flags: template.flags | Flags::WIDE_CHAR_SPACER,
+                    ..template.clone()
+                };
+            }
+            col += width;
+        }
+    }
+}
+
 #[inline]
 fn next_ascii_line<'a>(text: &'a str, offset: &mut usize) -> &'a str {
     // The parser validates the CRLF framing before forwarding a line batch.
@@ -959,7 +1078,11 @@ impl<T> Term<T> {
         self.selection = self.selection.take().and_then(|s| s.rotate(self, &region, lines as i32));
 
         self.grid.scroll_up(&region, lines);
-        self.record_graphics_change(graphics::GraphicsGridChange::Scroll { alternate: self.mode.contains(TermMode::ALT_SCREEN), start: origin.0, end: self.scroll_region.end.0, delta: -(lines as i32), topmost: self.grid.topmost_line().0, history: origin.0 == 0 && self.scroll_region.end.0 == self.screen_lines() as i32 && !self.mode.contains(TermMode::ALT_SCREEN) });
+        self.finish_scroll_up(region, lines);
+    }
+
+    fn finish_scroll_up(&mut self, region: Range<Line>, lines: usize) {
+        self.record_graphics_change(graphics::GraphicsGridChange::Scroll { alternate: self.mode.contains(TermMode::ALT_SCREEN), start: region.start.0, end: region.end.0, delta: -(lines as i32), topmost: self.grid.topmost_line().0, history: region.start.0 == 0 && region.end.0 == self.screen_lines() as i32 && !self.mode.contains(TermMode::ALT_SCREEN) });
 
         // Scroll vi mode cursor.
         let viewport_top = Line(-(self.grid.display_offset() as i32));
@@ -1286,6 +1409,8 @@ impl<T: EventListener> Term<T> {
 
         if width == 1 {
             self.write_at_cursor(c);
+        } else if self.grid.cursor.point.column + 1 < columns && self.try_write_wide_pair(c) {
+            self.grid.cursor.point.column += 1;
         } else {
             if self.grid.cursor.point.column + 1 >= columns {
                 if self.mode.contains(TermMode::LINE_WRAP) {
@@ -1317,6 +1442,123 @@ impl<T: EventListener> Term<T> {
             self.grid.cursor.point.column += 1;
         } else {
             self.grid.cursor.input_needs_wrap = true;
+        }
+    }
+
+    #[inline]
+    fn try_write_wide_pair(&mut self, c: char) -> bool {
+        if self.mode.contains(TermMode::INSERT)
+            || self.graphics_events.as_ref().is_some_and(|events| {
+                events.has_sixel(self.mode.contains(TermMode::ALT_SCREEN))
+            })
+        {
+            return false;
+        }
+
+        let point = self.grid.cursor.point;
+        let template = self.grid.cursor.template.clone();
+        let pair = self.grid[point.line].cells_mut(point.column.0..point.column.0 + 2);
+        // Overwriting half a wide glyph can also require repairing a neighboring row.
+        let wide = Flags::WIDE_CHAR | Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER;
+        if (pair[0].flags | pair[1].flags).intersects(wide) {
+            return false;
+        }
+        pair[0] = Cell { c, flags: template.flags | Flags::WIDE_CHAR, ..template.clone() };
+        pair[1] = Cell { c: ' ', flags: template.flags | Flags::WIDE_CHAR_SPACER, ..template };
+        true
+    }
+
+    #[inline(never)]
+    fn input_mixed_text(&mut self, text: &str) {
+        let mut chars = text.chars();
+        let wide = Flags::WIDE_CHAR | Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER;
+        if !self.mode.contains(TermMode::LINE_WRAP)
+            || self.mode.contains(TermMode::INSERT)
+            || self.grid.cursor.charsets[self.active_charset] != StandardCharset::Ascii
+            || self.grid.cursor.template.flags.intersects(wide)
+            || self.damage.graphics.is_some()
+            || self.graphics_events.as_ref().is_some_and(|events| {
+                events.has_sixel(self.mode.contains(TermMode::ALT_SCREEN))
+            })
+        {
+            chars.for_each(|c| self.input(c));
+            return;
+        }
+
+        let columns = self.columns();
+        let template = self.grid.cursor.template.clone();
+        while !chars.as_str().is_empty() {
+            let point = self.grid.cursor.point;
+            let mut slow = None;
+            if self.grid.cursor.input_needs_wrap {
+                // A combining mark still belongs to the last cell of the current line.
+                slow = chars.next();
+            } else {
+                let written = self.grid[point.line].write_prefix(point.column.0, |cells| {
+                    let mut used = 0;
+                    let no_extra = template.extra.is_none();
+                    let wide_flags = template.flags | Flags::WIDE_CHAR;
+                    let spacer_flags = template.flags | Flags::WIDE_CHAR_SPACER;
+                    for c in chars.by_ref() {
+                        let width = match char_width_fast(c) {
+                            Some(w @ (1 | 2)) if c != '\u{10eeee}' => w,
+                            _ => {
+                                slow = Some(c);
+                                break;
+                            },
+                        };
+                        if used + width > cells.len()
+                            || cells[used].flags.intersects(wide)
+                            || (width == 2 && cells[used + 1].flags.intersects(wide))
+                        {
+                            slow = Some(c);
+                            break;
+                        }
+                        if no_extra {
+                            let cell = &mut cells[used];
+                            cell.c = c;
+                            cell.fg = template.fg;
+                            cell.bg = template.bg;
+                            cell.flags = if width == 2 { wide_flags } else { template.flags };
+                            if cell.extra.is_some() {
+                                cell.extra = None;
+                            }
+                            if width == 2 {
+                                let spacer = &mut cells[used + 1];
+                                spacer.c = ' ';
+                                spacer.fg = template.fg;
+                                spacer.bg = template.bg;
+                                spacer.flags = spacer_flags;
+                                if spacer.extra.is_some() {
+                                    spacer.extra = None;
+                                }
+                            }
+                        } else {
+                            cells[used] = Cell { c, ..template.clone() };
+                            if width == 2 {
+                                cells[used].flags.insert(Flags::WIDE_CHAR);
+                                cells[used + 1] = Cell {
+                                    c: ' ',
+                                    flags: spacer_flags,
+                                    ..template.clone()
+                                };
+                            }
+                        }
+                        used += width;
+                    }
+                    used
+                });
+                let end = point.column.0 + written;
+                self.grid.cursor.point.column = Column(end.min(columns - 1));
+                self.grid.cursor.input_needs_wrap = end == columns;
+            }
+            if let Some(c) = slow {
+                self.input(c);
+                if c == '\u{10eeee}' && self.damage.graphics.is_some() {
+                    chars.for_each(|c| self.input(c));
+                    return;
+                }
+            }
         }
     }
 
@@ -1366,10 +1608,11 @@ impl<T: EventListener> Handler for Term<T> {
         }
     }
 
-    /// A printable text span to write through the common single-column ASCII path.
+    /// Write printable text without splitting UTF-8 or losing terminal cell boundaries.
     fn input_text(&mut self, text: &str) {
         let active_charset = self.grid.cursor.charsets[self.active_charset];
-        let supports_batch = text.is_ascii()
+        let ascii = text.is_ascii();
+        let supports_batch = ascii
             && self.mode.contains(TermMode::LINE_WRAP)
             && !self.mode.contains(TermMode::INSERT)
             && !self.grid.cursor.template.flags.intersects(
@@ -1377,8 +1620,12 @@ impl<T: EventListener> Handler for Term<T> {
             );
 
         if !supports_batch {
-            for character in text.chars() {
-                self.input(character);
+            if ascii {
+                for character in text.chars() {
+                    self.input(character);
+                }
+            } else {
+                self.input_mixed_text(text);
             }
             return;
         }
@@ -1399,16 +1646,42 @@ impl<T: EventListener> Handler for Term<T> {
             self.erase_sixel(line.0, line.0 + 1, start, end);
 
             let template = self.grid.cursor.template.clone();
+            let row_fresh = self.grid[line].occupied_len() == 0;
             // This span will be written by either path. Inspect the writable screen cells
             // directly instead of paying for history iteration on every ASCII span.
             let cells = self.grid[line].cells_mut(start..end);
+            let src = &bytes[processed..processed + write_len];
             let mut written = 0;
-            // Keep charset mapping outside the ordinary ASCII fill loop.
-            if active_charset == StandardCharset::Ascii {
-                for (cell, byte) in cells
-                    .iter_mut()
-                    .zip(&bytes[processed..processed + write_len])
-                {
+            // Keep charset mapping, template.extra, and fresh-row checks outside the fill loop.
+            if active_charset == StandardCharset::Ascii && template.extra.is_none() {
+                let fg = template.fg;
+                let bg = template.bg;
+                let flags = template.flags;
+                if row_fresh {
+                    for (cell, &byte) in cells.iter_mut().zip(src) {
+                        cell.c = byte as char;
+                        cell.fg = fg;
+                        cell.bg = bg;
+                        cell.flags = flags;
+                    }
+                    written = write_len;
+                } else {
+                    for (cell, &byte) in cells.iter_mut().zip(src) {
+                        if cell.flags.intersects(Flags::WIDE_CHAR | Flags::WIDE_CHAR_SPACER) {
+                            break;
+                        }
+                        written += 1;
+                        cell.c = byte as char;
+                        cell.fg = fg;
+                        cell.bg = bg;
+                        cell.flags = flags;
+                        if cell.extra.is_some() {
+                            cell.extra = None;
+                        }
+                    }
+                }
+            } else if active_charset == StandardCharset::Ascii {
+                for (cell, byte) in cells.iter_mut().zip(src) {
                     if cell.flags.intersects(Flags::WIDE_CHAR | Flags::WIDE_CHAR_SPACER) {
                         break;
                     }
@@ -1420,10 +1693,7 @@ impl<T: EventListener> Handler for Term<T> {
                     cell.extra.clone_from(&template.extra);
                 }
             } else {
-                for (cell, byte) in cells
-                    .iter_mut()
-                    .zip(&bytes[processed..processed + write_len])
-                {
+                for (cell, byte) in cells.iter_mut().zip(src) {
                     if cell.flags.intersects(Flags::WIDE_CHAR | Flags::WIDE_CHAR_SPACER) {
                         break;
                     }
@@ -1457,7 +1727,7 @@ impl<T: EventListener> Handler for Term<T> {
     }
 
     /// Complete printable ASCII lines terminated by carriage return and line feed.
-    fn input_text_lines(&mut self, text: &str, line_count: usize, max_line_length: usize) {
+    fn input_text_lines(&mut self, text: &str, mut line_count: usize, max_line_length: usize) {
         let active_charset = self.grid.cursor.charsets[self.active_charset];
         let full_scroll_region = Line(0)..Line(self.screen_lines() as i32);
         // Scroll-before-write batching is equivalent only for images that scroll with text.
@@ -1465,8 +1735,6 @@ impl<T: EventListener> Handler for Term<T> {
             && !self.graphics_events.as_ref().is_some_and(|e| e.has_fixed_sixel(self.mode.contains(TermMode::ALT_SCREEN)))
             && self.mode.contains(TermMode::LINE_WRAP)
             && !self.mode.contains(TermMode::INSERT)
-            && !self.grid.cursor.input_needs_wrap
-            && self.grid.cursor.point.column == Column(0)
             && self.scroll_region == full_scroll_region
             && self.grid.display_offset() == 0
             && self.selection.is_none()
@@ -1490,6 +1758,14 @@ impl<T: EventListener> Handler for Term<T> {
         }
 
         let mut text_offset = 0;
+        // A PTY read often starts partway through a line. Only that first
+        // fragment needs cursor-aware writes; its CRLF aligns the rest.
+        if self.grid.cursor.input_needs_wrap || self.grid.cursor.point.column != Column(0) {
+            self.input_text(next_ascii_line(text, &mut text_offset));
+            self.carriage_return();
+            self.linefeed();
+            line_count -= 1;
+        }
         let lines_before_scroll = (self.bottommost_line() - self.grid.cursor.point.line).0 as usize;
         let leading_lines = line_count.min(lines_before_scroll);
 
@@ -1504,17 +1780,40 @@ impl<T: EventListener> Handler for Term<T> {
         let bottom_line = self.bottommost_line();
         let template = self.grid.cursor.template.clone();
         let mut remaining_lines = line_count - leading_lines;
+        let mut original_rows = self.screen_lines();
+        let mut pending = std::collections::VecDeque::new();
 
         while remaining_lines > 0 {
             let batch_lines = remaining_lines.min(batch_capacity);
-            self.scroll_up(batch_lines);
+            let original = original_rows.min(batch_lines);
+            let deferred = batch_lines - original;
+            // Only the old cursor row may have a suffix or a wide cell to repair.
+            let prewritten = usize::from(original_rows == self.screen_lines());
+            if prewritten != 0 {
+                self.input_text(next_ascii_line(text, &mut text_offset));
+                self.carriage_return();
+            }
+            if deferred == 0 {
+                self.scroll_up(batch_lines);
+            } else {
+                self.grid.scroll_up_ascii(&full_scroll_region, batch_lines, &template, |i| {
+                    i.checked_sub(original).map(|index| pending[index])
+                });
+                pending.drain(..deferred);
+                self.finish_scroll_up(full_scroll_region.clone(), batch_lines);
+            }
             let first_line = bottom_line - batch_lines as i32;
 
-            for offset in 0..batch_lines {
+            for offset in prewritten..batch_lines {
                 let line = next_ascii_line(text, &mut text_offset);
                 let line_index = first_line + offset as i32;
                 self.erase_sixel(line_index.0, line_index.0 + 1, 0, line.len());
                 if let Some(events) = &self.damage.graphics { events.dirty_row(line_index.0); }
+                // This fresh row will cross the top before the call returns.
+                if (line_index.0 as usize) < remaining_lines - batch_lines {
+                    pending.push_back(line);
+                    continue;
+                }
                 for (cell, byte) in self.grid[line_index].cells_mut(0..line.len())
                     .iter_mut()
                     .zip(line.bytes())
@@ -1527,9 +1826,153 @@ impl<T: EventListener> Handler for Term<T> {
                 }
             }
 
+            original_rows -= original;
             remaining_lines -= batch_lines;
         }
 
+        debug_assert!(pending.is_empty());
+        debug_assert_eq!(text_offset, text.len());
+    }
+
+    /// Complete printable UTF-8 lines terminated by carriage return and line feed.
+    fn input_utf8_lines(&mut self, text: &str, mut line_count: usize) {
+        let active_charset = self.grid.cursor.charsets[self.active_charset];
+        let full_scroll_region = Line(0)..Line(self.screen_lines() as i32);
+        let supports_batch = active_charset == StandardCharset::Ascii
+            && self.damage.graphics.is_none()
+            && !self.graphics_events.as_ref().is_some_and(|e| {
+                e.has_fixed_sixel(self.mode.contains(TermMode::ALT_SCREEN))
+            })
+            && self.mode.contains(TermMode::LINE_WRAP)
+            && !self.mode.contains(TermMode::INSERT)
+            && self.scroll_region == full_scroll_region
+            && self.grid.display_offset() == 0
+            && self.selection.is_none()
+            && self.screen_lines() > 1
+            && line_count >= 2
+            && !self.grid.cursor.template.flags.intersects(
+                Flags::WIDE_CHAR | Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER,
+            );
+
+        if !supports_batch {
+            let mut text_offset = 0;
+            for _ in 0..line_count {
+                let line = next_ascii_line(text, &mut text_offset);
+                self.input_text(line);
+                self.carriage_return();
+                self.linefeed();
+            }
+            debug_assert_eq!(text_offset, text.len());
+            return;
+        }
+
+        let mut text_offset = 0;
+        if self.grid.cursor.input_needs_wrap || self.grid.cursor.point.column != Column(0) {
+            self.input_text(next_ascii_line(text, &mut text_offset));
+            self.carriage_return();
+            self.linefeed();
+            line_count -= 1;
+        }
+        let lines_before_scroll = (self.bottommost_line() - self.grid.cursor.point.line).0 as usize;
+        let leading_lines = line_count.min(lines_before_scroll);
+
+        for _ in 0..leading_lines {
+            let line = next_ascii_line(text, &mut text_offset);
+            self.input_text(line);
+            self.carriage_return();
+            self.linefeed();
+        }
+
+        let columns = self.columns();
+        let tail_lines_total = line_count - leading_lines;
+        let mut fast_lines = Vec::with_capacity(tail_lines_total);
+        let mut scan_offset = text_offset;
+        for _ in 0..tail_lines_total {
+            let candidate_start = scan_offset;
+            let line = next_ascii_line(text, &mut scan_offset);
+            if let Some((cols, wide_count)) = measure_utf8_single_row(line, columns) {
+                fast_lines.push((line, cols, wide_count));
+            } else {
+                scan_offset = candidate_start;
+                break;
+            }
+        }
+
+        let mut remaining_lines = fast_lines.len();
+        if remaining_lines >= 2 {
+            let batch_capacity = self.screen_lines() - 1;
+            let bottom_line = self.bottommost_line();
+            let template = self.grid.cursor.template.clone();
+            let mut original_rows = self.screen_lines();
+            let mut pending_start = 0;
+            let mut pending_end = 0;
+            let mut cursor_idx = 0;
+
+            while remaining_lines > 0 {
+                let batch_lines = remaining_lines.min(batch_capacity);
+                let original = original_rows.min(batch_lines);
+                let deferred = batch_lines - original;
+                let prewritten = usize::from(original_rows == self.screen_lines());
+                if prewritten != 0 {
+                    let (line, _, _) = fast_lines[cursor_idx];
+                    cursor_idx += 1;
+                    self.input_text(line);
+                    self.carriage_return();
+                }
+                if deferred == 0 {
+                    self.scroll_up(batch_lines);
+                } else {
+                    let pending_slice = &fast_lines[pending_start..pending_end];
+                    self.grid.scroll_up_utf8(&full_scroll_region, batch_lines, &template, |i| {
+                        i.checked_sub(original).map(|index| pending_slice[index])
+                    });
+                    pending_start += deferred;
+                    self.finish_scroll_up(full_scroll_region.clone(), batch_lines);
+                }
+                let first_line = bottom_line - batch_lines as i32;
+
+                for offset in prewritten..batch_lines {
+                    let item_idx = cursor_idx;
+                    let (line, cols, wide_count) = fast_lines[item_idx];
+                    cursor_idx += 1;
+                    let line_index = first_line + offset as i32;
+                    self.erase_sixel(line_index.0, line_index.0 + 1, 0, cols);
+                    if (line_index.0 as usize) < remaining_lines - batch_lines {
+                        if pending_start == pending_end {
+                            pending_start = item_idx;
+                        }
+                        pending_end = item_idx + 1;
+                        continue;
+                    }
+                    let cells = self.grid[line_index].cells_mut(0..cols);
+                    if wide_count == 0 && line.is_ascii() {
+                        for (cell, byte) in cells.iter_mut().zip(line.bytes()) {
+                            cell.c = byte as char;
+                            cell.fg = template.fg;
+                            cell.bg = template.bg;
+                            cell.flags = template.flags;
+                            cell.extra.clone_from(&template.extra);
+                        }
+                    } else {
+                        write_utf8_cells_fresh(cells, line, &template);
+                    }
+                }
+
+                original_rows -= original;
+                remaining_lines -= batch_lines;
+            }
+
+            debug_assert_eq!(pending_start, pending_end);
+            debug_assert_eq!(cursor_idx, fast_lines.len());
+            text_offset = scan_offset;
+        }
+
+        while text_offset < text.len() {
+            let line = next_ascii_line(text, &mut text_offset);
+            self.input_text(line);
+            self.carriage_return();
+            self.linefeed();
+        }
         debug_assert_eq!(text_offset, text.len());
     }
 
@@ -3013,6 +3456,7 @@ mod tests {
         let top_line = -(scalar.history_size() as i32);
         for line in top_line..scalar.screen_lines() as i32 {
             assert_eq!(batch.grid[Line(line)], scalar.grid[Line(line)]);
+            assert_eq!(batch.grid[Line(line)].occupied_len(), scalar.grid[Line(line)].occupied_len());
         }
         assert_eq!(batch.damage.full, scalar.damage.full);
         assert_eq!(batch.damage.lines, scalar.damage.lines);
@@ -3046,10 +3490,12 @@ mod tests {
         assert_eq!(batch.grid.cursor, scalar.grid.cursor);
         assert!(batch.vi_mode_cursor == scalar.vi_mode_cursor);
         assert_eq!(batch.history_size(), scalar.history_size());
+        assert_eq!(batch.grid.scrolled_out_lines(), scalar.grid.scrolled_out_lines());
         assert_eq!(batch.grid.display_offset(), scalar.grid.display_offset());
         let top_line = -(scalar.history_size() as i32);
         for line in top_line..scalar.screen_lines() as i32 {
             assert_eq!(batch.grid[Line(line)], scalar.grid[Line(line)]);
+            assert_eq!(batch.grid[Line(line)].occupied_len(), scalar.grid[Line(line)].occupied_len());
         }
         assert_eq!(batch.damage.full, scalar.damage.full);
         assert_eq!(batch.damage.scroll_up, scalar.damage.scroll_up);
@@ -3077,22 +3523,60 @@ mod tests {
     }
 
     #[test]
+    fn wide_pair_overwrite_repairs_both_neighbors_and_wraps_combining_text() {
+        let mut term = Term::new(Config::default(), &TermSize::new(4, 2), VoidListener);
+        term.grid.cursor.template.bg = Color::Indexed(42);
+        term.input('中');
+        term.input('文');
+        term.goto(0, 1);
+        term.input('界');
+
+        // The new glyph covers the spacer of 中 and the head of 文.
+        let row = &term.grid[Line(0)];
+        for (col, (c, flags)) in [
+            (' ', Flags::empty()),
+            ('界', Flags::WIDE_CHAR),
+            (' ', Flags::WIDE_CHAR_SPACER),
+            (' ', Flags::empty()),
+        ].into_iter().enumerate() {
+            let cell = row.cell(Column(col));
+            assert_eq!((cell.c, cell.flags, cell.bg), (c, flags, Color::Indexed(42)));
+        }
+
+        // One free column is not enough: leave a wrap marker, and attach the
+        // combining mark to the glyph on the next line, not to its spacer.
+        term.input('語');
+        term.input('\u{301}');
+        assert_eq!(term.grid[Line(0)].cell(Column(3)).flags,
+            Flags::LEADING_WIDE_CHAR_SPACER | Flags::WRAPLINE);
+        let row = &term.grid[Line(1)];
+        let glyph = row.cell(Column(0));
+        assert_eq!((glyph.c, glyph.flags, glyph.zerowidth()), ('語', Flags::WIDE_CHAR, Some(&['\u{301}'][..])));
+        assert_eq!(row.cell(Column(1)).flags, Flags::WIDE_CHAR_SPACER);
+        assert_eq!(term.grid.cursor.point, Point::new(Line(1), Column(2)));
+    }
+
+    #[test]
     fn batch_input_preserves_complex_terminal_state() {
         let size = TermSize::new(8, 3);
         assert_batch_input_matches_scalar(&size, "ASCII中文e\u{301}", |_| {});
-        assert_batch_input_matches_scalar(&size, "jklmnop", |term| {
-            term.configure_charset(
-                CharsetIndex::G0,
-                StandardCharset::SpecialCharacterAndLineDrawing,
-            );
-        });
-        assert_batch_input_matches_scalar(&size, "insert", |term| {
-            term.mode.insert(TermMode::INSERT);
-        });
+        for text in ["jklmnop", "jk中語"] {
+            assert_batch_input_matches_scalar(&size, text, |term| {
+                term.configure_charset(
+                    CharsetIndex::G0,
+                    StandardCharset::SpecialCharacterAndLineDrawing,
+                );
+            });
+        }
+        for text in ["insert", "insert中文"] {
+            assert_batch_input_matches_scalar(&size, text, |term| {
+                term.mode.insert(TermMode::INSERT);
+            });
+        }
         for columns in [2, 8, 120] {
             let size = TermSize::new(columns, 3);
             for start in 0..columns {
-                for text in ["x", "overlap", "0123456789abcdefghijklmnop"] {
+                for text in ["x", "overlap", "0123456789abcdefghijklmnop", "é中文e\u{301}🦀Δ한"] {
                     assert_batch_input_matches_scalar(&size, text, |term| {
                         for c in "a界e\u{301}中b文界".chars() {
                             term.input(c);
@@ -3131,16 +3615,26 @@ mod tests {
     #[test]
     fn batch_ascii_lines_match_scalar_scrolling_history_and_style() {
         let size = TermSize::new(8, 3);
-        let text = "one\r\ntwo\r\nthree\r\nfour\r\nfive\r\nsix\r\nseven\r\n";
-        assert_batch_line_input_matches_scalar(Config::default(), &size, text, |term| {
-            term.grid.cursor.template.fg = Color::Indexed(42);
-            term.grid.cursor.template.bg = Color::Indexed(17);
-            term.grid.cursor.template.flags.insert(Flags::BOLD | Flags::UNDERLINE);
-            term.grid.cursor.template.set_hyperlink(Some(crate::term::cell::Hyperlink::new(
-                Some("batch-line-test"),
-                "https://example.com".to_owned(),
-            )));
-        });
+        let text = "1\r\ncolored \r\nmid   \r\n\r\nabcXXXXX\r\n        \r\n12345678\r\nseven\r\nend\r\n";
+        for history in [0, 1, 5, 30] {
+            for styled in [false, true] {
+                let config = Config { scrolling_history: history, ..Config::default() };
+                assert_batch_line_input_matches_scalar(config, &size, text, |term| {
+                    // The cursor row is not fresh: its suffix must survive the first write.
+                    term.goto(2, 0);
+                    term.input_text("old tail");
+                    term.carriage_return();
+                    if styled {
+                        term.grid.cursor.template.fg = Color::Indexed(42);
+                        term.grid.cursor.template.bg = Color::Indexed(17);
+                        term.grid.cursor.template.flags.insert(Flags::BOLD | Flags::UNDERLINE);
+                        term.grid.cursor.template.set_hyperlink(Some(crate::term::cell::Hyperlink::new(
+                            Some("batch-line-test"), "https://example.com".to_owned(),
+                        )));
+                    }
+                });
+            }
+        }
     }
 
     #[test]
@@ -3156,7 +3650,7 @@ mod tests {
     }
 
     #[test]
-    fn batch_ascii_lines_fall_back_for_complex_cursor_state() {
+    fn batch_ascii_lines_match_scalar_across_partial_and_wrapped_input() {
         let size = TermSize::new(6, 3);
         assert_batch_line_input_matches_scalar(
             Config::default(),
@@ -3164,6 +3658,75 @@ mod tests {
             "abcdefgh\r\nsecond\r\nthird\r\n",
             |term| term.input('界'),
         );
+        for prefix in ["ab", "abcdef"] {
+            assert_batch_line_input_matches_scalar(
+                Config::default(), &size, "cdef\r\nsecond\r\nthird\r\nfourth\r\nfifth\r\nsixth\r\n",
+                |term| {
+                    term.goto(2, 0);
+                    term.input_text(prefix);
+                },
+            );
+        }
+    }
+
+    #[test]
+    fn char_width_fast_matches_unicode_width_for_all_scalars() {
+        for code in 0..=0x10ffffu32 {
+            if let Some(c) = char::from_u32(code) {
+                assert_eq!(
+                    char_width_fast(c),
+                    c.width(),
+                    "mismatch for U+{code:04X}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn batch_utf8_lines_match_scalar_scrolling_history_and_style() {
+        use crate::grid::CellView;
+        let size = TermSize::new(16, 3);
+        let text = "中文1\r\n日本語 🚀 \r\n한국어Δοκιμή\r\ncafé naïve\r\n汉字满格测试八字\r\ne\u{301} combining\r\n超长一行超过十六列宽度测试汉字\r\nend中文\r\n";
+        for history in [0, 1, 5, 30] {
+            for styled in [false, true] {
+                let config = Config {
+                    scrolling_history: history,
+                    ..Config::default()
+                };
+                let mut batch = Term::new(config.clone(), &size, VoidListener);
+                let mut scalar = Term::new(config, &size, VoidListener);
+                for term in [&mut batch, &mut scalar] {
+                    term.goto(2, 0);
+                    term.input_text("old界tail");
+                    term.carriage_return();
+                    if styled {
+                        term.grid.cursor.template.fg = Color::Indexed(42);
+                        term.grid.cursor.template.bg = Color::Indexed(17);
+                        term.grid.cursor.template.flags.insert(Flags::BOLD | Flags::UNDERLINE);
+                    }
+                }
+                let line_count = text.matches("\r\n").count();
+                batch.input_utf8_lines(text, line_count);
+                for line in text.split_inclusive("\r\n") {
+                    for c in line.strip_suffix("\r\n").unwrap().chars() {
+                        scalar.input(c);
+                    }
+                    scalar.carriage_return();
+                    scalar.linefeed();
+                }
+                assert_eq!(batch.grid.cursor.point, scalar.grid.cursor.point);
+                assert_eq!(
+                    batch.grid.cursor.input_needs_wrap,
+                    scalar.grid.cursor.input_needs_wrap
+                );
+                assert_eq!(batch.grid.history_size(), scalar.grid.history_size());
+                for line in -(batch.grid.history_size() as i32)..batch.screen_lines() as i32 {
+                    let b: Vec<Cell> = batch.grid[Line(line)].iter().map(|c| c.into_owned()).collect();
+                    let s: Vec<Cell> = scalar.grid[Line(line)].iter().map(|c| c.into_owned()).collect();
+                    assert_eq!(b, s, "mismatch at line {line} (history={history}, styled={styled})");
+                }
+            }
+        }
     }
 
     #[test]

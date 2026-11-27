@@ -63,6 +63,96 @@ impl Dimensions for Size {
 }
 
 fn main() {
+    if std::env::args().any(|arg| arg == "--plain") {
+        let line = b"OxideTerm benchmark plain text 0123456789 abcdefghijklmnopqrstuvwxyz\r\n";
+        let input = line.repeat((16 * 1024 * 1024) / line.len());
+        for sample in 0..6 {
+            let before = LIVE.load(Relaxed);
+            let mut term = Term::new(Config::default(), &Size(120), VoidListener);
+            let mut parser: Processor = Processor::new();
+            let start = Instant::now();
+            for chunk in input.chunks(16 * 1024) {
+                parser.advance(&mut term, black_box(chunk));
+            }
+            let elapsed = start.elapsed().as_secs_f64();
+            let retained = LIVE.load(Relaxed).saturating_sub(before);
+            println!(
+                "plain {sample}: {:.2} MiB/s (retained {:.2} MiB)",
+                input.len() as f64 / 1048576. / elapsed,
+                retained as f64 / 1048576.
+            );
+            black_box(term);
+        }
+        return;
+    }
+    if std::env::args().any(|arg| arg == "--unicode") {
+        let line = "OxideTerm Unicode workload: 中文 日本語 한국어 Δοκιμή 🚀 café naïve\r\n".as_bytes();
+        let input = line.repeat((16 * 1024 * 1024) / line.len());
+        for sample in 0..6 {
+            let before = LIVE.load(Relaxed);
+            let mut term = Term::new(Config::default(), &Size(120), VoidListener);
+            let mut parser: Processor = Processor::new();
+            let start = Instant::now();
+            for chunk in input.chunks(16 * 1024) {
+                parser.advance(&mut term, black_box(chunk));
+            }
+            let elapsed = start.elapsed().as_secs_f64();
+            let retained = LIVE.load(Relaxed).saturating_sub(before);
+            println!(
+                "unicode {sample}: {:.2} MiB/s (retained {:.2} MiB)",
+                input.len() as f64 / 1048576. / elapsed,
+                retained as f64 / 1048576.
+            );
+            black_box(term);
+        }
+        return;
+    }
+    if std::env::args().any(|arg| arg == "--ansi") {
+        let line = "\x1b[1;38;2;72;183;255;48;2;18;24;38mOxideTerm ANSI style workload\x1b[0m\r\n"
+            .as_bytes();
+        let input = line.repeat((16 * 1024 * 1024) / line.len());
+        for sample in 0..6 {
+            let before = LIVE.load(Relaxed);
+            let mut term = Term::new(Config::default(), &Size(120), VoidListener);
+            let mut parser: Processor = Processor::new();
+            let start = Instant::now();
+            for chunk in input.chunks(16 * 1024) {
+                parser.advance(&mut term, black_box(chunk));
+            }
+            let elapsed = start.elapsed().as_secs_f64();
+            let retained = LIVE.load(Relaxed).saturating_sub(before);
+            println!(
+                "ansi {sample}: {:.2} MiB/s (retained {:.2} MiB)",
+                input.len() as f64 / 1048576. / elapsed,
+                retained as f64 / 1048576.
+            );
+            black_box(term);
+        }
+        return;
+    }
+    if std::env::args().any(|arg| arg == "--long-csi") {
+        let line = "\x1b[1;2;3;4;5;7;8;9;22;23;24;25;27;28;29;38;2;72;183;255;48;2;18;24;38mOxideTerm long CSI workload\x1b[0m\r\n"
+            .as_bytes();
+        let input = line.repeat((16 * 1024 * 1024) / line.len());
+        for sample in 0..6 {
+            let before = LIVE.load(Relaxed);
+            let mut term = Term::new(Config::default(), &Size(120), VoidListener);
+            let mut parser: Processor = Processor::new();
+            let start = Instant::now();
+            for chunk in input.chunks(16 * 1024) {
+                parser.advance(&mut term, black_box(chunk));
+            }
+            let elapsed = start.elapsed().as_secs_f64();
+            let retained = LIVE.load(Relaxed).saturating_sub(before);
+            println!(
+                "long-csi {sample}: {:.2} MiB/s (retained {:.2} MiB)",
+                input.len() as f64 / 1048576. / elapsed,
+                retained as f64 / 1048576.
+            );
+            black_box(term);
+        }
+        return;
+    }
     println!(
         "case,sample,cell_bytes,retained_bytes,after_read_bytes,resize_peak_bytes,fill_us,steady_us,read_us,resize_us,search_us,after_resize_bytes,after_search_bytes,reverse_search_us,narrow_us,encode_us"
     );

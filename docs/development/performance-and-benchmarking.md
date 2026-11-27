@@ -759,6 +759,42 @@ cargo bench -p oxideterm-gpui-terminal --features bench --bench terminal_render 
   --sample-size 10 --warm-up-time 1 --measurement-time 2
 ```
 
+### Batched ASCII writes to history (2026-11-27)
+
+`cargo bench -p alacritty_terminal --bench history -- --plain` measures the parser
+and grid on the plain benchmark text with CRLF line endings. It feeds roughly
+16 MiB in 16 KiB reads into a 120-column, 40-row terminal with default scrollback.
+On the same machine, the median of five runs after one warm-up rose from **320.84
+to 820.51 MiB/s (2.56×)**. Both measurements used the optimized bench profile.
+
+Finishing the partial first line separately lets the rest of a read use the
+batch path. Lines that leave the screen within that batch go straight into
+history; the final visible lines still use writable cells. The
+[187.035 MiB/s desktop result](../../benchmark/results/20261123T062729Z-23183/summary.md)
+measures process-to-PTY throughput and was not remeasured here.
+
+### Mixed Unicode: writing wide cells as a pair (2026-11-27)
+
+The grid can write a double-width glyph and its spacer through one mutable row
+slice when both cells fit and neither needs wide-cell repair. Insert mode and
+active Sixel images keep their existing write path. The VTE parser and character
+width lookup are unchanged.
+
+| Mixed Unicode workload | Baseline median | Paired-write median | Time change |
+| --- | ---: | ---: | ---: |
+| Parser + grid | 1.814 ms | 1.689 ms | −6.9% |
+| Recording-playback input pipeline | 1.789 ms | 1.659 ms | −7.3% |
+
+Both runs used the same roughly 256 KiB corpus, 120 × 40 grid, optimized profile
+and preceding ASCII-history changes. Criterion settings for the paired comparison:
+
+```sh
+cargo bench --locked -p oxideterm-terminal --bench terminal_pipeline -- \
+  'terminal_input_breakdown/(grid|pipeline)/unicode$' --noplot \
+  --sample-size 40 --warm-up-time 2 --measurement-time 5 --save-baseline before-wide-pair
+# After applying the change, replace --save-baseline with --baseline.
+```
+
 ### Text-Run History And Sequential Reads (2026-10-26)
 
 The third-stage baseline is the completed eight-byte implementation, saved before production edits in `target/text-history/baseline-src/` and `phase2.patch`. Both revisions were measured on the same Apple M5, ARM64 macOS 26.6.2, Rust 1.97.0, optimized bench profile, with one warm-up and five measured samples. Values below are medians; MB means 1,000,000 requested heap bytes.

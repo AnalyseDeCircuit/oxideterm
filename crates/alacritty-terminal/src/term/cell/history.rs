@@ -34,6 +34,33 @@ struct IndexedHistory {
 #[derive(Clone, Debug)]
 pub struct PackedHistory(History);
 
+impl PackedHistory {
+    pub(crate) fn from_ascii(text: &str, style: &Cell, tail: Option<&Cell>, reuse: Option<Self>) -> Self {
+        let mut row = match reuse {
+            Some(Self(History::Text(row))) => row,
+            _ => TextHistory::default(),
+        };
+        row.set_ascii(text, style, tail);
+        Self(History::Text(row))
+    }
+
+    pub(crate) fn from_utf8(
+        text: &str,
+        cols: usize,
+        wide_count: usize,
+        style: &Cell,
+        tail: Option<&Cell>,
+        reuse: Option<Self>,
+    ) -> Self {
+        let mut row = match reuse {
+            Some(Self(History::Text(row))) => row,
+            _ => TextHistory::default(),
+        };
+        row.set_utf8(text, cols, wide_count, style, tail);
+        Self(History::Text(row))
+    }
+}
+
 #[derive(Clone, Debug)]
 enum History {
     Text(TextHistory),
@@ -79,8 +106,9 @@ impl PartialEq<&Cell> for CellRef<'_> {
     }
 }
 
-fn attribute_run_len<const INCLUDE_FLAGS: bool>(source: &[Cell]) -> usize {
+fn attribute_run_len<const FLAGS_MASK: u16>(source: &[Cell]) -> usize {
     let first = &source[0];
+    let first_flags = first.flags.bits() & FLAGS_MASK;
     // Choose the color representation outside the scan. Comparing two Color enums inside every
     // iteration otherwise repeats both discriminant dispatches for ordinary terminal output.
     if first.extra.is_none() {
@@ -88,12 +116,22 @@ fn attribute_run_len<const INCLUDE_FLAGS: bool>(source: &[Cell]) -> usize {
             (Color::Named(fg), Color::Named(bg)) => return source[1..].iter().position(|cell| {
                 !matches!((cell.fg, cell.bg), (Color::Named(f), Color::Named(b)) if f == fg && b == bg)
                     || cell.extra.is_some()
-                    || (INCLUDE_FLAGS && cell.flags != first.flags)
+                    || (FLAGS_MASK != 0 && (cell.flags.bits() & FLAGS_MASK) != first_flags)
             }).map_or(source.len(), |i| i + 1),
             (Color::Indexed(fg), Color::Named(bg)) => return source[1..].iter().position(|cell| {
                 !matches!((cell.fg, cell.bg), (Color::Indexed(f), Color::Named(b)) if f == fg && b == bg)
                     || cell.extra.is_some()
-                    || (INCLUDE_FLAGS && cell.flags != first.flags)
+                    || (FLAGS_MASK != 0 && (cell.flags.bits() & FLAGS_MASK) != first_flags)
+            }).map_or(source.len(), |i| i + 1),
+            (Color::Spec(fg), Color::Spec(bg)) => return source[1..].iter().position(|cell| {
+                !matches!((cell.fg, cell.bg), (Color::Spec(f), Color::Spec(b)) if f == fg && b == bg)
+                    || cell.extra.is_some()
+                    || (FLAGS_MASK != 0 && (cell.flags.bits() & FLAGS_MASK) != first_flags)
+            }).map_or(source.len(), |i| i + 1),
+            (Color::Spec(fg), Color::Named(bg)) => return source[1..].iter().position(|cell| {
+                !matches!((cell.fg, cell.bg), (Color::Spec(f), Color::Named(b)) if f == fg && b == bg)
+                    || cell.extra.is_some()
+                    || (FLAGS_MASK != 0 && (cell.flags.bits() & FLAGS_MASK) != first_flags)
             }).map_or(source.len(), |i| i + 1),
             _ => {},
         }
@@ -104,7 +142,7 @@ fn attribute_run_len<const INCLUDE_FLAGS: bool>(source: &[Cell]) -> usize {
             cell.fg != first.fg
                 || cell.bg != first.bg
                 || cell.extra != first.extra
-                || (INCLUDE_FLAGS && cell.flags != first.flags)
+                || (FLAGS_MASK != 0 && (cell.flags.bits() & FLAGS_MASK) != first_flags)
         })
         .map_or(source.len(), |i| i + 1)
 }
@@ -169,7 +207,7 @@ impl HistoryStorage<Cell> for IndexedHistory {
         let mut start = 0;
         while start < source.len() {
             let first = &source[start];
-            let end = start + attribute_run_len::<false>(&source[start..]);
+            let end = start + attribute_run_len::<0>(&source[start..]);
             let matches =
                 |a: &Attributes| a.fg == first.fg && a.bg == first.bg && a.extra == first.extra;
             let attribute = if let Some(found) = attributes.iter().position(matches) {
@@ -340,10 +378,7 @@ impl HistoryStorage<Cell> for PackedHistory {
     }
     fn push(&mut self, value: Cell) -> bool {
         match &mut self.0 {
-            History::Text(text) => {
-                text.push(value);
-                true
-            }
+            History::Text(text) => text.push(value),
             History::Indexed(cells) => cells.push(value),
         }
     }
@@ -548,5 +583,61 @@ mod tests {
             })
             .collect();
         assert!(PackedHistory::encode(&source, None).is_none());
+    }
+
+    #[test]
+    fn wide_char_rows_pack_into_text_history_losslessly() {
+        let mut source = Vec::new();
+        for ch in "OxideTerm: 中文日本語한국어🚀测试文本".chars() {
+            let w = crate::term::char_width_fast(ch).unwrap();
+            if w == 2 {
+                source.push(Cell {
+                    c: ch,
+                    flags: Flags::WIDE_CHAR | Flags::BOLD,
+                    fg: Color::Indexed(3),
+                    ..Cell::default()
+                });
+                source.push(Cell {
+                    c: ' ',
+                    flags: Flags::WIDE_CHAR_SPACER | Flags::BOLD,
+                    fg: Color::Indexed(3),
+                    ..Cell::default()
+                });
+            } else {
+                source.push(Cell {
+                    c: ch,
+                    flags: Flags::BOLD,
+                    fg: Color::Indexed(3),
+                    ..Cell::default()
+                });
+            }
+        }
+        source.push(Cell::default());
+
+        let mut packed = PackedHistory::encode(&source, None).unwrap();
+        assert!(
+            matches!(packed.0, History::Text(_)),
+            "CJK wide row should stay in TextHistory rather than falling back to IndexedHistory"
+        );
+        // Verify forward iter, reverse iter, random cursor access, and decode.
+        let forward: Vec<Cell> = packed.iter_cells().map(|c| c.into_owned()).collect();
+        assert_eq!(forward, source);
+        let backward: Vec<Cell> = packed.iter_cells().rev().map(|c| c.into_owned()).collect();
+        let expected_rev: Vec<Cell> = source.iter().rev().cloned().collect();
+        assert_eq!(backward, expected_rev);
+        assert_eq!(packed.decode(0..source.len()), source);
+        let mut cursor = HistoryCursor::default();
+        for (i, expected) in source.iter().enumerate() {
+            assert_eq!(packed.cell_with_cursor(i, &mut cursor).into_owned(), *expected);
+        }
+
+        // Truncating right between a wide char and its spacer must preserve WIDE_CHAR.
+        let mid_wide = source
+            .iter()
+            .position(|c| c.flags.contains(Flags::WIDE_CHAR))
+            .unwrap()
+            + 1;
+        packed.truncate(mid_wide);
+        assert_eq!(packed.decode(0..mid_wide), source[..mid_wide]);
     }
 }

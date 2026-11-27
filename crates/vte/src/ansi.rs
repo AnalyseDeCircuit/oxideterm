@@ -529,6 +529,19 @@ pub trait Handler {
         }
     }
 
+    /// Complete printable UTF-8 lines terminated by carriage return and line feed.
+    fn input_utf8_lines(&mut self, text: &str, _line_count: usize) {
+        for line in text.split_inclusive("\r\n") {
+            if let Some(printable) = line.strip_suffix("\r\n") {
+                self.input_text(printable);
+                self.carriage_return();
+                self.linefeed();
+            } else {
+                self.input_text(line);
+            }
+        }
+    }
+
     /// Set cursor to position.
     fn goto(&mut self, _line: i32, _col: usize) {}
 
@@ -1341,6 +1354,14 @@ where
         self.handler.input_text_lines(text, line_count, max_line_length);
         if let Some(byte) = text.bytes().rev().find(|byte| (b' '..=b'~').contains(byte)) {
             self.state.preceding_char = Some(byte as char);
+        }
+    }
+
+    #[inline]
+    fn print_utf8_lines(&mut self, text: &str, line_count: usize) {
+        self.handler.input_utf8_lines(text, line_count);
+        if let Some(character) = text.chars().rev().find(|c| !matches!(c, '\r' | '\n')) {
+            self.state.preceding_char = Some(character);
         }
     }
 
@@ -2181,6 +2202,10 @@ mod tests {
 
         assert_eq!(handler.batches, ["abcd"]);
         assert_eq!(handler.scalar, "ddd");
+
+        parser.advance(&mut handler, "中文\x1b[2b".as_bytes());
+        assert_eq!(handler.batches, ["abcd", "中文"]);
+        assert_eq!(handler.scalar, "ddd文文");
     }
 
     #[test]
