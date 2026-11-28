@@ -68,7 +68,7 @@ impl SftpDialogView {
             ),
             SftpDialog::Editor { name } => (
                 name,
-                self.i18n.t("sftp.preview.editor_description"),
+                String::new(),
                 self.render_sftp_editor_body(has_background, cx),
                 None,
             ),
@@ -389,7 +389,14 @@ impl SftpDialogView {
                             actions.child(self.render_sftp_text_button(
                                 self.i18n.t("sftp.preview.compare"),
                                 false,
-                                cx.listener(move |this, _event, _window, cx| {
+                                cx.listener(move |this, _event, window, cx| {
+                                    #[cfg(target_family = "wasm")]
+                                    if matches!(this.sftp_view().read(cx).pair_primary_remote_id,Some(SftpRemoteId::DeviceFolder(_))) {
+                                        this.send(SftpDialogRequest::CompareDeviceFile(name.clone()),window,cx);
+                                        cx.stop_propagation();
+                                        return;
+                                    }
+                                    let _ = window;
                                     this.sftp_view().update(cx, |state, cx| {
                                         state.compare_preview(&name, &this.i18n, cx)
                                     });

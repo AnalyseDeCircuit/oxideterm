@@ -1,5 +1,6 @@
 mod archive;
 mod bookmarks;
+mod checksum;
 mod listing;
 mod model;
 mod path_completion;
@@ -7,9 +8,10 @@ mod paths;
 mod preview_format;
 mod preview_stream;
 
-pub use archive::{ArchiveEntryOutcome, can_extract_archive};
+pub use archive::{ArchiveEntryOutcome, can_extract_archive, list_archive_contents};
+pub use checksum::FileChecksums;
 pub use bookmarks::{
-    BOOKMARKS_FILENAME, bookmark_name_for_path, new_file_manager_bookmark_id, now_ms,
+    BOOKMARKS_FILENAME, bookmark_name_for_path, new_file_manager_bookmark_id, now_ms, reordered_bookmarks,
 };
 pub use listing::{local_file_default_cmp, sorted_local_files};
 pub use model::{
@@ -24,7 +26,7 @@ pub use path_completion::{
 };
 pub use paths::{
     join_local_path, local_parent_path, local_path_segments, normalize_local_path,
-    validate_local_name,
+    unique_copy_path_with, validate_local_name,
 };
 pub use preview_format::{
     MAX_PREVIEW_SIZE, STREAM_PREVIEW_THRESHOLD, local_file_extension, mime_type_for_extension,
@@ -33,8 +35,6 @@ pub use preview_stream::{append_local_preview_chunk, append_local_preview_text};
 
 #[cfg(not(target_family = "wasm"))]
 mod batch;
-#[cfg(not(target_family = "wasm"))]
-mod checksum;
 #[cfg(not(target_family = "wasm"))]
 mod drives;
 #[cfg(not(target_family = "wasm"))]

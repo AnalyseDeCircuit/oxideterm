@@ -27,34 +27,9 @@ impl WorkspaceApp {
         }
 
         let overrides = &self.settings_store.settings().keybindings.overrides;
-        let action = [
-            ("sftp.selectAll", Action::SelectAll),
-            ("sftp.editPath", Action::EditPath),
-            (
-                "sftp.revealTerminalDirectory",
-                Action::RevealTerminalDirectory,
-            ),
-            ("sftp.open", Action::Open),
-            ("sftp.preview", Action::Preview),
-            ("sftp.upload", Action::Upload),
-            ("sftp.download", Action::Download),
-            ("sftp.delete", Action::Delete),
-            ("sftp.rename", Action::Rename),
-            ("sftp.togglePreviewSource", Action::TogglePreviewSource),
-            ("editor.save", Action::SaveEditor),
-        ]
-        .into_iter()
-        .find(|(id, _)| {
-            let routed = if editor {
-                *id == "editor.save"
-            } else if dialog.is_some() {
-                *id == "sftp.togglePreviewSource"
-            } else {
-                !matches!(*id, "editor.save" | "sftp.togglePreviewSource")
-            };
-            routed && crate::keybindings::keystroke_matches_action(keystroke, id, overrides)
-        })
-        .map(|(_, action)| action);
+        let action = Action::resolve(dialog.as_ref(), |id| {
+            crate::keybindings::keystroke_matches_action(keystroke, id, overrides)
+        });
         let tree_mode = self.sftp_tree_mode(cx);
         let result = view.update(cx, |state, cx| {
             state.handle_key(keystroke, action, tree_mode, window, cx)

@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub use crate::rag_model::{DocChunk, DocScope};
+pub use crate::rag_model::{DocChunk, DocFormat, DocScope};
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Core Types
@@ -33,13 +33,6 @@ pub struct DocMetadata {
     /// Monotonically increasing version for optimistic locking.
     #[serde(default)]
     pub version: u64,
-}
-
-/// Supported document formats.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum DocFormat {
-    Markdown,
-    PlainText,
 }
 
 /// Stored vector embedding for a chunk.
@@ -105,21 +98,4 @@ pub struct Bm25Stats {
     pub doc_count: usize,
     /// Average document length in tokens.
     pub avg_dl: f64,
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Shared Helpers
-// ═══════════════════════════════════════════════════════════════════════════
-
-/// Check if a character belongs to a CJK script (Chinese, Japanese, Korean).
-pub fn is_cjk(c: char) -> bool {
-    matches!(c,
-        '\u{4E00}'..='\u{9FFF}'   // CJK Unified
-        | '\u{3400}'..='\u{4DBF}' // CJK Extension A
-        | '\u{F900}'..='\u{FAFF}' // CJK Compat
-        | '\u{3000}'..='\u{303F}' // CJK Symbols
-        | '\u{3040}'..='\u{309F}' // Hiragana
-        | '\u{30A0}'..='\u{30FF}' // Katakana
-        | '\u{AC00}'..='\u{D7AF}' // Hangul
-    )
 }

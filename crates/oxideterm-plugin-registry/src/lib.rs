@@ -97,6 +97,7 @@ pub use permissions::{
     native_plugin_capability_approval_matches, native_plugin_requested_capabilities,
     native_plugin_requires_permission_review, normalize_native_plugin_capabilities,
 };
+pub use oxideterm_plugin_manifest::catalog as catalog_browser;
 pub use registry::{
     NativePluginRegistry, OFFICIAL_NATIVE_PLUGIN_REGISTRY_URL,
     OFFICIAL_NATIVE_PLUGIN_REGISTRY_V2_URL,

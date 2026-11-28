@@ -13,30 +13,31 @@ use oxideterm_gpui_ui::{
     text_input::TextInputViewport,
 };
 use oxideterm_settings::{CursorStyle as SettingsCursorStyle, PersistedSettings};
-use oxideterm_workspace::{TabId, TabKind, parse_command_palette_query};
+use oxideterm_workspace::{SplitDirection, TabId, TabKind, parse_command_palette_query};
 use std::rc::Rc;
 
 #[derive(Clone)]
 pub enum PaletteAction {
     Command(Action),
     ToggleLeftSidebar,
+    OpenDeviceFolder,
+    ToggleFullscreen,
+    TabHistory(bool),
+    AdjacentPane(bool),
+    ClosePane,
     SelectSidebar(SidebarSection),
     ActivateTab(TabId),
+    SelectScope(crate::host::Scope),
     NextTab(isize),
     CloseOtherTabs,
     CloseAllTabs,
     Connect(String),
-    QuickConnect {
-        username: String,
-        host: String,
-        port: u16,
-    },
+    QuickConnect,
     FontAdjust(i32),
     FontReset,
     CursorStyle(SettingsCursorStyle),
     DisconnectAll,
-    HealthCheck,
-    OpenTopology,
+    DemoSessionStatus,
     SettingsTab(SettingsTab),
     ResetSettings,
     ReloadWindow,
@@ -54,10 +55,12 @@ pub struct Palette {
     pub model: Entity<PaletteModel<()>>,
     pub view: Entity<ShellPalette<PaletteAction>>,
     viewport: TextInputViewport,
+    commands: Vec<CommandSpec>,
+    help: Vec<CommandSpec>,
 }
 
 impl Palette {
-    pub fn new(cx: &mut Context<Workspace>) -> Self {
+    pub fn new(demo: bool, cx: &mut Context<Workspace>) -> Self {
         let model = cx.new(|_| PaletteModel::new(()));
         let host = cx.weak_entity();
         let dispatch = host.clone();
@@ -73,7 +76,7 @@ impl Palette {
                         let selected_index =
                             resolve_command_palette_selected_index(&ranked_items, selected);
                         let preview_selected = selected_index.is_some_and(|idx| {
-                            ranked_items[idx].item.section == PaletteSection::Connections
+                            m.content() == PaletteContent::Commands && ranked_items[idx].item.section == PaletteSection::Connections
                         });
                         PaletteFrame {
                             tokens: h.tokens,
@@ -82,7 +85,7 @@ impl Palette {
                             selected,
                             preview_selected,
                             titlebar_height: h.tokens.metrics.titlebar_height,
-                            scope_counts: None,
+                            scope_counts: (m.content() == PaletteContent::TabScopes).then(|| format!("{}/{}", h.layout.main_tabs().count(), h.layout.unfiltered_main_tabs().count())),
                             input: query_input(
                                 &h.tokens,
                                 &h.i18n,
@@ -110,6 +113,29 @@ impl Palette {
             view,
             model,
             viewport: Default::default(),
+            commands: desktop_command_specs(demo),
+            help: desktop_help_specs(),
+        }
+    }
+
+    pub(super) fn supports_shortcut(&self, def: &oxideterm_gpui_shell::shortcuts::bindings::ActionDefinition, demo: bool) -> bool {
+        use oxideterm_gpui_editor::EditorShortcut;
+        use oxideterm_gpui_shell::shortcuts::bindings::ActionScope;
+        use oxideterm_gpui_terminal_view::input::TerminalShortcut;
+        let id = def.id.as_ref();
+        if id == "app.commandPalette" || id.strip_prefix("app.goToTab").and_then(|s|s.parse::<u8>().ok()).is_some_and(|n|(1..=9).contains(&n)) {
+            return true;
+        }
+        if let Some(spec) = self.commands.iter().chain(&self.help).find(|s| s.shortcut_action == Some(id)) {
+            return demo || !matches!(spec.action, PaletteAction::Command(Action::NewConnection));
+        }
+        match def.scope {
+            ActionScope::Sftp => demo,
+            ActionScope::FileManager | ActionScope::Preview => demo || crate::files::can_pick_directory(),
+            ActionScope::Editor => EditorShortcut::BINDINGS.iter().any(|&(key,_)| key == id),
+            ActionScope::Terminal => TerminalShortcut::BINDINGS.iter().any(|&(key,action)| key == id
+                && (action.scroll_action().is_some() || matches!(action, TerminalShortcut::Copy | TerminalShortcut::Paste | TerminalShortcut::WordBackward | TerminalShortcut::WordForward))),
+            _ => false,
         }
     }
 
@@ -119,29 +145,6 @@ impl Palette {
             m.focus.enter(focus, w, cx);
         });
     }
-}
-
-fn parse_quick_connect(query: &str) -> Option<(String, String, u16)> {
-    if query.is_empty() || query.contains(char::is_whitespace) {
-        return None;
-    }
-    let trimmed = query.strip_prefix("ssh://").unwrap_or(query);
-    let (username, host_port) = trimmed.split_once('@')?;
-    if username.is_empty() || host_port.is_empty() {
-        return None;
-    }
-    let (host, port) = if let Some((h, p)) = host_port.rsplit_once(':') {
-        if h.is_empty() {
-            return None;
-        }
-        (h, p.parse::<u16>().ok()?)
-    } else {
-        (host_port, 22)
-    };
-    if host.is_empty() {
-        return None;
-    }
-    Some((username.to_string(), host.to_string(), port))
 }
 
 fn tab_detail_key(kind: &TabKind) -> &'static str {
@@ -173,11 +176,32 @@ fn tab_detail_key(kind: &TabKind) -> &'static str {
 fn desktop_command_specs(demo: bool) -> Vec<CommandSpec> {
     let mut specs = vec![
         CommandSpec {
+            id: "cmd:open_files",
+            label_key: "sidebar.panels.files",
+            icon: LucideIcon::FolderOpen,
+            shortcut_action: None,
+            action: PaletteAction::Command(Action::Files),
+        },
+        CommandSpec {
+            id: "cmd:device_folder_ide",
+            label_key: "ide.open_device_folder",
+            icon: LucideIcon::FolderOpen,
+            shortcut_action: None,
+            action: PaletteAction::OpenDeviceFolder,
+        },
+        CommandSpec {
             id: "cmd:new_terminal",
             label_key: "command_palette.cmd_new_terminal",
             icon: LucideIcon::Terminal,
             shortcut_action: Some("app.newTerminal"),
             action: PaletteAction::Command(Action::Terminal),
+        },
+        CommandSpec {
+            id: "cmd:find_in_terminal",
+            label_key: Action::TerminalSearch.key(),
+            icon: LucideIcon::Search,
+            shortcut_action: Some("terminal.search"),
+            action: PaletteAction::Command(Action::TerminalSearch),
         },
         CommandSpec {
             id: "cmd:new_connection",
@@ -219,7 +243,14 @@ fn desktop_command_specs(demo: bool) -> Vec<CommandSpec> {
             label_key: "command_palette.cmd_split_horizontal",
             icon: LucideIcon::SplitSquareHorizontal,
             shortcut_action: Some("split.horizontal"),
-            action: PaletteAction::Command(Action::Split),
+            action: PaletteAction::Command(Action::Split(SplitDirection::Horizontal)),
+        },
+        CommandSpec {
+            id: "cmd:split_vertical",
+            label_key: "command_palette.cmd_split_vertical",
+            icon: LucideIcon::SplitSquareVertical,
+            shortcut_action: Some("split.vertical"),
+            action: PaletteAction::Command(Action::Split(SplitDirection::Vertical)),
         },
         CommandSpec {
             id: "cmd:zen_mode",
@@ -236,10 +267,10 @@ fn desktop_command_specs(demo: bool) -> Vec<CommandSpec> {
             action: PaletteAction::Command(Action::Assistant),
         },
         CommandSpec {
-            id: "cmd:toggle_panel",
-            label_key: "command_palette.cmd_toggle_panel",
-            icon: LucideIcon::LayoutList,
-            shortcut_action: Some("palette.eventLog"),
+            id: "cmd:notifications",
+            label_key: "event_log.audit.notifications",
+            icon: LucideIcon::Bell,
+            shortcut_action: None,
             action: PaletteAction::Command(Action::Notifications),
         },
         CommandSpec {
@@ -285,6 +316,48 @@ fn desktop_command_specs(demo: bool) -> Vec<CommandSpec> {
             action: PaletteAction::Command(Action::Theme),
         },
         CommandSpec {
+            id: "cmd:toggle_fullscreen",
+            label_key: "settings_view.keybindings.actions.app.toggleFullscreen",
+            icon: LucideIcon::Square,
+            shortcut_action: Some("app.toggleFullscreen"),
+            action: PaletteAction::ToggleFullscreen,
+        },
+        CommandSpec {
+            id: "cmd:nav_back",
+            label_key: "settings_view.keybindings.actions.app.navBack",
+            icon: LucideIcon::ChevronLeft,
+            shortcut_action: Some("app.navBack"),
+            action: PaletteAction::TabHistory(false),
+        },
+        CommandSpec {
+            id: "cmd:nav_forward",
+            label_key: "settings_view.keybindings.actions.app.navForward",
+            icon: LucideIcon::ChevronRight,
+            shortcut_action: Some("app.navForward"),
+            action: PaletteAction::TabHistory(true),
+        },
+        CommandSpec {
+            id: "cmd:close_pane",
+            label_key: "settings_view.keybindings.actions.split.closePane",
+            icon: LucideIcon::X,
+            shortcut_action: Some("split.closePane"),
+            action: PaletteAction::ClosePane,
+        },
+        CommandSpec {
+            id: "cmd:previous_pane",
+            label_key: "settings_view.keybindings.actions.split.navLeft",
+            icon: LucideIcon::ChevronLeft,
+            shortcut_action: Some("split.navLeft"),
+            action: PaletteAction::AdjacentPane(false),
+        },
+        CommandSpec {
+            id: "cmd:next_pane",
+            label_key: "settings_view.keybindings.actions.split.navRight",
+            icon: LucideIcon::ChevronRight,
+            shortcut_action: Some("split.navRight"),
+            action: PaletteAction::AdjacentPane(true),
+        },
+        CommandSpec {
             id: "cmd:font_increase",
             label_key: "command_palette.cmd_font_increase",
             icon: LucideIcon::Plus,
@@ -327,6 +400,13 @@ fn desktop_command_specs(demo: bool) -> Vec<CommandSpec> {
             action: PaletteAction::CursorStyle(SettingsCursorStyle::Underline),
         },
         CommandSpec {
+            id: "cmd:open_plugin_manager",
+            label_key: "command_palette.cmd_open_plugin_manager",
+            icon: LucideIcon::Puzzle,
+            shortcut_action: None,
+            action: PaletteAction::Command(Action::Plugins),
+        },
+        CommandSpec {
             id: "cmd:sidebar_sessions",
             label_key: "command_palette.cmd_sidebar_sessions",
             icon: LucideIcon::ListTree,
@@ -344,6 +424,13 @@ fn desktop_command_specs(demo: bool) -> Vec<CommandSpec> {
 
     if demo {
         specs.extend([
+            CommandSpec {
+                id: "cmd:demo_session_status",
+                label_key: "command_palette.cmd_demo_session_status",
+                icon: LucideIcon::Activity,
+                shortcut_action: None,
+                action: PaletteAction::DemoSessionStatus,
+            },
             CommandSpec {
                 id: "cmd:sidebar_sftp",
                 label_key: "command_palette.cmd_sidebar_sftp",
@@ -377,14 +464,7 @@ fn desktop_command_specs(demo: bool) -> Vec<CommandSpec> {
                 label_key: "command_palette.cmd_open_topology",
                 icon: LucideIcon::Network,
                 shortcut_action: None,
-                action: PaletteAction::OpenTopology,
-            },
-            CommandSpec {
-                id: "cmd:open_plugin_manager",
-                label_key: "command_palette.cmd_open_plugin_manager",
-                icon: LucideIcon::Puzzle,
-                shortcut_action: None,
-                action: PaletteAction::Command(Action::Plugins),
+                action: PaletteAction::Command(Action::Topology),
             },
             CommandSpec {
                 id: "cmd:open_cloud_sync",
@@ -399,13 +479,6 @@ fn desktop_command_specs(demo: bool) -> Vec<CommandSpec> {
                 icon: LucideIcon::BookOpen,
                 shortcut_action: None,
                 action: PaletteAction::Command(Action::Knowledge),
-            },
-            CommandSpec {
-                id: "cmd:open_files",
-                label_key: "sidebar.panels.files",
-                icon: LucideIcon::FolderOpen,
-                shortcut_action: None,
-                action: PaletteAction::Command(Action::Files),
             },
             CommandSpec {
                 id: "cmd:open_ide",
@@ -427,17 +500,10 @@ fn desktop_command_specs(demo: bool) -> Vec<CommandSpec> {
     specs.extend([
         CommandSpec {
             id: "cmd:disconnect_all",
-            label_key: "command_palette.cmd_disconnect_all",
+            label_key: "tabbar.close_terminals",
             icon: LucideIcon::Power,
             shortcut_action: None,
             action: PaletteAction::DisconnectAll,
-        },
-        CommandSpec {
-            id: "cmd:health_check",
-            label_key: "command_palette.cmd_health_check",
-            icon: LucideIcon::Activity,
-            shortcut_action: None,
-            action: PaletteAction::HealthCheck,
         },
         CommandSpec {
             id: "cmd:reset_settings",
@@ -480,7 +546,7 @@ fn desktop_help_specs() -> Vec<CommandSpec> {
 impl Workspace {
     fn spec_to_item(
         &self,
-        spec: CommandSpec,
+        spec: &CommandSpec,
         section: PaletteSection,
         cx: &App,
     ) -> PaletteItem<PaletteAction> {
@@ -496,59 +562,77 @@ impl Workspace {
             shortcut,
             count: None,
             active: false,
-            action: spec.action,
+            action: spec.action.clone(),
             disabled: false,
         }
     }
 
-    fn quick_connect_item(&self, query: &str) -> Option<PaletteItem<PaletteAction>> {
-        let (username, host, port) = parse_quick_connect(query)?;
-        let target = if port == 22 {
-            format!("{username}@{host}")
-        } else {
-            format!("{username}@{host}:{port}")
-        };
-        Some(PaletteItem {
+    fn quick_connect_item(&self, launch: &oxideterm_ssh_launch::TemporarySshLaunch) -> PaletteItem<PaletteAction> {
+        let target = oxideterm_ssh_launch::format_user_host_port_target(&launch.username, &launch.host, launch.port);
+        let needs_auth = !self.demo && launch.password.is_some();
+        PaletteItem {
             id: "quick_connect".to_string(),
             label: format!("{}: {target}", self.i18n.t("command_palette.quick_connect")),
             section: PaletteSection::QuickConnect,
             icon: LucideIcon::Zap,
-            detail: None,
+            detail: needs_auth.then(|| self.i18n.t("command_palette.gateway_auth_unavailable")),
             shortcut: None,
             count: None,
             active: false,
             value: format!("quick_connect {target}"),
-            action: PaletteAction::QuickConnect {
-                username,
-                host,
-                port,
-            },
-            disabled: false,
-        })
+            action: PaletteAction::QuickConnect,
+            disabled: needs_auth || (!self.demo && !self.ready),
+        }
     }
 
     fn ranked(&self, cx: &App) -> Vec<RankedItem<PaletteAction>> {
-        let raw_query = self.palette.model.read(cx).query();
+        let model = self.palette.model.read(cx);
+        let raw_query = model.query();
+        if model.content() == PaletteContent::TabScopes {
+            return self.scope_choices(raw_query,cx);
+        }
+        let launch = oxideterm_ssh_launch::parse_quick_ssh_launch(raw_query.trim_start());
+        if let Some(launch) = launch.as_ref().filter(|l| l.password.is_some()) {
+            // Credentials belong to the form, never the matcher, MRU, or an action payload.
+            return vec![RankedItem { item: self.quick_connect_item(launch), score: 4.0, highlights: Vec::new() }];
+        }
         let (mode, query) = parse_command_palette_query(raw_query);
         let active_tab_id = self.layout.active_tab_id();
 
-        let command_items: Vec<PaletteItem<PaletteAction>> = desktop_command_specs(self.demo)
-            .into_iter()
+        let command_items: Vec<PaletteItem<PaletteAction>> = self
+            .palette
+            .commands
+            .iter()
+            .filter(|spec| match spec.action {
+                PaletteAction::Command(a) => self.action_available(a, cx),
+                PaletteAction::OpenDeviceFolder => crate::files::can_pick_directory(),
+                PaletteAction::ToggleFullscreen => web_sys::window()
+                    .and_then(|w| w.document())
+                    .is_some_and(|d| d.fullscreen_enabled()),
+                PaletteAction::AdjacentPane(_) => self
+                    .layout
+                    .active_tab()
+                    .and_then(|t| t.root_pane.as_ref())
+                    .is_some_and(|r| r.pane_count() > 1),
+                PaletteAction::ClosePane => self
+                    .layout
+                    .active_tab()
+                    .is_some_and(|t| t.active_pane_id.is_some()),
+                PaletteAction::SelectSidebar(SidebarSection::Connections) => self.demo,
+                _ => true,
+            })
             .map(|spec| self.spec_to_item(spec, PaletteSection::Commands, cx))
             .collect();
 
         let session_items: Vec<PaletteItem<PaletteAction>> = self
             .layout
-            .main_tabs()
+            .unfiltered_main_tabs()
             .map(|(_, tab)| {
                 let is_ble_tab = tab.root_pane.as_ref().is_some_and(|root| {
                     let mut ids = Vec::new();
                     root.collect_session_ids(&mut ids);
-                    ids.iter().any(|sid| {
-                        self.sessions
-                            .get(sid)
-                            .is_some_and(|s| crate::ble::is_ble_node(&s.node))
-                    })
+                    ids.iter()
+                        .any(|sid| self.sessions.get(sid).is_some_and(|s| s.is_ble()))
                 });
                 let detail = if is_ble_tab {
                     self.i18n.t("modals.new_connection.transport_ble")
@@ -580,11 +664,17 @@ impl Workspace {
             .items
             .iter()
             .filter_map(|row| {
-                let SessionManagerOpenTarget::Connection(id) = &row.target else {
+                let (SessionManagerOpenTarget::Connection(id)
+                | SessionManagerOpenTarget::Ble(id)
+                | SessionManagerOpenTarget::StandaloneSftp(id)) = &row.target
+                else {
                     return None;
                 };
                 let is_ble = crate::ble::is_ble_node(id);
-                let connected = self.sessions.values().any(|s| &s.node == id);
+                let connected = self
+                    .sessions
+                    .values()
+                    .any(|s| &s.node == id && s.connected(self.ready));
                 let mut detail = row.subtitle.clone();
                 for tag in &row.tags {
                     if !tag.is_empty() {
@@ -598,6 +688,8 @@ impl Workspace {
                     section: PaletteSection::Connections,
                     icon: if is_ble {
                         LucideIcon::Bluetooth
+                    } else if matches!(row.target, SessionManagerOpenTarget::StandaloneSftp(_)) {
+                        LucideIcon::FolderSync
                     } else {
                         LucideIcon::Server
                     },
@@ -612,8 +704,10 @@ impl Workspace {
             })
             .collect();
 
-        let help_items: Vec<PaletteItem<PaletteAction>> = desktop_help_specs()
-            .into_iter()
+        let help_items: Vec<PaletteItem<PaletteAction>> = self
+            .palette
+            .help
+            .iter()
             .map(|spec| self.spec_to_item(spec, PaletteSection::Help, cx))
             .collect();
 
@@ -621,7 +715,7 @@ impl Workspace {
         rank_commands(
             mode,
             &query,
-            self.quick_connect_item(&query),
+            launch.as_ref().map(|l| self.quick_connect_item(l)),
             mru,
             command_items,
             session_items,
@@ -638,151 +732,160 @@ impl Workspace {
         }
     }
 
+    pub(super) fn command_for_shortcut(&self, id: &str) -> Option<PaletteAction> {
+        if id == "app.commandPalette" {
+            return Some(PaletteAction::Command(Action::Palette));
+        }
+        self.palette
+            .commands
+            .iter()
+            .chain(&self.palette.help)
+            .find(|spec| spec.shortcut_action == Some(id))
+            .map(|spec| spec.action.clone())
+    }
+
+    pub(super) fn execute_command(
+        &mut self,
+        action: PaletteAction,
+        w: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match action {
+            PaletteAction::Command(a) => self.action(a, w, cx),
+            PaletteAction::SelectScope(scope) => self.select_scope(scope,w,cx),
+            PaletteAction::OpenDeviceFolder => self.pick_device_project(w,cx),
+            PaletteAction::ToggleFullscreen => w.toggle_fullscreen(),
+            PaletteAction::TabHistory(forward) => {
+                let visible = self.layout.main_tabs().map(|(_, t)| t.id).collect();
+                if let Some(id) = self.layout.navigate_history(forward, &visible) {
+                    self.tab_request(
+                        oxideterm_gpui_shell::tabs::strip::ShellTabRequest::Select(id),
+                        w,
+                        cx,
+                    );
+                }
+            }
+            PaletteAction::AdjacentPane(forward) => self.pane_shortcut(Some(forward), w, cx),
+            PaletteAction::ClosePane => self.pane_shortcut(None, w, cx),
+            PaletteAction::ToggleLeftSidebar => {
+                self.request(ShellRequest::Toggle(RailSide::Left), w, cx);
+            }
+            PaletteAction::SelectSidebar(section) => {
+                self.request(ShellRequest::Select(section), w, cx);
+            }
+            PaletteAction::ActivateTab(id) => self.tab_request(
+                oxideterm_gpui_shell::tabs::strip::ShellTabRequest::Select(id),
+                w,
+                cx,
+            ),
+            PaletteAction::NextTab(delta) => {
+                if let Some(request) =
+                    oxideterm_gpui_shell::shortcuts::TabShortcut::Cycle(delta > 0)
+                        .request(&self.layout, self.layout.active_tab_id())
+                {
+                    self.tab_request(request, w, cx);
+                }
+            }
+            PaletteAction::CloseOtherTabs => {
+                let active = self.layout.active_tab_id();
+                let others: Vec<TabId> = self
+                    .layout
+                    .main_tabs()
+                    .map(|(_, t)| t.id)
+                    .filter(|id| Some(*id) != active)
+                    .collect();
+                self.request_close(crate::host::CloseTarget::Others(others), w, cx);
+            }
+            PaletteAction::CloseAllTabs => {
+                let all: Vec<TabId> = self.layout.main_tabs().map(|(_, t)| t.id).collect();
+                self.request_close(crate::host::CloseTarget::All(all), w, cx);
+            }
+            PaletteAction::Connect(node_id) => {
+                self.connect_catalog_item(&node_id, w, cx);
+            }
+            PaletteAction::QuickConnect => {
+                let Some(launch) = oxideterm_ssh_launch::parse_quick_ssh_launch(self.palette.model.read(cx).query().trim_start()) else { return };
+                self.palette_request(ShellPaletteRequest::Close, w, cx);
+                self.open_quick_ssh(launch, w, cx);
+            }
+            PaletteAction::FontAdjust(delta) => {
+                self.settings.update(cx, |s, cx| {
+                    s.edit_preferences(cx, |p| {
+                        let next = (p.terminal.font_size as i32 + delta).clamp(8, 32);
+                        p.terminal.font_size = next as i64;
+                    });
+                });
+            }
+            PaletteAction::FontReset => {
+                let default_size = PersistedSettings::default().terminal.font_size;
+                self.settings.update(cx, |s, cx| {
+                    s.edit_preferences(cx, |p| {
+                        p.terminal.font_size = default_size;
+                    });
+                });
+            }
+            PaletteAction::CursorStyle(style) => {
+                self.settings.update(cx, |s, cx| {
+                    s.edit_preferences(cx, |p| p.terminal.cursor_style = style);
+                });
+            }
+            PaletteAction::DisconnectAll => self.request_close_terminals(None, w, cx),
+            PaletteAction::DemoSessionStatus => {
+                let sessions = self.sessions.values().filter(|s| !s.is_ble());
+                let total = sessions.clone().count();
+                let running = sessions.filter(|s| s.connected(self.ready)).count();
+                let msg = self
+                    .i18n
+                    .t("command_palette.demo_session_status")
+                    .replace("{{running}}", &running.to_string())
+                    .replace("{{total}}", &total.to_string());
+                self.notifications_notice(msg, cx);
+            }
+            PaletteAction::SettingsTab(tab) => {
+                self.settings.update(cx, |s, cx| s.open_section(tab, cx));
+                self.action(Action::Settings, w, cx);
+            }
+            PaletteAction::ResetSettings => self.request_settings_reset(w, cx),
+            PaletteAction::ReloadWindow => {
+                if let Some(win) = web_sys::window() {
+                    let _ = win.location().reload();
+                }
+            }
+        }
+    }
+
     fn palette_request(&mut self, r: ShellPaletteRequest, w: &mut Window, cx: &mut Context<Self>) {
         match r {
             ShellPaletteRequest::Execute(id) => {
+                if !self.palette.model.read(cx).is_open()
+                    || self.palette.model.read(cx).is_closing()
+                {
+                    return;
+                }
                 if let Some(action) = self
                     .ranked(cx)
                     .into_iter()
-                    .find(|i| i.item.id == id)
+                    .find(|i| i.item.id == id && !i.item.disabled)
                     .map(|i| i.item.action)
                 {
-                    if id != "quick_connect" {
-                        let mru_id = id.clone();
-                        self.settings.update(cx, |s, cx| {
-                            s.edit_preferences(cx, |p| p.record_command_palette_use(&mru_id));
-                        });
+                    if !matches!(action, PaletteAction::QuickConnect) {
+                        if self.palette.model.read(cx).content() == PaletteContent::Commands {
+                            self.settings.update(cx, |s, cx| {
+                                s.edit_preferences(cx, |p| p.record_command_palette_use(&id));
+                            });
+                        }
+                        self.palette_request(ShellPaletteRequest::Close, w, cx);
                     }
-                    self.palette_request(ShellPaletteRequest::Close, w, cx);
-                    match action {
-                        PaletteAction::Command(a) => self.action(a, w, cx),
-                        PaletteAction::ToggleLeftSidebar => {
-                            self.request(ShellRequest::Toggle(RailSide::Left), w, cx);
-                        }
-                        PaletteAction::SelectSidebar(section) => {
-                            self.request(ShellRequest::Select(section), w, cx);
-                        }
-                        PaletteAction::ActivateTab(tab_id) => {
-                            self.layout.select_main_tab(Some(tab_id));
-                            if let Some(s) =
-                                self.active_session().and_then(|s| self.sessions.get(&s))
-                            {
-                                w.focus(&s.view.read(cx).focus_handle(cx), cx);
-                            } else {
-                                w.focus(&self.focus, cx);
-                            }
-                            self.changed(cx);
-                        }
-                        PaletteAction::NextTab(delta) => {
-                            let ids: Vec<TabId> =
-                                self.layout.main_tabs().map(|(_, t)| t.id).collect();
-                            if ids.len() > 1 {
-                                let cur =
-                                    self.layout
-                                        .active_tab_id()
-                                        .and_then(|id| ids.iter().position(|c| *c == id))
-                                        .unwrap_or(0) as isize;
-                                let next = (cur + delta).rem_euclid(ids.len() as isize) as usize;
-                                self.layout.select_main_tab(Some(ids[next]));
-                                self.changed(cx);
-                            }
-                        }
-                        PaletteAction::CloseOtherTabs => {
-                            let active = self.layout.active_tab_id();
-                            let others: Vec<TabId> = self
-                                .layout
-                                .main_tabs()
-                                .map(|(_, t)| t.id)
-                                .filter(|id| Some(*id) != active)
-                                .collect();
-                            for tab_id in others {
-                                self.close(tab_id, cx);
-                            }
-                        }
-                        PaletteAction::CloseAllTabs => {
-                            let all: Vec<TabId> =
-                                self.layout.main_tabs().map(|(_, t)| t.id).collect();
-                            for tab_id in all {
-                                self.close(tab_id, cx);
-                            }
-                        }
-                        PaletteAction::Connect(node_id) => {
-                            self.new_terminal(node_id, None, w, cx);
-                        }
-                        PaletteAction::QuickConnect {
-                            username,
-                            host,
-                            port,
-                        } => {
-                            let target = format!("{username}@{host}:{port}");
-                            self.new_terminal(target, None, w, cx);
-                        }
-                        PaletteAction::FontAdjust(delta) => {
-                            self.settings.update(cx, |s, cx| {
-                                s.edit_preferences(cx, |p| {
-                                    let next = (p.terminal.font_size as i32 + delta).clamp(8, 32);
-                                    p.terminal.font_size = next as i64;
-                                });
-                            });
-                        }
-                        PaletteAction::FontReset => {
-                            let default_size = PersistedSettings::default().terminal.font_size;
-                            self.settings.update(cx, |s, cx| {
-                                s.edit_preferences(cx, |p| {
-                                    p.terminal.font_size = default_size;
-                                });
-                            });
-                        }
-                        PaletteAction::CursorStyle(style) => {
-                            self.settings.update(cx, |s, cx| {
-                                s.edit_preferences(cx, |p| p.terminal.cursor_style = style);
-                            });
-                        }
-                        PaletteAction::DisconnectAll => {
-                            let nodes: Vec<String> =
-                                self.sessions.values().map(|s| s.node.clone()).collect();
-                            for node in nodes {
-                                self.disconnect_node(&node, cx);
-                            }
-                        }
-                        PaletteAction::HealthCheck => {
-                            let total = self.sessions.len();
-                            let healthy = if self.ready {
-                                total
-                            } else {
-                                self.ble_links.len()
-                            };
-                            let msg = self
-                                .i18n
-                                .t("command_palette.health_result")
-                                .replace("{{healthy}}", &healthy.to_string())
-                                .replace("{{total}}", &total.to_string());
-                            self.notifications_notice(msg, cx);
-                        }
-                        PaletteAction::OpenTopology => {
-                            self.pages.runtime_section = crate::pages::RuntimeSection::Topology;
-                            self.action(Action::Runtime, w, cx);
-                        }
-                        PaletteAction::SettingsTab(tab) => {
-                            self.settings.update(cx, |s, cx| s.open_section(tab, cx));
-                            self.action(Action::Settings, w, cx);
-                        }
-                        PaletteAction::ResetSettings => {
-                            self.settings.update(cx, |s, cx| {
-                                s.edit_preferences(cx, |p| *p = PersistedSettings::default());
-                            });
-                        }
-                        PaletteAction::ReloadWindow => {
-                            if let Some(win) = web_sys::window() {
-                                let _ = win.location().reload();
-                            }
-                        }
-                    }
+                    self.execute_command(action, w, cx);
                 }
             }
             ShellPaletteRequest::Close => {
                 let delay = exit_settle_duration(&self.tokens, MotionDuration::Control);
                 self.palette.model.update(cx, |m, cx| {
+                    if m.query().split_once('@').is_some_and(|(user_info, _)| user_info.trim_start_matches("ssh://").contains(':')) {
+                        use zeroize::Zeroize;
+                        m.take_query().zeroize();
+                    }
                     m.begin_close(delay, cx);
                     m.focus.restore(&self.focus, w, cx);
                 });

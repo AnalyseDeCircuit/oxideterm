@@ -1,5 +1,6 @@
 {
   "terminal": {
+    "demo_shell_welcome": "Đây là terminal mô phỏng trong trình duyệt. Nhập help để xem các lệnh.",
     "ssh_latency": {
       "measured": "Thời gian khứ hồi SSH: {{millis}} ms, gồm thời gian mạng và phản hồi máy chủ. Cập nhật {{seconds}} giây trước.",
       "pending": "Đang đo độ trễ SSH…",
@@ -101,6 +102,7 @@
     },
     "paste": {
       "edit_title": "Chỉnh sửa trước khi dán",
+      "clipboard_read_failed": "Không đọc được bộ nhớ tạm. Hãy dùng phím tắt để dán.",
       "send_by_line": "Gửi từng dòng",
       "stop_sending": "Dừng gửi",
       "interrupted": "Đã gửi trọn {{sent}} dòng. Dừng gửi ở dòng {{line}}.",
@@ -658,6 +660,7 @@
       "connection_failed": "Kết nối BLE thất bại: {error}",
       "runtime_init_failed": "Khởi tạo runtime BLE thất bại",
       "adapter_index_out_of_range": "Chỉ số bộ chuyển đổi Bluetooth {n} nằm ngoài phạm vi",
+      "write_failed": "Ghi qua Bluetooth thất bại. Hãy kết nối lại thiết bị để gửi tiếp.",
       "service_not_found": "Không tìm thấy dịch vụ {uuid}",
       "no_notify_write_pair": "Dịch vụ đã chọn không có cặp đặc tính notify+write"
     }

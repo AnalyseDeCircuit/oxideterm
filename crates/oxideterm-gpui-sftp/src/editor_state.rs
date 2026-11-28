@@ -99,6 +99,7 @@ impl SftpWorkspaceEntity {
         self.preview_pane = Some(pane);
         self.preview_path = Some(file.path.clone());
         self.preview_content = None;
+        self.preview_image = None;
         self.preview_asset_owner = None;
         self.preview_plugin = plugin_preview;
         self.preview_markdown_scroll = MarkdownVirtualListScrollHandle::new();
@@ -119,6 +120,14 @@ impl SftpWorkspaceEntity {
         self.preview_generation
     }
 
+    pub(crate) fn preview_pane_is_editable(&self) -> bool {
+        #[cfg(target_family = "wasm")]
+        if self.preview_pane == Some(SftpPane::Local) && matches!(self.pair_primary_remote_id,Some(SftpRemoteId::DeviceFolder(_))) {
+            return true;
+        }
+        self.preview_pane == Some(SftpPane::Remote)
+    }
+
     pub fn open_preview_editor(
         &mut self,
         name: &str,
@@ -131,7 +140,7 @@ impl SftpWorkspaceEntity {
     ) {
         let Some((data, language, encoding, preview_path)) = ({
             let sftp = &*self;
-            if sftp.preview_pane != Some(SftpPane::Remote) {
+            if !sftp.preview_pane_is_editable() {
                 None
             } else {
                 match sftp.preview_content.as_deref() {

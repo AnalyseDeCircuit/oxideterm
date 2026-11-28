@@ -18,6 +18,7 @@
   "copy_address": "Sao chép địa chỉ",
   "copied": "Đã sao chép!",
   "forwards": {
+    "preview_hint": "Bản nháp quy tắc cho phiên demo này. Không có cổng nào được mở.",
     "quick": {
       "title": "Chuyển tiếp nhanh",
       "jupyter": "Jupyter (8888)",

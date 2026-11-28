@@ -4,233 +4,10 @@
 use crate::rag::chunker::estimate_tokens;
 use crate::rag::error::RagError;
 use crate::rag::store::RagStore;
-use crate::rag::types::{Bm25Stats, PostingEntry, is_cjk};
-use rust_stemmers::{Algorithm, Stemmer};
-use std::collections::{HashMap, HashSet};
-use std::sync::LazyLock;
+use crate::rag::types::{Bm25Stats, PostingEntry};
+use crate::rag_keyword::{idf, term_frequencies, term_score, tokenize};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
-
-// ═══════════════════════════════════════════════════════════════════════════
-// BM25 Parameters
-// ═══════════════════════════════════════════════════════════════════════════
-
-const K1: f64 = 1.2;
-const B: f64 = 0.75;
-
-/// Common English stop words filtered from BM25 tokens to reduce noise.
-/// CJK tokens are not affected (bigram tokenizer has no equivalent concept).
-static ENGLISH_STOP_WORDS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
-    HashSet::from([
-        "a",
-        "about",
-        "above",
-        "after",
-        "again",
-        "against",
-        "all",
-        "also",
-        "am",
-        "an",
-        "and",
-        "any",
-        "are",
-        "as",
-        "at",
-        "be",
-        "because",
-        "been",
-        "before",
-        "being",
-        "below",
-        "between",
-        "both",
-        "but",
-        "by",
-        "can",
-        "cannot",
-        "could",
-        "did",
-        "do",
-        "does",
-        "doing",
-        "down",
-        "during",
-        "each",
-        "few",
-        "for",
-        "from",
-        "further",
-        "get",
-        "got",
-        "had",
-        "has",
-        "have",
-        "having",
-        "he",
-        "her",
-        "here",
-        "hers",
-        "herself",
-        "him",
-        "himself",
-        "his",
-        "how",
-        "if",
-        "in",
-        "into",
-        "is",
-        "it",
-        "its",
-        "itself",
-        "just",
-        "let",
-        "ll",
-        "me",
-        "might",
-        "more",
-        "most",
-        "must",
-        "my",
-        "myself",
-        "no",
-        "nor",
-        "not",
-        "now",
-        "of",
-        "off",
-        "on",
-        "once",
-        "only",
-        "or",
-        "other",
-        "our",
-        "ours",
-        "ourselves",
-        "out",
-        "over",
-        "own",
-        "re",
-        "same",
-        "shall",
-        "she",
-        "should",
-        "so",
-        "some",
-        "such",
-        "than",
-        "that",
-        "the",
-        "their",
-        "theirs",
-        "them",
-        "themselves",
-        "then",
-        "there",
-        "these",
-        "they",
-        "this",
-        "those",
-        "through",
-        "to",
-        "too",
-        "under",
-        "until",
-        "up",
-        "upon",
-        "ve",
-        "very",
-        "was",
-        "we",
-        "were",
-        "what",
-        "when",
-        "where",
-        "which",
-        "while",
-        "who",
-        "whom",
-        "why",
-        "will",
-        "with",
-        "won",
-        "would",
-        "you",
-        "your",
-        "yours",
-        "yourself",
-        "yourselves",
-    ])
-});
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Tokenizer — character bigram for CJK, whitespace split for ASCII
-// ═══════════════════════════════════════════════════════════════════════════
-
-/// Tokenize text into a set of terms for BM25 indexing.
-/// CJK characters are split into overlapping character bigrams.
-/// ASCII/Latin text is split on whitespace and lowercased.
-pub fn tokenize(text: &str) -> Vec<String> {
-    let mut tokens = Vec::new();
-    let mut ascii_buf = String::new();
-    let chars: Vec<char> = text.chars().collect();
-    let len = chars.len();
-
-    let mut i = 0;
-    while i < len {
-        let ch = chars[i];
-
-        if is_cjk(ch) {
-            // Flush any accumulated ASCII token
-            flush_ascii(&mut ascii_buf, &mut tokens);
-
-            // Emit character bigrams
-            if i + 1 < len && is_cjk(chars[i + 1]) {
-                let mut bigram = String::with_capacity(8);
-                bigram.push(ch);
-                bigram.push(chars[i + 1]);
-                tokens.push(bigram);
-            } else {
-                // Single CJK char (end of run) — emit as unigram
-                tokens.push(ch.to_string());
-            }
-            i += 1;
-        } else if ch.is_alphanumeric() || ch == '_' || ch == '-' {
-            ascii_buf.push(ch.to_ascii_lowercase());
-            i += 1;
-        } else {
-            // Whitespace or punctuation — flush ASCII buffer
-            flush_ascii(&mut ascii_buf, &mut tokens);
-            i += 1;
-        }
-    }
-    flush_ascii(&mut ascii_buf, &mut tokens);
-    tokens
-}
-
-/// Compute term frequency map: term → count.
-pub fn term_frequencies(tokens: &[String]) -> HashMap<String, f32> {
-    let mut freqs: HashMap<String, f32> = HashMap::new();
-    for t in tokens {
-        *freqs.entry(t.clone()).or_insert(0.0) += 1.0;
-    }
-    freqs
-}
-
-/// Snowball English stemmer (thread-safe, zero-alloc internal state).
-static STEMMER: LazyLock<Stemmer> = LazyLock::new(|| Stemmer::create(Algorithm::English));
-
-fn flush_ascii(buf: &mut String, tokens: &mut Vec<String>) {
-    if !buf.is_empty() {
-        // Filter out English stop words; allow all other tokens (including single-char
-        // technical terms like "c", "r", "w" that are common in terminal/ops context)
-        if !ENGLISH_STOP_WORDS.contains(buf.as_str()) {
-            // Apply Snowball stemming so "deployments" and "deploying" match "deploy"
-            let stemmed = STEMMER.stem(buf);
-            tokens.push(stemmed.into_owned());
-        }
-        buf.clear();
-    }
-}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // BM25 Index Building
@@ -372,8 +149,7 @@ pub fn search_bm25(
         }
 
         // IDF: log((N - df + 0.5) / (df + 0.5) + 1)
-        let df = postings.len() as f64;
-        let idf = ((doc_count as f64 - df + 0.5) / (df + 0.5) + 1.0).ln();
+        let idf = idf(doc_count, postings.len());
 
         for entry in &postings {
             if filter && !valid_chunks.contains(&entry.chunk_id) {
@@ -388,9 +164,7 @@ pub fn search_bm25(
                 // Fallback for legacy postings without stored doc_length
                 avg_dl
             };
-            let tf_norm = (tf * (K1 + 1.0)) / (tf + K1 * (1.0 - B + B * dl / avg_dl));
-
-            *scores.entry(entry.chunk_id.clone()).or_insert(0.0) += idf * tf_norm;
+            *scores.entry(entry.chunk_id.clone()).or_insert(0.0) += term_score(idf, tf, dl, avg_dl);
         }
     }
 

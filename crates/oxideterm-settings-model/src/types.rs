@@ -893,6 +893,98 @@ pub enum SettingsBackgroundTabIcon {
     Terminal,
 }
 
+pub fn background_tab_options() -> &'static [(&'static str, &'static str, SettingsBackgroundTabIcon)]
+{
+    // Keys correspond to tab content, not individual pane or session IDs.
+    &[
+        (
+            "terminal",
+            "settings_view.terminal.bg_tab_terminal",
+            SettingsBackgroundTabIcon::Terminal,
+        ),
+        (
+            "local_terminal",
+            "settings_view.terminal.bg_tab_local",
+            SettingsBackgroundTabIcon::Monitor,
+        ),
+        (
+            "file_manager",
+            "settings_view.terminal.bg_tab_files",
+            SettingsBackgroundTabIcon::Folder,
+        ),
+        (
+            "graphics",
+            "settings_view.terminal.bg_tab_graphics",
+            SettingsBackgroundTabIcon::Monitor,
+        ),
+        (
+            "runtime",
+            "settings_view.terminal.bg_tab_runtime",
+            SettingsBackgroundTabIcon::Gauge,
+        ),
+        (
+            "connection_monitor",
+            "settings_view.terminal.bg_tab_monitor",
+            SettingsBackgroundTabIcon::Activity,
+        ),
+        (
+            "topology",
+            "settings_view.terminal.bg_tab_topology",
+            SettingsBackgroundTabIcon::Network,
+        ),
+        (
+            "notification_center",
+            "settings_view.terminal.bg_tab_notifications",
+            SettingsBackgroundTabIcon::Bell,
+        ),
+        (
+            "sftp",
+            "settings_view.terminal.bg_tab_sftp",
+            SettingsBackgroundTabIcon::FolderInput,
+        ),
+        (
+            "ide",
+            "settings_view.terminal.bg_tab_ide",
+            SettingsBackgroundTabIcon::Code2,
+        ),
+        (
+            "forwards",
+            "settings_view.terminal.bg_tab_forwards",
+            SettingsBackgroundTabIcon::ArrowLeftRight,
+        ),
+        (
+            "session_manager",
+            "settings_view.terminal.bg_tab_sessions",
+            SettingsBackgroundTabIcon::ListTree,
+        ),
+        (
+            "plugin_manager",
+            "settings_view.terminal.bg_tab_plugins",
+            SettingsBackgroundTabIcon::Puzzle,
+        ),
+        (
+            "plugin",
+            "settings_view.terminal.bg_tab_plugin",
+            SettingsBackgroundTabIcon::Puzzle,
+        ),
+        (
+            "cloud_sync",
+            "settings_view.terminal.bg_tab_cloud_sync",
+            SettingsBackgroundTabIcon::Cloud,
+        ),
+        (
+            "remote_desktop",
+            "settings_view.terminal.bg_tab_remote_desktop",
+            SettingsBackgroundTabIcon::Monitor,
+        ),
+        (
+            "settings",
+            "settings_view.terminal.bg_tab_settings",
+            SettingsBackgroundTabIcon::Settings,
+        ),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

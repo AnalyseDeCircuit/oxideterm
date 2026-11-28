@@ -35,7 +35,7 @@ pub(super) fn ai_providers_view(
     let req_owner = owner.downgrade();
     cx.new(|cx| {
         let view_weak: WeakEntity<AiProviderSettingsView> = cx.weak_entity();
-        AiProviderSettingsView::new(AiProviderBindings {
+        AiProviderSettingsView::for_session(AiProviderBindings {
             controls: Rc::new(move |cx| {
                 let entity = controls_owner.upgrade()?;
                 let state = entity.read(cx);
@@ -58,10 +58,11 @@ pub(super) fn ai_providers_view(
                         s.changed(cx);
                     }
                     AiProviderRequest::SaveKey { index, provider_id } => {
+                        if s.provider_id_at(index) != Some(provider_id.as_str()) { return; }
                         if s.fields.active == Some(SettingsInput::AiProviderApiKey(index)) {
                             s.fields.blur();
                         }
-                        if let Some(key) = s.ai_api_key_drafts.remove(&index)
+                        if let Some(key) = s.ai_api_key_drafts.remove(&provider_id)
                             && !key.trim().is_empty()
                         {
                             s.ai_api_keys.insert(provider_id, key);
@@ -74,7 +75,7 @@ pub(super) fn ai_providers_view(
                         if s.fields.active == Some(SettingsInput::AiProviderNewModel(index)) {
                             s.fields.blur();
                         }
-                        s.ai_new_model_drafts.remove(&index);
+                        if let Some(id) = s.provider_id_at(index).map(str::to_owned) { s.ai_new_model_drafts.remove(&id); }
                         cx.notify();
                     }
                     AiProviderRequest::Confirm(intent, _) => match intent {
@@ -87,6 +88,9 @@ pub(super) fn ai_providers_view(
                             s.changed(cx);
                         }
                         AiSettingsConfirmIntent::RemoveProvider { provider_id } => {
+                            s.fields.blur();
+                            s.ai_new_model_drafts.remove(&provider_id);
+                            s.ai_api_key_drafts.remove(&provider_id);
                             s.ai_api_keys.remove(&provider_id);
                             if let Some(index) = s.settings.ai.providers.iter().position(|p| {
                                 oxideterm_ai::provider_view(p)
@@ -195,8 +199,18 @@ pub(super) fn window_dispatch(
                 }
                 FinishSlider => s.slider = None,
                 ConfirmAiEnable => {
-                    crate::options::set_ai_enabled(&mut s.settings, true);
-                    s.changed(cx);
+                    s.fields.blur();
+                    s.focus.focus(window, cx);
+                    s.ai_confirm.update(cx, |dialog, cx| {
+                        dialog.open(
+                            crate::ai::confirm::AiSettingsConfirmIntent::Enable,
+                            None,
+                            s.tokens_cache,
+                            s.i18n.clone(),
+                            cx,
+                        )
+                    });
+                    cx.notify();
                 }
                 _ => {}
             }
@@ -210,6 +224,27 @@ impl PageState {
         let thumb = pages::tokens(&self.settings, dark)
             .metrics
             .ui_slider_thumb_size;
+        if slider == SettingsSlider::AppearanceBackgroundOpacity {
+            let Some(anchor) = self
+                .anchors
+                .get(&SelectAnchorId::SettingsAppearanceBackgroundOpacitySlider)
+            else {
+                return;
+            };
+            let position = slider_pointer_percent(
+                x - f32::from(anchor.bounds.left()),
+                f32::from(anchor.bounds.size.width).max(1.),
+                thumb,
+            );
+            let min = (oxideterm_settings::MIN_TERMINAL_BACKGROUND_OPACITY * 100.) as f32;
+            let max = (oxideterm_settings::MAX_TERMINAL_BACKGROUND_OPACITY * 100.) as f32;
+            let opacity = f64::from((min + (max - min) * position).round()) / 100.;
+            if self.settings.terminal.background_opacity != opacity {
+                self.settings.terminal.background_opacity = opacity;
+                self.changed(cx);
+            }
+            return;
+        }
         let (anchor, min, max, field) = match slider {
             SettingsSlider::TerminalFontSize => (
                 SelectAnchorId::SettingsTerminalFontSizeSlider,
@@ -390,7 +425,9 @@ impl PageState {
             KeybindingRequest::CloseReset { apply } => {
                 self.reset_open = false;
                 if apply {
-                    self.settings.keybindings.overrides.clear();
+                    for action in &self.catalog {
+                        self.settings.keybindings.overrides.remove(action.id.as_ref());
+                    }
                     self.changed(cx);
                 }
                 cx.notify();
@@ -426,7 +463,11 @@ impl PageState {
         cx: &mut Context<Self>,
     ) {
         let key = event.keystroke.key.as_str();
-        if self.document.is_some() {
+        if self.ai_confirm.read(cx).state().is_some() {
+            self.ai_confirm
+                .update(cx, |d, cx| d.handle_footer_key(&event.keystroke, cx));
+            window.prevent_default();
+        } else if self.document.is_some() {
             if key == "escape" {
                 self.document = None;
                 cx.notify();

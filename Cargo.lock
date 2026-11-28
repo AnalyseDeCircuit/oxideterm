@@ -3868,6 +3868,7 @@ dependencies = [
  "usvg",
  "uuid",
  "waker-fn",
+ "web-sys",
  "web-time",
  "windows 0.62.2",
  "zed-scap",
@@ -7253,6 +7254,7 @@ dependencies = [
  "oxideterm-portable-runtime",
  "oxideterm-remote-desktop",
  "oxideterm-secret-store",
+ "oxideterm-ssh-launch",
  "parking_lot",
  "quick-xml 0.39.4",
  "rand 0.10.2",
@@ -7473,6 +7475,7 @@ dependencies = [
  "oxideterm-gpui-audit",
  "oxideterm-gpui-background",
  "oxideterm-gpui-cloud-sync",
+ "oxideterm-gpui-command-sender",
  "oxideterm-gpui-connections",
  "oxideterm-gpui-editor",
  "oxideterm-gpui-file-manager",
@@ -7606,6 +7609,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxideterm-gpui-command-sender"
+version = "2.4.2"
+dependencies = [
+ "gpui-pre",
+ "oxideterm-environment",
+ "oxideterm-gpui-editor",
+ "oxideterm-gpui-ui",
+ "oxideterm-i18n",
+ "oxideterm-terminal-encoding",
+ "oxideterm-theme",
+ "oxideterm-workspace",
+ "uuid",
+ "web-time",
+ "zeroize",
+]
+
+[[package]]
 name = "oxideterm-gpui-connections"
 version = "2.4.2"
 dependencies = [
@@ -7666,6 +7686,7 @@ dependencies = [
  "tracing",
  "unicode-segmentation",
  "unicode-width",
+ "zeroize",
  "zip",
 ]
 
@@ -7697,6 +7718,7 @@ dependencies = [
  "gpui-pre",
  "oxideterm-editor-core",
  "oxideterm-forwarding",
+ "oxideterm-gpui-editor",
  "oxideterm-gpui-ui",
  "oxideterm-i18n",
  "oxideterm-ssh",
@@ -7865,6 +7887,7 @@ dependencies = [
  "oxideterm-gpui-platform",
  "oxideterm-gpui-shell",
  "oxideterm-gpui-terminal",
+ "oxideterm-gpui-terminal-view",
  "oxideterm-gpui-ui",
  "oxideterm-i18n",
  "oxideterm-plugin-manifest",
@@ -7895,6 +7918,7 @@ dependencies = [
 name = "oxideterm-gpui-sftp"
 version = "2.4.2"
 dependencies = [
+ "base64 0.22.1",
  "chrono",
  "gpui-pre",
  "gstreamer",
@@ -7997,7 +8021,9 @@ version = "2.4.2"
 dependencies = [
  "foldhash 0.2.0",
  "gpui-pre",
+ "oxideterm-gpui-editor",
  "oxideterm-gpui-ui",
+ "oxideterm-i18n",
  "oxideterm-settings",
  "oxideterm-terminal-emulator",
  "oxideterm-terminal-encoding",
@@ -8023,14 +8049,20 @@ dependencies = [
 name = "oxideterm-gpui-web"
 version = "2.4.2"
 dependencies = [
+ "base64 0.22.1",
+ "chrono",
+ "eventsource-stream",
  "futures",
  "gpui-pre",
  "js-sys",
  "oxideterm-ai",
  "oxideterm-ai-tasks",
  "oxideterm-connection-monitor",
+ "oxideterm-environment",
  "oxideterm-gpui-ai",
+ "oxideterm-gpui-command-sender",
  "oxideterm-gpui-connections",
+ "oxideterm-gpui-editor",
  "oxideterm-gpui-file-manager",
  "oxideterm-gpui-forwards",
  "oxideterm-gpui-host-tools",
@@ -8046,12 +8078,16 @@ dependencies = [
  "oxideterm-gpui-ui",
  "oxideterm-i18n",
  "oxideterm-ide-core",
+ "oxideterm-ide-fs",
  "oxideterm-local-files",
  "oxideterm-notification-center",
+ "oxideterm-plugin-manifest",
+ "oxideterm-preview",
  "oxideterm-quick-commands",
  "oxideterm-settings",
  "oxideterm-settings-model",
  "oxideterm-sftp",
+ "oxideterm-ssh-launch",
  "oxideterm-theme",
  "oxideterm-topology",
  "oxideterm-workspace",
@@ -8061,9 +8097,11 @@ dependencies = [
  "uuid",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+ "wasm-streams",
  "web-sys",
  "web-time",
  "zeroize",
+ "zip",
 ]
 
 [[package]]
@@ -8078,6 +8116,7 @@ name = "oxideterm-ide-core"
 version = "2.4.2"
 dependencies = [
  "oxideterm-editor-core",
+ "regex",
  "serde",
  "serde_json",
  "thiserror 2.0.20",
@@ -8242,6 +8281,7 @@ dependencies = [
 name = "oxideterm-plugin-manifest"
 version = "2.4.2"
 dependencies = [
+ "chrono",
  "oxideterm-remote-desktop",
  "serde",
  "serde_json",
@@ -8505,7 +8545,9 @@ dependencies = [
  "oxideterm-settings",
  "oxideterm-terminal-semantic",
  "oxideterm-theme",
+ "serde",
  "serde_json",
+ "uuid",
  "web-time",
  "zeroize",
 ]
@@ -8655,7 +8697,6 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
- "unicode-segmentation",
  "uuid",
  "windows 0.61.3",
  "zeroize",
@@ -8668,6 +8709,7 @@ dependencies = [
  "alacritty_terminal",
  "oxideterm-terminal-graphics",
  "oxideterm-terminal-model",
+ "regex",
  "web-time",
  "zeroize",
 ]
@@ -8677,6 +8719,7 @@ name = "oxideterm-terminal-encoding"
 version = "2.4.2"
 dependencies = [
  "encoding_rs",
+ "unicode-segmentation",
  "zeroize",
 ]
 

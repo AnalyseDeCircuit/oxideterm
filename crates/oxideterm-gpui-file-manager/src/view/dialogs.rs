@@ -20,7 +20,32 @@ fn file_manager_dialog_exit_shield() -> AnyElement {
         .into_any_element()
 }
 
+#[cfg(target_family = "wasm")]
+const HOST_FILE_ACTION: (LucideIcon, &str) = (LucideIcon::Download, "fileManager.download");
+#[cfg(not(target_family = "wasm"))]
+const HOST_FILE_ACTION: (LucideIcon, &str) = (LucideIcon::ExternalLink, "fileManager.openExternal");
+
 impl FileManagerView {
+    fn perform_host_file_action(&mut self, path: &str, cx: &mut Context<Self>) {
+        let fs = &self.file_manager.read(cx).fs;
+        #[cfg(target_family = "wasm")]
+        let result = fs.download(path);
+        #[cfg(not(target_family = "wasm"))]
+        let result = crate::filesystem::FileIo::Ready(fs.open_external(path));
+        if let Some(task) = result.deliver(self, cx, |this, result, cx| {
+            if let Err(error) = result {
+                this.push_file_manager_toast(
+                    this.i18n.t("fileManager.error"),
+                    Some(this.i18n.t(&error)),
+                    FileManagerNoticeKind::Error,
+                    cx,
+                );
+            }
+        }) {
+            task.detach();
+        }
+    }
+
     pub(super) fn render_file_manager_context_menu(
         &self,
         menu: FileManagerContextMenu,
@@ -59,23 +84,14 @@ impl FileManagerView {
                 item_count += 1;
             } else {
                 rows.push(self.render_file_manager_context_menu_item(
-                    LucideIcon::ExternalLink,
-                    self.i18n.t("fileManager.openExternal"),
+                    HOST_FILE_ACTION.0,
+                    self.i18n.t(HOST_FILE_ACTION.1),
                     false,
                     has_background,
                     {
                         let file = file.clone();
                         move |this, _event, _window, cx| {
-                            if let Err(error) =
-                                this.file_manager.read(cx).fs.open_external(&file.path)
-                            {
-                                this.push_file_manager_toast(
-                                    this.i18n.t("fileManager.error"),
-                                    Some(error),
-                                    FileManagerNoticeKind::Error,
-                                    cx,
-                                );
-                            }
+                            this.perform_host_file_action(&file.path, cx);
                         }
                     },
                     cx,
@@ -93,6 +109,7 @@ impl FileManagerView {
                 item_count += 2;
             }
         }
+        #[cfg(not(target_family = "wasm"))]
         if menu.file.is_some() {
             rows.push(self.render_file_manager_context_menu_item(
                 LucideIcon::FolderOpen,
@@ -137,7 +154,7 @@ impl FileManagerView {
                 LucideIcon::Pencil,
                 self.i18n.t("fileManager.cut"),
                 false,
-                false,
+                !self.selection_can_move(cx),
                 menu_loading,
                 has_background,
                 |this, _event, _window, cx| {
@@ -175,7 +192,7 @@ impl FileManagerView {
             && menu
                 .file
                 .as_ref()
-                .is_some_and(|file| can_extract_archive(&file.name))
+                .is_some_and(|file| self.file_manager.read(cx).fs.can_extract(&file.name))
         {
             rows.push(self.render_file_manager_context_menu_guarded_item(
                 LucideIcon::FolderArchive,
@@ -211,7 +228,7 @@ impl FileManagerView {
                 LucideIcon::Pencil,
                 self.i18n.t("fileManager.rename"),
                 false,
-                false,
+                !self.selection_can_move(cx),
                 menu_loading,
                 has_background,
                 {
@@ -325,17 +342,20 @@ impl FileManagerView {
             },
             cx,
         ));
-        rows.push(self.render_file_manager_context_menu_item(
-            LucideIcon::HardDrive,
-            self.i18n.t("fileManager.showDrives"),
-            false,
-            has_background,
-            |this, _event, _window, cx| {
-                this.open_file_manager_drives_dialog(cx);
-            },
-            cx,
-        ));
-        item_count += 5;
+        if !cfg!(target_family = "wasm") {
+            rows.push(self.render_file_manager_context_menu_item(
+                LucideIcon::HardDrive,
+                self.i18n.t("fileManager.showDrives"),
+                false,
+                has_background,
+                |this, _event, _window, cx| {
+                    this.open_file_manager_drives_dialog(cx);
+                },
+                cx,
+            ));
+            item_count += 1;
+        }
+        item_count += 4;
 
         let viewport = window.viewport_size();
         let viewport_height = f32::from(viewport.height);
@@ -356,7 +376,7 @@ impl FileManagerView {
             true,
             [
                 self.i18n.t("fileManager.open"),
-                self.i18n.t("fileManager.openExternal"),
+                self.i18n.t(HOST_FILE_ACTION.1),
                 self.i18n.t("fileManager.preview"),
                 self.i18n.t("fileManager.extract"),
                 self.i18n.t("fileManager.compress"),
@@ -948,6 +968,7 @@ impl FileManagerView {
                             selected_range: self.ime_selected_range_for_target(target, cx),
                             marked_text: self.marked_text_for_target(target, cx),
                         },
+                        cx,
                     )
                     .bg(file_manager_bg(self.tokens.ui.bg_sunken, has_background)),
                     |this, cx| {
@@ -1011,6 +1032,7 @@ impl FileManagerView {
                             selected_range: self.ime_selected_range_for_target(target, cx),
                             marked_text: self.marked_text_for_target(target, cx),
                         },
+                        cx,
                     )
                     .bg(file_manager_bg(self.tokens.ui.bg_sunken, has_background)),
                     |this, cx| {

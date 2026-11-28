@@ -669,66 +669,47 @@ impl HostToolsEntity {
         );
 
         let selector: AnyElement = if panel.instances.len() > 1 {
-            let active_index = panel
-                .instance
-                .as_ref()
-                .and_then(|selected| {
-                    panel
-                        .instances
-                        .iter()
-                        .position(|instance| instance.id() == selected.id())
-                })
-                .unwrap_or_default();
-            let items = panel
-                .instances
-                .iter()
-                .map(|instance| {
-                    let mut label = i18n.t(instance.engine.label_key());
-                    if let Some(version) = instance.server_version.as_deref() {
-                        label.push_str(" · ");
-                        label.push_str(version);
-                    }
-                    let active = panel
-                        .instance
-                        .as_ref()
-                        .is_some_and(|selected| selected.id() == instance.id());
-                    let instance_id = instance.id();
-                    oxideterm_gpui_ui::segmented_control_item_content(
-                        tokens,
-                        active,
-                        div()
-                            .w_full()
-                            .py(px(2.0))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .child(label)
-                            .into_any_element(),
-                    )
-                    .text_size(px(11.0))
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |host_tools, _event, _window, cx| {
-                            host_tools.select_container_instance(instance_id.clone(), cx);
-                            cx.stop_propagation();
-                            cx.notify();
-                        }),
-                    )
-                    .into_any_element()
-                })
-                .collect::<Vec<_>>();
-            oxideterm_gpui_ui::segmented_control(
-                tokens,
-                "host-container-instance-switcher",
-                oxideterm_gpui_ui::SegmentedControlOptions::new(
-                    active_index,
-                    active_index,
-                    panel.instances.len(),
-                )
-                .compact(300.0),
-                items,
-            )
-            .into_any_element()
+            let mut switcher = oxideterm_gpui_ui::tabs::tabs_list(tokens)
+                .w_full()
+                .min_w_0()
+                .h(px(26.0))
+                .p(px(2.0))
+                .rounded(px(tokens.radii.sm));
+            for instance in &panel.instances {
+                let mut label = i18n.t(instance.engine.label_key());
+                if let Some(version) = instance.server_version.as_deref() {
+                    label.push_str(" · ");
+                    label.push_str(version);
+                }
+                let active = panel
+                    .instance
+                    .as_ref()
+                    .is_some_and(|selected| selected.id() == instance.id());
+                let instance_id = instance.id();
+                switcher = switcher.child(
+                    oxideterm_gpui_ui::tabs::tabs_trigger(tokens, label, active)
+                        .min_w_0()
+                        .h_full()
+                        .overflow_hidden()
+                        .px(px(6.0))
+                        .py_0()
+                        .text_size(px(11.0))
+                        .when(!active, |el| {
+                            el.hover(move |style| {
+                                style.bg(rgb(theme.bg_hover)).text_color(rgb(theme.text))
+                            })
+                        })
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |host_tools, _event, _window, cx| {
+                                host_tools.select_container_instance(instance_id.clone(), cx);
+                                cx.stop_propagation();
+                                cx.notify();
+                            }),
+                        ),
+                );
+            }
+            switcher.into_any_element()
         } else {
             let label = match panel.instance.as_ref() {
                 Some(instance) => {
@@ -806,51 +787,42 @@ impl HostToolsEntity {
                 "sidebar.host_container.tabs.registries",
             ));
         }
-        let active_index = tabs
-            .iter()
-            .position(|(tab, _)| *tab == panel.tab)
-            .unwrap_or_default();
-        let items = tabs
-            .iter()
-            .map(|(tab, label_key)| {
-                let active = *tab == panel.tab;
-                let target = *tab;
-                oxideterm_gpui_ui::segmented_control_item_content(
-                    tokens,
-                    active,
-                    div()
-                        .w_full()
-                        .py(px(2.0))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .child(div().min_w_0().truncate().child(i18n.t(*label_key)))
-                        .into_any_element(),
-                )
-                // Seven possible tabs share one rail: trim the default item
-                // padding so every label keeps a readable slice.
-                .px(px(4.0))
-                .text_size(px(11.0))
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |host_tools, _event, _window, cx| {
-                        host_tools.select_container_tab(target, cx);
-                        cx.stop_propagation();
-                        cx.notify();
-                    }),
-                )
-                .into_any_element()
-            })
-            .collect::<Vec<_>>();
-        // Fill shares the panel width; a fixed width clipped the trailing
-        // tabs (Pods/Registries) outside the visible panel.
-        oxideterm_gpui_ui::segmented_control(
-            tokens,
-            "host-container-tab-switcher",
-            oxideterm_gpui_ui::SegmentedControlOptions::new(active_index, active_index, tabs.len()),
-            items,
-        )
-        .into_any_element()
+        let theme = tokens.ui;
+        // Reuse the compact tabs rail used by sibling host-tools panels rather
+        // than the card-bordered Fill segmented control, and trim horizontal
+        // padding so up to six tabs share the sidebar width cleanly.
+        let mut bar = oxideterm_gpui_ui::tabs::tabs_list(tokens)
+            .w_full()
+            .min_w_0()
+            .h(px(28.0))
+            .p(px(2.0))
+            .rounded(px(tokens.radii.sm));
+        for (tab, label_key) in tabs {
+            let active = tab == panel.tab;
+            bar = bar.child(
+                oxideterm_gpui_ui::tabs::tabs_trigger(tokens, i18n.t(label_key), active)
+                    .min_w_0()
+                    .h_full()
+                    .overflow_hidden()
+                    .px(px(4.0))
+                    .py_0()
+                    .text_size(px(11.0))
+                    .when(!active, |el| {
+                        el.hover(move |style| {
+                            style.bg(rgb(theme.bg_hover)).text_color(rgb(theme.text))
+                        })
+                    })
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |host_tools, _event, _window, cx| {
+                            host_tools.select_container_tab(tab, cx);
+                            cx.stop_propagation();
+                            cx.notify();
+                        }),
+                    ),
+            );
+        }
+        bar.into_any_element()
     }
 
     #[allow(clippy::too_many_arguments)]

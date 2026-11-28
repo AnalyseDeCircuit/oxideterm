@@ -98,6 +98,7 @@ pub(crate) struct QuickCommandEditorDraft {
 #[derive(Clone)]
 pub struct QuickCommandExecutionDraft {
     pub command: QuickCommand,
+    pub targets: Vec<oxideterm_quick_commands::QuickCommandTargetContext>,
     // Runtime substitutions may contain credentials, so dialog ownership is
     // also the zeroization boundary for every entered value.
     pub parameter_values: Vec<Zeroizing<String>>,
@@ -450,6 +451,14 @@ impl TerminalQuickCommandsState {
     }
 
     pub fn request_execution(&mut self, command: QuickCommand) {
+        self.request_execution_for(command, Vec::new());
+    }
+
+    pub fn request_execution_for(
+        &mut self,
+        command: QuickCommand,
+        targets: Vec<oxideterm_quick_commands::QuickCommandTargetContext>,
+    ) {
         self.editor_scroll = gpui::ScrollHandle::new();
         self.store.focused_input = None;
         let parameter_values = command
@@ -459,6 +468,7 @@ impl TerminalQuickCommandsState {
             .collect();
         self.pending_execution = Some(QuickCommandExecutionDraft {
             command,
+            targets,
             parameter_values,
         });
         self.open = true;
@@ -738,6 +748,20 @@ impl TerminalQuickCommandsState {
             self.store.highlighted_command = None;
         }
         true
+    }
+
+    pub(crate) fn commit_field(&mut self, input: QuickCommandInput, text: &str) {
+        let Some(value) = self.input_value_mut(input) else {
+            return;
+        };
+        if value != text {
+            use zeroize::Zeroize;
+            value.zeroize();
+            value.push_str(text);
+            if input == QuickCommandInput::Search {
+                self.store.highlighted_command = None;
+            }
+        }
     }
 
     pub fn move_highlight(

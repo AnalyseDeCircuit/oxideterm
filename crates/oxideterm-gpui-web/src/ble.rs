@@ -7,7 +7,7 @@
 
 use futures::{StreamExt, channel::mpsc};
 use gpui::{AsyncApp, Task};
-use js_sys::{Array, DataView, Function, Object, Promise, Reflect, Uint8Array};
+use js_sys::{Array, DataView, Function, Promise, Reflect, Uint8Array};
 use oxideterm_gpui_connections::{form_model::SerialLineEnding, form_state::WebBleServiceSummary};
 use uuid::Uuid;
 use wasm_bindgen::{JsCast, JsValue, closure::Closure};
@@ -34,7 +34,7 @@ const OPTIONAL_SERVICES: &[&str] = &[
     BATTERY_SERVICE_UUID,
 ];
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct BleSessionConfig {
     pub service_uuid: Option<Uuid>,
     pub input_line_ending: SerialLineEnding,
@@ -44,7 +44,7 @@ pub struct BleSessionConfig {
     pub write_without_response: bool,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct BleProfile {
     pub name: String,
     pub device_id: Option<String>,
@@ -64,6 +64,7 @@ pub struct PairedWebBle {
 
 pub enum BleEvent {
     Rx(Vec<u8>),
+    WriteFailed,
     Disconnected,
 }
 
@@ -80,29 +81,18 @@ pub struct BleConnectionInfo {
 pub struct WebBleLink {
     device: JsValue,
     gatt: JsValue,
-    rx_char: Option<JsValue>,
-    write_tx: mpsc::UnboundedSender<Vec<u8>>,
+    _lease: BleLease,
+    _notifications: Option<BleSubscription>,
+    write_tx: Option<mpsc::UnboundedSender<zeroize::Zeroizing<Vec<u8>>>>,
     chunk_size: usize,
     input_line_ending: SerialLineEnding,
     local_echo: bool,
-    on_notify: Option<Closure<dyn FnMut(JsValue)>>,
     on_disconnect: Option<Closure<dyn FnMut(JsValue)>>,
     _writer: Task<()>,
 }
 
 impl Drop for WebBleLink {
     fn drop(&mut self) {
-        if let (Some(rx), Some(cb)) = (&self.rx_char, &self.on_notify) {
-            let _ = js_call(
-                rx,
-                "removeEventListener",
-                &[
-                    JsValue::from_str("characteristicvaluechanged"),
-                    cb.as_ref().clone(),
-                ],
-            );
-            let _ = js_call(rx, "stopNotifications", &[]);
-        }
         if let Some(cb) = &self.on_disconnect {
             let _ = js_call(
                 &self.device,
@@ -112,9 +102,6 @@ impl Drop for WebBleLink {
                     cb.as_ref().clone(),
                 ],
             );
-        }
-        if js_bool(&self.gatt, "connected") {
-            let _ = js_call(&self.gatt, "disconnect", &[]);
         }
     }
 }
@@ -136,77 +123,106 @@ pub fn known_service_label(uuid: Uuid) -> String {
     }
 }
 
-/// Prompts the browser's Web Bluetooth device picker, connects GATT, and
-/// enumerates all accessible primary services and their TX/RX capabilities.
-pub async fn pair_and_inspect(extra_service: Option<Uuid>) -> Result<PairedWebBle, String> {
-    let window = web_sys::window().ok_or_else(|| "Browser window unavailable".to_string())?;
-    let navigator: JsValue = window.navigator().into();
-    let bluetooth = js_prop(&navigator, "bluetooth")?;
-    if bluetooth.is_undefined() || bluetooth.is_null() {
-        return Err(
-            "Web Bluetooth is unavailable in this browser or context (use Chrome/Edge on localhost or HTTPS)"
-                .into(),
-        );
-    }
+pub fn available() -> bool {
+    web_sys::window()
+        .filter(|w| w.is_secure_context())
+        .and_then(|w| js_prop(&w.navigator().into(), "bluetooth").ok())
+        .and_then(|api| js_prop(&api, "requestDevice").ok())
+        .is_some_and(|method| method.is_function())
+}
 
-    let options = Object::new();
-    Reflect::set(&options, &"acceptAllDevices".into(), &JsValue::TRUE).map_err(js_err)?;
-    let optional_services = Array::new();
+#[wasm_bindgen::prelude::wasm_bindgen(module = "/src/ble/discovery.mjs")]
+extern "C" {
+    #[wasm_bindgen(js_name = chooseDevice)]
+    fn choose_device(bluetooth: &JsValue, services: &Array, expected_id: Option<&str>) -> Promise;
+    #[wasm_bindgen(js_name = inspectServices)]
+    fn inspect_services(device: &JsValue) -> Promise;
+    type BrowserBleLease;
+    #[wasm_bindgen(js_name = subscribeRx)]
+    fn subscribe_rx(characteristic: &JsValue, callback: &JsValue) -> BrowserBleLease;
+    #[wasm_bindgen(js_name = retainGatt)]
+    fn retain_gatt(gatt: &JsValue) -> BrowserBleLease;
+    #[wasm_bindgen(method, getter, structural)]
+    fn ready(this: &BrowserBleLease) -> Promise;
+    #[wasm_bindgen(method, structural)]
+    fn release(this: &BrowserBleLease);
+}
+
+struct BleLease(BrowserBleLease);
+
+struct BleSubscription {
+    // Release the JS listener before the wasm callback is destroyed.
+    _lease: BleLease,
+    _callback: Closure<dyn FnMut(JsValue)>,
+}
+
+impl Drop for BleLease {
+    fn drop(&mut self) {
+        self.0.release();
+    }
+}
+
+pub fn pair_and_inspect(
+    extra_service: Option<Uuid>,
+    expected_id: Option<&str>,
+) -> impl Future<Output = Result<Option<PairedWebBle>, &'static str>> + use<> {
+    let bluetooth = web_sys::window()
+        .and_then(|w| js_prop(&w.navigator().into(), "bluetooth").ok())
+        .unwrap_or(JsValue::UNDEFINED);
+    let services = Array::new();
     for uuid in OPTIONAL_SERVICES {
-        optional_services.push(&JsValue::from_str(uuid));
+        services.push(&JsValue::from_str(uuid));
     }
     if let Some(extra) = extra_service {
-        let extra_str = extra.to_string();
-        if !OPTIONAL_SERVICES.contains(&extra_str.as_str()) {
-            optional_services.push(&JsValue::from_str(&extra_str));
+        let uuid = extra.to_string();
+        if !OPTIONAL_SERVICES.contains(&uuid.as_str()) {
+            services.push(&uuid.into());
         }
     }
-    Reflect::set(&options, &"optionalServices".into(), &optional_services).map_err(js_err)?;
+    let selected = JsFuture::from(choose_device(&bluetooth, &services, expected_id));
+    async move {
+        let device = selected
+            .await
+            .map_err(|err| match err.as_string().as_deref() {
+                Some("unavailable") => "modals.new_connection.ble_web_unavailable",
+                Some("denied") => "modals.new_connection.ble_web_denied",
+                Some("wrong-device") => "modals.new_connection.ble_web_wrong_device",
+                Some("inspect") => "modals.new_connection.ble_inspect_failed",
+                _ => "modals.new_connection.ble_scan_failed",
+            })?;
+        if device.is_null() {
+            return Ok(None);
+        }
+        inspect_device(device).await.map(Some)
+    }
+}
 
-    let device = js_await(js_call(&bluetooth, "requestDevice", &[options.into()])?).await?;
-    let id = js_string(&device, "id").unwrap_or_else(|| "ble-device".into());
+async fn inspect_device(device: JsValue) -> Result<PairedWebBle, &'static str> {
+    let failed = "modals.new_connection.ble_inspect_failed";
+    let id = js_string(&device, "id").ok_or(failed)?;
     let name = js_string(&device, "name")
         .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(|| "BLE Device".into());
-
-    let gatt = js_prop(&device, "gatt")?;
-    if gatt.is_undefined() || gatt.is_null() {
-        return Err("Selected Bluetooth device does not expose a GATT server".into());
-    }
-    let connected_gatt = js_await(js_call(&gatt, "connect", &[])?).await?;
-
+        .unwrap_or_else(|| id.clone());
+    let gatt = js_prop(&device, "gatt").map_err(|_| failed)?;
+    let summaries =
+        JsFuture::from(inspect_services(&device))
+            .await
+            .map_err(|err| match js_string(&err, "name").as_deref() {
+                Some("SecurityError" | "NotAllowedError") => "modals.new_connection.ble_web_denied",
+                _ => failed,
+            })?;
     let mut services = Vec::new();
-    if let Ok(promise) = js_call(&connected_gatt, "getPrimaryServices", &[])
-        && let Ok(list_val) = js_await(promise).await
-    {
-        let arr = Array::from(&list_val);
-        for svc_val in arr.iter() {
-            let Some(uuid) = js_string(&svc_val, "uuid").and_then(|u| parse_ble_uuid(&u)) else {
-                continue;
-            };
-            let mut has_write = false;
-            let mut has_write_without_response = false;
-            let mut has_notify = false;
-            if let Ok(chars_promise) = js_call(&svc_val, "getCharacteristics", &[])
-                && let Ok(chars_val) = js_await(chars_promise).await
-            {
-                let chars = Array::from(&chars_val);
-                for ch in chars.iter() {
-                    if let Ok(props) = js_prop(&ch, "properties") {
-                        has_write |= js_bool(&props, "write");
-                        has_write_without_response |= js_bool(&props, "writeWithoutResponse");
-                        has_notify |= js_bool(&props, "notify") || js_bool(&props, "indicate");
-                    }
-                }
-            }
-            services.push(WebBleServiceSummary {
-                uuid,
-                label: known_service_label(uuid),
-                has_write,
-                has_write_without_response,
-                has_notify,
-            });
-        }
+    for service in Array::from(&summaries).iter() {
+        let uuid = js_string(&service, "uuid")
+            .and_then(|s| parse_ble_uuid(&s))
+            .ok_or(failed)?;
+        services.push(WebBleServiceSummary {
+            uuid,
+            label: known_service_label(uuid),
+            has_write: js_bool(&service, "write"),
+            has_write_without_response: js_bool(&service, "writeWithoutResponse"),
+            has_notify: js_bool(&service, "notify"),
+        });
     }
 
     // Prioritize full-duplex UART services so the default selection works out of the box.
@@ -233,7 +249,7 @@ pub async fn pair_and_inspect(extra_service: Option<Uuid>) -> Result<PairedWebBl
         id,
         name,
         device,
-        gatt: connected_gatt,
+        gatt,
         services,
     })
 }
@@ -247,11 +263,8 @@ impl WebBleLink {
         events: mpsc::UnboundedSender<BleEvent>,
         cx: &mut AsyncApp,
     ) -> Result<(Self, BleConnectionInfo), String> {
-        let gatt = if js_bool(&paired.gatt, "connected") {
-            paired.gatt.clone()
-        } else {
-            js_await(js_call(&paired.gatt, "connect", &[])?).await?
-        };
+        let lease = BleLease(retain_gatt(&paired.gatt));
+        let gatt = JsFuture::from(lease.0.ready()).await.map_err(js_err)?;
 
         let target_uuid = config.service_uuid.or_else(|| {
             paired
@@ -353,33 +366,33 @@ impl WebBleLink {
                     }
                 }
             });
-            js_call(
-                rx,
-                "addEventListener",
-                &[
-                    JsValue::from_str("characteristicvaluechanged"),
-                    cb.as_ref().clone(),
-                ],
-            )?;
-            js_await(js_call(rx, "startNotifications", &[])?).await?;
-            Some(cb)
+            let lease = BleLease(subscribe_rx(rx, cb.as_ref()));
+            let subscription = BleSubscription {
+                _lease: lease,
+                _callback: cb,
+            };
+            JsFuture::from(subscription._lease.0.ready())
+                .await
+                .map_err(js_err)?;
+            Some(subscription)
         } else {
             None
         };
 
+        let writer_events = events.clone();
         let disconnect_cb = Closure::<dyn FnMut(JsValue)>::new(move |_event: JsValue| {
             let _ = events.unbounded_send(BleEvent::Disconnected);
         });
-        let _ = js_call(
+        js_call(
             &paired.device,
             "addEventListener",
             &[
                 JsValue::from_str("gattserverdisconnected"),
                 disconnect_cb.as_ref().clone(),
             ],
-        );
+        )?;
 
-        let (write_tx, mut write_rx) = mpsc::unbounded::<Vec<u8>>();
+        let (write_tx, mut write_rx) = mpsc::unbounded::<zeroize::Zeroizing<Vec<u8>>>();
         let has_tx = tx_char.is_some();
         let has_rx = rx_char.is_some();
         let prefer_without_response = config.write_without_response;
@@ -387,7 +400,6 @@ impl WebBleLink {
         // Serialize GATT writes to avoid Web Bluetooth's "GATT operation already in progress" rejection.
         let writer = cx.spawn(async move |_| {
             let Some((ch, can_write, can_write_nr)) = tx_char else {
-                while write_rx.next().await.is_some() {}
                 return;
             };
             let use_without_response = can_write_nr && (prefer_without_response || !can_write);
@@ -404,8 +416,13 @@ impl WebBleLink {
                     js_call(&ch, "writeValueWithResponse", &[arg.clone()])
                         .or_else(|_| js_call(&ch, "writeValue", &[arg]))
                 };
-                if let Ok(promise) = call {
-                    let _ = js_await(promise).await;
+                let written = match call {
+                    Ok(promise) => js_await(promise).await.is_ok(),
+                    Err(_) => false,
+                };
+                if !written {
+                    let _ = writer_events.unbounded_send(BleEvent::WriteFailed);
+                    break;
                 }
             }
         });
@@ -421,12 +438,12 @@ impl WebBleLink {
         let link = Self {
             device: paired.device,
             gatt,
-            rx_char,
-            write_tx,
+            _lease: lease,
+            _notifications: on_notify,
+            write_tx: has_tx.then_some(write_tx),
             chunk_size,
             input_line_ending: config.input_line_ending,
             local_echo: config.local_echo,
-            on_notify,
             on_disconnect: Some(disconnect_cb),
             _writer: writer,
         };
@@ -435,12 +452,26 @@ impl WebBleLink {
 
     /// Encodes terminal input according to the configured line ending, splits it
     /// into MTU-safe ATT chunks, and returns optional local-echo bytes.
-    pub fn write(&self, raw: &[u8]) -> Option<Vec<u8>> {
-        let encoded = apply_input_line_ending(raw, self.input_line_ending);
-        for chunk in encoded.chunks(self.chunk_size.max(20)) {
-            let _ = self.write_tx.unbounded_send(chunk.to_vec());
+    pub fn writable(&self) -> bool {
+        self.write_tx.as_ref().is_some_and(|tx| !tx.is_closed()) && js_bool(&self.gatt, "connected")
+    }
+
+    pub fn write(&self, raw: &[u8]) -> Result<Option<Vec<u8>>, ()> {
+        let encoded = zeroize::Zeroizing::new(apply_input_line_ending(raw, self.input_line_ending));
+        self.write_raw(&encoded)?;
+        Ok(self.local_echo.then(|| format_local_echo(raw)))
+    }
+
+    pub fn write_raw(&self, bytes: &[u8]) -> Result<(), ()> {
+        let tx = self.write_tx.as_ref().ok_or(())?;
+        if !self.writable() || bytes.is_empty() {
+            return Err(());
         }
-        self.local_echo.then(|| format_local_echo(raw))
+        for chunk in bytes.chunks(self.chunk_size.max(20)) {
+            tx.unbounded_send(zeroize::Zeroizing::new(chunk.to_vec()))
+                .map_err(|_| ())?;
+        }
+        Ok(())
     }
 }
 
@@ -551,7 +582,9 @@ async fn js_await(value: JsValue) -> Result<JsValue, String> {
 }
 
 fn js_err(err: JsValue) -> String {
-    if let Some(msg) = js_string(&err, "message")
+    if let Some(msg) = Reflect::get(&err, &"message".into())
+        .ok()
+        .and_then(|v| v.as_string())
         && !msg.trim().is_empty()
     {
         return msg;

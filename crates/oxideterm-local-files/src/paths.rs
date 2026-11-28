@@ -1,6 +1,4 @@
-use std::path::Path;
-#[cfg(not(target_family = "wasm"))]
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::LocalPathSegment;
 #[cfg(not(target_family = "wasm"))]
@@ -226,7 +224,11 @@ pub fn validate_local_name(name: &str) -> Result<(), String> {
 
 #[cfg(not(target_family = "wasm"))]
 pub fn unique_copy_path(path: &Path) -> PathBuf {
-    if !path.exists() {
+    unique_copy_path_with(path, Path::exists)
+}
+
+pub fn unique_copy_path_with(path: &Path, exists: impl Fn(&Path) -> bool) -> PathBuf {
+    if !exists(path) {
         return path.to_path_buf();
     }
     let parent = path.parent().unwrap_or_else(|| Path::new(""));
@@ -238,13 +240,17 @@ pub fn unique_copy_path(path: &Path) -> PathBuf {
         .extension()
         .map(|ext| format!(".{}", ext.to_string_lossy()))
         .unwrap_or_default();
-    for index in 1..=100 {
-        let candidate = parent.join(format!("{stem} ({index}){ext}"));
-        if !candidate.exists() {
+    for index in 1usize.. {
+        let candidate = if index == 101 {
+            parent.join(format!("{stem} (copy){ext}"))
+        } else {
+            parent.join(format!("{stem} ({index}){ext}"))
+        };
+        if !exists(&candidate) {
             return candidate;
         }
     }
-    parent.join(format!("{stem} (copy){ext}"))
+    unreachable!("a finite directory always has a free suffix")
 }
 
 #[cfg(not(target_family = "wasm"))]

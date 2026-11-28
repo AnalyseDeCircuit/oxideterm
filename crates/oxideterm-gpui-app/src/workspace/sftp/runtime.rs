@@ -17,32 +17,7 @@ fn sftp_terminal_directory_pane(
     recent.get(node).copied()
 }
 
-fn sftp_open_presentation(
-    preferred: oxideterm_settings::SftpPresentationPreference,
-    existing_tab: bool,
-    sftp_tab_active: bool,
-) -> oxideterm_settings::SftpPresentationPreference {
-    // The sidebar is hidden while an SFTP tab is active and must not take over
-    // its shared entity. Existing tabs also retain their detached-window routing.
-    if existing_tab || sftp_tab_active {
-        oxideterm_settings::SftpPresentationPreference::Tab
-    } else {
-        preferred
-    }
-}
-
-fn sidebar_sftp_target(
-    opened: Option<&NodeId>,
-    pinned: bool,
-    focused: Option<NodeId>,
-) -> Option<NodeId> {
-    let opened = opened?;
-    if pinned {
-        Some(opened.clone())
-    } else {
-        focused
-    }
-}
+use oxideterm_gpui_sftp::{sftp_open_presentation, sidebar_sftp_target};
 
 impl WorkspaceApp {
     fn dedicated_sftp_connection_slot(
@@ -1250,18 +1225,6 @@ mod remote_load_state_tests {
         assert!(sftp.remote_load_inflight);
     }
 
-    #[test]
-    fn sftp_presentation_reuses_tabs_without_changing_first_open_preference() {
-        use oxideterm_settings::SftpPresentationPreference::{Ask, Sidebar, Tab};
-
-        for preference in [Ask, Sidebar, Tab] {
-            assert_eq!(sftp_open_presentation(preference, false, false), preference);
-            // Reuse an existing tab even when another tab or window is focused.
-            assert_eq!(sftp_open_presentation(preference, true, false), Tab);
-            // A different node must not activate a hidden sidebar either.
-            assert_eq!(sftp_open_presentation(preference, false, true), Tab);
-        }
-    }
 
     #[test]
     fn sftp_ready_event_preserves_pending_terminal_cwd() {
@@ -1450,22 +1413,6 @@ mod tests {
         assert!(request.audit_request.is_none());
     }
 
-    #[test]
-    fn sidebar_follows_focus_unless_pinned_and_stays_closed_until_opened() {
-        let a = NodeId::new("a");
-        let b = NodeId::new("b");
-        assert_eq!(
-            sidebar_sftp_target(Some(&a), false, Some(b.clone())),
-            Some(b.clone())
-        );
-        assert_eq!(
-            sidebar_sftp_target(Some(&a), true, Some(b.clone())),
-            Some(a.clone())
-        );
-        assert_eq!(sidebar_sftp_target(Some(&a), false, None), None);
-        assert_eq!(sidebar_sftp_target(Some(&a), true, None), Some(a));
-        assert_eq!(sidebar_sftp_target(None, false, Some(b)), None);
-    }
 
     #[gpui::test]
     fn accepted_root_listing_clears_tree_state(cx: &mut gpui::TestAppContext) {

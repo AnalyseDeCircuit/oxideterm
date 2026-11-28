@@ -467,6 +467,7 @@ impl WorkspaceApp {
                     cx.stop_propagation();
                     return;
                 }
+                if this.tab_context_menu.is_some() { return; }
                 if this.active_window_modal_owner(cx).is_some() {
                     // Yield only to the modal's own input or editor, never background routing.
                     return;
@@ -1437,8 +1438,8 @@ impl WorkspaceApp {
             .when_some(self.render_split_drop_preview(window), |root, preview| {
                 root.child(preview)
             })
-            .when_some(self.render_tab_context_menu(window, cx), |root, menu| {
-                root.child(menu)
+            .when_some(self.tab_context_menu.as_ref(), |root, (_, menu)| {
+                root.child(menu.clone())
             })
             .at(DesktopPortal::TerminalCastPlayer as u16)
             .when_some(self.render_terminal_cast_player(cx), |root, player| {

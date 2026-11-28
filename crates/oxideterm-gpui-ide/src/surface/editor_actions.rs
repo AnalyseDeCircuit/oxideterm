@@ -707,8 +707,12 @@ impl IdeSurface {
             return;
         };
         if !self.file_open_errors.contains_key(&tab_id) {
+            let target = PendingEditorReveal {
+                line: hit.line,
+                column: hit.column,
+            };
             self.pending_search_queries
-                .insert(tab_id, (self.search.query.clone(), hit.line));
+                .insert(tab_id, (self.search.query.clone(), target));
             self.apply_pending_search_query(tab_id, cx);
         }
     }
@@ -717,12 +721,12 @@ impl IdeSurface {
         let Some(editor) = self.editors.get(&tab_id).cloned() else {
             return;
         };
-        let Some((query, line)) = self.pending_search_queries.remove(&tab_id) else {
+        let Some((query, hit)) = self.pending_search_queries.remove(&tab_id) else {
             return;
         };
         self.show_markdown_source(tab_id, cx);
         editor.update(cx, |editor, cx| {
-            editor.set_find_query_at_line(query, line, cx)
+            editor.show_project_match(query, hit.line, hit.column, cx)
         });
     }
 
@@ -2372,6 +2376,11 @@ impl IdeSurface {
         };
         let text = editor.read(cx).buffer().shared_text();
         let _ = self.workspace.replace_buffer_text(tab_id, text);
+    }
+
+    pub fn has_unsaved_changes(&mut self, cx: &mut Context<Self>) -> bool {
+        self.sync_all_editors(cx);
+        self.workspace.has_dirty_buffers()
     }
 
     fn sync_all_editors(&mut self, cx: &mut Context<Self>) {

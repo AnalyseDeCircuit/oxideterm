@@ -1,7 +1,5 @@
-#[cfg(not(target_family = "wasm"))]
 use std::path::Path;
 
-#[cfg(not(target_family = "wasm"))]
 use crate::{LocalArchiveEntry, LocalArchiveInfo};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -193,16 +191,18 @@ pub fn extract_local_archive(
 #[cfg(not(target_family = "wasm"))]
 pub fn list_local_archive_contents(path: &str) -> Result<LocalArchiveInfo, String> {
     use std::fs::File;
-    use zip::ZipArchive;
 
     let file = File::open(path).map_err(|error| format!("Failed to open archive: {error}"))?;
-    let mut archive =
-        ZipArchive::new(file).map_err(|error| format!("Failed to read archive: {error}"))?;
+    list_archive_contents(file)
+}
+
+pub fn list_archive_contents(source: impl std::io::Read + std::io::Seek) -> Result<LocalArchiveInfo, String> {
+    let mut archive = zip::ZipArchive::new(source).map_err(|error| format!("Failed to read archive: {error}"))?;
     let mut entries = Vec::new();
     let mut total_files = 0;
     let mut total_dirs = 0;
-    let mut total_size = 0;
-    let mut compressed_size = 0;
+    let mut total_size = 0u64;
+    let mut compressed_size = 0u64;
 
     for index in 0..archive.len() {
         let file = archive
@@ -227,8 +227,8 @@ pub fn list_local_archive_contents(path: &str) -> Result<LocalArchiveInfo, Strin
             total_dirs += 1;
         } else {
             total_files += 1;
-            total_size += size;
-            compressed_size += comp_size;
+            total_size = total_size.checked_add(size).ok_or("Invalid ZIP size")?;
+            compressed_size = compressed_size.checked_add(comp_size).ok_or("Invalid ZIP size")?;
         }
         let display_name = Path::new(&name)
             .file_name()

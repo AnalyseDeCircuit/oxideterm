@@ -46,56 +46,31 @@ pub(super) fn tokens(settings: &PersistedSettings, dark: bool) -> ThemeTokens {
 }
 
 fn font_preview(settings: &PersistedSettings, cx: &App) -> TerminalPreviewFont {
+    use oxideterm_gpui_terminal_view::metrics::{
+        resolve_portable_terminal_font, terminal_letter_spacing_for_font,
+        terminal_line_height_for_font,
+    };
     let term = &settings.terminal;
-    let configured = term
-        .font_family
-        .terminal_family_name(&term.custom_font_family);
-    let families = oxideterm_gpui_ui::typography::css_font_family_stack(&configured);
-    let mut font = gpui::font(settings_mono_font_family(settings));
-    font.weight = gpui::FontWeight(term.font_weight as f32);
-    if !term.font_ligatures {
-        font.features = gpui::FontFeatures::disable_ligatures();
-    }
-    let (available, missing): (Vec<_>, Vec<_>) = families.into_iter().partition(|family| {
-        cx.text_system()
-            .font_id(&gpui::Font {
-                family: family.clone(),
-                ..font.clone()
-            })
-            .is_ok()
-    });
-    if let Some(primary) = available.first() {
-        font.family = primary.clone();
-    }
-    let fallbacks = available
-        .iter()
-        .skip(1)
-        .map(ToString::to_string)
-        .chain(
-            oxideterm_gpui_ui::typography::css_font_family_stack(&term.cjk_font_family)
-                .into_iter()
-                .map(|f| f.to_string()),
-        )
-        .collect();
-    font.fallbacks = Some(gpui::FontFallbacks::from_fonts(fallbacks));
+    let resolved = resolve_portable_terminal_font(cx.text_system(), term);
     let size = px(term.font_size as f32);
-    let font_id = cx.text_system().resolve_font(&font);
-    let width = cx.text_system().layout_width(font_id, size, 'm');
     let spacing = (term.character_spacing
         * oxideterm_settings::TERMINAL_CHARACTER_SPACING_BASELINE_SCALE) as f32;
-    let height = f32::from(cx.text_system().ascent(font_id, size)).max(0.0)
-        + f32::from(cx.text_system().descent(font_id, size)).abs();
     TerminalPreviewFont {
-        font,
+        line_height: terminal_line_height_for_font(
+            cx.text_system(),
+            &resolved.font,
+            size,
+            term.line_height as f32,
+        ),
+        letter_spacing: terminal_letter_spacing_for_font(
+            cx.text_system(),
+            &resolved.font,
+            size,
+            spacing,
+        ),
+        font: resolved.font,
         font_size: size,
-        line_height: px((if height > 0.0 {
-            height
-        } else {
-            f32::from(size)
-        } * term.line_height as f32)
-            .max(1.0)),
-        letter_spacing: Some(width * (spacing - 1.0)),
-        unavailable_families: missing.into_iter().map(|f| f.to_string()).collect(),
+        unavailable_families: resolved.unavailable_families,
     }
 }
 
@@ -115,7 +90,7 @@ pub(super) fn render_section(
             c.general_preference_section(section, cx)
         }
         AiGeneralSettings | AiGeneralPrivacy | AiToolsWebSearch => {
-            crate::ai::basic::basic_section(&c, section, cx)
+            crate::ai::basic::basic_section(&c, section, true, cx)
         }
         AiContextControls => {
             let enabled = state.settings.ai.enabled;
@@ -577,34 +552,60 @@ pub(super) fn render_section(
                     .into_any_element(),
             ],
         ),
-        KnowledgeCollections => c.settings_card(
-            "settings_view.knowledge.collections",
-            "settings_view.knowledge.create_description",
-            vec![
+        KnowledgeCollections | KnowledgeEmbeddingConfig => {
+            let text_row = |label: String| {
                 div()
                     .text_size(px(tokens.metrics.ui_text_xs))
                     .text_color(rgb(tokens.ui.text_muted))
-                    .line_height(px(18.0))
-                    .child(state.i18n.t("settings_view.knowledge.no_collections"))
-                    .into_any_element(),
-            ],
-        ),
-        KnowledgeEmbeddingConfig => c.settings_card(
-            "settings_view.knowledge.semantic_search",
-            "settings_view.knowledge.configure_embeddings",
-            vec![
-                div()
-                    .text_size(px(tokens.metrics.ui_text_xs))
-                    .text_color(rgb(tokens.ui.text_muted))
-                    .line_height(px(18.0))
-                    .child(
-                        state
-                            .i18n
-                            .t("settings_view.knowledge.semantic_search_not_configured"),
-                    )
-                    .into_any_element(),
-            ],
-        ),
+                    .child(label)
+                    .into_any_element()
+            };
+            let list = section == KnowledgeCollections;
+            let rows = match &state.knowledge {
+                PortableKnowledgeLibrary::Ready { collections, .. }
+                    if list && !collections.is_empty() =>
+                {
+                    collections.iter().cloned().map(text_row).collect()
+                }
+                PortableKnowledgeLibrary::Ready { keyword_ready, .. } if !list => {
+                    let mut rows = Vec::new();
+                    if *keyword_ready {
+                        rows.push(text_row(
+                            state.i18n.t("settings_view.knowledge.keyword_search_ready"),
+                        ));
+                    }
+                    rows.push(text_row(
+                        state.i18n.t("settings_view.knowledge.keyword_only"),
+                    ));
+                    rows
+                }
+                status => vec![text_row(state.i18n.t(match status {
+                    PortableKnowledgeLibrary::Unavailable => {
+                        "settings_view.knowledge.library_unavailable"
+                    }
+                    PortableKnowledgeLibrary::Loading => "settings_view.known_hosts.loading",
+                    PortableKnowledgeLibrary::Failed => {
+                        "settings_view.knowledge.navigator_load_failed"
+                    }
+                    PortableKnowledgeLibrary::Ready { .. } => {
+                        "settings_view.knowledge.no_collections"
+                    }
+                }))],
+            };
+            if list {
+                c.settings_card(
+                    "settings_view.knowledge.collections",
+                    "settings_view.knowledge.create_description",
+                    rows,
+                )
+            } else {
+                c.settings_card(
+                    "settings_view.knowledge.semantic_search",
+                    "settings_view.knowledge.semantic_search_description",
+                    rows,
+                )
+            }
+        }
         ConnectionsKnownHosts => {
             let hosts = &state.known_hosts;
             let owner = owner.downgrade();
@@ -636,7 +637,7 @@ pub(super) fn render_section(
         }
         HelpVersion | HelpDiagnostics | HelpTechStack | HelpResources | HelpSafety | HelpLegal => {
             let owner = owner.downgrade();
-            HelpPresentation {
+            let page = HelpPresentation {
                 controls: c,
                 year: &chrono::Utc::now().format("%Y").to_string(),
                 dispatch: Rc::new(move |request, cx| match request {
@@ -653,14 +654,19 @@ pub(super) fn render_section(
                     }
                     _ => unreachable!("desktop help operations are not mounted"),
                 }),
+            };
+            if state.host == SettingsHost::Browser {
+                page.browser_section(section,state.browser_report.clone(),cx)
+            } else {
+                page.section(section,cx)
             }
-            .section(section, cx)
         }
         SftpOpening | SftpPerformance | SftpConflict => c.settings_sftp_section(section, cx),
         IdeEditing | IdeTypography | IdeAgent | IdeAgentPrivacy => {
             c.settings_ide_section(section, state.ide_custom, cx)
         }
-        AppearanceTheme | AppearanceLayout | AppearanceEffects | AppearanceAppIcon => {
+        AppearanceTheme | AppearanceBackground | AppearanceLayout | AppearanceEffects | AppearanceAppIcon => {
+            let settings_owner=owner;
             let owner = owner.downgrade();
             let page = CoreAppearancePage {
                 controls: c,
@@ -673,6 +679,7 @@ pub(super) fn render_section(
                 }),
             };
             match section {
+                AppearanceBackground => wallpaper::card(&page,settings_owner,cx),
                 AppearanceTheme => {
                     let rows = page.appearance_theme_controls_with_hints(&state.settings, true, cx);
                     page.appearance_card(state.i18n.t("settings_view.appearance.theme"), None, rows)
@@ -1084,6 +1091,9 @@ impl PortableSettingsSurface {
     ) -> Vec<AnyElement> {
         let mut layers = Vec::new();
         let state = self.state.read(cx);
+        if state.ai_confirm.read(cx).state().is_some() {
+            layers.push(state.ai_confirm.clone().into_any_element());
+        }
         if let Some((third_party, scroll)) = &state.document {
             let owner = self.state.downgrade();
             layers.push(

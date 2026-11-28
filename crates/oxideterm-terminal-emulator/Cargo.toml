@@ -12,4 +12,5 @@ alacritty_terminal = { path = "../alacritty-terminal", default-features = false 
 oxideterm-terminal-graphics = { path = "../oxideterm-terminal-graphics" }
 oxideterm-terminal-model = { path = "../oxideterm-terminal-model" }
 web-time.workspace = true
+regex.workspace = true
 zeroize.workspace = true

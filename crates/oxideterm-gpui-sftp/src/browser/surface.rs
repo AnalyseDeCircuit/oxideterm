@@ -120,6 +120,46 @@ impl SftpBrowserView {
                                 }),
                                 cx.entity(),
                             ))
+                            .child(self.render_sftp_icon_button(
+                                LucideIcon::ExternalLink,
+                                self.i18n.t("sftp.sidebar.open_tab"),
+                                cx.listener(move |this, _event, _window, cx| {
+                                    let current_path =
+                                        this.sftp_view().read(cx).remote_path.clone();
+                                    this.send(
+                                        SftpBrowserRequest::OpenTab(
+                                            open_node_id.clone(),
+                                            current_path,
+                                        ),
+                                        None,
+                                        cx,
+                                    );
+                                    cx.stop_propagation();
+                                }),
+                                cx.entity(),
+                            ))
+                            // Dismissing the embedded surface leaves the node
+                            // and its other consumers connected.
+                            .child(self.render_sftp_icon_button(
+                                LucideIcon::X,
+                                self.i18n.t("sftp.preview.close"),
+                                cx.listener(move |this, _event, _window, cx| {
+                                    this.send(
+                                        SftpBrowserRequest::CloseSidebar(close_node_id.clone()),
+                                        None,
+                                        cx,
+                                    );
+                                    cx.stop_propagation();
+                                }),
+                                cx.entity(),
+                            )),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_wrap()
+                            .items_center()
+                            .gap_1()
                             .child(self.render_sftp_nav_button(
                                 SftpPane::Remote,
                                 "..",
@@ -163,39 +203,6 @@ impl SftpBrowserView {
                                             cx,
                                         );
                                     });
-                                    cx.stop_propagation();
-                                }),
-                                cx.entity(),
-                            ))
-                            .child(self.render_sftp_icon_button(
-                                LucideIcon::ExternalLink,
-                                self.i18n.t("sftp.sidebar.open_tab"),
-                                cx.listener(move |this, _event, _window, cx| {
-                                    let current_path =
-                                        this.sftp_view().read(cx).remote_path.clone();
-                                    this.send(
-                                        SftpBrowserRequest::OpenTab(
-                                            open_node_id.clone(),
-                                            current_path,
-                                        ),
-                                        None,
-                                        cx,
-                                    );
-                                    cx.stop_propagation();
-                                }),
-                                cx.entity(),
-                            ))
-                            // Dismissing the embedded surface leaves the node
-                            // and its other consumers connected.
-                            .child(self.render_sftp_icon_button(
-                                LucideIcon::X,
-                                self.i18n.t("sftp.preview.close"),
-                                cx.listener(move |this, _event, _window, cx| {
-                                    this.send(
-                                        SftpBrowserRequest::CloseSidebar(close_node_id.clone()),
-                                        None,
-                                        cx,
-                                    );
                                     cx.stop_propagation();
                                 }),
                                 cx.entity(),
@@ -411,8 +418,24 @@ impl SftpBrowserView {
                             .child(self.render_sftp_pane(
                                 SftpPane::Local,
                                 pair_primary_title.map_or_else(
-                                    || self.i18n.t("sftp.file_list.local"),
+                                    || {
+                                        if cfg!(target_family = "wasm") {
+                                            self.i18n.t("sftp.file_list.demo")
+                                        } else {
+                                            self.i18n.t("sftp.file_list.local")
+                                        }
+                                    },
                                     |host| {
+                                        #[cfg(target_family = "wasm")]
+                                        if matches!(
+                                            self.sftp_pair_primary_remote_id(cx),
+                                            Some(SftpRemoteId::DeviceFolder(_))
+                                        ) {
+                                            return format!(
+                                                "{} · {host}",
+                                                self.i18n.t("sftp.file_list.local")
+                                            );
+                                        }
                                         self.i18n
                                             .t("sftp.file_list.remote")
                                             .replace("{{host}}", &host)
@@ -732,30 +755,38 @@ impl SftpBrowserView {
                 cx.entity(),
             ));
 
-        if pane == SftpPane::Local && self.sftp_pair_primary_remote_id(cx).is_none() {
-            header = header
-                .child(self.render_sftp_icon_button(
-                    LucideIcon::HardDrive,
-                    self.i18n.t("sftp.toolbar.show_drives"),
-                    cx.listener(|this, _event, _window, cx| {
-                        this.sftp_view().update(cx, |sftp, cx| {
-                            sftp.drives_scroll = ScrollHandle::new();
-                            sftp.set_dialog(SftpDialog::Drives);
-                            cx.notify();
-                        });
-                        cx.stop_propagation();
-                    }),
-                    cx.entity(),
-                ))
-                .child(self.render_sftp_icon_button(
-                    LucideIcon::FolderOpen,
-                    self.i18n.t("sftp.toolbar.browse_folder"),
-                    cx.listener(|this, _event, _window, cx| {
-                        this.send(SftpBrowserRequest::BrowseFolder, None, cx);
-                        cx.stop_propagation();
-                    }),
-                    cx.entity(),
-                ));
+        if !cfg!(target_family = "wasm")
+            && pane == SftpPane::Local
+            && self.sftp_pair_primary_remote_id(cx).is_none()
+        {
+            header = header.child(self.render_sftp_icon_button(
+                LucideIcon::HardDrive,
+                self.i18n.t("sftp.toolbar.show_drives"),
+                cx.listener(|this, _event, _window, cx| {
+                    this.sftp_view().update(cx, |sftp, cx| {
+                        sftp.drives_scroll = ScrollHandle::new();
+                        sftp.set_dialog(SftpDialog::Drives);
+                        cx.notify();
+                    });
+                    cx.stop_propagation();
+                }),
+                cx.entity(),
+            ));
+        }
+        #[cfg(target_family = "wasm")]
+        let browse_local = self.device_folder_picker;
+        #[cfg(not(target_family = "wasm"))]
+        let browse_local = self.sftp_pair_primary_remote_id(cx).is_none();
+        if pane == SftpPane::Local && browse_local {
+            header = header.child(self.render_sftp_icon_button(
+                LucideIcon::FolderOpen,
+                self.i18n.t("sftp.toolbar.browse_folder"),
+                cx.listener(|this, _event, _window, cx| {
+                    this.send(SftpBrowserRequest::BrowseFolder, None, cx);
+                    cx.stop_propagation();
+                }),
+                cx.entity(),
+            ));
         }
 
         header = header

@@ -55,6 +55,7 @@ use oxideterm_i18n::I18n;
 use oxideterm_settings::{AiActiveBackend, AiThinkingStyle};
 use oxideterm_theme::ThemeTokens;
 
+#[cfg(not(target_family = "wasm"))]
 use super::editor::AiEditorView;
 use crate::state::{AiChatInitializationError, AiWorkspaceEntity, ai_chat_virtual_list_spec};
 
@@ -182,10 +183,11 @@ pub struct AiSidebarChildren {
     pub header: Entity<super::AiChatHeaderView>,
     pub background: Entity<crate::background::AiBackgroundTaskView>,
     pub model_trigger: Entity<crate::model_picker::AiModelPickerView>,
-    pub composer: Entity<AiEditorView>,
+    pub composer: gpui::AnyView,
 }
 
 pub struct AiRenameFrame {
+    pub field: Option<gpui::AnyView>,
     pub anchor: TextInputAnchorId,
     pub viewport: TextInputViewport,
     pub marked: Option<String>,
@@ -202,6 +204,7 @@ pub struct AiOverlayFrame {
 }
 
 pub struct AiTranscriptFrame {
+    pub can_insert_command: bool,
     pub overlay: AiOverlayFrame,
 
     pub composer: AiComposerFrame,
@@ -331,7 +334,7 @@ impl From<AiTranscriptBindings> for PortableTranscriptBindings {
 
 pub struct AiAssistantSidebarView {
     state: Entity<AiWorkspaceEntity>,
-    message_editor: Entity<AiEditorView>,
+    message_editor: gpui::AnyView,
     views: AiSidebarChildren,
     bindings: PortableTranscriptBindings,
     frame: Option<AiTranscriptFrame>,
@@ -365,7 +368,7 @@ impl AiAssistantSidebarView {
 
     pub fn with_bindings(
         state: Entity<AiWorkspaceEntity>,
-        message_editor: Entity<AiEditorView>,
+        message_editor: impl Into<gpui::AnyView>,
         views: AiSidebarChildren,
         bindings: PortableTranscriptBindings,
         tokens: ThemeTokens,
@@ -375,7 +378,7 @@ impl AiAssistantSidebarView {
         cx.observe(&state, |_, _, cx| cx.notify()).detach();
         Self {
             state,
-            message_editor,
+            message_editor: message_editor.into(),
             views,
             bindings,
             frame: None,
@@ -775,8 +778,8 @@ impl AiAssistantSidebarView {
         });
     }
 
-    fn insert_ai_code_block_command(&self, a0: String, cx: &mut App) {
-        (self.bindings.request)(AiTranscriptRequest::InsertCommand(a0), None, cx);
+    fn insert_ai_code_block_command(&self, command: String, window: &mut Window, cx: &mut App) {
+        (self.bindings.request)(AiTranscriptRequest::InsertCommand(command), Some(window), cx);
     }
 
     fn retry_ai_chat_initialization(&self, cx: &mut App) {

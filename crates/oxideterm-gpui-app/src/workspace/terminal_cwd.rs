@@ -12,9 +12,9 @@ use std::{
 
 use oxideterm_editor_core::utf16::replace_utf16;
 use oxideterm_environment::{
-    CurrentDirectoryEntry, CurrentDirectoryEntryKind, CurrentDirectoryKey, CurrentDirectoryScope,
+    CurrentDirectoryEntry, CurrentDirectoryKey, CurrentDirectoryScope,
     CurrentDirectorySnapshot, CurrentDirectorySource, current_directory_cd_command,
-    current_directory_parent, current_directory_path_is_explicit, current_directory_report_command,
+    current_directory_parent, current_directory_report_command,
     current_directory_shell_path_argument, list_local_current_directory,
     sort_current_directory_entries,
 };
@@ -26,7 +26,7 @@ use super::*;
 const TERMINAL_CWD_REMOTE_LIST_TIMEOUT: Duration = Duration::from_secs(15);
 const TERMINAL_CWD_REPORT_POLL_INTERVAL: Duration = Duration::from_millis(40);
 const TERMINAL_CWD_REPORT_POLL_ATTEMPTS: usize = 30;
-const TERMINAL_CWD_MAX_ENTRIES: usize = 160;
+use oxideterm_gpui_command_sender::cwd::MAX_ENTRIES as TERMINAL_CWD_MAX_ENTRIES;
 const TERMINAL_CWD_LIST_ESTIMATED_HEIGHT: f32 = 42.0;
 const TERMINAL_CWD_LIST_OVERSCAN: usize = 8;
 
@@ -72,20 +72,7 @@ async fn run_terminal_cwd_remote_stages<H, T, AcquireError, ListError>(
         .map_err(|_| ())
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(in crate::workspace) enum TerminalCwdVisibleEntryKind {
-    Parent,
-    Directory,
-    File,
-    TypedPath,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(in crate::workspace) struct TerminalCwdVisibleEntry {
-    pub kind: TerminalCwdVisibleEntryKind,
-    pub name: String,
-    pub path: String,
-}
+pub(in crate::workspace) use oxideterm_gpui_command_sender::cwd::{Entry as TerminalCwdVisibleEntry, Kind as TerminalCwdVisibleEntryKind};
 
 pub(in crate::workspace) struct TerminalCwdPickerState {
     open: bool,
@@ -369,44 +356,7 @@ impl WorkspaceTerminalEntity {
         let Some(path) = self.cwd_browse_path() else {
             return Vec::new();
         };
-        let query = self.cwd_picker.query.trim().to_ascii_lowercase();
-        let mut rows = Vec::new();
-
-        if let Some(parent) = current_directory_parent(path) {
-            rows.push(TerminalCwdVisibleEntry {
-                kind: TerminalCwdVisibleEntryKind::Parent,
-                name: "..".to_string(),
-                path: parent,
-            });
-        }
-        rows.extend(
-            self.cwd_picker
-                .entries
-                .iter()
-                .filter(|entry| {
-                    query.is_empty()
-                        || entry.name().to_ascii_lowercase().contains(&query)
-                        || entry.path().to_ascii_lowercase().contains(&query)
-                })
-                .map(|entry| TerminalCwdVisibleEntry {
-                    kind: match entry.kind() {
-                        CurrentDirectoryEntryKind::Directory => {
-                            TerminalCwdVisibleEntryKind::Directory
-                        }
-                        CurrentDirectoryEntryKind::File => TerminalCwdVisibleEntryKind::File,
-                    },
-                    name: entry.name().to_string(),
-                    path: entry.path().to_string(),
-                }),
-        );
-        if let Some(path) = self.cwd_query_path_candidate() {
-            rows.push(TerminalCwdVisibleEntry {
-                kind: TerminalCwdVisibleEntryKind::TypedPath,
-                name: path.clone(),
-                path,
-            });
-        }
-        rows
+        oxideterm_gpui_command_sender::cwd::choices(path, &self.cwd_picker.entries, &self.cwd_picker.query)
     }
 
     pub(in crate::workspace) fn replace_cwd_query(
@@ -645,19 +595,6 @@ impl WorkspaceTerminalEntity {
         true
     }
 
-    fn cwd_query_path_candidate(&self) -> Option<String> {
-        let query = self.cwd_picker.query.trim();
-        if !current_directory_path_is_explicit(query)
-            || self
-                .cwd_picker
-                .entries
-                .iter()
-                .any(|entry| entry.path() == query)
-        {
-            return None;
-        }
-        current_directory_cd_command(query).map(|_| query.to_string())
-    }
 
     fn ensure_cwd_highlight(&mut self) {
         let visible = self.visible_cwd_entries();

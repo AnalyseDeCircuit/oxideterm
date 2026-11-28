@@ -336,32 +336,7 @@ fn privilege_prompt_matches_custom_patterns(
         .any(|pattern| !pattern.is_empty() && prompt_text.contains(&pattern))
 }
 
-fn terminal_cwd_chip_label(path: &str) -> String {
-    let path = path.trim();
-    if path.is_empty()
-        || path == "/"
-        || path == "~"
-        || path.ends_with(":\\")
-        || path.ends_with(":/")
-    {
-        return path.to_string();
-    }
-    let separator = if path.contains('\\') { '\\' } else { '/' };
-    let mut segments = path
-        .split(separator)
-        .filter(|segment| !segment.is_empty())
-        .collect::<Vec<_>>();
-    if segments.is_empty() {
-        return path.to_string();
-    }
-    let tail = segments.split_off(segments.len().saturating_sub(2));
-    let label = tail.join(&separator.to_string());
-    if path.starts_with("~/") && tail.len() == 1 {
-        format!("~/{label}")
-    } else {
-        label
-    }
-}
+use oxideterm_gpui_command_sender::cwd::chip_label as terminal_cwd_chip_label;
 
 fn terminal_cwd_chip_tooltip(
     snapshot: Option<&CurrentDirectorySnapshot>,

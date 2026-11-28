@@ -10,7 +10,46 @@ version.workspace = true
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[[test]]
+name = "demo_sftp"
+path = "tests/demo.rs"
+
+[[test]]
+name = "provider_stream"
+path = "src/ai/provider_stream.rs"
+
+[[test]]
+name = "gateway_session"
+path = "src/transport/session.rs"
+
+[[test]]
+name = "browser_file_preview"
+path = "src/files/preview/inline.rs"
+
+[dev-dependencies]
+serde.workspace = true
+oxideterm-environment = { path = "../oxideterm-environment" }
+zeroize.workspace = true
+chrono.workspace = true
+zip.workspace = true
+base64.workspace = true
+oxideterm-local-files = { path = "../oxideterm-local-files" }
+oxideterm-preview = { path = "../oxideterm-preview" }
+web-time.workspace = true
+serde_json.workspace = true
+futures.workspace = true
+eventsource-stream = "0.2.3"
+
 [target.'cfg(target_family = "wasm")'.dependencies]
+oxideterm-environment = { path = "../oxideterm-environment" }
+chrono.workspace = true
+zip = { version = "2.0", default-features = false, features = ["deflate"] }
+oxideterm-plugin-manifest = { path = "../oxideterm-plugin-manifest" }
+oxideterm-ide-fs = { path = "../oxideterm-ide-fs" }
+oxideterm-preview = { path = "../oxideterm-preview" }
+base64.workspace = true
+wasm-streams = "0.4.2"
+eventsource-stream = "0.2.3"
 gpui.workspace = true
 futures.workspace = true
 serde.workspace = true
@@ -19,19 +58,22 @@ js-sys.workspace = true
 url.workspace = true
 uuid.workspace = true
 oxideterm-settings-model = { path = "../oxideterm-settings-model" }
+oxideterm-ssh-launch = { path = "../oxideterm-ssh-launch" }
 wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true
 zeroize.workspace = true
-web-sys = { version = "=0.3.107", features = ["Window", "Location", "Navigator", "WebSocket", "MessageEvent", "Event", "UrlSearchParams", "Request", "RequestInit", "RequestMode", "Response", "Headers", "ReadableStream", "ReadableStreamDefaultReader"] }
+web-sys = { version = "=0.3.107", features = ["File", "Blob", "FileSystemEntry", "FileSystemDirectoryEntry", "FileSystemDirectoryReader", "AbortController", "AbortSignal", "Window", "Location", "Storage", "Navigator", "WebSocket", "MessageEvent", "Event", "UrlSearchParams", "Request", "RequestInit", "RequestMode", "RequestCredentials", "RequestRedirect", "ReferrerPolicy", "Response", "Headers", "ReadableStream", "ReadableStreamDefaultReader"] }
 oxideterm-gpui-platform = { path = "../oxideterm-gpui-platform" }
 oxideterm-gpui-shell = { path = "../oxideterm-gpui-shell" }
 oxideterm-gpui-ui = { path = "../oxideterm-gpui-ui" }
+oxideterm-gpui-editor = { path = "../oxideterm-gpui-editor" }
 oxideterm-gpui-terminal-view = { path = "../oxideterm-gpui-terminal-view" }
 oxideterm-gpui-connections = { path = "../oxideterm-gpui-connections" }
 oxideterm-gpui-settings-view = { path = "../oxideterm-gpui-settings-view" }
 oxideterm-gpui-onboarding = { path = "../oxideterm-gpui-onboarding" }
 oxideterm-gpui-forwards = { path = "../oxideterm-gpui-forwards" }
 oxideterm-gpui-quick-commands = { path = "../oxideterm-gpui-quick-commands" }
+oxideterm-gpui-command-sender = { path = "../oxideterm-gpui-command-sender" }
 oxideterm-quick-commands = { path = "../oxideterm-quick-commands" }
 oxideterm-gpui-file-manager = { path = "../oxideterm-gpui-file-manager" }
 oxideterm-gpui-sftp = { path = "../oxideterm-gpui-sftp" }

@@ -663,6 +663,9 @@ impl ConnectionFormView {
         let Some(form) = self.connection_form_state(cx).form.as_ref() else {
             return div().into_any_element();
         };
+        if self.environment.browser.is_some() {
+            return form_field(&self.tokens, self.i18n.t("ssh.form.password"), input);
+        }
         let loading = form.password_load_id.is_some();
         let error = form.password_load_error;
         let button = if loading {
@@ -737,6 +740,13 @@ impl ConnectionFormView {
         field: NewConnectionField,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        if self.environment.browser.is_some() {
+            return form_field(
+                &self.tokens,
+                label,
+                self.render_connection_input(value, placeholder, field, false, cx),
+            );
+        }
         form_field(
             &self.tokens,
             label,
@@ -5010,6 +5020,21 @@ impl ConnectionFormView {
             .into_any_element()
     }
 
+    fn render_open_sftp_switch(&self, open_sftp_on_connect: bool, cx: &mut Context<Self>) -> AnyElement {
+        self.render_connection_switch_row_with_help(
+                "new-connection-open-sftp-help",
+                "new-connection-open-sftp",
+                "ssh.form.open_sftp_on_connect",
+                "ssh.form.open_sftp_on_connect_hint",
+                open_sftp_on_connect,
+                false,
+                |form| {
+                    form.open_sftp_on_connect = !form.open_sftp_on_connect;
+                },
+                cx,
+            )
+    }
+
     pub(super) fn render_connection_ssh_options(
         &self,
         agent_forwarding: bool,
@@ -5017,6 +5042,10 @@ impl ConnectionFormView {
         content_width: f32,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        if self.environment.browser.is_some() {
+            let checked = self.connection_form_state(cx).form.as_ref().is_some_and(|form| form.open_sftp_on_connect);
+            return self.render_open_sftp_switch(checked, cx);
+        }
         let Some((
             connect_timeout_seconds_text,
             keep_alive_interval_seconds_text,
@@ -5337,18 +5366,7 @@ impl ConnectionFormView {
                 cx,
             ))
             .child(self.form_hairline())
-            .child(self.render_connection_switch_row_with_help(
-                "new-connection-open-sftp-help",
-                "new-connection-open-sftp",
-                "ssh.form.open_sftp_on_connect",
-                "ssh.form.open_sftp_on_connect_hint",
-                open_sftp_on_connect,
-                false,
-                |form| {
-                    form.open_sftp_on_connect = !form.open_sftp_on_connect;
-                },
-                cx,
-            ))
+            .child(self.render_open_sftp_switch(open_sftp_on_connect, cx))
             .child(self.form_hairline())
             .child(self.render_connection_switch_row_with_help(
                 "new-connection-agent-forwarding-help",
@@ -5595,8 +5613,7 @@ impl ConnectionFormView {
                 cx,
             ))
             .child(self.render_connection_hint(self.i18n.t("sftp.standalone.initial_path_hint")))
-            .child(self.form_hairline())
-            .child(timeout_row)
+            .when(self.environment.browser.is_none(), |col| col.child(self.form_hairline()).child(timeout_row))
             .into_any_element()
     }
 

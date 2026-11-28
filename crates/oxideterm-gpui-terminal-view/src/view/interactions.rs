@@ -9,9 +9,9 @@ use zeroize::Zeroizing;
 use super::{TerminalView, TerminalViewEvent};
 use crate::{
     input::{
-        KittyKeyEventType, TerminalScrollAction, alt_scroll, key_escape_sequence,
-        mouse_button_report, mouse_mode, mouse_moved_report, mouse_scroll_report,
-        oxideterm_terminal_scroll_action,
+        KittyKeyEventType, TerminalKeybindings, TerminalScrollAction, TerminalShortcut, alt_scroll,
+        key_escape_sequence, mouse_button_report, mouse_mode, mouse_moved_report,
+        mouse_scroll_report, oxideterm_terminal_scroll_action,
     },
     links::{
         TerminalLinkKind, TerminalLinkRange, is_link_interactive_cell,
@@ -52,13 +52,23 @@ impl TerminalView {
         }
         let command = m.platform && !m.control && !m.shift && !m.alt;
         let control = m.control && !m.platform && !m.alt;
-        let copy = (key.key == "c" && (command || (control && m.shift)))
-            || (key.key == "insert" && control && !m.shift);
+        let bindings = cx.try_global::<TerminalKeybindings>();
+        let configured = bindings.and_then(|b| b.resolve(key));
+        let legacy = bindings.is_none();
+        let copy = configured == Some(TerminalShortcut::Copy)
+            || (legacy
+                && ((key.key == "c" && (command || (control && m.shift)))
+                    || (key.key == "insert" && control && !m.shift)));
         let browser_control_paste = cfg!(target_family = "wasm") && !cx.platform_info().is_mac();
-        let paste = (key.key == "v"
+        let paste_chord = (key.key == "v"
             && (command || (control && (m.shift || browser_control_paste))))
             || (key.key == "insert" && m.shift && !m.control && !m.platform && !m.alt);
-        let smart_copy = key.key == "c"
+        let browser_paste = browser_control_paste && control && !m.shift && key.key == "v";
+        let paste = configured == Some(TerminalShortcut::Paste)
+            || (legacy && paste_chord)
+            || (configured.is_none() && browser_paste);
+        let smart_copy = self.options.smart_copy
+            && key.key == "c"
             && control
             && !m.shift
             && !self
@@ -76,17 +86,18 @@ impl TerminalView {
         } else if paste {
             // The browser delivers clipboardData through InputHandler::paste.
             // Cancelling this keydown would also cancel the DOM paste event.
-            if cfg!(target_family = "wasm") {
+            if cfg!(target_family = "wasm") && paste_chord {
                 return;
             }
-            if let Some(text) = cx
-                .read_from_clipboard()
-                .and_then(|item| item.text())
-                .map(Zeroizing::new)
-            {
-                self.paste_text(&text, cx);
-            }
-        } else if let Some(action) = oxideterm_terminal_scroll_action(key) {
+            self.read_clipboard_for_paste(cx);
+        } else if let Some(action) = configured
+            .and_then(TerminalShortcut::scroll_action)
+            .or_else(|| {
+                legacy
+                    .then(|| oxideterm_terminal_scroll_action(key))
+                    .flatten()
+            })
+        {
             let delta = match action {
                 TerminalScrollAction::LineUp => 1,
                 TerminalScrollAction::LineDown => -1,
@@ -96,6 +107,19 @@ impl TerminalView {
                 TerminalScrollAction::Bottom => -(self.snapshot.display_offset as i32),
             };
             self.scroll_grid(delta, cx);
+        } else if matches!(
+            configured,
+            Some(TerminalShortcut::WordBackward | TerminalShortcut::WordForward)
+        ) && !self
+            .mode()
+            .intersects(TermMode::ALT_SCREEN | TermMode::KITTY_KEYBOARD_PROTOCOL)
+        {
+            let byte = if configured == Some(TerminalShortcut::WordBackward) {
+                b'b'
+            } else {
+                b'f'
+            };
+            self.send_user_bytes(vec![0x1b, byte], cx);
         } else {
             let mode = self.mode();
             let kind = if event.is_held {
@@ -121,6 +145,28 @@ impl TerminalView {
         }
         window.prevent_default();
         cx.stop_propagation();
+    }
+
+    fn read_clipboard_for_paste(&mut self, cx: &mut Context<Self>) {
+        let clipboard = cx.read_from_clipboard_async();
+        cx.spawn(async move |view, cx| {
+            let item = clipboard.await;
+            let _ = view.update(cx, |view, cx| {
+                if !view.focused {
+                    return;
+                }
+                match item {
+                    Ok(Some(item)) => {
+                        if let Some(text) = item.text() {
+                            view.request_paste(Zeroizing::new(text), cx);
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(_) => cx.emit(TerminalViewEvent::ClipboardReadFailed),
+                }
+            });
+        })
+        .detach();
     }
 
     pub(super) fn key_up(
@@ -156,6 +202,7 @@ impl TerminalView {
             .snapshot
             .lines
             .get(row)
+            .filter(|_| self.options.bidi)
             .and_then(visual_line_for_row_if_bidi)
             .map_or(visual, |line| line.logical_col_for_visual_col(visual));
         Some(TerminalPoint { row, col })
@@ -191,8 +238,18 @@ impl TerminalView {
         } else {
             m.control
         };
-        if event.button == MouseButton::Left
-            && activate_link
+        let reporting = mouse_mode(mode, m.shift);
+        let paste =
+            (event.button == MouseButton::Middle && self.options.middle_paste && !reporting)
+                || (event.button == MouseButton::Right
+                    && self.options.right_paste
+                    && !(self.options.respect_mouse_tracking && reporting));
+        if paste {
+            self.read_clipboard_for_paste(cx);
+            window.prevent_default();
+            cx.stop_propagation();
+        } else if event.button == MouseButton::Left
+            && (!self.options.link_modifier || activate_link)
             && let Some(link) = self.link_at(point)
         {
             cx.emit(TerminalViewEvent::OpenUrl(link.target.to_string()));
@@ -202,7 +259,9 @@ impl TerminalView {
                 self.pointer.last_report = Some(point);
                 cx.emit(TerminalViewEvent::SendBytes(bytes));
             }
-        } else if event.button == MouseButton::Left {
+        } else if event.button == MouseButton::Left
+            && (!self.options.selection_requires_shift || m.shift)
+        {
             window.request_virtual_keyboard();
             let Some(grid) = grid_point_for_viewport_point(&self.snapshot, point) else {
                 return;
@@ -225,7 +284,18 @@ impl TerminalView {
                 _ => line_selection_at_point(&self.snapshot, point),
             };
             self.set_selection(selection);
+            if event.click_count > 1 {
+                self.copy_finished_selection(cx);
+            }
             cx.notify();
+        }
+    }
+
+    fn copy_finished_selection(&self, cx: &mut Context<Self>) {
+        if self.options.copy_on_select
+            && let Some(text) = self.selected_text()
+        {
+            cx.write_to_clipboard(ClipboardItem::new_string(text));
         }
     }
 
@@ -291,6 +361,7 @@ impl TerminalView {
         } else if event.button == MouseButton::Left && self.pointer.selecting {
             self.drag_to(point, cx);
             self.pointer.selecting = false;
+            self.copy_finished_selection(cx);
         }
     }
 

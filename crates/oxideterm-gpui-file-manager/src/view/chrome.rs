@@ -1,7 +1,9 @@
 use super::*;
 use gpui::Div;
+#[cfg(not(target_family = "wasm"))]
+use oxideterm_gpui_ui::text_input::text_input_with_viewport;
 use oxideterm_gpui_ui::text_input::{
-    TextInputAnchorProbe, text_input_anchor_probe, text_input_with_viewport,
+    TextInputAnchorProbe, text_input_anchor_probe,
 };
 
 pub(super) mod browser_behavior {
@@ -114,6 +116,9 @@ impl FileManagerView {
         &self,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
+        #[cfg(target_family = "wasm")]
+        let bounds = self.fields.path_anchor.get()?.bounds;
+        #[cfg(not(target_family = "wasm"))]
         let bounds = self.ime[FileManagerInput::Path.index()].anchor?.bounds;
         let state = &self.file_manager.read(cx).path_completion;
         if !state.is_visible() {
@@ -150,9 +155,22 @@ impl FileManagerView {
         &self,
         input: FileManagerInput,
         view: TextInputView<'_>,
+        _cx: &mut App,
     ) -> Div {
-        let ime = &self.ime[input.index()];
-        text_input_with_viewport(&self.tokens, view, &ime.viewport, ime.active_offset)
+        #[cfg(target_family = "wasm")]
+        {
+            let field = &self.fields.views[&input];
+            field.update(_cx, |f, cx| {
+                f.sync_value(view.value, cx);
+                f.environment(self.tokens, view.placeholder, cx);
+            });
+            div().w_full().h_full().min_w_0().child(field.clone())
+        }
+        #[cfg(not(target_family = "wasm"))]
+        {
+            let ime = &self.ime[input.index()];
+            text_input_with_viewport(&self.tokens, view, &ime.viewport, ime.active_offset)
+        }
     }
 
     pub(super) fn text_input_with_workspace_ime(
@@ -162,28 +180,49 @@ impl FileManagerView {
         prepare: impl Fn(&mut Self, &mut Context<Self>) + 'static,
         cx: &Context<Self>,
     ) -> TextInputAnchorProbe {
-        let anchor = self.bindings.anchor.clone();
-        text_input_anchor_probe(
-            input.anchor_id(),
-            control
-                .cursor(CursorStyle::IBeam)
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                        prepare(this, cx);
-                        this.pointer(
-                            FileManagerPointer::TextDown(input, event.clone()),
-                            window,
-                            cx,
-                        );
-                        cx.stop_propagation();
-                    }),
-                )
-                .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
-                    this.pointer(FileManagerPointer::TextMove(event.clone()), window, cx);
-                })),
-            move |data, _, _| anchor(data),
-        )
+        #[cfg(target_family = "wasm")]
+        {
+            let owner = cx.weak_entity();
+            let anchor = self.fields.path_anchor.clone();
+            return text_input_anchor_probe(
+                input.anchor_id(),
+                control.capture_any_mouse_down(move |event, _, cx| {
+                    if event.button == MouseButton::Left {
+                        let _ = owner.update(cx, |this, cx| prepare(this, cx));
+                    }
+                }),
+                move |data, _, _| {
+                    if input == FileManagerInput::Path {
+                        anchor.set(Some(data));
+                    }
+                },
+            );
+        }
+        #[cfg(not(target_family = "wasm"))]
+        {
+            let anchor = self.bindings.anchor.clone();
+            text_input_anchor_probe(
+                input.anchor_id(),
+                control
+                    .cursor(gpui::CursorStyle::IBeam)
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                            prepare(this, cx);
+                            this.pointer(
+                                FileManagerPointer::TextDown(input, event.clone()),
+                                window,
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        }),
+                    )
+                    .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
+                        this.pointer(FileManagerPointer::TextMove(event.clone()), window, cx);
+                    })),
+                move |data, _, _| anchor(data),
+            )
+        }
     }
 
     pub(super) fn render_display_text_with_role(

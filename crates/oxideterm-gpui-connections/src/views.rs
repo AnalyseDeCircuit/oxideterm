@@ -7,7 +7,6 @@ use oxideterm_theme::ThemeTokens;
 mod dialog;
 mod host_key;
 mod keyboard_interactive;
-pub(crate) mod line_edit;
 mod select;
 
 pub use crate::session_manager::{PortableCatalogData, PortableCatalogEvent, PortableCatalogView};
@@ -47,7 +46,7 @@ pub use delivery::{SftpConnected, SftpConnectedEndpoint};
 mod form;
 pub mod portable_form;
 pub use form::{
-    ConnectionFormEnvironment, FormKeyAction, FormPluginType, FormTotpCredential,
+    BrowserConnectionCapabilities, ConnectionFormEnvironment, FormKeyAction, FormPluginType, FormTotpCredential,
     NEW_CONNECTION_TYPE_SIDEBAR_WIDTH, TunnelFormEnvironment, TunnelKind,
 };
 pub use portable_form::{

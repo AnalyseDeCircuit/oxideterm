@@ -134,7 +134,9 @@ impl TextEditorView {
         }
         let generation = self.syntax_generation.fetch_add(1, Ordering::AcqRel) + 1;
         self.highlight_chunk_cache.borrow_mut().clear();
-        if !self.render_cache_active {
+        // The browser build detects languages but ships no tree-sitter parsers.
+        // Keep editing and bracket matching independent of native syntax workers.
+        if cfg!(target_family = "wasm") || !self.render_cache_active {
             self.pending_syntax = None;
             drop(self.take_syntax_state());
             return;

@@ -13,15 +13,7 @@ use std::{future::Future, pin::Pin};
 /// Host futures may borrow browser handles and need not be `Send`.
 pub type FileFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, IdeFileError>> + 'a>>;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct IdeSearchMatch {
-    pub path: String,
-    pub line: u32,
-    pub column: u32,
-    pub preview: String,
-    pub match_start: usize,
-    pub match_end: usize,
-}
+pub use oxideterm_ide_core::IdeSearchMatch;
 
 pub trait PortableIdeHost {
     fn capabilities(&self) -> FileSystemCapabilities;

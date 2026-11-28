@@ -37,6 +37,8 @@ use crate::{
 
 mod actions;
 mod fields;
+mod wallpaper;
+use oxideterm_settings_model::browser_preferences::{BundledWallpaper,WallpaperId};
 mod host;
 pub use host::{PortableKnownHostsAction, PortableProxyProbe};
 mod pages;
@@ -58,6 +60,51 @@ pub struct PortableSettingsSurface {
 
 impl EventEmitter<PortableSettingsChanged> for PortableSettingsSurface {}
 impl EventEmitter<PortableSettingsChanged> for PageState {}
+
+#[cfg(all(test, not(target_family = "wasm")))]
+mod browser_tests {
+    use super::*;
+
+    #[gpui::test]
+    fn browser_settings_open_search_hits_but_not_desktop_only_routes(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let settings =
+            cx.new(|cx| PortableSettingsSurface::browser_workspace(Default::default(), vec![], cx));
+        let state = settings.read_with(cx, |s, _| s.state.clone());
+        state.update(cx, |s, cx| {
+            s.i18n.set_locale(Locale::En);
+            s.search.apply("MCP Servers".into());
+            assert!(
+                !s.search
+                    .results(&s.i18n)
+                    .iter()
+                    .any(|r| r.section == SettingsSectionId::AiToolsMcpServers)
+            );
+            s.search.apply("API Key".into());
+            let results = s.search.results(&s.i18n);
+            let hit = results
+                .iter()
+                .find(|r| r.section == SettingsSectionId::AiProvidersSettings)
+                .unwrap();
+            s.navigate(hit.tab, Some(hit), cx);
+            s.navigate(SettingsTab::Portable, None, cx);
+            let (frame, sections) = s.frame(true);
+            assert_eq!(s.route.route_snapshot().active_tab, SettingsTab::Ai);
+            assert_eq!(
+                sections,
+                [
+                    SettingsSectionId::AiPageSwitcher,
+                    SettingsSectionId::AiProvidersSettings
+                ]
+            );
+            assert!(!frame.groups.iter().flatten().any(|tab| matches!(
+                tab,
+                SettingsTab::Portable | SettingsTab::Network | SettingsTab::Privilege
+            )));
+        });
+    }
+}
 
 fn supported(tab: SettingsTab, section: SettingsSectionId) -> bool {
     use SettingsSectionId::*;
@@ -134,7 +181,83 @@ fn supported(tab: SettingsTab, section: SettingsSectionId) -> bool {
     }
 }
 
+use crate::search::SettingsHost;
+type SectionFilter = fn(SettingsTab, SettingsSectionId) -> bool;
+type ReportDownload = Rc<dyn Fn(&mut Window, &mut App)>;
+
+fn browser_section(tab: SettingsTab, section: SettingsSectionId) -> bool {
+    use SettingsSectionId::*;
+    supported(tab, section)
+        && !matches!(
+            section,
+            PortableRuntime
+                | PrivilegeCredentials
+                | TerminalLocalShell
+                | TerminalLocalShellProfile
+                | TerminalLocalPrivilegeCredentials
+                | TerminalLoggingSession
+                | TerminalTransferInBand
+                | TerminalTransferXmodem
+                | GeneralWindowBehavior
+                | GeneralExternalConnectionUris
+                | ConnectionsKnownHosts
+                | NetworkSharedProxy
+                | NetworkRouting
+                | IdeAgent
+                | IdeAgentPrivacy
+                | AiToolsAgents
+                | AiToolsSkills
+                | AiToolsMcpServers
+                | AiToolsToolUse
+                | AiToolsWebSearch
+        )
+}
+
+#[derive(Default, PartialEq, Eq, Hash)]
+pub enum PortableKnowledgeLibrary {
+    #[default]
+    Unavailable,
+    Loading,
+    Failed,
+    Ready {
+        collections: Vec<String>,
+        keyword_ready: bool,
+    },
+}
+
+pub enum WallpaperAction {
+    Pick,
+    Select(WallpaperId),
+    Remove(WallpaperId),
+    Clear,
+    Reload,
+}
+
+#[derive(Clone)]
+pub struct WallpaperTile {
+    pub id: WallpaperId,
+    pub name: String,
+    pub format_key: &'static str,
+    pub thumbnail: gpui::ImageSource,
+}
+
+#[derive(Clone)]
+pub struct BrowserWallpaperGallery {
+    pub request: Rc<dyn Fn(WallpaperAction, &mut App)>,
+    pub source: fn(BundledWallpaper) -> gpui::ImageSource,
+    pub supports_tab: fn(&str) -> bool,
+}
+
 struct PageState {
+    host: SettingsHost,
+    browser_report: Option<ReportDownload>,
+    wallpaper_gallery: Option<BrowserWallpaperGallery>,
+    wallpaper_tiles: Vec<WallpaperTile>,
+    gallery_busy: bool,
+    gallery_error: Option<&'static str>,
+    loaded_wallpaper: Option<WallpaperId>,
+    section_filter: SectionFilter,
+    knowledge: PortableKnowledgeLibrary,
     settings: PersistedSettings,
     tokens_cache: ThemeTokens,
     catalog: Vec<ActionDefinition>,
@@ -158,9 +281,10 @@ struct PageState {
     known_hosts: host::KnownHosts,
     probe: host::ProxyProbe,
     ai_api_keys: HashMap<String, zeroize::Zeroizing<String>>,
-    ai_api_key_drafts: HashMap<usize, zeroize::Zeroizing<String>>,
-    ai_new_model_drafts: HashMap<usize, String>,
+    ai_api_key_drafts: HashMap<String, zeroize::Zeroizing<String>>,
+    ai_new_model_drafts: HashMap<String, String>,
     ai_tool_policy_expanded: bool,
+    ai_confirm: Entity<crate::ai::confirm::AiSettingsConfirm>,
     document: Option<(
         bool,
         oxideterm_gpui_markdown::MarkdownVirtualListScrollHandle,
@@ -181,8 +305,57 @@ impl PortableSettingsSurface {
         actions: Vec<ActionDefinition>,
         cx: &mut Context<Self>,
     ) -> Self {
+        Self::with_sections(settings, actions, SettingsHost::Managed, None, cx)
+    }
+
+    /// Settings for the visiting browser, not for a separately managed desktop installation.
+    pub fn browser_workspace(
+        settings: PersistedSettings,
+        actions: Vec<ActionDefinition>,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        Self::with_sections(settings, actions, SettingsHost::Browser, None, cx)
+    }
+
+    pub fn browser_workspace_with_wallpapers(
+        settings: PersistedSettings,
+        actions: Vec<ActionDefinition>,
+        gallery: BrowserWallpaperGallery,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        Self::with_sections(settings, actions, SettingsHost::Browser, Some(gallery), cx)
+    }
+
+    fn with_sections(
+        settings: PersistedSettings,
+        actions: Vec<ActionDefinition>,
+        host: SettingsHost,
+        wallpaper_gallery: Option<BrowserWallpaperGallery>,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let section_filter: SectionFilter = match host {
+            SettingsHost::Browser if wallpaper_gallery.is_some() => |tab, section| {
+                browser_section(tab, section) || (tab == SettingsTab::Appearance && section == SettingsSectionId::AppearanceBackground)
+            },
+            SettingsHost::Browser => browser_section,
+            _ => supported,
+        };
         let initial_tokens = pages::tokens(&settings, true);
+        let ai_confirm = cx.new(|_| {
+            crate::ai::confirm::AiSettingsConfirm::new(
+                initial_tokens,
+                I18n::new(locale(settings.general.language)),
+            )
+        });
         let state = cx.new(|cx| PageState {
+            host,
+            wallpaper_gallery,
+            wallpaper_tiles: Vec::new(),
+            gallery_busy: false,
+            gallery_error: None,
+            loaded_wallpaper: None,
+            browser_report: None,
+            section_filter,
             i18n: I18n::new(locale(settings.general.language)),
             tokens_cache: initial_tokens,
             settings,
@@ -192,8 +365,8 @@ impl PortableSettingsSurface {
             list: Default::default(),
             target: Cell::new(None),
             query: String::new(),
-            search: SettingsSearchFilter::new(|i18n, query| {
-                crate::search::filtered_results(i18n, query, supported, false)
+            search: SettingsSearchFilter::new(move |i18n, query| {
+                crate::search::filtered_results(i18n, query, section_filter, host)
             }),
             search_open: false,
             focus: cx.focus_handle(),
@@ -207,16 +380,31 @@ impl PortableSettingsSurface {
             editor: None,
             editor_scroll: ScrollHandle::new(),
             known_hosts: Default::default(),
+            knowledge: Default::default(),
             probe: Default::default(),
             ai_api_keys: Default::default(),
             ai_api_key_drafts: Default::default(),
             ai_new_model_drafts: Default::default(),
             ai_tool_policy_expanded: false,
+            ai_confirm: ai_confirm.clone(),
             document: None,
             shortcuts: Default::default(),
             reset_open: false,
             app_icon_picker: None,
         });
+        cx.subscribe(&ai_confirm, {
+            let state = state.clone();
+            move |_, _, intent: &crate::ai::confirm::AiSettingsConfirmIntent, cx| {
+                if *intent == crate::ai::confirm::AiSettingsConfirmIntent::Enable {
+                    state.update(cx, |s, cx| {
+                        crate::options::set_ai_enabled_confirmed(&mut s.settings, true);
+                        crate::options::set_ai_enabled(&mut s.settings, true);
+                        s.changed(cx);
+                    });
+                }
+            }
+        })
+        .detach();
         let picker = actions::theme_picker(&state, cx);
         let ai_providers = actions::ai_providers_view(&state, &picker, cx);
         Self {
@@ -230,8 +418,18 @@ impl PortableSettingsSurface {
         }
     }
 
+    pub fn captures_workspace_shortcuts(&self, cx: &App) -> bool {
+        let state = self.state.read(cx);
+        state.ai_confirm.read(cx).state().is_some() || state.reset_open
+            || state.shortcuts.keybinding_recording_action_id().is_some()
+    }
+
     pub fn settings<'a>(&self, cx: &'a App) -> &'a PersistedSettings {
         &self.state.read(cx).settings
+    }
+
+    pub fn has_provider_api_key(&self, id: &str, cx: &App) -> bool {
+        self.state.read(cx).ai_api_keys.contains_key(id)
     }
 
     /// Returns the in-memory session API key configured for an AI provider, if any.
@@ -249,6 +447,26 @@ impl PortableSettingsSurface {
         (pages::tokens(&state.settings, dark), state.i18n.clone())
     }
 
+    pub fn set_loaded_wallpaper(&self, id: Option<WallpaperId>, cx: &mut App) {
+        self.state.update(cx, |s, cx| {
+            if s.loaded_wallpaper != id {
+                s.loaded_wallpaper = id;
+                cx.notify();
+            }
+        });
+    }
+
+    pub fn update_wallpaper_gallery(
+        &self, tiles: Vec<WallpaperTile>, busy: bool, error: Option<&'static str>, cx: &mut App,
+    ) {
+        self.state.update(cx, |s, cx| {
+            s.wallpaper_tiles = tiles;
+            s.gallery_busy = busy;
+            s.gallery_error = error;
+            cx.notify();
+        });
+    }
+
     pub fn edit_preferences(&self, cx: &mut App, edit: impl FnOnce(&mut PersistedSettings)) {
         self.state.update(cx, |state, cx| {
             edit(&mut state.settings);
@@ -256,10 +474,55 @@ impl PortableSettingsSurface {
         });
     }
 
+    pub fn open_ai_providers(&self, cx: &mut App) {
+        self.state.update(cx, |s,cx| {
+            s.route.set_ai_page(AiSettingsPage::Providers);
+            s.navigate(SettingsTab::Ai,None,cx);
+        });
+    }
+
     pub fn open_section(&self, tab: SettingsTab, cx: &mut App) {
         self.state
             .update(cx, |state, cx| state.navigate(tab, None, cx));
     }
+
+    pub fn knowledge_dialog(
+        &self,
+        tokens: &ThemeTokens,
+        content: crate::knowledge_page::dialog::KnowledgeDialogContent<'_>,
+        fields: Option<(AnyElement, AnyElement)>,
+        focus: Option<oxideterm_gpui_ui::ConfirmDialogAction>,
+        dispatch: Rc<dyn Fn(crate::knowledge_page::dialog::KnowledgeDialogAction, &mut App)>,
+        cx: &App,
+    ) -> AnyElement {
+        let state = self.state.read(cx);
+        crate::knowledge_page::dialog::KnowledgeDialog {
+            controls: state.controls(
+                tokens,
+                actions::window_dispatch(self.state.downgrade(), self.picker.downgrade()),
+            ),
+            focus,
+            dispatch,
+        }
+        .render_with_fields(content, fields, cx)
+    }
+
+    pub fn set_knowledge_library(&self, library: PortableKnowledgeLibrary, cx: &mut App) {
+        self.state.update(cx, |s, cx| {
+            if s.knowledge != library {
+                s.knowledge = library;
+                cx.notify();
+            }
+        });
+    }
+
+    pub fn on_browser_report(&self, download: impl Fn(&mut Window, &mut App) + 'static, cx: &mut App) {
+        self.state.update(cx, |s, cx| {
+            s.browser_report = Some(Rc::new(download));
+            cx.notify();
+        });
+    }
+
 
     pub fn set_app_icon_picker(
         &self,
@@ -324,12 +587,22 @@ impl PageState {
         result: Option<&SettingsSearchResult>,
         cx: &mut Context<Self>,
     ) {
+        if let Some(result) = result {
+            if !(self.section_filter)(tab, result.section) {
+                return;
+            }
+        } else if self.sections_for(tab, self.section_counts()).is_empty() {
+            return;
+        }
         if tab != SettingsTab::Network {
             self.clear_proxy_password();
         }
         self.route.set_active_tab(tab);
         if let Some(page) = result.and_then(|r| r.terminal_page) {
             self.route.set_terminal_page(page);
+        }
+        if let Some(page) = result.and_then(|r| r.ai_page) {
+            self.route.set_ai_page(page);
         }
         self.target.set(result.map(|r| r.section));
         self.search_open = false;
@@ -342,6 +615,15 @@ impl PageState {
         cx.notify();
     }
 
+    fn has_wallpaper(&self) -> bool {
+        let t = &self.settings.terminal;
+        self.wallpaper_gallery.is_some()
+            && t.background_enabled && WallpaperId::selected(t).is_some_and(|id|matches!(id,WallpaperId::Bundled(_))||self.loaded_wallpaper==Some(id))
+            && (t.background_scope == oxideterm_settings::BackgroundScope::Window
+                || t.background_scope
+                    .includes_content(&t.background_enabled_tabs, "settings"))
+    }
+
     fn controls<'a>(
         &'a self,
         tokens: &'a ThemeTokens,
@@ -352,7 +634,7 @@ impl PageState {
                 settings: &self.settings,
                 tokens,
                 i18n: &self.i18n,
-                has_background: false,
+                has_background: self.has_wallpaper(),
             },
             dispatch,
             ime: self,
@@ -364,9 +646,9 @@ impl PageState {
         }
     }
 
-    fn frame(&self, dark: bool) -> (SettingsSurfaceFrame, Vec<SettingsSectionId>) {
+    fn section_counts(&self) -> SettingsDynamicSectionCounts {
         let route = self.route.route_snapshot();
-        let counts = SettingsDynamicSectionCounts {
+        SettingsDynamicSectionCounts {
             terminal_page: route.terminal_page,
             ai_page: route.ai_page,
             visible_keybinding_scope_count: if route.active_tab == SettingsTab::Keybindings {
@@ -380,17 +662,29 @@ impl PageState {
             },
             knowledge_has_error: false,
             knowledge_has_selected_collection: false,
-        };
-        let sections_for = |tab| {
-            let mut sections = settings_tab_sections(tab, counts);
-            // A gateway can edit desktop preferences irrespective of its own platform.
-            if tab == SettingsTab::General
-                && !sections.contains(&SettingsSectionId::GeneralWindowBehavior)
-            {
-                sections.push(SettingsSectionId::GeneralWindowBehavior);
-            }
-            sections
-        };
+        }
+    }
+
+    fn sections_for(
+        &self,
+        tab: SettingsTab,
+        counts: SettingsDynamicSectionCounts,
+    ) -> Vec<SettingsSectionId> {
+        let mut sections = settings_tab_sections(tab, counts);
+        // Managed desktop settings can include tray controls on a non-desktop client.
+        if tab == SettingsTab::General
+            && !sections.contains(&SettingsSectionId::GeneralWindowBehavior)
+        {
+            sections.push(SettingsSectionId::GeneralWindowBehavior);
+        }
+
+        sections.retain(|section| (self.section_filter)(tab, *section));
+        sections
+    }
+
+    fn frame(&self, dark: bool) -> (SettingsSurfaceFrame, Vec<SettingsSectionId>) {
+        let route = self.route.route_snapshot();
+        let counts = self.section_counts();
         let layout = SettingsNavigationLayout::from_persisted_groups(
             &self.settings.settings_navigation.groups,
         );
@@ -401,19 +695,12 @@ impl PageState {
                 let tabs: Vec<_> = group
                     .iter()
                     .copied()
-                    .filter(|&tab| {
-                        sections_for(tab)
-                            .into_iter()
-                            .any(|section| supported(tab, section))
-                    })
+                    .filter(|&tab| !self.sections_for(tab, counts).is_empty())
                     .collect();
                 (!tabs.is_empty()).then_some(tabs)
             })
             .collect();
-        let sections: Vec<_> = sections_for(route.active_tab)
-            .into_iter()
-            .filter(|&s| supported(route.active_tab, s))
-            .collect();
+        let sections = self.sections_for(route.active_tab, counts);
         let signatures = std::iter::once(None)
             .chain(sections.iter().copied().map(Some))
             .map(|section| {
@@ -424,6 +711,10 @@ impl PageState {
                 self.settings.appearance.ui_font_family.hash(&mut h);
                 (self.settings.appearance.ui_density as u8).hash(&mut h);
                 match section {
+                    Some(
+                        SettingsSectionId::KnowledgeCollections
+                        | SettingsSectionId::KnowledgeEmbeddingConfig,
+                    ) => self.knowledge.hash(&mut h),
                     Some(SettingsSectionId::ConnectionsKnownHosts) => {
                         self.known_hosts.revision.hash(&mut h);
                         self.known_hosts.query.hash(&mut h);
@@ -473,6 +764,16 @@ impl PageState {
                             .keybinding_recording_combo()
                             .is_some()
                             .hash(&mut h);
+                    }
+                    Some(SettingsSectionId::AppearanceBackground) => {
+                        self.settings.terminal.background_image.hash(&mut h);
+                        self.settings.terminal.background_enabled.hash(&mut h);
+                        self.settings.terminal.background_opacity.to_bits().hash(&mut h);
+                        (self.settings.terminal.background_scope as u8).hash(&mut h);
+                        self.settings.terminal.background_enabled_tabs.hash(&mut h);
+                        self.gallery_busy.hash(&mut h);
+                        self.gallery_error.hash(&mut h);
+                        for tile in &self.wallpaper_tiles { tile.id.hash(&mut h); }
                     }
                     Some(SettingsSectionId::AppearanceTheme) => {
                         self.settings
@@ -527,11 +828,11 @@ impl PageState {
                 signatures,
                 tokens,
                 i18n: self.i18n.clone(),
-                has_background: false,
+                has_background: self.has_wallpaper(),
                 ui_font: oxideterm_gpui_ui::typography::tauri_ui_font_family(
                     &self.settings.appearance.ui_font_family,
                 ),
-                divider: gpui::rgba((tokens.ui.border << 8) | 0x66),
+                divider: gpui::rgba((tokens.ui.border << 8) | if self.has_wallpaper() { 0x26 } else { 0x66 }),
                 groups,
             },
             sections,
@@ -667,7 +968,21 @@ impl Render for PortableSettingsSurface {
                             TerminalSettingsPage::Awareness,
                             TerminalSettingsPage::Logging,
                             TerminalSettingsPage::Highlight,
-                        ],
+                        ]
+                        .into_iter()
+                        .filter(|&page| {
+                            state
+                                .sections_for(
+                                    SettingsTab::Terminal,
+                                    SettingsDynamicSectionCounts {
+                                        terminal_page: page,
+                                        ..frame.counts
+                                    },
+                                )
+                                .iter()
+                                .any(|s| *s != SettingsSectionId::TerminalPageSwitcher)
+                        })
+                        .collect::<Vec<_>>(),
                         route.terminal_page,
                         route.previous_terminal_page,
                         TerminalSettingsPage::label_key,
@@ -692,7 +1007,21 @@ impl Render for PortableSettingsSurface {
                             AiSettingsPage::Providers,
                             AiSettingsPage::Context,
                             AiSettingsPage::Tools,
-                        ],
+                        ]
+                        .into_iter()
+                        .filter(|&page| {
+                            state
+                                .sections_for(
+                                    SettingsTab::Ai,
+                                    SettingsDynamicSectionCounts {
+                                        ai_page: page,
+                                        ..frame.counts
+                                    },
+                                )
+                                .iter()
+                                .any(|s| *s != SettingsSectionId::AiPageSwitcher)
+                        })
+                        .collect::<Vec<_>>(),
                         route.ai_page,
                         route.previous_ai_page,
                         AiSettingsPage::label_key,

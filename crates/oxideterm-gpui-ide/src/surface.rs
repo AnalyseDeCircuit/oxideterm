@@ -448,7 +448,7 @@ pub struct IdeSurface {
     quick_open_focus: Option<EditorTabId>,
     search_cache: HashMap<String, SearchCacheEntry>,
     search_cache_order: Vec<String>,
-    pending_search_queries: HashMap<EditorTabId, (String, u32)>,
+    pending_search_queries: HashMap<EditorTabId, (String, PendingEditorReveal)>,
     pending_editor_reveals: BTreeMap<String, PendingEditorReveal>,
     tab_context_menu: Option<TabContextMenu>,
     tree_context_menu: Option<TreeContextMenu>,

@@ -13,6 +13,7 @@ base64.workspace = true
 oxideterm-settings = { path = "../oxideterm-settings" }
 parking_lot.workspace = true
 regex.workspace = true
+rust-stemmers = "1"
 rmp-serde.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -49,7 +50,6 @@ oxideterm-secret-store = { path = "../oxideterm-secret-store" }
 rand.workspace = true
 redb = "2.1"
 reqwest.workspace = true
-rust-stemmers = "1"
 tokio.workspace = true
 tracing.workspace = true
 whoami.workspace = true

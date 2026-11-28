@@ -1202,6 +1202,7 @@ impl WorkspaceApp {
         let anchor_id = target.anchor_id();
         let anchors = self.text_input_anchors.clone();
         oxideterm_gpui_sftp::SftpDialogIme {
+            field: None,
             anchor_id,
             viewport: anchors.viewport(anchor_id),
             caret_visible: self.input_caret.visible(),

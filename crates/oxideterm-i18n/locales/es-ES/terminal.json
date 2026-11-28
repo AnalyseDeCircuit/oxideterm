@@ -1,5 +1,6 @@
 {
   "terminal": {
+    "demo_shell_welcome": "Terminal de demostración en el navegador. Escribe help para ver los comandos.",
     "ssh_latency": {
       "measured": "Tiempo de ida y vuelta SSH: {{millis}} ms, incluida la red y la respuesta del servidor. Actualizado hace {{seconds}} s.",
       "pending": "Midiendo latencia SSH…",
@@ -101,6 +102,7 @@
     },
     "paste": {
       "edit_title": "Editar antes de pegar",
+      "clipboard_read_failed": "No se pudo leer el portapapeles. Usa el atajo de teclado para pegar.",
       "send_by_line": "Enviar línea por línea",
       "stop_sending": "Detener el envío",
       "interrupted": "Se enviaron {{sent}} líneas completas. El envío se detuvo en la línea {{line}}.",
@@ -658,6 +660,7 @@
       "connection_failed": "Error de conexión BLE: {error}",
       "runtime_init_failed": "Error al inicializar el runtime BLE",
       "adapter_index_out_of_range": "El índice del adaptador Bluetooth {n} está fuera de rango",
+      "write_failed": "No se pudo escribir por Bluetooth. Vuelve a conectar el dispositivo para enviar más datos.",
       "service_not_found": "Servicio {uuid} no encontrado",
       "no_notify_write_pair": "El servicio seleccionado no tiene un par de características notify+write"
     }

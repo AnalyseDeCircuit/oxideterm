@@ -1,7 +1,7 @@
 use super::*;
 
 pub(super) use oxideterm_local_files::{
-    bookmark_name_for_path, can_extract_archive, local_parent_path,
+    bookmark_name_for_path, local_parent_path,
     local_path_segments as file_manager_path_segments, new_file_manager_bookmark_id,
     normalize_local_path, now_ms, sorted_local_files,
 };

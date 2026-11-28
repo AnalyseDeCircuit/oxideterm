@@ -141,6 +141,8 @@ features = [
     "Element",
     "EventTarget",
     "File",
+    "FileList",
+    "FileSystemEntry",
     "FocusOptions",
     "HtmlCanvasElement",
     "HtmlElement",

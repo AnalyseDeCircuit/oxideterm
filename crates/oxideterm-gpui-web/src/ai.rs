@@ -1,5 +1,8 @@
+mod composer;
 mod history;
-mod services;
+mod layers;
+mod provider_stream;
+pub(crate) mod services;
 
 use gpui::{prelude::*, *};
 use oxideterm_ai::{AiChatRole, AiProviderView, AiStreamEvent, agent_chat_message, provider_view};
@@ -22,14 +25,48 @@ use wasm_bindgen_futures::JsFuture;
 use web_sys::{Headers, Request, RequestInit, RequestMode, Response};
 use zeroize::Zeroizing;
 
+pub(crate) struct ChatSetupNotice(pub &'static str);
+impl EventEmitter<ChatSetupNotice> for Assistant {}
+
+#[derive(Clone, Copy)]
+enum Turn {
+    Draft,
+    Retry,
+    Edit,
+}
+
+struct ProviderRequest {
+    provider_id: String,
+    kind: String,
+    endpoint: String,
+    model: String,
+    key: Option<Zeroizing<String>>,
+}
+
+fn selected_provider<'a>(
+    providers: &'a [AiProviderView],
+    id: Option<&str>,
+) -> Option<&'a AiProviderView> {
+    match id {
+        Some(id) => providers.iter().find(|p| p.id == id && p.enabled),
+        None => providers.iter().find(|p| p.enabled),
+    }
+}
+
 pub struct Assistant {
     state: Entity<AiWorkspaceEntity>,
     sidebar: Entity<AiAssistantSidebarView>,
-    model_menu: Entity<AiModelPickerView>,
+    composer: Entity<composer::Composer>,
+    message: Entity<composer::Composer>,
+    layers: Entity<layers::ChatLayers>,
+    rename: Entity<oxideterm_gpui_editor::line_edit::LineField>,
+    history: Rc<history::History>,
     settings: Entity<PortableSettingsSurface>,
     focus: FocusHandle,
-    env: Rc<RefCell<(ThemeTokens, I18n)>>,
+    env: Rc<RefCell<(ThemeTokens, I18n, SharedString)>>,
     serial: u64,
+    command_target: Rc<std::cell::Cell<bool>>,
+    demo: bool,
     on_open_settings: Rc<dyn Fn(&mut Window, &mut App)>,
     on_insert_command: Rc<dyn Fn(String, &mut Window, &mut App)>,
 }
@@ -37,13 +74,17 @@ pub struct Assistant {
 impl Assistant {
     pub fn new(
         t: ThemeTokens,
+        ui_font: SharedString,
         i: I18n,
         settings: Entity<PortableSettingsSurface>,
+        demo: bool,
         on_open_settings: Rc<dyn Fn(&mut Window, &mut App)>,
         on_insert_command: Rc<dyn Fn(String, &mut Window, &mut App)>,
         cx: &mut Context<Self>,
     ) -> Self {
-        let env = Rc::new(RefCell::new((t, i.clone())));
+        let env = Rc::new(RefCell::new((t, i.clone(), ui_font)));
+        let command_target = Rc::new(std::cell::Cell::new(false));
+        let can_insert_command = command_target.clone();
         let local = Rc::new(services::LocalOnly);
         let history = Rc::new(history::History::default());
         let knowledge =
@@ -62,55 +103,41 @@ impl Assistant {
             )
         });
         let focus = cx.focus_handle();
-        let f = focus.clone();
-        let style = env.clone();
-        let editor_state = state.clone();
-        let bindings = AiEditorBindings {
-            frame: Rc::new(move |kind, _| {
-                let (t, i) = &*style.borrow();
-                Some(AiEditorFrame {
-                    tokens: *t,
-                    i18n: i.clone(),
-                    font: "IBM Plex Sans".into(),
-                    width: 320.,
-                    anchor: TextInputAnchorId(if kind == AiEditorKind::Composer { 1 } else { 2 }),
-                    model_selected: true,
-                    marked_range: None,
-                    selected_range: None,
-                    active_offset: None,
-                    composed_text: None,
-                    caret_visible: true,
-                })
-            }),
-            anchor: Rc::new(|_, _, _| {}),
-            input: Rc::new(move |kind, _, w, cx| {
-                w.focus(&f, cx);
-                editor_state.update(cx, |s, cx| {
-                    if kind == AiEditorKind::Composer {
-                        s.focus_chat_input()
-                    } else {
-                        s.focus_message_edit()
-                    }
-                    cx.notify();
-                });
-            }),
-        };
-        let composer =
-            cx.new(|_| AiEditorView::new(AiEditorKind::Composer, state.clone(), bindings.clone()));
-        let message =
-            cx.new(|_| AiEditorView::new(AiEditorKind::MessageEdit, state.clone(), bindings));
+        let anchors = layers::Anchors::default();
+        let place = layers::anchor_writer(&anchors, &state);
+        let header_anchor = place.clone();
+        let rename = Self::rename_field(&state, t, cx);
+        let send = cx.weak_entity();
+        let composer = cx.new(|cx| {
+            composer::Composer::new(
+                AiEditorKind::Composer,
+                state.clone(),
+                env.clone(),
+                send.clone(),
+                cx,
+            )
+        });
+        let message = cx.new(|cx| {
+            composer::Composer::new(
+                AiEditorKind::MessageEdit,
+                state.clone(),
+                env.clone(),
+                send,
+                cx,
+            )
+        });
         let owner = cx.weak_entity();
         let style = env.clone();
         let header = cx.new(|_| {
             AiChatHeaderView::new(
                 state.clone(),
                 Rc::new(move |_| {
-                    let (t, i) = &*style.borrow();
+                    let (t, i, ui_font) = &*style.borrow();
                     Some(AiChatHeaderFrame {
                         tokens: *t,
                         i18n: i.clone(),
                         background: rgb(t.ui.bg_panel),
-                        font: "IBM Plex Sans".into(),
+                        font: ui_font.clone(),
                     })
                 }),
                 Rc::new(move |r, _, cx| {
@@ -122,7 +149,7 @@ impl Assistant {
                         }),
                     });
                 }),
-                Rc::new(|_, _, _| {}),
+                header_anchor,
             )
         });
         let jobs =
@@ -133,7 +160,7 @@ impl Assistant {
                 state.clone(),
                 jobs,
                 Rc::new(move |_| {
-                    let (t, i) = &*style.borrow();
+                    let (t, i, _) = &*style.borrow();
                     Some(AiBackgroundTaskFrame {
                         tokens: *t,
                         i18n: i.clone(),
@@ -156,27 +183,39 @@ impl Assistant {
             &state,
             AiModelPickerBindings {
                 frame: Rc::new(move |cx| {
-                    let (t, i) = &*style.borrow();
+                    let (t, i, _) = &*style.borrow();
                     let ai = &picker_settings.read(cx).settings(cx).ai;
                     let providers: Vec<AiProviderView> =
                         ai.providers.iter().filter_map(provider_view).collect();
-                    let active_provider = ai.active_provider_id.clone();
-                    let active_model = ai
-                        .active_model
-                        .clone()
-                        .filter(|m| !m.trim().is_empty())
-                        .or_else(|| {
-                            providers
-                                .iter()
-                                .find(|p| Some(&p.id) == active_provider.as_ref())
-                                .and_then(|p| p.models.first().cloned())
+                    let selected = selected_provider(&providers, ai.active_provider_id.as_deref());
+                    let active_provider = selected.map(|p| p.id.clone());
+                    let active_model = selected.and_then(|p| {
+                        ai.active_model
+                            .clone()
+                            .filter(|m| !m.trim().is_empty())
+                            .or_else(|| p.models.first().cloned())
+                    });
+                    let status = providers
+                        .iter()
+                        .map(|p| {
+                            let has_key =
+                                !oxideterm_ai::provider_chat_requires_key(&p.provider_type)
+                                    || p.provider_type == "lmstudio"
+                                    || picker_settings.read(cx).has_provider_api_key(&p.id, cx);
+                            (
+                                p.id.clone(),
+                                AiModelPickerStatus {
+                                    has_key,
+                                    ..Default::default()
+                                },
+                            )
                         })
-                        .or_else(|| Some("OxideSens Demo".into()));
+                        .collect();
                     Some(AiModelPickerFrame {
                         tokens: *t,
                         i18n: i.clone(),
                         providers,
-                        status: Default::default(),
+                        status,
                         active_provider,
                         active_model,
                         acp_active: false,
@@ -199,8 +238,6 @@ impl Assistant {
                         AiModelPickerRequest::Select(provider_id, model_id) => {
                             a.settings.update(cx, |surface, cx| {
                                 surface.edit_preferences(cx, |prefs| {
-                                    prefs.ai.enabled = true;
-                                    prefs.ai.enabled_confirmed = true;
                                     prefs.ai.active_provider_id = Some(provider_id.clone());
                                     prefs.ai.active_model = Some(model_id.clone());
                                 });
@@ -223,7 +260,7 @@ impl Assistant {
                         _ => {}
                     });
                 }),
-                anchor: Rc::new(|_, _, _| {}),
+                anchor: place.clone(),
                 text_anchor: Rc::new(|_, _, _| {}),
             },
             cx,
@@ -231,27 +268,32 @@ impl Assistant {
 
         let owner = cx.weak_entity();
         let style = env.clone();
+        let composer_settings = settings.clone();
+        let composer_state = state.clone();
+        let rename_view = rename.clone();
+        let initial_history = history.clone();
         let sidebar = cx.new(|cx| {
             AiAssistantSidebarView::with_bindings(
                 state.clone(),
-                message,
+                message.clone(),
                 AiSidebarChildren {
                     header,
                     background,
-                    model_trigger: model.sidebar,
-                    composer,
+                    model_trigger: model.sidebar.clone(),
+                    composer: composer.clone().into(),
                 },
                 PortableTranscriptBindings {
                     initialize: Rc::new(move |s, _, cx| {
-                        s.initialize_hosted_history(history.as_ref(), cx)
+                        s.initialize_hosted_history(initial_history.as_ref(), cx)
                     }),
                     image_bytes: Rc::new(|_, _, _| Box::pin(async { None })),
-                    frame: Rc::new(move |_| {
-                        let (t, i) = &*style.borrow();
+                    frame: Rc::new(move |cx| {
+                        let (t, i, ui_font) = &*style.borrow();
                         Some(AiTranscriptFrame {
+                            can_insert_command: can_insert_command.get(),
                             tokens: *t,
                             i18n: i.clone(),
-                            font: "IBM Plex Sans".into(),
+                            font: ui_font.clone(),
                             mono_font: "Lilex".into(),
                             panel_background: rgb(t.ui.bg_panel),
                             divider: rgb(t.ui.border),
@@ -263,6 +305,7 @@ impl Assistant {
                             selectable_text: Rc::new(|v| div().child(v.text).into_any_element()),
                             overlay: AiOverlayFrame {
                                 rename: AiRenameFrame {
+                                    field: Some(rename_view.clone().into()),
                                     anchor: TextInputAnchorId(4),
                                     viewport: Default::default(),
                                     marked: None,
@@ -275,9 +318,9 @@ impl Assistant {
                                 confirm_focus: None,
                             },
                             composer: AiComposerFrame {
-                                enabled: true,
+                                enabled: composer_settings.read(cx).settings(cx).ai.enabled,
                                 model_selected: true,
-                                images_allowed: false,
+                                images_allowed: composer_state.read(cx).chat_ui().images.is_empty(),
                                 backend: Default::default(),
                                 context_counts: None,
                                 terminal_context: false,
@@ -292,12 +335,49 @@ impl Assistant {
                     }),
                     request: Rc::new(move |r, w, cx| {
                         let _ = owner.update(cx, |a, cx| match r {
+                            AiTranscriptRequest::EditMessage(id) => a
+                                .state
+                                .update(cx, |s, cx| s.load_message_edit(id, |_| {}, cx)),
+                            AiTranscriptRequest::CancelEdit => {
+                                a.state.update(cx, |s, cx| s.cancel_message_edit(cx))
+                            }
+                            AiTranscriptRequest::Regenerate => a.start_turn(Turn::Retry, cx),
+                            AiTranscriptRequest::SaveEdit => a.start_turn(Turn::Edit, cx),
                             AiTranscriptRequest::Send => a.send(cx),
                             AiTranscriptRequest::Stop => a.stop(cx),
                             AiTranscriptRequest::NewConversation => a.new_chat(cx),
+                            AiTranscriptRequest::ConfirmClearAll(yes)
+                            | AiTranscriptRequest::ConfirmDeleteMessage(yes) => {
+                                a.confirm_chat(yes, cx)
+                            }
+                            AiTranscriptRequest::ClosePopovers => a.state.update(cx, |s, cx| {
+                                s.close_chat_popovers();
+                                s.dismiss_model_selector();
+                                cx.notify();
+                            }),
+                            AiTranscriptRequest::OpenSettings => {
+                                if let Some(w) = w {
+                                    (a.on_open_settings)(w, cx);
+                                }
+                            }
+                            AiTranscriptRequest::BeginRename(id, title) => {
+                                a.state.update(cx, |s, cx| {
+                                    s.begin_conversation_rename(id, title.clone());
+                                    cx.notify();
+                                });
+                                a.rename.update(cx, |f, cx| f.reset(&title, true, cx));
+                                if let Some(w) = w {
+                                    w.focus(&a.rename.focus_handle(cx), cx);
+                                }
+                            }
+                            AiTranscriptRequest::SaveRename => {
+                                a.state.update(cx, |s, cx| s.save_conversation_rename(cx));
+                            }
                             AiTranscriptRequest::DeleteConversation(id) => {
                                 a.state.update(cx, |s, cx| {
+                                    s.cancel_chat_stream_for(&id);
                                     s.delete_conversation(&id);
+                                    s.persist_chat_state();
                                     cx.notify();
                                 });
                             }
@@ -308,7 +388,7 @@ impl Assistant {
                             }
                             AiTranscriptRequest::FocusComposer => {
                                 if let Some(w) = w {
-                                    w.focus(&a.focus, cx)
+                                    w.focus(&a.composer.focus_handle(cx), cx)
                                 }
                                 a.state.update(cx, |s, cx| {
                                     s.focus_chat_input();
@@ -324,7 +404,7 @@ impl Assistant {
                     }),
                     file_preview: Rc::new(|_, _| None),
                     markdown_actions: Default::default(),
-                    select_anchor: Rc::new(|_, _, _| {}),
+                    select_anchor: place,
                     text_anchor: Rc::new(|_, _, _| {}),
                 },
                 t,
@@ -342,12 +422,17 @@ impl Assistant {
                         {
                             let finished =
                                 matches!(event, AiStreamEvent::Done | AiStreamEvent::Error(_));
+                            // Browser failures contain only localized messages and HTTP status, never response bodies.
+                            let safe_error = match &event {
+                                AiStreamEvent::Error(reason) => Some(reason.clone()),
+                                _ => None,
+                            };
                             s.apply_stream_event_state(
                                 d.generation,
                                 &d.conversation_id,
                                 &d.assistant_id,
                                 event,
-                                None,
+                                safe_error,
                             );
                             if finished {
                                 s.complete_chat_stream(d.generation);
@@ -362,23 +447,55 @@ impl Assistant {
         })
         .detach();
 
+        let layers = cx.new(|cx| {
+            layers::ChatLayers::new(
+                state.clone(),
+                sidebar.clone(),
+                model,
+                anchors,
+                env.clone(),
+                cx,
+            )
+        });
         Self {
             state,
             sidebar,
-            model_menu: model.menu,
+            composer,
+            message,
+            layers,
+            rename,
+            history,
             settings,
             focus,
             env,
             serial: 0,
+            command_target,
+            demo,
             on_open_settings,
             on_insert_command,
         }
     }
 
-    pub fn environment(&mut self, t: ThemeTokens, i: I18n, cx: &mut Context<Self>) {
-        self.env.replace((t, i));
+    pub fn panel(&self, width: f32, writable: bool, cx: &mut App) {
+        self.composer.update(cx, |c, cx| c.set_width(width, cx));
+        self.message.update(cx, |c, cx| c.set_width(width, cx));
+        if self.command_target.replace(writable) != writable {
+            App::notify(cx, self.sidebar.entity_id());
+        }
+    }
+
+    pub fn environment(
+        &mut self,
+        t: ThemeTokens,
+        i: I18n,
+        ui_font: SharedString,
+        cx: &mut Context<Self>,
+    ) {
+        self.env.replace((t, i, ui_font));
+        self.composer.update(cx, |c, cx| c.appearance(cx));
+        self.message.update(cx, |c, cx| c.appearance(cx));
         App::notify(cx, self.sidebar.entity_id());
-        App::notify(cx, self.model_menu.entity_id());
+        App::notify(cx, self.layers.entity_id());
         cx.notify();
     }
 
@@ -403,167 +520,191 @@ impl Assistant {
         });
     }
 
-    fn active_provider_request(
-        &self,
-        cx: &App,
-    ) -> Option<(String, String, String, Option<Zeroizing<String>>)> {
-        let ai = &self.settings.read(cx).settings(cx).ai;
-        let providers: Vec<AiProviderView> =
-            ai.providers.iter().filter_map(provider_view).collect();
-        let active = ai
-            .active_provider_id
-            .as_deref()
-            .and_then(|id| providers.iter().find(|p| p.id == id))
-            .or_else(|| providers.iter().find(|p| p.enabled))?;
+    fn active_provider_request(&self, cx: &App) -> Result<Option<ProviderRequest>, &'static str> {
+        let surface = self.settings.read(cx);
+        let ai = &surface.settings(cx).ai;
+        if ai.providers.is_empty() && ai.active_provider_id.is_none() {
+            return if self.demo {
+                Ok(None)
+            } else {
+                Err("ai.model_selector.no_provider")
+            };
+        }
+        let providers = oxideterm_ai::provider_views(&ai.providers);
+        let active = selected_provider(&providers, ai.active_provider_id.as_deref())
+            .ok_or("ai.model_selector.no_model_selected")?;
         let model = ai
             .active_model
             .clone()
             .filter(|m| !m.trim().is_empty())
-            .or_else(|| active.models.first().cloned())?;
-        let key = self.settings.read(cx).provider_api_key(&active.id, cx);
-        let keyless_ok = active.provider_type == "ollama" || active.provider_type == "lmstudio";
-        if key.is_none() && !keyless_ok {
-            return None;
+            .or_else(|| active.models.first().cloned())
+            .ok_or("ai.model_selector.no_model_selected")?;
+        if active.api_protocol == oxideterm_ai::AiApiProtocol::Responses
+            || active.provider_type == "gemini"
+        {
+            return Err("settings_view.ai.browser_protocol");
         }
-        Some((
-            active.provider_type.clone(),
-            active.base_url.clone(),
+        let key = surface.provider_api_key(&active.id, cx);
+        if key.is_none()
+            && active.provider_type != "lmstudio"
+            && oxideterm_ai::provider_chat_requires_key(&active.provider_type)
+        {
+            return Err("ai.model_selector.no_key_warning");
+        }
+        let url =
+            url::Url::parse(&active.base_url).map_err(|_| "settings_view.ai.chat_endpoint")?;
+        if !matches!(url.scheme(), "https" | "http") || !url.has_host() {
+            return Err("settings_view.ai.chat_endpoint");
+        }
+        Ok(Some(ProviderRequest {
+            provider_id: active.id.clone(),
+            kind: active.provider_type.clone(),
+            endpoint: active.base_url.clone(),
             model,
             key,
-        ))
+        }))
     }
 
     fn send(&mut self, cx: &mut Context<Self>) {
+        self.start_turn(Turn::Draft, cx);
+    }
+
+    fn start_turn(&mut self, turn: Turn, cx: &mut Context<Self>) {
         let state = self.state.read(cx);
-        if !state.history_ready() || state.chat_ui().draft.trim().is_empty() {
+        if !self.settings.read(cx).settings(cx).ai.enabled
+            || !state.history_ready()
+            || (matches!(turn, Turn::Draft)
+                && (!state.chat_ui().images.is_empty() || state.chat_ui().draft.trim().is_empty()))
+            || (!matches!(turn, Turn::Draft) && state.chat_is_loading())
+        {
             return;
         }
-        let user_prompt = state.chat_ui().draft.clone();
-        let provider_req = self.active_provider_request(cx);
-        self.serial += 1;
-        let (generation, conversation_id, assistant_id, sender, history_msgs) =
+        let provider_req = match self.active_provider_request(cx) {
+            Ok(req) => req,
+            Err(key) => {
+                cx.emit(ChatSetupNotice(key));
+                return;
+            }
+        };
+        let i18n = self.env.borrow().1.clone();
+        let now = js_sys::Date::now() as i64;
+        let Some((generation, conversation_id, assistant_id, sender, committed)) =
             self.state.update(cx, |s, cx| {
-                let id = s.ensure_conversation(
-                    format!("chat-{}", self.serial),
-                    None,
-                    js_sys::Date::now() as i64,
-                    None,
-                );
-                s.add_message(
-                    &id,
-                    agent_chat_message(AiChatRole::User, user_prompt.clone()),
-                );
-                let history_msgs: Vec<(String, String)> = s
-                    .conversation_state()
-                    .active_conversation()
-                    .map(|c| {
-                        c.messages
-                            .iter()
-                            .filter(|m| !m.content.trim().is_empty())
-                            .map(|m| {
-                                let role = match m.role {
-                                    AiChatRole::User => "user",
-                                    AiChatRole::Assistant => "assistant",
-                                    AiChatRole::System => "system",
-                                    AiChatRole::Tool => "tool",
-                                };
-                                (role.to_string(), m.content.clone())
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default();
+                let id = match turn {
+                    Turn::Draft => {
+                        self.serial += 1;
+                        let id =
+                            s.ensure_conversation(format!("chat-{}", self.serial), None, now, None);
+                        let user = agent_chat_message(AiChatRole::User, s.chat_ui().draft.clone());
+                        s.add_message(&id, user);
+                        s.set_chat_draft(String::new());
+                        id
+                    }
+                    Turn::Retry => {
+                        let id = s.conversation_state().active_conversation_id.clone()?;
+                        s.truncate_conversation_after_last_user(&id, now)?
+                    }
+                    Turn::Edit => {
+                        let (message, content) = s.editable_message_draft()?;
+                        let next = s.next_chat_id(now);
+                        let (backend_id, model) = provider_req
+                            .as_ref()
+                            .map(|r| (r.provider_id.clone(), r.model.clone()))
+                            .unwrap_or_else(|| ("demo".into(), String::new()));
+                        let provenance = oxideterm_ai::AiMessageBackendProvenance {
+                            kind: oxideterm_ai::AiMessageBackendKind::Provider,
+                            backend_id,
+                            model: model.clone(),
+                        };
+                        let id = s.replace_active_user_message(
+                            &message, next, content, model, provenance, now,
+                        )?;
+                        s.clear_message_edit();
+                        id
+                    }
+                };
                 let mut reply = agent_chat_message(AiChatRole::Assistant, String::new());
+                reply.model = provider_req.as_ref().map(|p| p.model.clone());
                 reply.is_streaming = true;
                 let aid = reply.id.clone();
                 s.add_message(&id, reply);
-                s.set_chat_draft(String::new());
                 let (gen_id, tx) = s.begin_chat_stream(id.clone(), aid.clone());
                 cx.notify();
-                (gen_id, id, aid, tx, history_msgs)
-            });
-
-        let task = if let Some((provider_type, base_url, model, api_key)) = provider_req {
-            cx.spawn(async move |_, _cx| {
-                let outcome =
-                    fetch_llm_completion(&provider_type, &base_url, &model, api_key, &history_msgs)
-                        .await;
-                let events = match outcome {
-                    Ok(content) => vec![AiStreamEvent::Content(content), AiStreamEvent::Done],
-                    Err(err) => vec![AiStreamEvent::Error(err)],
-                };
-                for event in events {
-                    if sender
-                        .send(PortableStreamDelivery {
-                            generation,
-                            conversation_id: conversation_id.clone(),
-                            assistant_id: assistant_id.clone(),
-                            event: PortableStreamEvent::Stream(event),
-                        })
-                        .is_err()
-                    {
-                        break;
-                    }
-                }
+                Some((gen_id, id, aid, tx, s.committed_history()))
             })
-        } else {
-            let reply_text = demo_assistant_reply(&user_prompt);
-            cx.spawn(async move |_, cx| {
-                let chunks: Vec<&str> = reply_text.split_inclusive('\n').collect();
-                for chunk in chunks {
+        else {
+            return;
+        };
+
+        let history = self.history.clone();
+        let task = cx.spawn(async move |_, cx| {
+            let emit = |event| {
+                sender.send(PortableStreamDelivery {
+                    generation,
+                    conversation_id: conversation_id.clone(),
+                    assistant_id: assistant_id.clone(),
+                    event: PortableStreamEvent::Stream(event),
+                })
+            };
+            // The visible transcript may contain only previews or an older page.
+            let messages = if committed.await == Ok(true) {
+                history
+                    .request_messages(&conversation_id, &assistant_id)
+                    .ok()
+            } else {
+                None
+            };
+            let Some(messages) = messages else {
+                let _ = emit(AiStreamEvent::Error(i18n.t("ai.chat.load_failed_generic")));
+                return;
+            };
+            if let Some(ProviderRequest {
+                kind: provider_type,
+                endpoint: base_url,
+                model,
+                key: api_key,
+                ..
+            }) = provider_req
+            {
+                let result = fetch_llm_completion(
+                    &provider_type,
+                    &base_url,
+                    &model,
+                    api_key,
+                    &i18n,
+                    &messages,
+                    |delta| {
+                        let _ = emit(AiStreamEvent::Content(delta));
+                    },
+                )
+                .await;
+                let _ = emit(match result {
+                    Ok(()) => AiStreamEvent::Done,
+                    Err(reason) => AiStreamEvent::Error(reason),
+                });
+            } else if let Some((_, prompt)) = messages.iter().rev().find(|(role, _)| role == "user")
+            {
+                let text = demo_assistant_reply(prompt, &i18n);
+                for chunk in text.split_inclusive('\n') {
                     cx.background_executor()
                         .timer(Duration::from_millis(45))
                         .await;
-                    if sender
-                        .send(PortableStreamDelivery {
-                            generation,
-                            conversation_id: conversation_id.clone(),
-                            assistant_id: assistant_id.clone(),
-                            event: PortableStreamEvent::Stream(AiStreamEvent::Content(
-                                chunk.to_string(),
-                            )),
-                        })
-                        .is_err()
-                    {
+                    if emit(AiStreamEvent::Content(chunk.into())).is_err() {
                         return;
                     }
                 }
-                let _ = sender.send(PortableStreamDelivery {
-                    generation,
-                    conversation_id,
-                    assistant_id,
-                    event: PortableStreamEvent::Stream(AiStreamEvent::Done),
-                });
-            })
-        };
+                let _ = emit(AiStreamEvent::Done);
+            } else {
+                let _ = emit(AiStreamEvent::Error(i18n.t("ai.chat.load_failed_generic")));
+            }
+        });
         self.state.update(cx, |s, _| {
             s.set_host_stream_task(generation, HostTask::new(move || drop(task)))
         });
     }
 
-    fn key(&mut self, e: &KeyDownEvent, w: &mut Window, cx: &mut Context<Self>) {
-        if !self.state.read(cx).chat_ui().input_focused {
-            return;
-        }
-        if e.keystroke.key == "enter" && !e.keystroke.modifiers.shift {
-            self.send(cx);
-        } else if e.keystroke.key == "backspace" {
-            self.state.update(cx, |s, cx| {
-                s.pop_chat_draft();
-                cx.notify()
-            });
-        } else if let Some(text) = &e.keystroke.key_char
-            && !e.keystroke.modifiers.control
-            && !e.keystroke.modifiers.platform
-        {
-            self.state.update(cx, |s, cx| {
-                s.replace_chat_input(None, text);
-                cx.notify()
-            });
-        } else {
-            return;
-        }
-        w.prevent_default();
-        cx.stop_propagation();
+    pub fn composer_focused(&self, w: &Window, cx: &App) -> bool {
+        self.composer.focus_handle(cx).is_focused(w) || self.message.focus_handle(cx).is_focused(w)
     }
 }
 
@@ -572,15 +713,25 @@ async fn fetch_llm_completion(
     base_url: &str,
     model: &str,
     api_key: Option<Zeroizing<String>>,
+    i18n: &I18n,
     messages: &[(String, String)],
-) -> Result<String, String> {
-    let window = web_sys::window().ok_or_else(|| "Browser window unavailable".to_string())?;
+    mut emit: impl FnMut(String),
+) -> Result<(), String> {
+    let window = web_sys::window().ok_or_else(|| i18n.t("settings_view.ai.chat_network"))?;
     let trimmed_base = base_url.trim().trim_end_matches('/');
     let is_anthropic = provider_type == "anthropic";
     let url = if is_anthropic {
-        format!("{trimmed_base}/messages")
+        if trimmed_base.ends_with("/messages") {
+            trimmed_base.to_owned()
+        } else if trimmed_base.ends_with("/v1") {
+            format!("{trimmed_base}/messages")
+        } else {
+            format!("{trimmed_base}/v1/messages")
+        }
     } else if trimmed_base.ends_with("/chat/completions") {
         trimmed_base.to_string()
+    } else if provider_type == "ollama" && !trimmed_base.ends_with("/v1") {
+        format!("{trimmed_base}/v1/chat/completions")
     } else {
         format!("{trimmed_base}/chat/completions")
     };
@@ -594,6 +745,7 @@ async fn fetch_llm_completion(
         serde_json::json!({
             "model": model,
             "max_tokens": 2048,
+            "stream": true,
             "messages": msgs,
         })
     } else {
@@ -604,14 +756,14 @@ async fn fetch_llm_completion(
         serde_json::json!({
             "model": model,
             "messages": msgs,
-            "stream": false,
+            "stream": true,
         })
     };
 
-    let headers = Headers::new().map_err(|_| "Failed to create HTTP headers".to_string())?;
+    let headers = Headers::new().map_err(|_| i18n.t("settings_view.ai.chat_endpoint"))?;
     headers
         .set("Content-Type", "application/json")
-        .map_err(|_| "Failed to set Content-Type".to_string())?;
+        .map_err(|_| i18n.t("settings_view.ai.chat_endpoint"))?;
     if let Some(key) = api_key {
         let auth_value = if is_anthropic {
             Zeroizing::new(key.trim().to_string())
@@ -625,13 +777,27 @@ async fn fetch_llm_completion(
         };
         headers
             .set(header_name, &auth_value)
-            .map_err(|_| "Failed to set auth header".to_string())?;
+            .map_err(|_| i18n.t("settings_view.ai.chat_endpoint"))?;
         if is_anthropic {
-            let _ = headers.set("anthropic-version", "2023-06-01");
+            headers
+                .set("anthropic-version", "2023-06-01")
+                .and_then(|_| headers.set("anthropic-dangerous-direct-browser-access", "true"))
+                .map_err(|_| i18n.t("settings_view.ai.chat_endpoint"))?;
         }
     }
 
+    // The conversation owns this future: stopping it must cancel fetch and its body reader.
+    struct FetchGuard(web_sys::AbortController);
+    impl Drop for FetchGuard {
+        fn drop(&mut self) {
+            self.0.abort();
+        }
+    }
+    let guard = FetchGuard(
+        web_sys::AbortController::new().map_err(|_| i18n.t("settings_view.ai.chat_network"))?,
+    );
     let opts = RequestInit::new();
+    opts.set_signal(Some(&guard.0.signal()));
     opts.set_method("POST");
     opts.set_mode(RequestMode::Cors);
     opts.set_headers(&headers);
@@ -639,29 +805,54 @@ async fn fetch_llm_completion(
     opts.set_body(&wasm_bindgen::JsValue::from_str(&body_str));
 
     let request = Request::new_with_str_and_init(&url, &opts)
-        .map_err(|_| "Invalid provider API endpoint URL".to_string())?;
+        .map_err(|_| i18n.t("settings_view.ai.chat_endpoint"))?;
     let resp_val = JsFuture::from(window.fetch_with_request(&request))
         .await
-        .map_err(|_| "Network or CORS error contacting provider API".to_string())?;
+        .map_err(|_| i18n.t("settings_view.ai.browser_network"))?;
     let resp: Response = resp_val
         .dyn_into()
-        .map_err(|_| "Unexpected response object".to_string())?;
-    let status = resp.status();
+        .map_err(|_| i18n.t("settings_view.ai.chat_invalid_stream"))?;
+    if !resp.ok() {
+        return Err(format!(
+            "{} (HTTP {})",
+            i18n.t("settings_view.ai.chat_rejected"),
+            resp.status()
+        ));
+    }
+    let content_type = resp
+        .headers()
+        .get("content-type")
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    if !content_type
+        .split(';')
+        .next()
+        .is_some_and(|mime| mime.trim().eq_ignore_ascii_case("application/json"))
+    {
+        use futures::StreamExt;
+        let body = resp
+            .body()
+            .ok_or_else(|| i18n.t("settings_view.ai.stream_interrupted"))?;
+        let chunks = wasm_streams::ReadableStream::from_raw(body)
+            .into_stream()
+            .map(|part| part.map(|js| js_sys::Uint8Array::new(&js).to_vec()));
+        return provider_stream::read_text_events(chunks, is_anthropic, emit)
+            .await
+            .map_err(|key| i18n.t(key));
+    }
     let text_promise = resp
         .text()
-        .map_err(|_| "Failed to read response body".to_string())?;
+        .map_err(|_| i18n.t("settings_view.ai.stream_interrupted"))?;
     let text = JsFuture::from(text_promise)
         .await
-        .ok()
-        .and_then(|v| v.as_string())
-        .unwrap_or_default();
-    if !resp.ok() {
-        return Err(format!("Provider returned HTTP {status}"));
-    }
+        .map_err(|_| i18n.t("settings_view.ai.stream_interrupted"))?
+        .as_string()
+        .ok_or_else(|| i18n.t("settings_view.ai.chat_invalid_stream"))?;
 
     let json: serde_json::Value =
-        serde_json::from_str(&text).map_err(|_| "Invalid JSON from provider".to_string())?;
-    if is_anthropic {
+        serde_json::from_str(&text).map_err(|_| i18n.t("settings_view.ai.chat_invalid_stream"))?;
+    let content = if is_anthropic {
         json.get("content")
             .and_then(|c| c.as_array())
             .and_then(|arr| {
@@ -671,7 +862,7 @@ async fn fetch_llm_completion(
                     .collect();
                 (!parts.is_empty()).then(|| parts.join(""))
             })
-            .ok_or_else(|| "Empty Anthropic response".to_string())
+            .ok_or_else(|| i18n.t("settings_view.ai.chat_invalid_stream"))
     } else {
         json.get("choices")
             .and_then(|c| c.get(0))
@@ -679,38 +870,41 @@ async fn fetch_llm_completion(
             .and_then(|m| m.get("content"))
             .and_then(|t| t.as_str())
             .map(str::to_owned)
-            .ok_or_else(|| "Empty completion response".to_string())
-    }
+            .ok_or_else(|| i18n.t("settings_view.ai.chat_invalid_stream"))
+    }?;
+    emit(content);
+    Ok(())
 }
 
-fn demo_assistant_reply(prompt: &str) -> String {
+fn demo_assistant_reply(prompt: &str, i18n: &I18n) -> String {
     let lower = prompt.to_lowercase();
-    if lower.contains("port") || lower.contains("端口") || lower.contains("listen") {
-        "Active listening sockets on `oxide.demo`:\n\n```sh\nss -tulnp\n```\n\n- `:22` (`sshd`)\n- `:80` / `:443` (`nginx`)\n- `:6379` (`redis-server`)\n- `:8443` (`oxideterm-gateway`)\n\nYou can also inspect them live in the **Ports** Host Tool on the right rail, or add an API key in **Settings → AI → Providers** to use a real LLM.".to_string()
-    } else if lower.contains("docker") || lower.contains("容器") || lower.contains("container") {
-        "Running containers on `oxide.demo`:\n\n```sh\ndocker ps --format \"table {{.Names}}\\t{{.Image}}\\t{{.Status}}\\t{{.Ports}}\"\n```\n\n- `oxide-web` (`nginx:alpine`, Up 4 days, `8080->80/tcp`)\n- `oxide-redis` (`redis:7-alpine`, Up 4 days, `6379/tcp`)\n\nAdd a real provider & API key in **Settings → AI → Providers** for live model completions.".to_string()
-    } else if lower.contains("disk")
-        || lower.contains("磁盘")
-        || lower.contains("df")
-        || lower.contains("空间")
+    let example = if ["port", "端口", "listen"].iter().any(|s| lower.contains(s)) {
+        "ss -tulnp"
+    } else if ["docker", "容器", "container"]
+        .iter()
+        .any(|s| lower.contains(s))
     {
-        "Filesystem usage on `oxide.demo`:\n\n```sh\ndf -h / /srv/oxideterm\n```\n\n- `/` — 29 GiB / 80 GiB (36%)\n- `/srv/oxideterm` — 12 GiB / 50 GiB (24%)\n\nOpen **Filesystems** in the right rail for mount and inode details, or configure a live model in **Settings → AI → Providers**.".to_string()
+        "docker ps"
+    } else if ["disk", "磁盘", "df", "空间"]
+        .iter()
+        .any(|s| lower.contains(s))
+    {
+        "df -h"
     } else {
-        format!(
-            "OxideSens is running in **Browser Demo** mode (no live LLM provider configured yet).\n\nReceived: `{}`\n\nTo use a real model directly from the browser:\n1. Open **Settings → AI → Providers** (or click the model selector below)\n2. Add an OpenAI / Anthropic / DeepSeek / Ollama / OpenAI-compatible provider and save an API key (kept in memory only)\n3. Select the model and send your next prompt.\n\nQuick demo shell commands:\n```sh\ncd /srv/oxideterm && ls -la\n```",
-            prompt.trim().replace('`', "'")
-        )
-    }
+        "pwd"
+    };
+    format!(
+        "{}\n\n```sh\n{example}\n```",
+        i18n.t("settings_view.ai.browser_demo_reply")
+    )
 }
 
 impl Render for Assistant {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .relative()
             .size_full()
             .track_focus(&self.focus)
-            .on_key_down(cx.listener(Self::key))
             .child(self.sidebar.clone())
-            .child(self.model_menu.clone())
     }
 }

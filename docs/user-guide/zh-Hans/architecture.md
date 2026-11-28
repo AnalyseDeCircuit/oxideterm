@@ -2061,7 +2061,7 @@ flowchart TB
 | `workspace/acp_workspace.rs` 与 `oxideterm-acp-*` 集成 | 协调 ACP agent 配置、session、模型选项和 ACP 主机工具桥接，并与原生供应商路径并列 | ACP session 有独立的 agent/session 生命周期，不应被当作普通供应商流 |
 | `workspace/terminal_context_actions.rs` | 构建选择、搜索、传输和命令路由等终端右键动作 | 终端动作使用统一应用菜单风格，同时仍通过明确 session API 分发 |
 | `oxideterm-gpui-quick-commands/src`、`workspace/quick_commands.rs`、`workspace/terminal_command_bar/` | 功能视图管理快捷命令列表和编辑；工作区向指定终端发送命令并处理命令行补全 | 重复终端动作可以变成可复用的桌面控件 |
-| `workspace/terminal_command_sender.rs` 与 `terminal_command_bar/sender.rs` | `TerminalCommandSenderEntity` 管理定时、重复、多目标终端输入、目标快照、取消和进度 | 任务不依赖根视图轮询，也不会创建 SSH 连接；Entity 仍由 `WorkspaceApp` 协调，并使用已经存在的终端目标 |
+| `oxideterm-gpui-command-sender` 与 `terminal_command_bar/sender.rs` | 桌面和浏览器共用发送草稿、展开面板、分次发送、目标快照、取消和进度 | 各宿主只向已打开的窗格写入；切换标签不会改变正在发送的目标，也不会新建 SSH 连接 |
 | `oxideterm-gpui-background`、`workspace/local_terminal_background.rs`、`workspace/root/background.rs` | 功能包显示背景图片、播放背景媒体；工作区选择并挂载背景 | 背景不改变终端缓冲区内容 |
 | `oxideterm-gpui-audit`、`workspace/audit.rs` | 审计视图管理操作记录、会话摘要和离线录制回放；主包提供回放窗格与导出文件选择器 | 回放录制不会重新连接会话 |
 | `workspace/notification_center.rs` | 收集并渲染可操作的应用通知 | 后台失败和恢复动作不会阻塞终端输入，但仍然可见 |

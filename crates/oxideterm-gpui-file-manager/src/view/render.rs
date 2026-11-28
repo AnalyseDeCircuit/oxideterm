@@ -290,28 +290,32 @@ impl FileManagerView {
                     .h(px(20.0))
                     .bg(file_manager_border(theme.border, has_background)),
             )
-            .child(self.render_file_manager_icon_button(
-                LucideIcon::HardDrive,
-                self.i18n.t("fileManager.showDrives"),
-                cx.listener(|this, _event, _window, cx| {
-                    // Drive switching must remain a primary action for removable
-                    // media and Windows volumes, not a context-menu-only command.
-                    this.blur_file_manager_inline_inputs(cx);
-                    this.open_file_manager_drives_dialog(cx);
-                    cx.stop_propagation();
-                    cx.notify();
-                }),
-                cx.entity(),
-            ))
-            .child(self.render_file_manager_icon_button(
-                LucideIcon::FolderOpen,
-                self.i18n.t("fileManager.browse"),
-                cx.listener(|this, _event, _window, cx| {
-                    this.browse_file_manager_folder(cx);
-                    cx.stop_propagation();
-                }),
-                cx.entity(),
-            ))
+            .when(!cfg!(target_family = "wasm"), |bar| {
+                bar.child(self.render_file_manager_icon_button(
+                    LucideIcon::HardDrive,
+                    self.i18n.t("fileManager.showDrives"),
+                    cx.listener(|this, _event, _window, cx| {
+                        // Drive switching must remain a primary action for removable
+                        // media and Windows volumes, not a context-menu-only command.
+                        this.blur_file_manager_inline_inputs(cx);
+                        this.open_file_manager_drives_dialog(cx);
+                        cx.stop_propagation();
+                        cx.notify();
+                    }),
+                    cx.entity(),
+                ))
+            })
+            .when(self.file_manager.read(cx).fs.can_pick_folder(), |bar| {
+                bar.child(self.render_file_manager_icon_button(
+                    LucideIcon::FolderOpen,
+                    self.i18n.t("fileManager.browse"),
+                    cx.listener(|this, _event, window, cx| {
+                        this.browse_file_manager_folder(window, cx);
+                        cx.stop_propagation();
+                    }),
+                    cx.entity(),
+                ))
+            })
             .child(self.render_file_manager_icon_button(
                 LucideIcon::RefreshCw,
                 self.i18n.t("fileManager.refresh"),
@@ -380,7 +384,13 @@ impl FileManagerView {
                     .child(self.render_selectable_display_text(
                         "file-manager-local-title",
                         (),
-                        self.i18n.t("fileManager.local").to_uppercase(),
+                        if let Some(name) = self.file_manager.read(cx).fs.device_name() {
+                            name.to_owned()
+                        } else if cfg!(target_family = "wasm") {
+                            self.i18n.t("sftp.file_list.demo").to_uppercase()
+                        } else {
+                            self.i18n.t("fileManager.local").to_uppercase()
+                        },
                         theme.text_muted,
                         cx,
                     )),
@@ -639,6 +649,7 @@ impl FileManagerView {
                     selected_range: self.ime_selected_range_for_target(target, cx),
                     marked_text: self.marked_text_for_target(target, cx),
                 },
+                cx,
             )
             .flex_1()
             .min_w(px(0.0))
@@ -815,6 +826,7 @@ impl FileManagerView {
                             selected_range: self.ime_selected_range_for_target(target, cx),
                             marked_text: self.marked_text_for_target(target, cx),
                         },
+                        cx,
                     )
                     .flex_1()
                     .min_w_0()
@@ -920,6 +932,44 @@ impl FileManagerView {
                 )
                 .into_any_element();
         }
+        #[cfg(not(target_family = "wasm"))]
+        let list = list
+            .drag_over::<gpui::ExternalPaths>({
+                let theme = self.tokens.ui;
+                move |style, _paths, _window, _cx| {
+                    style
+                        .bg(rgba((theme.accent << 8) | 0x1a))
+                        .border_color(rgba((theme.accent << 8) | 0x4d))
+                }
+            })
+            .can_drop(|drag, _window, _cx| drag.is::<gpui::ExternalPaths>())
+            .on_drop(
+                cx.listener(|this, paths: &gpui::ExternalPaths, _window, cx| {
+                    this.queue_file_manager_external_drop_paths(paths.paths(), cx);
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            );
+        #[cfg(target_family = "wasm")]
+        let list = list
+            .drag_over::<gpui::BrowserFileDrop>(move |style, _, _, _| {
+                style.bg(rgba((theme.accent << 8) | 0x1a))
+            })
+            .on_drop(cx.listener(|this, payload: &gpui::BrowserFileDrop, _, cx| {
+                this.file_manager.update(cx, |s, cx| {
+                    if s.dialog.is_none() && !payload.0.is_empty() {
+                        s.start_operation(
+                            FileBatch::BrowserDrop {
+                                destination: s.path.clone(),
+                                payload: payload.clone(),
+                            },
+                            Vec::new(),
+                            cx,
+                        );
+                    }
+                });
+                cx.stop_propagation();
+            }));
         if files.is_empty() {
             return list
                 .child(
@@ -1066,22 +1116,6 @@ impl FileManagerView {
                         })
                         .collect::<Vec<_>>()
                 },
-            )
-            .drag_over::<gpui::ExternalPaths>({
-                let theme = self.tokens.ui;
-                move |style, _paths, _window, _cx| {
-                    style
-                        .bg(rgba((theme.accent << 8) | 0x1a))
-                        .border_color(rgba((theme.accent << 8) | 0x4d))
-                }
-            })
-            .can_drop(|drag, _window, _cx| drag.is::<gpui::ExternalPaths>())
-            .on_drop(
-                cx.listener(|this, paths: &gpui::ExternalPaths, _window, cx| {
-                    this.queue_file_manager_external_drop_paths(paths.paths(), cx);
-                    cx.stop_propagation();
-                    cx.notify();
-                }),
             )
             .on_mouse_down(
                 MouseButton::Left,

@@ -250,6 +250,21 @@ impl PortableConnectionFormView {
         });
         view
     }
+    pub fn duplicate_ssh(
+        source_id: String,
+        mut form: NewConnectionForm,
+        env: PortableConnectionFormEnvironment,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        form.focused_field = NewConnectionField::Name;
+        form.field_focused = true;
+        let view = Self::from_form(form, env, cx);
+        view.state.update(cx, |state, cx| {
+            state.duplicating_saved_connection_id = Some(source_id);
+            cx.notify();
+        });
+        view
+    }
     pub fn form<'a>(&self, cx: &'a App) -> Option<&'a NewConnectionForm> {
         self.state.read(cx).form.as_ref()
     }
@@ -312,6 +327,14 @@ impl PortableConnectionFormView {
         if form.pending {
             return;
         }
+        if self
+            .environment
+            .borrow()
+            .browser
+            .is_some_and(|caps| !caps.supports(form.transport))
+        {
+            return;
+        }
         let saved_id = self.state.read(cx).editing_saved_connection_id.clone();
         match PortableConnectionDraft::snapshot(form, &self.environment.borrow(), saved_id) {
             Ok(draft) => cx.emit(event(draft)),
@@ -346,6 +369,20 @@ impl PortableConnectionFormView {
     ) {
         use FormAction::*;
         use PortableConnectionFormEvent as Event;
+        if self.environment.borrow().browser.is_some()
+            && matches!(
+                &action,
+                TestForm { .. }
+                    | RevealSavedPassword
+                    | OpenTunnel
+                    | SaveTunnel { .. }
+                    | OpenPluginForm { .. }
+                    | OpenMoshPlugin
+                    | OpenRemoteDesktopPlugin(_)
+            )
+        {
+            return;
+        }
         match action {
             FocusInput(ConnectionsInput::Form(field), event) => {
                 self.state.update(cx, |s, cx| {
@@ -393,7 +430,16 @@ impl PortableConnectionFormView {
                 }
             }
             #[cfg(target_family = "wasm")]
-            RequestBleScan => cx.emit(Event::RequestBleScan),
+            RequestBleScan => {
+                if self
+                    .environment
+                    .borrow()
+                    .browser
+                    .is_none_or(|caps| caps.bluetooth)
+                {
+                    cx.emit(Event::RequestBleScan);
+                }
+            }
             QueueTooltip { id, label, x, y } => self.tooltip = Some((id, label, x, y)),
             ClearTooltip(id) => {
                 if self.tooltip.as_ref().is_some_and(|t| t.0 == id) {
@@ -474,20 +520,33 @@ impl PortableConnectionFormView {
         if self.active_field(cx).is_some() && key == "space" {
             return;
         }
-        let tunnel = self.environment.borrow().tunnel.as_ref().map(|t| {
+        let fields = self.environment.borrow().tunnel.as_ref().map(|t| {
             use NewConnectionField::*;
             let mut fields = vec![Name, Host, Port];
             if t.kind != TunnelKind::Dynamic {
                 fields.extend([TunnelTargetHost, TunnelTargetPort]);
             }
             fields
+        }).or_else(|| {
+            self.environment.borrow().browser?;
+            let form = self.form(cx)?;
+            use crate::form_state::{ConnectionFormDrawer as Drawer, NewConnectionField::*};
+            Some(match (form.transport, form.active_drawer) {
+                (NewConnectionTransport::Ssh, None) => vec![Name, Username, Host, Port],
+                (NewConnectionTransport::StandaloneSftp, None) => vec![Name],
+                (NewConnectionTransport::StandaloneSftp, Some(Drawer::StandaloneSftpPrimary)) => vec![Username, Host, Port, InitialRemotePath],
+                (NewConnectionTransport::StandaloneSftp, Some(Drawer::StandaloneSftpSecondary)) => vec![StandaloneSftpSecondaryUsername, StandaloneSftpSecondaryHost, StandaloneSftpSecondaryPort, StandaloneSftpSecondaryInitialRemotePath],
+                (NewConnectionTransport::Ssh | NewConnectionTransport::StandaloneSftp, Some(Drawer::Notes)) => vec![Color, IconBackgroundColor, Notes],
+                (NewConnectionTransport::Ssh, Some(Drawer::SshSecurity)) => vec![],
+                _ => return None,
+            })
         });
         let result = self.state.update(cx, |s, cx| {
             if super::algorithms::handle_key(s, &self.algorithms, e, cx) {
                 cx.notify();
                 return FormKeyAction::Handled;
             }
-            s.handle_key(e, true, tunnel.as_deref(), cx).0
+            s.handle_key(e, true, fields.as_deref(), cx).0
         });
         match result {
             FormKeyAction::CloseForm => cx.emit(PortableConnectionFormEvent::Cancel),
@@ -496,6 +555,7 @@ impl PortableConnectionFormView {
                 let event = if self.environment.borrow().tunnel.is_some() {
                     PortableConnectionFormEvent::SaveAndConnect
                 } else if state.editing_saved_connection_id.is_some()
+                    || state.duplicating_saved_connection_id.is_some()
                     || state.form.as_ref().is_some_and(|f| {
                         f.remote_desktop_profile_id.is_some()
                             || f.mosh_profile_id.is_some()

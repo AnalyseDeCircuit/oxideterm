@@ -803,6 +803,7 @@ impl AiAssistantSidebarView {
         }
 
         let mut options = self.localized_markdown_options();
+        options.code_action_label = self.i18n.t("terminal.ai.insert");
         options.base_font_size = 13.0;
         options.block_gap = 10.0;
         // Compact heading scale keeps headings proportional inside the narrow chat sidebar.
@@ -817,15 +818,20 @@ impl AiAssistantSidebarView {
         let workspace = cx.entity();
         let mut code_actions = self.markdown_mermaid_actions(cx);
         // Child output cannot infer authority over the currently selected terminal.
-        if self.state.read(cx).agents.detail.is_none() {
-            code_actions.on_run = Some(Arc::new(move |command, window, cx| {
+        if self.frame().can_insert_command && self.state.read(cx).agents.detail.is_none() {
+            code_actions.on_run = Some(Arc::new(move |mut command, window, cx| {
+                // A fenced block's closing newline is Markdown syntax, not an Enter keystroke.
+                if command.ends_with('\n') {
+                    command.pop();
+                    if command.ends_with('\r') { command.pop(); }
+                }
                 let workspace = workspace.clone();
                 // Markdown action callbacks are plain event callbacks, not
                 // AiAssistantSidebarView listeners. Defer the entity write so code block
                 // buttons cannot nest a AiAssistantSidebarView update inside another one.
-                window.defer(cx, move |_window, cx| {
+                window.defer(cx, move |window, cx| {
                     let _ = workspace.update(cx, |this, cx| {
-                        this.insert_ai_code_block_command(command, cx);
+                        this.insert_ai_code_block_command(command, window, cx);
                     });
                 });
             }));

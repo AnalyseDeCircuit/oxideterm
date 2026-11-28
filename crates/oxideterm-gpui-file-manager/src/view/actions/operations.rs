@@ -1,110 +1,35 @@
 use super::*;
+use crate::filesystem::FileMutation;
 
 impl FileManagerView {
     pub(in crate::view) fn create_file_manager_folder(&mut self, cx: &mut Context<Self>) {
-        let (name, current_path) = {
-            let file_manager = self.file_manager.read(cx);
-            (
-                file_manager.dialog_value.trim().to_string(),
-                file_manager.path.clone(),
-            )
-        };
-        let result = self
-            .file_manager
-            .read(cx)
-            .fs
-            .create_folder(&current_path, &name);
-        match result {
-            Ok(()) => {
-                self.close_file_manager_dialog(cx);
-                self.refresh_file_manager(cx);
-                self.push_file_manager_toast(
-                    self.i18n.t("fileManager.folderCreated"),
-                    None,
-                    FileManagerNoticeKind::Success,
-                    cx,
-                );
-            }
-            Err(error) => self.push_file_manager_toast(
-                self.i18n.t("fileManager.error"),
-                Some(error),
-                FileManagerNoticeKind::Error,
-                cx,
-            ),
-        }
-        cx.notify();
+        let name = self.file_manager.read(cx).dialog_value.trim().to_owned();
+        self.mutate_entry(
+            FileMutation::CreateFolder(name),
+            self.i18n.t("fileManager.folderCreated"),
+            cx,
+        );
     }
-
     pub(in crate::view) fn create_file_manager_file(&mut self, cx: &mut Context<Self>) {
-        let (name, current_path) = {
-            let file_manager = self.file_manager.read(cx);
-            (
-                file_manager.dialog_value.trim().to_string(),
-                file_manager.path.clone(),
-            )
-        };
-        let result = self
-            .file_manager
-            .read(cx)
-            .fs
-            .create_file(&current_path, &name);
-        match result {
-            Ok(()) => {
-                self.close_file_manager_dialog(cx);
-                self.refresh_file_manager(cx);
-                self.push_file_manager_toast(
-                    self.i18n.t("fileManager.fileCreated"),
-                    None,
-                    FileManagerNoticeKind::Success,
-                    cx,
-                );
-            }
-            Err(error) => self.push_file_manager_toast(
-                self.i18n.t("fileManager.error"),
-                Some(error),
-                FileManagerNoticeKind::Error,
-                cx,
-            ),
-        }
-        cx.notify();
+        let name = self.file_manager.read(cx).dialog_value.trim().to_owned();
+        self.mutate_entry(
+            FileMutation::CreateFile(name),
+            self.i18n.t("fileManager.fileCreated"),
+            cx,
+        );
     }
 
     pub(in crate::view) fn rename_file_manager_entry(
         &mut self,
-        old_name: String,
+        from: String,
         cx: &mut Context<Self>,
     ) {
-        let (new_name, current_path) = {
-            let file_manager = self.file_manager.read(cx);
-            (
-                file_manager.dialog_value.trim().to_string(),
-                file_manager.path.clone(),
-            )
-        };
-        let result = self
-            .file_manager
-            .read(cx)
-            .fs
-            .rename(&current_path, &old_name, &new_name);
-        match result {
-            Ok(()) => {
-                self.close_file_manager_dialog(cx);
-                self.refresh_file_manager(cx);
-                self.push_file_manager_toast(
-                    self.i18n.t("fileManager.renamed"),
-                    None,
-                    FileManagerNoticeKind::Success,
-                    cx,
-                );
-            }
-            Err(error) => self.push_file_manager_toast(
-                self.i18n.t("fileManager.error"),
-                Some(error),
-                FileManagerNoticeKind::Error,
-                cx,
-            ),
-        }
-        cx.notify();
+        let to = self.file_manager.read(cx).dialog_value.trim().to_owned();
+        self.mutate_entry(
+            FileMutation::Rename { from, to },
+            self.i18n.t("fileManager.renamed"),
+            cx,
+        );
     }
 
     pub(in crate::view) fn delete_file_manager_entries(
@@ -112,29 +37,44 @@ impl FileManagerView {
         names: Vec<String>,
         cx: &mut Context<Self>,
     ) {
-        let current_path = self.file_manager.read(cx).path.clone();
-        let error = self.file_manager.read(cx).fs.delete(&current_path, &names);
-        match error {
-            Some(error) => self.push_file_manager_toast(
-                self.i18n.t("fileManager.error"),
-                Some(error),
-                FileManagerNoticeKind::Error,
-                cx,
-            ),
-            None => {
-                self.close_file_manager_dialog(cx);
-                self.refresh_file_manager(cx);
-                self.push_file_manager_toast(
-                    self.i18n
-                        .t("fileManager.deletedCount")
-                        .replace("{{count}}", &names.len().to_string()),
-                    None,
-                    FileManagerNoticeKind::Success,
-                    cx,
-                );
-            }
+        let message = self
+            .i18n
+            .t("fileManager.deletedCount")
+            .replace("{{count}}", &names.len().to_string());
+        self.mutate_entry(FileMutation::Delete(names), message, cx);
+    }
+
+    fn mutate_entry(&mut self, action: FileMutation, message: String, cx: &mut Context<Self>) {
+        let state = self.file_manager.read(cx);
+        if state.mutation_task.is_some() {
+            return;
         }
-        cx.notify();
+        let work = state.fs.mutate(&state.path, action);
+        let pending = matches!(&work, crate::filesystem::FileIo::Pending(_));
+        if pending {
+            self.close_file_manager_dialog(cx);
+        }
+        let task = work.deliver(self, cx, move |this, result, cx| {
+            this.file_manager
+                .update(cx, |state, _| state.mutation_task = None);
+            match result {
+                Ok(()) => {
+                    if !pending {
+                        this.close_file_manager_dialog(cx);
+                    }
+                    this.push_file_manager_toast(message, None, FileManagerNoticeKind::Success, cx);
+                }
+                Err(error) => this.push_file_manager_toast(
+                    this.i18n.t("fileManager.error"),
+                    Some(this.i18n.t(&error)),
+                    FileManagerNoticeKind::Error,
+                    cx,
+                ),
+            }
+            this.refresh_file_manager(cx);
+        });
+        self.file_manager
+            .update(cx, |state, _| state.mutation_task = task);
     }
 
     pub(in crate::view) fn copy_file_manager_selection(
@@ -144,6 +84,15 @@ impl FileManagerView {
     ) {
         let entries = self.selected_file_manager_entries(cx);
         if entries.is_empty() {
+            return;
+        }
+        if cut && !self.selection_can_move(cx) {
+            self.push_file_manager_toast(
+                self.i18n.t("fileManager.error"),
+                Some(self.i18n.t("fileManager.browserOperationUnavailable")),
+                FileManagerNoticeKind::Error,
+                cx,
+            );
             return;
         }
         self.file_manager.update(cx, |file_manager, cx| {
@@ -218,6 +167,7 @@ impl FileManagerView {
         self.dismiss_file_manager_context_menu(cx);
     }
 
+    #[cfg(not(target_family = "wasm"))]
     pub(in crate::view) fn queue_file_manager_external_drop_paths(
         &mut self,
         paths: &[std::path::PathBuf],
@@ -235,6 +185,9 @@ impl FileManagerView {
     }
 
     pub(in crate::view) fn compress_file_manager_selection(&mut self, cx: &mut Context<Self>) {
+        if self.file_manager.read(cx).mutation_task.is_some() {
+            return;
+        }
         let entries = self.selected_file_manager_entries(cx);
         if entries.is_empty() {
             return;
@@ -255,23 +208,27 @@ impl FileManagerView {
             .read(cx)
             .fs
             .compress(&paths, &archive_path);
-        match result {
-            Ok(archive_path) => {
-                self.refresh_file_manager(cx);
-                self.push_file_manager_toast(
-                    self.i18n.t("fileManager.operationSuccess"),
-                    Some(format!("{}", archive_path.display())),
-                    FileManagerNoticeKind::Success,
+        let task = result.deliver(self, cx, move |this, result, cx| {
+            this.file_manager.update(cx, |s, _| s.mutation_task = None);
+            match result {
+                Ok(archive_path) => {
+                    this.refresh_file_manager(cx);
+                    this.push_file_manager_toast(
+                        this.i18n.t("fileManager.operationSuccess"),
+                        Some(format!("{}", archive_path.display())),
+                        FileManagerNoticeKind::Success,
+                        cx,
+                    );
+                }
+                Err(error) => this.push_file_manager_toast(
+                    this.i18n.t("fileManager.error"),
+                    Some(this.i18n.t(&error)),
+                    FileManagerNoticeKind::Error,
                     cx,
-                );
+                ),
             }
-            Err(error) => self.push_file_manager_toast(
-                self.i18n.t("fileManager.error"),
-                Some(error),
-                FileManagerNoticeKind::Error,
-                cx,
-            ),
-        }
+        });
+        self.file_manager.update(cx, |s, _| s.mutation_task = task);
         self.dismiss_file_manager_context_menu(cx);
     }
 
@@ -279,10 +236,13 @@ impl FileManagerView {
         &mut self,
         cx: &mut Context<Self>,
     ) {
+        if self.file_manager.read(cx).mutation_task.is_some() {
+            return;
+        }
         let Some(entry) = self.single_selected_file_manager_file(cx) else {
             return;
         };
-        if !can_extract_archive(&entry.name) {
+        if !self.file_manager.read(cx).fs.can_extract(&entry.name) {
             return;
         }
         let current_path = self.file_manager.read(cx).path.clone();
@@ -291,23 +251,27 @@ impl FileManagerView {
             .read(cx)
             .fs
             .extract(&entry.path, &current_path);
-        match result {
-            Ok(()) => {
-                self.refresh_file_manager(cx);
-                self.push_file_manager_toast(
-                    self.i18n.t("fileManager.operationSuccess"),
-                    Some(entry.name),
-                    FileManagerNoticeKind::Success,
+        let task = result.deliver(self, cx, move |this, result, cx| {
+            this.file_manager.update(cx, |s, _| s.mutation_task = None);
+            match result {
+                Ok(()) => {
+                    this.refresh_file_manager(cx);
+                    this.push_file_manager_toast(
+                        this.i18n.t("fileManager.operationSuccess"),
+                        Some(entry.name),
+                        FileManagerNoticeKind::Success,
+                        cx,
+                    );
+                }
+                Err(error) => this.push_file_manager_toast(
+                    this.i18n.t("fileManager.error"),
+                    Some(this.i18n.t(&error)),
+                    FileManagerNoticeKind::Error,
                     cx,
-                );
+                ),
             }
-            Err(error) => self.push_file_manager_toast(
-                self.i18n.t("fileManager.error"),
-                Some(error),
-                FileManagerNoticeKind::Error,
-                cx,
-            ),
-        }
+        });
+        self.file_manager.update(cx, |s, _| s.mutation_task = task);
         self.dismiss_file_manager_context_menu(cx);
     }
 }

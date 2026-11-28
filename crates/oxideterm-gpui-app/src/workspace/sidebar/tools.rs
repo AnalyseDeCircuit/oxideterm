@@ -5,47 +5,9 @@ use oxideterm_gpui_ui::select::{
     select_separator,
 };
 
-const TOOLS: [ContextSidebarTool; 13] = [
-    ContextSidebarTool::Monitor,
-    ContextSidebarTool::Processes,
-    ContextSidebarTool::Gpu,
-    ContextSidebarTool::Docker,
-    ContextSidebarTool::Container,
-    ContextSidebarTool::Services,
-    ContextSidebarTool::Logs,
-    ContextSidebarTool::Ports,
-    ContextSidebarTool::Tmux,
-    ContextSidebarTool::Filesystems,
-    ContextSidebarTool::Schedules,
-    ContextSidebarTool::Packages,
-    ContextSidebarTool::Redis,
-];
-
-const MONITORING_TOOL_COUNT: usize = 5;
-
-fn visible_tool_count(available_height: f32, row_height: f32, separator_height: f32) -> usize {
-    // Reserve More only for overflow, and the second divider only when both groups show.
-    (0..=TOOLS.len())
-        .rev()
-        .find(|&count| {
-            let more_height = if count < TOOLS.len() { row_height } else { 0.0 };
-            tool_stack_height(count, row_height, separator_height) + more_height <= available_height
-        })
-        .unwrap_or(0)
-}
-
-fn tool_stack_height(count: usize, row_height: f32, separator_height: f32) -> f32 {
-    let separators = if count > MONITORING_TOOL_COUNT {
-        2.0
-    } else {
-        1.0
-    };
-    (count + 1) as f32 * row_height + separators * separator_height
-}
-
-fn overflow_tools(visible: usize) -> Vec<ContextSidebarTool> {
-    TOOLS[visible..].to_vec()
-}
+use oxideterm_gpui_host_tools::rail::{
+    self, MONITORING_TOOL_COUNT, TOOLS, overflow_tools, tool_stack_height, visible_tool_count,
+};
 
 fn context_host_tools_in_focus(
     active_surface: ActiveSurface,
@@ -82,8 +44,10 @@ impl WorkspaceApp {
             .flex_none()
             .w(px(self.tokens.metrics.divider_width))
             .h(px(self.tokens.metrics.divider_height))
-            .mt(px(2.0))
-            .mb(px(self.tokens.metrics.activity_icon_gap + 2.0))
+            .mt(px(rail::DIVIDER_MARGIN))
+            .mb(px(
+                self.tokens.metrics.activity_icon_gap + rail::DIVIDER_MARGIN
+            ))
             .bg(self.workspace_chrome_divider())
     }
 
@@ -102,7 +66,7 @@ impl WorkspaceApp {
         visible_tool_count(
             available,
             metrics.activity_icon_size + metrics.activity_icon_gap,
-            metrics.divider_height + metrics.activity_icon_gap,
+            rail::separator_height(metrics),
         )
     }
 
@@ -323,7 +287,7 @@ impl WorkspaceApp {
             + tool_stack_height(
                 count,
                 metrics.activity_icon_size + metrics.activity_icon_gap,
-                metrics.divider_height + metrics.activity_icon_gap,
+                rail::separator_height(metrics),
             );
         Some(
             popover_backdrop()
@@ -416,41 +380,6 @@ impl WorkspaceApp {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn shrinking_the_rail_moves_only_trailing_tools_into_more() {
-        let row_height = 40.0;
-        let separator_height = 9.0;
-        let stack = |count| tool_stack_height(count, row_height, separator_height);
-        // All tools fit exactly without reserving an unnecessary More button.
-        let tall = stack(TOOLS.len());
-        assert_eq!(
-            visible_tool_count(tall, row_height, separator_height),
-            TOOLS.len()
-        );
-        assert_eq!(overflow_tools(TOOLS.len()), vec![]);
-        assert_eq!(
-            visible_tool_count(tall + 200.0, row_height, separator_height),
-            TOOLS.len()
-        );
-        // Once the stack no longer fits, More needs a row of its own and only
-        // trailing tools move into it.
-        let tight = visible_tool_count(tall - 1.0, row_height, separator_height);
-        assert!(tight < TOOLS.len());
-        assert_eq!(overflow_tools(tight), TOOLS[tight..].to_vec());
-        // Below the group divider only leading monitoring tools stay visible.
-        let below_divider = visible_tool_count(
-            stack(MONITORING_TOOL_COUNT) - 1.0,
-            row_height,
-            separator_height,
-        );
-        assert!(below_divider < MONITORING_TOOL_COUNT);
-        assert_eq!(
-            overflow_tools(below_divider),
-            TOOLS[below_divider..].to_vec()
-        );
-        assert_eq!(visible_tool_count(80.0, 40.0, 9.0), 0);
-    }
 
     #[test]
     fn context_host_tools_dim_outside_terminal_host_surfaces_unless_open() {

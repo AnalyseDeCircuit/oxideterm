@@ -31,23 +31,7 @@ const SESSION_TREE_ITEM_HEIGHT: f32 = 26.0;
 const SESSION_ROW_SELECTED_BG_ALPHA: u32 = 0x26;
 const MONITOR_EMERALD: u32 = 0x34d399;
 
-const CONTEXT_TOOLS: [ContextSidebarTool; 13] = [
-    ContextSidebarTool::Monitor,
-    ContextSidebarTool::Processes,
-    ContextSidebarTool::Gpu,
-    ContextSidebarTool::Docker,
-    ContextSidebarTool::Container,
-    ContextSidebarTool::Services,
-    ContextSidebarTool::Logs,
-    ContextSidebarTool::Ports,
-    ContextSidebarTool::Tmux,
-    ContextSidebarTool::Filesystems,
-    ContextSidebarTool::Schedules,
-    ContextSidebarTool::Packages,
-    ContextSidebarTool::Redis,
-];
-
-const MONITORING_TOOL_COUNT: usize = 5;
+use oxideterm_gpui_host_tools::rail::{self, MONITORING_TOOL_COUNT, TOOLS as CONTEXT_TOOLS, overflow_tools, tool_stack_height, visible_tool_count};
 
 fn mix_rgb(a: u32, b: u32, t: f32) -> u32 {
     let t = t.clamp(0.0, 1.0);
@@ -67,33 +51,6 @@ fn session_item_surface(theme: AppUiColors, selected: bool) -> Div {
     }
 }
 
-fn tool_stack_height(count: usize, row_height: f32, separator_height: f32) -> f32 {
-    let separators = if count > MONITORING_TOOL_COUNT {
-        2.0
-    } else {
-        1.0
-    };
-    (count + 1) as f32 * row_height + separators * separator_height
-}
-
-fn visible_tool_count(available_height: f32, row_height: f32, separator_height: f32) -> usize {
-    // Reserve More only for overflow, and the second divider only when both groups show.
-    (0..=CONTEXT_TOOLS.len())
-        .rev()
-        .find(|&count| {
-            let more_height = if count < CONTEXT_TOOLS.len() {
-                row_height
-            } else {
-                0.0
-            };
-            tool_stack_height(count, row_height, separator_height) + more_height <= available_height
-        })
-        .unwrap_or(0)
-}
-
-fn overflow_tools(visible: usize) -> Vec<ContextSidebarTool> {
-    CONTEXT_TOOLS[visible..].to_vec()
-}
 
 struct ActiveNodeGroup {
     node_id: String,
@@ -102,6 +59,7 @@ struct ActiveNodeGroup {
     port: u32,
     local_group: bool,
     ble_group: bool,
+    connected: bool,
     terminals: Vec<(TabId, PaneId, TerminalSessionId)>,
 }
 
@@ -112,6 +70,18 @@ enum SessionActionVariant {
 }
 
 impl Workspace {
+    pub(crate) fn files_navigator_visible(&self, cx: &App) -> bool {
+        matches!(self.rails.section, SidebarSection::Sessions | SidebarSection::Connections)
+            && !self.rails.left.collapsed()
+            && !self.settings.read(cx).settings(cx).sidebar_ui.zen_mode
+    }
+    pub(crate) fn show_files_navigator(&mut self, cx: &mut Context<Self>) {
+        if !matches!(self.rails.section, SidebarSection::Sessions | SidebarSection::Connections)
+            && let Some(generation) = self.rails.select_section(SidebarSection::Sessions,&self.tokens) {
+            self.rails.finish_section_transition(generation);
+        }
+        if self.rails.left.collapsed() { self.collapse(RailSide::Left, false, cx); }
+    }
     pub(super) fn collapse(&mut self, side: RailSide, close: bool, cx: &mut Context<Self>) {
         let rail = self.rails.rail_mut(side);
         let generation = rail.set_collapsed(close, &self.tokens);
@@ -124,6 +94,7 @@ impl Workspace {
             })
             .detach();
         }
+        self.save_display(cx);
     }
 
     fn separator(&self) -> Div {
@@ -132,8 +103,8 @@ impl Workspace {
             .flex_none()
             .w(px(m.divider_width))
             .h(px(m.divider_height))
-            .mt(px(2.0))
-            .mb(px(m.activity_icon_gap + 2.0))
+            .mt(px(rail::DIVIDER_MARGIN))
+            .mb(px(m.activity_icon_gap + rail::DIVIDER_MARGIN))
             .bg(self.chrome_divider())
     }
 
@@ -250,7 +221,7 @@ impl Workspace {
         // Mirror desktop SidebarSection::PRIMARY_ITEMS order and group divider
         // (Sessions, Connections, Runtime | Extensions, CloudSync, Knowledge).
         for (index, (section, icon)) in SidebarSection::PRIMARY_ITEMS.into_iter().enumerate() {
-            if index == 3 {
+            if index == 3 && self.demo {
                 primary = primary.child(self.separator());
             }
             primary = match section {
@@ -270,20 +241,24 @@ impl Workspace {
                     "sidebar.panels.runtime",
                     cx,
                 )),
-                Extensions => primary.child(self.page_button(
-                    Action::Plugins,
-                    icon,
-                    TabKind::PluginManager,
-                    "sidebar.panels.plugins",
-                    cx,
-                )),
-                CloudSync => primary.child(self.page_button(
-                    Action::CloudSync,
-                    icon,
-                    TabKind::CloudSync,
-                    "plugin.cloud_sync.panel_title",
-                    cx,
-                )),
+                Extensions if self.action_available(Action::Plugins, cx) => {
+                    primary.child(self.page_button(
+                        Action::Plugins,
+                        icon,
+                        TabKind::PluginManager,
+                        "sidebar.panels.plugins",
+                        cx,
+                    ))
+                }
+                CloudSync if self.action_available(Action::CloudSync, cx) => {
+                    primary.child(self.page_button(
+                        Action::CloudSync,
+                        icon,
+                        TabKind::CloudSync,
+                        "plugin.cloud_sync.panel_title",
+                        cx,
+                    ))
+                }
                 Knowledge if self.demo => primary.child(self.page_button(
                     Action::Knowledge,
                     icon,
@@ -313,7 +288,7 @@ impl Workspace {
                     cx,
                     |h, w, cx| h.action(Action::Terminal, w, cx),
                 )),
-                Files if self.demo => footer.child(self.page_button(
+                Files if self.action_available(Action::Files,cx) => footer.child(self.page_button(
                     Action::Files,
                     icon,
                     TabKind::FileManager,
@@ -351,16 +326,19 @@ impl Workspace {
         activity_rail(RailSide::Left, !self.rails.left.collapsed(), body, env, cx)
     }
 
+    fn context_tools_top(&self) -> f32 {
+        let metrics = self.tokens.metrics;
+        let title = if self.onboarding_locked() { 0.0 } else { metrics.titlebar_height };
+        title + metrics.tabbar_height + PRIMARY_SIDEBAR_CONTENT_TOP_INSET
+    }
+
     fn context_tool_count(&self, w: &Window) -> usize {
         let m = self.tokens.metrics;
-        let available = f32::from(w.viewport_size().height)
-            - m.titlebar_height
-            - m.tabbar_height
-            - PRIMARY_SIDEBAR_CONTENT_TOP_INSET;
+        let available = f32::from(w.viewport_size().height) - self.context_tools_top();
         visible_tool_count(
             available,
             m.activity_icon_size + m.activity_icon_gap,
-            m.divider_height + m.activity_icon_gap + 4.0,
+            rail::separator_height(m),
         )
     }
 
@@ -403,8 +381,11 @@ impl Workspace {
                 0,
                 cx,
                 |h, w, cx| h.action(Action::Assistant, w, cx),
-            ))
-            .child(self.separator());
+            ));
+        if self.tools.monitor.is_none() {
+            return activity_rail(RailSide::Right, visible, body, env, cx);
+        }
+        body = body.child(self.separator());
 
         for (index, tool) in CONTEXT_TOOLS.iter().take(count).copied().enumerate() {
             if index == MONITORING_TOOL_COUNT {
@@ -453,6 +434,12 @@ impl Workspace {
                                 .unwrap_or(first);
                             h.popover_generation = h.popover_generation.wrapping_add(1);
                             h.context_tools_menu = Some(highlighted);
+                            if let Some(index) =
+                                overflow.iter().position(|tool| *tool == highlighted)
+                            {
+                                h.context_tools_menu_scroll.scroll_to_item(index);
+                            }
+                            w.focus(&h.focus, cx);
                         }
                     }
                     cx.notify();
@@ -461,6 +448,56 @@ impl Workspace {
         }
 
         activity_rail(RailSide::Right, visible, body, env, cx)
+    }
+
+    pub(super) fn context_tools_key(
+        &mut self,
+        key: &str,
+        w: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        use oxideterm_gpui_ui::select::{BrowserSelectKeyDirection, browser_select_next_index};
+        let Some(highlighted) = self.context_tools_menu else {
+            return false;
+        };
+        let overflow = overflow_tools(self.context_tool_count(w));
+        if overflow.is_empty() {
+            self.context_tools_menu = None;
+            cx.notify();
+            return false;
+        }
+        let index = overflow
+            .iter()
+            .position(|&tool| tool == highlighted)
+            .unwrap_or(0);
+        match key {
+            "escape" | "tab" => self.context_tools_menu = None,
+            "enter" | "space" | " " => {
+                self.context_tools_menu = None;
+                self.action(Action::HostTool(overflow[index]), w, cx);
+            }
+            key => {
+                let next = match key {
+                    "home" => 0,
+                    "end" => overflow.len() - 1,
+                    "arrowup" | "up" => browser_select_next_index(
+                        index,
+                        overflow.len(),
+                        BrowserSelectKeyDirection::Previous,
+                    ),
+                    "arrowdown" | "down" => browser_select_next_index(
+                        index,
+                        overflow.len(),
+                        BrowserSelectKeyDirection::Next,
+                    ),
+                    _ => return true,
+                };
+                self.context_tools_menu = Some(overflow[next]);
+                self.context_tools_menu_scroll.scroll_to_item(next);
+            }
+        }
+        cx.notify();
+        true
     }
 
     pub(super) fn render_context_tools_menu(
@@ -514,13 +551,11 @@ impl Workspace {
             );
         }
         let m = self.tokens.metrics;
-        let top = m.titlebar_height
-            + m.tabbar_height
-            + PRIMARY_SIDEBAR_CONTENT_TOP_INSET
+        let top = self.context_tools_top()
             + tool_stack_height(
                 count,
                 m.activity_icon_size + m.activity_icon_gap,
-                m.divider_height + m.activity_icon_gap + 4.0,
+                rail::separator_height(m),
             );
         Some(
             popover_backdrop()
@@ -577,7 +612,7 @@ impl Workspace {
                     .h(px(t.metrics.tabbar_height))
                     .flex()
                     .items_center()
-                    .bg(rgb(t.ui.shell_bg()))
+                    .bg(self.chrome_fill(t.ui.shell_bg()))
                     .occlude()
                     .border_b_1()
                     .border_color(self.chrome_divider()),
@@ -590,7 +625,7 @@ impl Workspace {
                     .flex()
                     .flex_col()
                     .overflow_hidden()
-                    .bg(rgb(t.ui.shell_bg()))
+                    .bg(self.chrome_fill(t.ui.shell_bg()))
                     .child(content),
             )
             .children(footer)
@@ -600,13 +635,19 @@ impl Workspace {
     pub(super) fn right_drawer(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let t = self.tokens;
         let (panel_key, icon, key, content, toggle) = match self.rails.context_panel {
-            ContextSidebarPanel::Assistant => (
-                0usize,
-                LucideIcon::Sparkles,
-                Action::Assistant.key(),
-                self.assistant.as_ref()?.clone().into_any_element(),
-                None,
-            ),
+            ContextSidebarPanel::Assistant => {
+                let writable = self.active_session()
+                    .and_then(|id| self.sessions.get(&id))
+                    .is_some_and(|s| s.writable(self.ready));
+                self.assistant.update(cx, |a, cx| a.panel(self.rails.right.width(), writable, cx));
+                (
+                    0usize,
+                    LucideIcon::Sparkles,
+                    Action::Assistant.key(),
+                    self.assistant.clone().into_any_element(),
+                    None,
+                )
+            }
             ContextSidebarPanel::HostTools => {
                 let monitor = self.tools.monitor.as_ref()?;
                 let width = self.rails.right.width();
@@ -729,71 +770,26 @@ impl Workspace {
     fn render_sidebar_search_bar(
         &self,
         id: &'static str,
-        query: &str,
-        placeholder_key: &'static str,
+        field: Field,
         cx: &Context<Self>,
     ) -> AnyElement {
         let t = self.tokens;
         let theme = t.ui;
-        let focused = self.sidebar_search_focused;
-        let empty = query.is_empty();
-        // Matches desktop `sidebar_search_row` + borderless `TextInputView`:
-        // flat 36px strip under the header divider with no inner bordered box.
+        let view = self.fields.view(field);
+        let empty = view.read(cx).text().is_empty();
         div()
             .id(id)
             .w_full()
             .min_w_0()
-            .flex_none()
-            .h(px(36.0))
+            .h(px(36.))
             .px_3()
             .flex()
             .items_center()
             .gap(px(t.spacing.one))
             .border_b_1()
             .border_color(self.chrome_divider())
-            .bg(rgb(theme.shell_bg()))
-            .cursor(CursorStyle::IBeam)
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .h(px(20.0))
-                    .flex()
-                    .items_center()
-                    .overflow_hidden()
-                    .text_size(px(t.metrics.sidebar_title_font_size))
-                    .line_height(px(20.0))
-                    .text_color(rgb(if empty { theme.text_muted } else { theme.text }))
-                    .child(if empty {
-                        div()
-                            .flex()
-                            .items_center()
-                            .when(focused, |row| {
-                                row.child(
-                                    div().w(px(1.5)).h(px(14.0)).mr(px(1.0)).bg(rgb(theme.text)),
-                                )
-                            })
-                            .child(self.i18n.t(placeholder_key))
-                            .into_any_element()
-                    } else {
-                        div()
-                            .flex()
-                            .items_center()
-                            .min_w_0()
-                            .child(div().truncate().child(query.to_owned()))
-                            .when(focused, |row| {
-                                row.child(
-                                    div()
-                                        .flex_none()
-                                        .w(px(1.5))
-                                        .h(px(14.0))
-                                        .ml(px(1.0))
-                                        .bg(rgb(theme.text)),
-                                )
-                            })
-                            .into_any_element()
-                    }),
-            )
+            .bg(self.chrome_fill(theme.shell_bg()))
+            .child(div().flex_1().min_w_0().h(px(22.)).child(view.clone()))
             .when(!empty, |bar| {
                 bar.child(
                     div()
@@ -809,29 +805,16 @@ impl Workspace {
                         .child(glyph(LucideIcon::X, 11.0, theme.text_muted))
                         .on_mouse_down(
                             MouseButton::Left,
-                            cx.listener(|h, _, _, cx| {
-                                if h.rails.section == SidebarSection::Connections {
-                                    h.connections_search_query.clear();
-                                } else {
-                                    h.session_search_query.clear();
-                                }
+                            cx.listener(move |h, _, w, cx| {
+                                let view = h.fields.view(field);
+                                view.update(cx, |v, cx| v.reset("", false, cx));
+                                w.focus(&view.read(cx).focus_handle(cx), cx);
                                 cx.stop_propagation();
                                 cx.notify();
                             }),
                         ),
                 )
             })
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|h, _, w, cx| {
-                    h.sidebar_search_focused = true;
-                    h.knowledge.active_input = None;
-                    h.pages.plugin_search_focused = false;
-                    w.focus(&h.focus, cx);
-                    cx.stop_propagation();
-                    cx.notify();
-                }),
-            )
             .into_any_element()
     }
 
@@ -1015,11 +998,18 @@ impl Workspace {
             false,
             cx.listener(move |h, _, w, cx| {
                 h.connection_context_menu = None;
-                h.new_terminal(connect_id.clone(), None, w, cx);
+                h.connect_catalog_item(&connect_id, w, cx);
                 cx.stop_propagation();
             }),
         ));
-        if !is_ble {
+        if !is_ble
+            && self.demo
+            && !self
+                .files
+                .as_ref()
+                .is_some_and(|f| f.sftp_profiles.contains_key(&node_id))
+        {
+            let sftp_id = node_id.clone();
             popup = popup.child(select_option_action(
                 select_option(
                     &self.tokens,
@@ -1028,9 +1018,9 @@ impl Workspace {
                 ),
                 false,
                 false,
-                cx.listener(|h, _, w, cx| {
+                cx.listener(move |h, _, _, cx| {
                     h.connection_context_menu = None;
-                    h.action(Action::Sftp, w, cx);
+                    h.open_node_sftp(&sftp_id, cx);
                     cx.stop_propagation();
                 }),
             ));
@@ -1059,20 +1049,10 @@ impl Workspace {
                 ),
                 false,
                 false,
-                cx.listener(move |h, _, _, cx| {
+                cx.listener(move |h, _, w, cx| {
                     h.connection_context_menu = None;
-                    h.catalog_data.items.retain(|r| {
-                        r.target != SessionManagerOpenTarget::Connection(delete_id.clone())
-                    });
-                    h.ble_profiles.remove(&delete_id);
-                    if h.selected_connection_id.as_deref() == Some(delete_id.as_str()) {
-                        h.selected_connection_id = None;
-                    }
-                    h.catalog.update(cx, |v, cx| {
-                        v.set_catalog_data(h.catalog_data.clone(), cx);
-                    });
+                    h.request_profile_delete(&delete_id, w, cx);
                     cx.stop_propagation();
-                    cx.notify();
                 }),
             ));
         Some(
@@ -1158,12 +1138,12 @@ impl Workspace {
                             h.connections_search_open,
                             cx,
                         );
+                        let view = h.fields.view(Field::Connections);
                         if h.connections_search_open {
-                            h.sidebar_search_focused = true;
-                            w.focus(&h.focus, cx);
+                            w.focus(&view.read(cx).focus_handle(cx), cx);
                         } else {
-                            h.connections_search_query.clear();
-                            h.sidebar_search_focused = false;
+                            view.update(cx, |v, cx| v.reset("", false, cx));
+                            w.focus(&h.focus, cx);
                         }
                         cx.notify();
                     },
@@ -1223,8 +1203,7 @@ impl Workspace {
                             &t,
                             div().w_full().child(self.render_sidebar_search_bar(
                                 "connections-search-input",
-                                &self.connections_search_query,
-                                "sessionManager.toolbar.search_placeholder",
+                                Field::Connections,
                                 cx,
                             )),
                             Some(36.0),
@@ -1269,12 +1248,12 @@ impl Workspace {
                     h.session_sort_menu_open = false;
                     h.session_search_open = !h.session_search_open;
                     h.begin_disclosure("session-search".into(), h.session_search_open, cx);
+                    let view = h.fields.view(Field::Sessions);
                     if h.session_search_open {
-                        h.sidebar_search_focused = true;
-                        w.focus(&h.focus, cx);
+                        w.focus(&view.read(cx).focus_handle(cx), cx);
                     } else {
-                        h.session_search_query.clear();
-                        h.sidebar_search_focused = false;
+                        view.update(cx, |v, cx| v.reset("", false, cx));
+                        w.focus(&h.focus, cx);
                     }
                     cx.notify();
                 },
@@ -1331,7 +1310,13 @@ impl Workspace {
             .iter()
             .map(|g| if g.local_group { g.terminals.len() } else { 1 })
             .sum::<usize>();
-        let query = self.session_search_query.trim().to_lowercase();
+        let query = self
+            .fields
+            .view(Field::Sessions)
+            .read(cx)
+            .text()
+            .trim()
+            .to_lowercase();
         let filtered_groups: Vec<ActiveNodeGroup> = if query.is_empty() {
             all_groups
         } else {
@@ -1358,8 +1343,7 @@ impl Workspace {
                         &t,
                         div().w_full().child(self.render_sidebar_search_bar(
                             "sessions-search-input",
-                            &self.session_search_query,
-                            "sidebar.search.placeholder",
+                            Field::Sessions,
                             cx,
                         )),
                         Some(36.0),
@@ -1386,9 +1370,19 @@ impl Workspace {
         self.drawer(header, content, Some(footer))
     }
 
+    pub(crate) fn reveal_session_node(&mut self, node: &str, w: &mut Window, cx: &mut Context<Self>) {
+        self.session_search_open = false;
+        self.fields.view(Field::Sessions).update(cx, |v,cx| v.reset("",false,cx));
+        self.expanded_nodes.insert(node.into());
+        if self.rails.section != SidebarSection::Sessions || self.rails.left.collapsed() {
+            self.request(ShellRequest::Select(SidebarSection::Sessions), w, cx);
+        }
+        self.changed(cx);
+    }
+
     fn active_session_groups(&self) -> Vec<ActiveNodeGroup> {
         let mut by_node: Vec<ActiveNodeGroup> = Vec::new();
-        for (_, tab) in self.layout.main_tabs() {
+        for (_, tab) in self.layout.unfiltered_main_tabs() {
             let Some(root) = &tab.root_pane else {
                 continue;
             };
@@ -1403,27 +1397,25 @@ impl Workspace {
                 };
                 if let Some(group) = by_node.iter_mut().find(|g| g.node_id == session.node) {
                     group.terminals.push((tab.id, pane, session_id));
+                    group.connected |= session.connected(self.ready);
                 } else {
                     let local_group = session.node == "local";
-                    let ble_group = crate::ble::is_ble_node(&session.node);
+                    let ble_group = session.is_ble();
                     let profile = self.catalog_data.items.iter().find(|row| {
                         matches!(&row.target, SessionManagerOpenTarget::Connection(id) if id == &session.node)
                     });
-                    let ble_profile = ble_group
-                        .then(|| self.ble_profiles.get(&session.node))
-                        .flatten();
                     let title = if local_group {
                         self.i18n
                             .t("modals.new_connection.transport_local_terminal")
-                    } else if let Some(b) = ble_profile {
-                        b.name.clone()
+                    } else if let Some((name, _)) = session.ble_labels() {
+                        name.to_owned()
                     } else if let Some(p) = profile {
                         p.name.clone()
                     } else {
                         session.node.clone()
                     };
-                    let subtitle = if let Some(b) = ble_profile {
-                        b.device_name.clone()
+                    let subtitle = if let Some((_, device)) = session.ble_labels() {
+                        device.to_owned()
                     } else {
                         profile.map(|p| p.subtitle.clone()).unwrap_or_default()
                     };
@@ -1439,6 +1431,7 @@ impl Workspace {
                         port,
                         local_group,
                         ble_group,
+                        connected: session.connected(self.ready),
                         terminals: vec![(tab.id, pane, session_id)],
                     });
                 }
@@ -1454,22 +1447,8 @@ impl Workspace {
             }
             SessionSortOrder::ConnectedFirst => {
                 by_node.sort_by(|a, b| {
-                    let a_conn = if a.ble_group {
-                        a.terminals
-                            .iter()
-                            .any(|(_, _, sid)| self.ble_links.contains_key(sid))
-                    } else {
-                        self.ready
-                    };
-                    let b_conn = if b.ble_group {
-                        b.terminals
-                            .iter()
-                            .any(|(_, _, sid)| self.ble_links.contains_key(sid))
-                    } else {
-                        self.ready
-                    };
-                    b_conn
-                        .cmp(&a_conn)
+                    b.connected
+                        .cmp(&a.connected)
                         .then_with(|| a.local_group.cmp(&b.local_group))
                         .then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
                 });
@@ -1487,7 +1466,14 @@ impl Workspace {
         let t = self.tokens;
         let theme = t.ui;
         let active_terminal = self.active_session();
-        let active_tab_kind = self.layout.active_tab().map(|tab| tab.kind.clone());
+        let tool_node = self.focused_tab().and_then(|t| match t.kind {
+            TabKind::Forwards => self.tools.forwards.node(t.id),
+            TabKind::Ide => self.projects.project_node(t.id),
+            _ => None,
+        }).map(str::to_owned).or_else(|| {
+            let page = self.files.as_ref()?.sftp_pages.get(&self.focused_tab()?.id)?.read(cx);
+            page.target.profile.is_none().then(||page.target.id.clone())
+        });
 
         if groups.is_empty() {
             if filtering {
@@ -1535,12 +1521,7 @@ impl Workspace {
             let owns_terminal = active_terminal.is_some_and(|active_id| {
                 group.terminals.iter().any(|(_, _, sid)| *sid == active_id)
             });
-            let owns_tool_tab = !group.local_group
-                && !group.ble_group
-                && matches!(
-                    active_tab_kind,
-                    Some(TabKind::Sftp | TabKind::Ide | TabKind::Forwards)
-                );
+            let owns_tool_tab = tool_node.as_deref() == Some(group.node_id.as_str());
             let owns_active_tab = owns_terminal || owns_tool_tab;
             let header = self.render_session_node_header(group, expanded, owns_active_tab, cx);
 
@@ -1550,7 +1531,6 @@ impl Workspace {
                 self.render_session_node_children(
                     group,
                     active_terminal,
-                    active_tab_kind.as_ref(),
                     cx,
                 )
             } else {
@@ -1595,14 +1575,7 @@ impl Workspace {
         } else {
             LucideIcon::Server
         };
-        let connected = if group.ble_group {
-            group
-                .terminals
-                .iter()
-                .any(|(_, _, sid)| self.ble_links.contains_key(sid))
-        } else {
-            self.ready
-        };
+        let connected = group.connected;
         let node_id = group.node_id.clone();
         let chevron_id = SharedString::from(format!("session-node-chevron-{}", group.node_id));
         let terminal_count = group.terminals.len();
@@ -1734,7 +1707,6 @@ impl Workspace {
         &self,
         group: &ActiveNodeGroup,
         active_terminal: Option<TerminalSessionId>,
-        active_tab_kind: Option<&TabKind>,
         cx: &Context<Self>,
     ) -> Vec<AnyElement> {
         let mut children = Vec::new();
@@ -1805,8 +1777,8 @@ impl Workspace {
                 SessionActionVariant::Danger,
                 false,
                 true,
-                cx.listener(move |h, _, _, cx| {
-                    h.disconnect_node(&disconnect_node, cx);
+                cx.listener(move |h, _, w, cx| {
+                    h.request_close_terminals(Some(&disconnect_node), w, cx);
                     cx.stop_propagation();
                 }),
             ));
@@ -1830,42 +1802,53 @@ impl Workspace {
         ));
 
         if self.demo {
-            children.push(self.render_session_action_row(
-                &group.node_id,
-                "sftp",
-                LucideIcon::FolderOpen,
-                self.i18n.t("sessions.tree.actions.sftp"),
-                SessionActionVariant::Primary,
-                active_tab_kind == Some(&TabKind::Sftp),
-                false,
-                cx.listener(|h, _, w, cx| {
-                    h.action(Action::Sftp, w, cx);
-                    cx.stop_propagation();
-                }),
-            ));
-            children.push(self.render_session_action_row(
-                &group.node_id,
-                "ide",
-                LucideIcon::Code2,
-                "IDE".to_string(),
-                SessionActionVariant::Primary,
-                active_tab_kind == Some(&TabKind::Ide),
-                false,
-                cx.listener(|h, _, w, cx| {
-                    h.action(Action::Ide, w, cx);
-                    cx.stop_propagation();
-                }),
-            ));
+            let sftp_node = group.node_id.clone();
+            children.push(
+                self.render_session_action_row(
+                    &group.node_id,
+                    "sftp",
+                    LucideIcon::FolderOpen,
+                    self.i18n.t("sessions.tree.actions.sftp"),
+                    SessionActionVariant::Primary,
+                    self.focused_tab()
+                        .and_then(|t| self.files.as_ref()?.sftp_pages.get(&t.id))
+                        .is_some_and(|p| p.read(cx).target.id == group.node_id),
+                    false,
+                    cx.listener(move |h, _, _, cx| {
+                        h.open_node_sftp(&sftp_node, cx);
+                        cx.stop_propagation();
+                    }),
+                ),
+            );
+            let ide_node = group.node_id.clone();
+            children.push(
+                self.render_session_action_row(
+                    &group.node_id,
+                    "ide",
+                    LucideIcon::Code2,
+                    self.i18n.t("settings_view.tabs.ide"),
+                    SessionActionVariant::Primary,
+                    self.focused_tab()
+                        .and_then(|t| self.projects.project_node(t.id))
+                        == Some(group.node_id.as_str()),
+                    false,
+                    cx.listener(move |h, _, w, cx| {
+                        h.open_node_ide(&ide_node, w, cx);
+                        cx.stop_propagation();
+                    }),
+                ),
+            );
+            let forward_node = group.node_id.clone();
             children.push(self.render_session_action_row(
                 &group.node_id,
                 "port-forwarding",
                 LucideIcon::ArrowLeftRight,
                 self.i18n.t("sessions.tree.actions.port_forwarding"),
                 SessionActionVariant::Primary,
-                active_tab_kind == Some(&TabKind::Forwards),
+                self.focused_tab().and_then(|t|self.tools.forwards.node(t.id)) == Some(group.node_id.as_str()),
                 false,
-                cx.listener(|h, _, w, cx| {
-                    h.action(Action::Forwards, w, cx);
+                cx.listener(move |h, _, _, cx| {
+                    h.open_node_forwards(&forward_node, cx);
                     cx.stop_propagation();
                 }),
             ));
@@ -1886,12 +1869,12 @@ impl Workspace {
             &group.node_id,
             "disconnect",
             LucideIcon::WifiOff,
-            self.i18n.t("sessions.tree.actions.disconnect"),
+            self.i18n.t("tabbar.close_terminals"),
             SessionActionVariant::Danger,
             false,
             true,
-            cx.listener(move |h, _, _, cx| {
-                h.disconnect_node(&disconnect_node, cx);
+            cx.listener(move |h, _, w, cx| {
+                h.request_close_terminals(Some(&disconnect_node), w, cx);
                 cx.stop_propagation();
             }),
         ));
@@ -2005,7 +1988,7 @@ impl Workspace {
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |h, _, w, cx| {
-                        h.layout.select_main_tab(Some(tab_id));
+                        h.activate_page(tab_id, cx);
                         h.pane_request(
                             ShellPaneRequest::Focus(
                                 tab_id,
@@ -2118,7 +2101,7 @@ impl Workspace {
             .gap(px(self.tokens.spacing.two))
             .border_t_1()
             .border_color(self.chrome_divider())
-            .bg(rgb(theme.shell_bg()))
+            .bg(self.chrome_fill(theme.shell_bg()))
             .child(
                 div()
                     .flex_none()
@@ -2146,13 +2129,21 @@ impl Workspace {
     fn connections_sidebar(&self, cx: &Context<Self>) -> AnyElement {
         let t = self.tokens;
         let theme = t.ui;
-        let query = self.connections_search_query.trim().to_lowercase();
+        let query = self
+            .fields
+            .view(Field::Connections)
+            .read(cx)
+            .text()
+            .trim()
+            .to_lowercase();
         let mut items: Vec<_> = self
             .catalog_data
             .items
             .iter()
             .filter_map(|row| match &row.target {
                 SessionManagerOpenTarget::Connection(id)
+                | SessionManagerOpenTarget::Ble(id)
+                | SessionManagerOpenTarget::StandaloneSftp(id)
                     if query.is_empty()
                         || row.name.to_lowercase().contains(&query)
                         || row.subtitle.to_lowercase().contains(&query)
@@ -2228,7 +2219,10 @@ impl Workspace {
             .gap(px(2.0))
             .children(items.into_iter().map(|(node_id, row)| {
                 let is_ble = crate::ble::is_ble_node(&node_id);
-                let is_connected = self.sessions.values().any(|s| s.node == node_id);
+                let is_connected = self
+                    .sessions
+                    .values()
+                    .any(|s| s.node == node_id && s.connected(self.ready));
                 let is_selected = self.selected_connection_id.as_deref() == Some(node_id.as_str());
                 let semantic = if is_ble { theme.warning } else { theme.info };
                 let icon_box = div()
@@ -2247,6 +2241,9 @@ impl Workspace {
                     .child(glyph(
                         if is_ble {
                             LucideIcon::Bluetooth
+                        } else if matches!(row.target, SessionManagerOpenTarget::StandaloneSftp(_))
+                        {
+                            LucideIcon::FolderSync
                         } else {
                             LucideIcon::Server
                         },
@@ -2330,7 +2327,7 @@ impl Workspace {
                         cx.listener(move |h, e: &MouseDownEvent, w, cx| {
                             h.selected_connection_id = Some(click_id.clone());
                             if e.click_count >= 2 {
-                                h.new_terminal(click_id.clone(), None, w, cx);
+                                h.connect_catalog_item(&click_id, w, cx);
                             } else {
                                 cx.notify();
                             }

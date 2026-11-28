@@ -72,6 +72,7 @@ impl WorkspaceApp {
                     app.ai_tool_indicator_info(cx),
                     auth,
                     AiRenameFrame {
+                        field: None,
                         anchor: rename_target.anchor_id(),
                         viewport: app.text_input_anchors.viewport(rename_target.anchor_id()),
                         marked: app
@@ -84,6 +85,7 @@ impl WorkspaceApp {
                     app.standard_confirm_focus(),
                 );
                 Some(AiTranscriptFrame {
+                    can_insert_command: app.active_pane(cx).is_some(),
                     composer,
                     overlay,
                     agent_models,

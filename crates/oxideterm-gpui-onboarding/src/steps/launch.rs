@@ -17,40 +17,54 @@ use crate::{
 pub(crate) fn render_launch_step(
     frame: &OnboardingFrame,
     bindings: &OnboardingViewBindings,
+    actions: crate::OnboardingLaunchActions,
     wide: bool,
 ) -> AnyElement {
     let theme = frame.tokens.ui;
 
+    let has_primary = actions.new_connection || actions.terminal_description.is_some();
     let quick_primary = div()
         .w_full()
         .h_full()
         .grid()
-        .grid_cols(if wide { 2 } else { 1 })
+        .grid_cols(
+            if wide && actions.new_connection && actions.terminal_description.is_some() {
+                2
+            } else {
+                1
+            },
+        )
         .gap(px(10.0))
-        .child(primary_action_tile(
-            frame,
-            bindings,
-            "onboarding-launch-new-conn",
-            "lucide/plus.svg",
-            "onboarding.new_connection",
-            "onboarding.new_connection_desc",
-            true,
-            OnboardingRequest::OpenNewConnection,
-        ))
-        .child(primary_action_tile(
-            frame,
-            bindings,
-            "onboarding-launch-terminal",
-            "lucide/terminal.svg",
-            "onboarding.open_terminal",
-            "onboarding.open_terminal_desc",
-            false,
-            OnboardingRequest::OpenTerminal,
-        ));
-
-    let import_rows = vec![
-        import_ssh_row(frame, bindings),
-        utility_action_row(
+        .when(actions.new_connection, |c| {
+            c.child(primary_action_tile(
+                frame,
+                bindings,
+                "onboarding-launch-new-conn",
+                "lucide/plus.svg",
+                "onboarding.new_connection",
+                "onboarding.new_connection_desc",
+                true,
+                OnboardingRequest::OpenNewConnection,
+            ))
+        })
+        .when_some(actions.terminal_description, |c, description| {
+            c.child(primary_action_tile(
+                frame,
+                bindings,
+                "onboarding-launch-terminal",
+                "lucide/terminal.svg",
+                "onboarding.open_terminal",
+                description,
+                false,
+                OnboardingRequest::OpenTerminal,
+            ))
+        });
+    let mut import_rows = Vec::new();
+    if actions.import_ssh {
+        import_rows.push(import_ssh_row(frame, bindings));
+    }
+    if actions.import_apps {
+        import_rows.push(utility_action_row(
             frame,
             bindings,
             "onboarding-import-apps",
@@ -60,8 +74,9 @@ pub(crate) fn render_launch_step(
             frame.i18n.t("onboarding.import_apps_desc"),
             false,
             OnboardingRequest::OpenConnectionImporters,
-        ),
-    ];
+        ));
+    }
+    let has_import = !import_rows.is_empty();
 
     let quick_start_section = div()
         .w_full()
@@ -77,24 +92,32 @@ pub(crate) fn render_launch_step(
             div()
                 .w_full()
                 .grid()
-                .grid_cols(if wide { 2 } else { 1 })
+                .grid_cols(if wide && has_primary && has_import {
+                    2
+                } else {
+                    1
+                })
                 .gap(px(if wide { 20.0 } else { 12.0 }))
-                .child(quick_primary)
-                .child(grouped_surface(&frame.tokens, frame.has_background, import_rows).h_full()),
+                .when(has_primary, |row| row.child(quick_primary))
+                .when(has_import, |row| {
+                    row.child(
+                        grouped_surface(&frame.tokens, frame.has_background, import_rows).h_full(),
+                    )
+                }),
         );
 
-    let ai_rows = vec![
-        ai_toggle_row(
-            frame,
-            bindings,
-            "onboarding-ai-enable",
-            "onboarding.ai_tools_enable",
-            "onboarding.ai_tools_enable_hint",
-            frame.ai_opt_in,
-            true,
-            OnboardingRequest::ToggleAiOptIn,
-        ),
-        ai_toggle_row(
+    let mut ai_rows = vec![ai_toggle_row(
+        frame,
+        bindings,
+        "onboarding-ai-enable",
+        "onboarding.ai_tools_enable",
+        "onboarding.ai_tools_enable_hint",
+        frame.ai_opt_in,
+        true,
+        OnboardingRequest::ToggleAiOptIn,
+    )];
+    if actions.ai_tools {
+        ai_rows.push(ai_toggle_row(
             frame,
             bindings,
             "onboarding-ai-tools-enable",
@@ -103,7 +126,9 @@ pub(crate) fn render_launch_step(
             frame.tool_use_opt_in,
             frame.ai_opt_in,
             OnboardingRequest::ToggleToolUseOptIn,
-        ),
+        ));
+    }
+    ai_rows.push(
         div()
             .w_full()
             .px(px(14.0))
@@ -125,9 +150,7 @@ pub(crate) fn render_launch_step(
                     .child(frame.i18n.t("onboarding.ai_tools_privacy_context")),
             )
             .into_any_element(),
-    ];
-
-    let cli_col = render_cli_card(frame, bindings);
+    );
     let ai_col = div()
         .h_full()
         .min_w(px(0.0))
@@ -144,10 +167,14 @@ pub(crate) fn render_launch_step(
     let preferences_band = div()
         .w_full()
         .grid()
-        .grid_cols(if wide { 2 } else { 1 })
+        .grid_cols(if wide && actions.cli && actions.ai {
+            2
+        } else {
+            1
+        })
         .gap(px(if wide { 20.0 } else { 14.0 }))
-        .child(ai_col)
-        .child(cli_col);
+        .when(actions.ai, |c| c.child(ai_col))
+        .when(actions.cli, |c| c.child(render_cli_card(frame, bindings)));
 
     let mut shortcut_strip = div()
         .pt(px(14.0))
@@ -190,8 +217,8 @@ pub(crate) fn render_launch_step(
         .flex()
         .flex_col()
         .gap(px(20.0))
-        .child(quick_start_section)
-        .child(preferences_band)
+        .when(has_primary || has_import, |c| c.child(quick_start_section))
+        .when(actions.ai || actions.cli, |c| c.child(preferences_band))
         .when(!frame.shortcuts.is_empty(), |col| col.child(shortcut_strip))
         .into_any_element()
 }

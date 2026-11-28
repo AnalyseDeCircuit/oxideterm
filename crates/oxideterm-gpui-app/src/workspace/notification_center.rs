@@ -60,7 +60,7 @@ impl WorkspaceApp {
             notifications: self.notification_center.notifications.clone(),
             active_view: self.notification_center.active_view,
             has_background: self.background_surface_active("notification_center"),
-            actions_available: true,
+            actions: NotificationActions::Audit,
             transition: self.segmented_control_user_transition_active(
                 NOTIFICATION_CENTER_SWITCHER_ID,
                 notification_center_view_index(self.notification_center.active_view),

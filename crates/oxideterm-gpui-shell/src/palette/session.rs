@@ -62,6 +62,11 @@ impl<P: PaletteProvider> PaletteModel<P> {
         &self.interaction.raw_query
     }
 
+    /// Transfer the input to the host when it must not remain visible during exit.
+    pub fn take_query(&mut self) -> String {
+        std::mem::take(&mut self.interaction.raw_query)
+    }
+
     pub fn reveal_selection<A>(&self, items: &[super::model::RankedItem<A>]) {
         use super::model::*;
         use oxideterm_gpui_ui::virtual_list::*;

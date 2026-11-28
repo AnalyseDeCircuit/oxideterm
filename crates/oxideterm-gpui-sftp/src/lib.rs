@@ -14,7 +14,7 @@ pub use dialog::{
 pub mod native_video;
 pub use diff::{SftpDiffFrame, SftpDiffView};
 mod presentation;
-pub use presentation::render_presentation_choice;
+pub use presentation::{render_presentation_choice, sftp_open_presentation, sidebar_sftp_target};
 mod queue;
 pub mod style;
 

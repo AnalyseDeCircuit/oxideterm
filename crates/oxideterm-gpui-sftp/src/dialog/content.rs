@@ -32,9 +32,11 @@ impl SftpDialogView {
             PreviewContent::Text { data, language, .. } => {
                 self.render_sftp_preview_code(data, language.as_deref(), cx)
             }
-            PreviewContent::Image { mime_type, data } => {
-                let source = format!("data:{mime_type};base64,{data}");
-                self.render_sftp_preview_image(source, mime_type.clone())
+            PreviewContent::Image { mime_type, .. } => {
+                match self.sftp_view().read(cx).preview_image.clone() {
+                    Some(image) => self.render_sftp_preview_image(image, mime_type.clone()),
+                    None => self.render_sftp_preview_text(self.i18n.t("sftp.preview.unsupported")),
+                }
             }
             PreviewContent::AssetFile {
                 path,

@@ -81,9 +81,10 @@ impl ForwardsView {
             )
             .child(self.render_forward_type_picker(has_background, cx))
             .child(self.render_forward_address_form(false, has_background, cx))
-            .when(forward_type != ForwardType::Dynamic, |form| {
-                form.child(self.render_forward_skip_health_check(has_background, cx))
-            })
+            .when(
+                self.preview_focus.is_none() && forward_type != ForwardType::Dynamic,
+                |form| form.child(self.render_forward_skip_health_check(has_background, cx)),
+            )
             .when_some(error.as_ref(), |form, error| {
                 form.child(self.render_forwards_error(error))
             })
@@ -106,23 +107,25 @@ impl ForwardsView {
                             }),
                         ))
                     })
-                    .child(self.render_forward_button(
-                        if pending {
-                            self.i18n.t("forwards.form.creating")
-                        } else if can_save {
-                            self.i18n.t("forwards.form.save_and_start")
-                        } else {
-                            self.i18n.t("forwards.form.create_forward")
-                        },
-                        None,
-                        ForwardButtonVariant::Primary,
-                        !pending,
-                        has_background,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.submit_forward_create(tab_id, node_id.clone(), true, cx);
-                            cx.stop_propagation();
-                        }),
-                    )),
+                    .when(self.preview_focus.is_none(), |actions| {
+                        actions.child(self.render_forward_button(
+                            if pending {
+                                self.i18n.t("forwards.form.creating")
+                            } else if can_save {
+                                self.i18n.t("forwards.form.save_and_start")
+                            } else {
+                                self.i18n.t("forwards.form.create_forward")
+                            },
+                            None,
+                            ForwardButtonVariant::Primary,
+                            !pending,
+                            has_background,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.submit_forward_create(tab_id, node_id.clone(), true, cx);
+                                cx.stop_propagation();
+                            }),
+                        ))
+                    }),
             )
             .when(!form_visible, |form| {
                 form.child(
@@ -645,6 +648,10 @@ impl ForwardsView {
     ) -> AnyElement {
         use oxideterm_gpui_ui::text_input::{text_input_anchor_probe, text_input_with_viewport};
         let state = self.state.read(cx);
+        if let Some(focus) = &self.preview_focus {
+            return crate::view::PreviewField::new(self, focus.clone(), input, placeholder, cx)
+                .into_any_element();
+        }
         let Some(frame) = (self.bindings.ime)(input, cx) else {
             return div().into_any_element();
         };

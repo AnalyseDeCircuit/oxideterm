@@ -10,6 +10,13 @@ use std::{
 
 const MAX_TAB_HISTORY: usize = 50;
 
+pub fn tab_is_renamable(kind: &TabKind) -> bool {
+    matches!(
+        kind,
+        TabKind::LocalTerminal | TabKind::SshTerminal | TabKind::MoshTerminal | TabKind::Workspace
+    )
+}
+
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 pub enum TabScope<A> {
     #[default]
@@ -223,19 +230,23 @@ impl<A: Eq + Hash + Clone, M> TabLayout<A, M> {
             .and_then(|index| self.tabs.get(index))
     }
 
-    /// Renames only terminal display metadata without changing pane or session ownership.
+    /// A terminal title event must not overwrite the name of its split workspace.
     pub fn rename_terminal_tab(&mut self, tab_id: TabId, title: &str) -> bool {
-        let normalized_title = title.trim();
-        if normalized_title.is_empty() {
+        if self
+            .tab_by_id(tab_id)
+            .is_none_or(|t| t.kind == TabKind::Workspace)
+        {
             return false;
         }
+        self.rename_tab(tab_id, title)
+    }
+
+    pub fn rename_tab(&mut self, tab_id: TabId, title: &str) -> bool {
+        let normalized_title = title.trim();
         let Some(tab) = self.tab_mut_by_id(tab_id) else {
             return false;
         };
-        if !matches!(
-            tab.kind,
-            TabKind::LocalTerminal | TabKind::SshTerminal | TabKind::MoshTerminal
-        ) {
+        if normalized_title.is_empty() || !tab_is_renamable(&tab.kind) {
             return false;
         }
         tab.title.clear();

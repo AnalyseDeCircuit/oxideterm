@@ -160,7 +160,7 @@ impl AiProviderSettingsView {
                                     "{}: {}",
                                     self.i18n.t("settings_view.ai.api_key"),
                                     if provider_has_key {
-                                        self.i18n.t("settings_view.ai.api_key_stored")
+                                        self.i18n.t(if self.session_only { "settings_view.ai.browser_key_present" } else { "settings_view.ai.api_key_stored" })
                                     } else {
                                         self.i18n.t("settings_view.ai.api_key_missing")
                                     }

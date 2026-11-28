@@ -3,6 +3,13 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Supported document formats.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum DocFormat {
+    Markdown,
+    PlainText,
+}
+
 /// Scope determines which sessions can see a collection.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum DocScope {
@@ -10,6 +17,15 @@ pub enum DocScope {
     Global,
     /// Visible only when connected to the given connection_id.
     Connection(String),
+}
+
+impl DocScope {
+    pub fn visible_to(&self, connection: Option<&str>) -> bool {
+        match (self, connection) {
+            (_, None) | (Self::Global, _) => true,
+            (Self::Connection(id), Some(filter)) => filter != "global" && id == filter,
+        }
+    }
 }
 
 /// A chunk of text split from a document.

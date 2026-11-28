@@ -52,6 +52,32 @@ pub enum TabKind {
     Onboarding,
 }
 
+pub fn tab_background_key(kind: &TabKind) -> &'static str {
+    match kind {
+        TabKind::Workspace => "terminal",
+        TabKind::LocalTerminal => "local_terminal",
+        TabKind::SshTerminal => "terminal",
+        TabKind::MoshTerminal => "terminal",
+        TabKind::FileManager => "file_manager",
+        TabKind::Graphics => "graphics",
+        TabKind::Runtime => "runtime",
+        TabKind::ConnectionPool => "runtime",
+        TabKind::Topology => "topology",
+        TabKind::NotificationCenter => "notification_center",
+        TabKind::Sftp => "sftp",
+        TabKind::Ide => "ide",
+        TabKind::Forwards => "forwards",
+        TabKind::SessionManager => "session_manager",
+        TabKind::PluginManager => "plugin_manager",
+        TabKind::Plugin { .. } => "plugin",
+        TabKind::CloudSync => "cloud_sync",
+        TabKind::Knowledge => "knowledge",
+        TabKind::RemoteDesktop => "remote_desktop",
+        TabKind::Settings => "settings",
+        TabKind::Onboarding => "onboarding",
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TabTitleSource {
     Static,

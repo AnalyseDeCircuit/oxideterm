@@ -279,6 +279,7 @@
       "host_trust_add": "Tin cậy khóa máy chủ",
       "host_trust_remove": "Xóa khóa máy chủ tin cậy",
       "connection_dispatch_receive": "Nhận yêu cầu kết nối",
+      "show_target": "Hiển thị trong không gian làm việc",
       "audit_view": "Xem kiểm toán",
       "credential_delete": "Xóa thông tin xác thực",
       "ssh_node_state": "Thay đổi trạng thái nút SSH",

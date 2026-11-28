@@ -23,6 +23,7 @@ members = [
   "crates/oxideterm-gpui-host-tools",
   "crates/oxideterm-gpui-onboarding",
   "crates/oxideterm-gpui-quick-commands",
+  "crates/oxideterm-gpui-command-sender",
   "crates/oxideterm-gpui-file-manager",
   "crates/oxideterm-gpui-sftp",
   "crates/oxideterm-gpui-remote-desktop",

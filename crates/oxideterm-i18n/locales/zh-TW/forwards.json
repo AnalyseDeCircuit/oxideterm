@@ -18,6 +18,7 @@
   "copy_address": "複製地址",
   "copied": "已複製",
   "forwards": {
+    "preview_hint": "規則草稿僅保留在此次示範中，不會開啟連接埠。",
     "quick": {
       "title": "快速轉發",
       "jupyter": "Jupyter (8888)",

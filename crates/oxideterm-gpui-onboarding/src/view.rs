@@ -30,6 +30,8 @@ const ONBOARDING_CONTENT_MAX_WIDTH: f32 = 880.0;
 pub struct OnboardingView {
     bindings: OnboardingViewBindings,
     scroll_handle: ScrollHandle,
+    launch_actions: std::rc::Rc<dyn Fn(&App) -> crate::OnboardingLaunchActions>,
+    save_failure_key: &'static str,
     last_step: usize,
     step_motion: UserSegmentedControlMotionState,
     control_motion: UserSegmentedControlMotionState,
@@ -42,12 +44,24 @@ impl OnboardingView {
         Self {
             bindings,
             scroll_handle: ScrollHandle::new(),
+            launch_actions: std::rc::Rc::new(|_| crate::OnboardingLaunchActions::DESKTOP),
+            save_failure_key: "onboarding.save_failed",
             last_step: 0,
             step_motion: UserSegmentedControlMotionState::default(),
             control_motion: UserSegmentedControlMotionState::default(),
             control_motion_tasks: HashMap::new(),
             subscriptions: Vec::new(),
         }
+    }
+
+    pub fn for_host(
+        mut self,
+        save_failure_key: &'static str,
+        actions: impl Fn(&App) -> crate::OnboardingLaunchActions + 'static,
+    ) -> Self {
+        self.save_failure_key = save_failure_key;
+        self.launch_actions = std::rc::Rc::new(actions);
+        self
     }
 
     pub(crate) fn begin_control_motion(
@@ -354,7 +368,9 @@ impl Render for OnboardingView {
                 wide,
                 cx,
             ),
-            OnboardingStep::Launch => render_launch_step(&frame, &self.bindings, wide),
+            OnboardingStep::Launch => {
+                render_launch_step(&frame, &self.bindings, (self.launch_actions)(cx), wide)
+            }
         };
 
         let animated_body = if let Some((generation, _)) = self
@@ -424,7 +440,7 @@ impl Render for OnboardingView {
                                             div()
                                                 .text_size(px(frame.tokens.metrics.ui_text_xs))
                                                 .text_color(rgb(theme.error))
-                                                .child(frame.i18n.t("onboarding.save_failed")),
+                                                .child(frame.i18n.t(self.save_failure_key)),
                                         )
                                     })
                                     .child(self.render_footer(&frame)),
@@ -614,5 +630,30 @@ mod tests {
             requests.borrow().as_slice(),
             &[OnboardingRequest::OpenNewConnection]
         );
+        view.update(cx, |v, cx| {
+            v.launch_actions = Rc::new(|_| crate::OnboardingLaunchActions {
+                terminal_description: Some("onboarding.open_terminal_desc"),
+                new_connection: false,
+                import_ssh: false,
+                import_apps: false,
+                cli: false,
+                ai: true,
+                ai_tools: false,
+            });
+            cx.notify();
+        });
+        cx.update(|window, app| {
+            window.draw(app).clear(app);
+        });
+        assert!(cx.debug_bounds("onboarding-launch-terminal").is_some());
+        assert!(cx.debug_bounds("onboarding-ai-enable").is_some());
+        for unavailable in [
+            "onboarding-launch-new-conn",
+            "onboarding-import-ssh",
+            "onboarding-ai-tools-enable",
+            "onboarding-cli-settings",
+        ] {
+            assert!(cx.debug_bounds(unavailable).is_none(), "{unavailable}");
+        }
     }
 }

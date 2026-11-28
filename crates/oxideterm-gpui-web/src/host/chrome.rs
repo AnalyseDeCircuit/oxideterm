@@ -77,7 +77,20 @@ pub(super) fn glyph(icon: LucideIcon, size: f32, color: u32) -> AnyElement {
 
 impl Workspace {
     pub(crate) fn chrome_divider(&self) -> Rgba {
-        rgba((self.tokens.ui.border << 8) | 0x66)
+        self.divider(0x66)
+    }
+    pub(super) fn divider(&self, opaque: u32) -> Rgba {
+        let alpha = if self.wallpaper.is_some() {
+            opaque.min(0x26)
+        } else {
+            opaque
+        };
+        rgba((self.tokens.ui.border << 8) | alpha)
+    }
+    pub(super) fn chrome_fill(&self, color: u32) -> Rgba {
+        let alpha =
+            (self.tokens.metrics.sidebar_vibrancy_alpha.clamp(0., 1.) * 255.).round() as u32;
+        oxideterm_gpui_ui::color_for_background(color, self.window_wallpaper().is_some(), alpha)
     }
 
     pub(crate) fn shortcut(&self, id: &str, cx: &App) -> Option<String> {
@@ -130,7 +143,8 @@ impl Workspace {
         let shortcut = match action {
             Action::Palette => self.shortcut("app.commandPalette", cx),
             Action::Zen => self.shortcut("app.zenMode", cx),
-            Action::Split => self.shortcut("split.horizontal", cx),
+            Action::Split(SplitDirection::Horizontal) => self.shortcut("split.horizontal", cx),
+            Action::Split(SplitDirection::Vertical) => self.shortcut("split.vertical", cx),
             _ => None,
         };
         let button = icon_button(
@@ -148,11 +162,21 @@ impl Workspace {
         )
     }
 
-    pub(super) fn titlebar(&self, cx: &Context<Self>) -> AnyElement {
+    pub(super) fn titlebar(&self, window: &Window, cx: &Context<Self>) -> AnyElement {
         let t = self.tokens;
         let size = t.metrics.titlebar_height - 6.0;
         let action_padding = t.spacing.one / 2.0;
-        let light = t.ui.is_light();
+        let scheme = self
+            .settings
+            .read(cx)
+            .settings(cx)
+            .appearance
+            .active_scheme(dark(window));
+        let dark_scheme = scheme.is_some_and(oxideterm_settings::AppearanceScheme::is_dark);
+        let actions_width = 3.0 * (size + 2.0 * action_padding);
+        let available = f32::from(window.viewport_size().width) - 2.0 * (actions_width + t.spacing.two);
+        let scope = self.scope_trigger(available, cx);
+        let show_scope = scope.is_some();
         let actions = div()
             .flex_none()
             .flex()
@@ -187,15 +211,15 @@ impl Workspace {
                     .px(px(action_padding))
                     .child(self.toolbar_button(
                         Action::Theme,
-                        if light {
-                            LucideIcon::Sun
-                        } else {
+                        if dark_scheme {
                             LucideIcon::Moon
-                        },
-                        if light {
-                            "sidebar.tooltips.switch_to_dark"
                         } else {
-                            "sidebar.tooltips.switch_to_light"
+                            LucideIcon::Sun
+                        },
+                        match scheme {
+                            None => "settings_view.appearance.configure_schemes",
+                            Some(_) if dark_scheme => "sidebar.tooltips.switch_to_light",
+                            Some(_) => "sidebar.tooltips.switch_to_dark",
                         },
                         size,
                         cx,
@@ -211,7 +235,7 @@ impl Workspace {
             .flex()
             .flex_row()
             .items_center()
-            .bg(rgb(t.ui.shell_bg()))
+            .bg(self.chrome_fill(t.ui.shell_bg()))
             .border_b_1()
             .border_color(self.chrome_divider())
             .text_size(px(t.metrics.titlebar_label_font_size))
@@ -245,39 +269,17 @@ impl Workspace {
                         }))
                     }),
             )
-            .child(actions)
+            .children(scope)
+            .child(div().when(show_scope, |right| right.flex_1().min_w(px(actions_width))).flex().justify_end().child(actions))
             .into_any_element()
     }
 
     pub(super) fn toggle_theme(&mut self, w: &mut Window, cx: &mut Context<Self>) {
         let settings = self.settings.read(cx).settings(cx);
         let system_dark = dark(w);
-        let fixed_scheme = settings
-            .appearance
-            .active_scheme(system_dark)
-            .is_none()
-            .then(|| oxideterm_settings::AppearanceScheme::from_dark(!self.tokens.ui.is_light()));
-        let next = match next_appearance_scheme(settings, system_dark) {
-            Ok(scheme) => Ok(scheme),
-            Err(AppearanceSchemeError::Unassigned) => {
-                let scheme =
-                    oxideterm_settings::AppearanceScheme::from_dark(self.tokens.ui.is_light());
-                oxideterm_settings_model::validate_appearance_scheme(settings, scheme)
-                    .map(|()| scheme)
-            }
-            Err(e) => Err(e),
-        };
-        match next {
+        match next_appearance_scheme(settings, system_dark) {
             Ok(scheme) => self.settings.update(cx, |s, cx| {
                 s.edit_preferences(cx, |p| {
-                    if let Some(current) = fixed_scheme {
-                        // Switching back must restore the user's original fixed palette.
-                        oxideterm_settings_model::assign_current_appearance(
-                            p,
-                            current,
-                            system_dark,
-                        );
-                    }
                     apply_appearance_mode(p, Some(scheme));
                 })
             }),
@@ -315,7 +317,7 @@ impl Workspace {
         self.settings.update(cx, |s, cx| {
             s.edit_preferences(cx, |p| p.sidebar_ui.zen_mode = zen)
         });
-        self.rails.set_zen_mode(zen, self.demo, &self.tokens);
+        self.rails.set_zen_mode(zen, true, &self.tokens);
         self.zen_exit.reset();
         self.changed(cx);
     }
@@ -348,22 +350,27 @@ impl Workspace {
         )
     }
 
-    fn welcome_available_width(&self, w: &Window, cx: &App) -> f32 {
-        let zen = self.settings.read(cx).settings(cx).sidebar_ui.zen_mode;
-        let mut available = f32::from(w.viewport_size().width);
-        if !zen {
-            available -= self.tokens.metrics.activity_bar_width;
-            if !self.rails.left.collapsed() {
-                available -= self.rails.left.width();
-            }
-            if self.demo {
-                available -= self.tokens.metrics.activity_bar_width;
-                if !self.rails.right.collapsed() {
-                    available -= self.rails.right.width();
-                }
-            }
+    pub(crate) fn occupied_rail_width(&self, cx: &App) -> f32 {
+        if self.settings.read(cx).settings(cx).sidebar_ui.zen_mode {
+            return 0.;
         }
-        available.max(self.tokens.metrics.min_main_width)
+        let bar = self.tokens.metrics.activity_bar_width;
+        let left = if self.rails.left.collapsed() {
+            bar
+        } else {
+            bar + self.rails.left.panel_width(&self.tokens)
+        };
+        let right = if self.rails.right.collapsed() {
+            bar
+        } else {
+            bar + self.rails.right.panel_width(&self.tokens)
+        };
+        left + right
+    }
+
+    fn welcome_available_width(&self, w: &Window, cx: &App) -> f32 {
+        (f32::from(w.viewport_size().width) - self.occupied_rail_width(cx))
+            .max(self.tokens.metrics.min_main_width)
     }
 
     pub(super) fn empty_workspace(&self, w: &Window, cx: &Context<Self>) -> AnyElement {
@@ -372,7 +379,7 @@ impl Workspace {
         let compact = available - 2.0 * WELCOME_PAGE_PADDING < WELCOME_COMPACT_LAYOUT_WIDTH;
         let recent = self.render_welcome_recent_connections(cx);
         let guidance = self.render_welcome_guidance(cx);
-        let workbench = {
+        let workbench = if let Some(guidance) = guidance {
             let grid = div()
                 .w_full()
                 .min_w_0()
@@ -387,11 +394,13 @@ impl Workspace {
                 grid.child(recent.w_full().min_w_0())
                     .child(guidance.w_full().min_w_0())
             }
+        } else {
+            recent.w_full()
         };
 
         div()
             .size_full()
-            .bg(rgb(theme.bg))
+            .when(self.window_wallpaper().is_none(), |view| view.bg(rgb(theme.bg)))
             .text_color(rgb(theme.text_muted))
             .child(
                 div()
@@ -489,17 +498,22 @@ impl Workspace {
 
     fn render_welcome_recent_connections(&self, cx: &Context<Self>) -> Div {
         let theme = self.tokens.ui;
+        let has_background = self.window_wallpaper().is_some();
+        let alpha = oxideterm_gpui_ui::theme_glass_card_background_alpha(&self.tokens);
+        let fill =
+            move |color| oxideterm_gpui_ui::color_for_background(color, has_background, alpha);
         let metrics = welcome_workbench_metrics(&self.tokens);
         let inner_radius = rounded_shell_child_radius(self.tokens.radii.lg);
-        let saved: Vec<_> = self
-            .catalog_data
-            .items
+        let saved = &self.catalog_data.items;
+        let mut recent: Vec<_> = saved
             .iter()
-            .filter_map(|row| match &row.target {
-                SessionManagerOpenTarget::Connection(id) => Some((id.clone(), row)),
-                _ => None,
+            .filter_map(|row| {
+                let timestamp = row.last_used.as_deref()?;
+                Some((timestamp, row))
             })
             .collect();
+        recent.sort_by(|a, b| b.0.cmp(a.0).then_with(|| a.1.id().cmp(b.1.id())));
+        recent.truncate(RECENT_CONNECTION_LIMIT);
         let count_label = self
             .i18n
             .t("layout.empty.saved_count")
@@ -510,10 +524,15 @@ impl Workspace {
             .rounded(px(self.tokens.radii.lg))
             .border_1()
             .border_color(rgba((theme.border << 8) | 0x80))
-            .bg(rgb(welcome_card_background(theme)))
+            .bg(fill(welcome_card_background(theme)))
             .overflow_hidden();
 
-        let body = if saved.is_empty() {
+        let empty_action = if self.demo {
+            Action::Catalog
+        } else {
+            Action::Ble
+        };
+        let body = if recent.is_empty() {
             container.child(
                 div()
                     .w_full()
@@ -530,7 +549,7 @@ impl Workspace {
                             .text_color(rgb(theme.text_muted))
                             .child(self.i18n.t("layout.empty.recent_connections_empty")),
                     )
-                    .when(self.demo, |col| {
+                    .when(self.action_available(empty_action, cx), |col| {
                         col.child(
                             div()
                                 .id("welcome-recent-open-manager")
@@ -542,12 +561,24 @@ impl Workspace {
                                 .text_color(rgb(theme.accent))
                                 .cursor_pointer()
                                 .hover(move |row| row.text_color(rgb(theme.accent_hover)))
-                                .child(glyph(LucideIcon::LayoutList, 14.0, theme.accent))
-                                .child(self.i18n.t("layout.empty.open_session_manager"))
+                                .child(glyph(
+                                    if self.demo {
+                                        LucideIcon::LayoutList
+                                    } else {
+                                        LucideIcon::Bluetooth
+                                    },
+                                    14.0,
+                                    theme.accent,
+                                ))
+                                .child(self.i18n.t(if self.demo {
+                                    "layout.empty.open_session_manager"
+                                } else {
+                                    "modals.new_connection.transport_ble"
+                                }))
                                 .on_mouse_down(
                                     MouseButton::Left,
-                                    cx.listener(|h, _, w, cx| {
-                                        h.action(Action::Catalog, w, cx);
+                                    cx.listener(move |h, _, w, cx| {
+                                        h.action(empty_action, w, cx);
                                         cx.stop_propagation();
                                     }),
                                 ),
@@ -555,10 +586,10 @@ impl Workspace {
                     }),
             )
         } else {
-            let recent: Vec<_> = saved.into_iter().take(RECENT_CONNECTION_LIMIT).collect();
             let count = recent.len();
             let mut list = div().w_full().flex().flex_col();
-            for (index, (node_id, row)) in recent.into_iter().enumerate() {
+            for (index, (_, row)) in recent.into_iter().enumerate() {
+                let node_id = row.id().to_owned();
                 if index > 0 {
                     list = list.child(div().h(px(1.0)).bg(rgba((theme.border << 8) | 0x45)));
                 }
@@ -577,31 +608,38 @@ impl Workspace {
                         .items_center()
                         .gap(px(10.0))
                         .cursor_pointer()
-                        .hover(move |r| r.bg(rgb(theme.bg_hover)))
+                        .hover(move |r| {
+                            r.bg(oxideterm_gpui_ui::color_for_background(
+                                theme.bg_hover,
+                                has_background,
+                                0x80,
+                            ))
+                        })
                         .child({
                             let is_ble = crate::ble::is_ble_node(&node_id);
-                            let semantic = if is_ble { theme.warning } else { theme.info };
                             div()
                                 .size(px(28.0))
                                 .flex_none()
                                 .rounded(px(self.tokens.radii.sm))
-                                .bg(rgba((semantic << 8) | 0x26))
-                                .when(!is_ble, |badge| {
-                                    badge
-                                        .border_1()
-                                        .border_color(rgba((theme.text << 8) | 0x1a))
-                                })
+                                .border_1()
+                                .border_color(rgba((theme.border << 8) | 0x66))
+                                .bg(fill(theme.bg_sunken))
                                 .flex()
                                 .items_center()
                                 .justify_center()
                                 .child(glyph(
                                     if is_ble {
                                         LucideIcon::Bluetooth
+                                    } else if matches!(
+                                        row.target,
+                                        SessionManagerOpenTarget::StandaloneSftp(_)
+                                    ) {
+                                        LucideIcon::FolderSync
                                     } else {
                                         LucideIcon::Server
                                     },
                                     14.0,
-                                    semantic,
+                                    theme.text_secondary,
                                 ))
                         })
                         .child(
@@ -642,7 +680,7 @@ impl Workspace {
                                         .rounded(px(self.tokens.radii.xs))
                                         .border_1()
                                         .border_color(rgba((theme.border << 8) | 0x66))
-                                        .bg(rgb(theme.bg_sunken))
+                                        .bg(fill(theme.bg_sunken))
                                         .px(px(6.0))
                                         .py(px(1.0))
                                         .font_family("Lilex")
@@ -650,6 +688,11 @@ impl Workspace {
                                         .text_color(rgb(theme.text_muted))
                                         .child(if crate::ble::is_ble_node(&node_id) {
                                             "BLE".to_string()
+                                        } else if matches!(
+                                            row.target,
+                                            SessionManagerOpenTarget::StandaloneSftp(_)
+                                        ) {
+                                            self.i18n.t("sidebar.panels.sftp")
                                         } else {
                                             self.i18n.t("terminal.typeSsh")
                                         }),
@@ -659,7 +702,7 @@ impl Workspace {
                         .on_mouse_down(
                             MouseButton::Left,
                             cx.listener(move |h, _, w, cx| {
-                                h.new_terminal(node_id.clone(), None, w, cx);
+                                h.connect_catalog_item(&node_id, w, cx);
                                 cx.stop_propagation();
                             }),
                         ),
@@ -700,8 +743,12 @@ impl Workspace {
             .child(body)
     }
 
-    fn render_welcome_guidance(&self, cx: &Context<Self>) -> Div {
+    fn render_welcome_guidance(&self, cx: &Context<Self>) -> Option<Div> {
         let theme = self.tokens.ui;
+        let has_background = self.window_wallpaper().is_some();
+        let alpha = oxideterm_gpui_ui::theme_glass_card_background_alpha(&self.tokens);
+        let fill =
+            move |color| oxideterm_gpui_ui::color_for_background(color, has_background, alpha);
         let metrics = welcome_workbench_metrics(&self.tokens);
         let inner_radius = rounded_shell_child_radius(self.tokens.radii.lg);
 
@@ -715,8 +762,16 @@ impl Workspace {
             ),
             (
                 LucideIcon::Terminal,
-                "layout.empty.new_local_terminal",
-                "layout.empty.new_local_terminal_hint",
+                if self.demo {
+                    "layout.empty.new_local_terminal"
+                } else {
+                    "menu.new_terminal"
+                },
+                if self.demo {
+                    "layout.empty.new_local_terminal_hint"
+                } else {
+                    "onboarding.gateway_terminal_desc"
+                },
                 Action::Terminal,
                 false,
             ),
@@ -724,22 +779,22 @@ impl Workspace {
 
         let utility_actions = [
             (
+                LucideIcon::FolderInput,
+                "layout.empty.import_connections",
+                "settings_view.connections.ssh_config.pick_file",
+                Action::ImportConnections,
+            ),
+            (
                 LucideIcon::LayoutList,
                 "layout.empty.open_session_manager",
                 "layout.empty.open_session_manager_hint",
                 Action::Catalog,
             ),
             (
-                LucideIcon::FolderOpen,
-                "sidebar.panels.files",
-                "sidebar.panels.files",
-                Action::Files,
-            ),
-            (
-                LucideIcon::Settings,
-                "command_palette.cmd_settings",
-                "sidebar.tooltips.settings",
-                Action::Settings,
+                LucideIcon::Cloud,
+                "plugin.cloud_sync.panel_title",
+                "plugin.cloud_sync.browser_preview",
+                Action::CloudSync,
             ),
         ];
 
@@ -748,10 +803,22 @@ impl Workspace {
             .rounded(px(self.tokens.radii.lg))
             .border_1()
             .border_color(rgba((theme.border << 8) | 0x80))
-            .bg(rgb(welcome_card_background(theme)))
+            .bg(fill(welcome_card_background(theme)))
             .overflow_hidden()
             .flex()
             .flex_col();
+        let utility_actions: Vec<_> = utility_actions
+            .into_iter()
+            .filter(|(_, _, _, a)| self.action_available(*a, cx))
+            .collect();
+        let primary_actions: Vec<_> = primary_actions
+            .into_iter()
+            .filter(|(_, _, _, action, _)| self.action_available(*action, cx))
+            .collect();
+        if primary_actions.is_empty() && utility_actions.is_empty() {
+            return None;
+        }
+        let primary_columns = primary_actions.len().max(1);
         let utility_count = utility_actions.len();
         for (index, (icon, title_key, hint_key, action)) in utility_actions.into_iter().enumerate()
         {
@@ -772,7 +839,13 @@ impl Workspace {
                 .items_center()
                 .gap(px(10.0))
                 .cursor_pointer()
-                .hover(move |r| r.bg(rgb(theme.bg_hover)))
+                .hover(move |r| {
+                    r.bg(oxideterm_gpui_ui::color_for_background(
+                        theme.bg_hover,
+                        has_background,
+                        0x80,
+                    ))
+                })
                 .child(glyph(icon, 14.0, theme.text_muted))
                 .child(
                     div()
@@ -795,95 +868,114 @@ impl Workspace {
             ));
         }
 
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(10.0))
-            .child(
-                div().w_full().h(px(20.0)).flex().items_center().child(
+        Some(
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(10.0))
+                .child(
+                    div().w_full().h(px(20.0)).flex().items_center().child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(rgb(theme.text_muted))
+                            .child(self.i18n.t("layout.empty.get_started")),
+                    ),
+                )
+                .child(
                     div()
-                        .text_size(px(self.tokens.metrics.ui_text_xs))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(rgb(theme.text_muted))
-                        .child(self.i18n.t("layout.empty.get_started")),
-                ),
-            )
-            .child(
-                div()
-                    .w_full()
-                    .flex()
-                    .flex_col()
-                    .gap(px(metrics.guidance_stack_gap))
-                    .child(div().w_full().grid().grid_cols(2).gap(px(10.0)).children(
-                        primary_actions.into_iter().map(
-                            |(icon, title_key, hint_key, action, primary)| {
-                                let tile = div()
-                                    .w_full()
-                                    .min_w_0()
-                                    .h(px(metrics.primary_tile_height))
-                                    .rounded(px(self.tokens.radii.lg))
-                                    .border_1()
-                                    .border_color(if primary {
-                                        rgba((theme.accent << 8) | 0x80)
-                                    } else {
-                                        rgba((theme.border << 8) | 0x80)
-                                    })
-                                    .bg(rgb(welcome_card_background(theme)))
-                                    .px(px(12.0))
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(10.0))
-                                    .cursor_pointer()
-                                    .hover(move |tile| tile.bg(rgb(theme.bg_hover)))
-                                    .child(
-                                        div()
-                                            .size(px(28.0))
-                                            .flex_none()
-                                            .rounded(px(self.tokens.radii.sm))
-                                            .when(!primary, |badge| {
-                                                badge
-                                                    .border_1()
-                                                    .border_color(rgba((theme.border << 8) | 0x66))
-                                                    .bg(rgb(theme.bg_sunken))
+                        .w_full()
+                        .flex()
+                        .flex_col()
+                        .gap(px(metrics.guidance_stack_gap))
+                        .child(
+                            div()
+                                .w_full()
+                                .grid()
+                                .grid_cols(primary_columns as u16)
+                                .gap(px(10.0))
+                                .children(primary_actions.into_iter().map(
+                                    |(icon, title_key, hint_key, action, primary)| {
+                                        let tile = div()
+                                            .w_full()
+                                            .min_w_0()
+                                            .h(px(metrics.primary_tile_height))
+                                            .rounded(px(self.tokens.radii.lg))
+                                            .border_1()
+                                            .border_color(if primary {
+                                                rgba((theme.accent << 8) | 0x80)
+                                            } else {
+                                                rgba((theme.border << 8) | 0x80)
                                             })
-                                            .when(primary, |badge| badge.bg(rgb(theme.accent)))
+                                            .bg(fill(welcome_card_background(theme)))
+                                            .px(px(12.0))
                                             .flex()
                                             .items_center()
-                                            .justify_center()
-                                            .child(glyph(
-                                                icon,
-                                                15.0,
-                                                if primary {
-                                                    theme.accent_text
-                                                } else {
-                                                    theme.text
-                                                },
+                                            .gap(px(10.0))
+                                            .cursor_pointer()
+                                            .hover(move |tile| {
+                                                tile.bg(oxideterm_gpui_ui::color_for_background(
+                                                    theme.bg_hover,
+                                                    has_background,
+                                                    0x80,
+                                                ))
+                                            })
+                                            .child(
+                                                div()
+                                                    .size(px(28.0))
+                                                    .flex_none()
+                                                    .rounded(px(self.tokens.radii.sm))
+                                                    .when(!primary, |badge| {
+                                                        badge
+                                                            .border_1()
+                                                            .border_color(rgba(
+                                                                (theme.border << 8) | 0x66,
+                                                            ))
+                                                            .bg(fill(theme.bg_sunken))
+                                                    })
+                                                    .when(primary, |badge| {
+                                                        badge.bg(rgb(theme.accent))
+                                                    })
+                                                    .flex()
+                                                    .items_center()
+                                                    .justify_center()
+                                                    .child(glyph(
+                                                        icon,
+                                                        15.0,
+                                                        if primary {
+                                                            theme.accent_text
+                                                        } else {
+                                                            theme.text
+                                                        },
+                                                    )),
+                                            )
+                                            .child(
+                                                div()
+                                                    .min_w_0()
+                                                    .flex_1()
+                                                    .truncate()
+                                                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                                                    .line_height(px(metrics.sm_line_height))
+                                                    .font_weight(FontWeight::MEDIUM)
+                                                    .text_color(rgb(theme.text))
+                                                    .child(self.i18n.t(title_key)),
+                                            );
+                                        self.bind_button(
+                                            tile,
+                                            SharedString::from(format!(
+                                                "welcome-primary-{title_key}"
                                             )),
-                                    )
-                                    .child(
-                                        div()
-                                            .min_w_0()
-                                            .flex_1()
-                                            .truncate()
-                                            .text_size(px(self.tokens.metrics.ui_text_sm))
-                                            .line_height(px(metrics.sm_line_height))
-                                            .font_weight(FontWeight::MEDIUM)
-                                            .text_color(rgb(theme.text))
-                                            .child(self.i18n.t(title_key)),
-                                    );
-                                self.bind_button(
-                                    tile,
-                                    SharedString::from(format!("welcome-primary-{title_key}")),
-                                    self.i18n.t(hint_key),
-                                    None,
-                                    cx,
-                                    move |h, w, cx| h.action(action, w, cx),
-                                )
-                            },
-                        ),
-                    ))
-                    .child(utility_list),
-            )
+                                            self.i18n.t(hint_key),
+                                            None,
+                                            cx,
+                                            move |h, w, cx| h.action(action, w, cx),
+                                        )
+                                    },
+                                )),
+                        )
+                        .when(utility_count > 0, |stack| stack.child(utility_list)),
+                ),
+        )
     }
 
     fn render_welcome_shortcuts(&self, cx: &App) -> AnyElement {
@@ -897,6 +989,10 @@ impl Workspace {
         ];
 
         let theme = self.tokens.ui;
+        let has_background = self.window_wallpaper().is_some();
+        let alpha = oxideterm_gpui_ui::theme_glass_card_background_alpha(&self.tokens);
+        let fill =
+            move |color| oxideterm_gpui_ui::color_for_background(color, has_background, alpha);
         div()
             .pt(px(16.0))
             .w_full()
@@ -913,6 +1009,11 @@ impl Workspace {
                 WELCOME_SHORTCUTS
                     .into_iter()
                     .filter_map(|(action_id, label_key)| {
+                        let label_key = match action_id {
+                            "app.newTerminal" if !self.ready => return None,
+                            "app.newTerminal" if !self.demo => "menu.new_terminal",
+                            _ => label_key,
+                        };
                         self.shortcut(action_id, cx).map(|key| {
                             div()
                                 .flex_none()
@@ -920,13 +1021,17 @@ impl Workspace {
                                 .items_center()
                                 .gap(px(6.0))
                                 .text_size(px(self.tokens.metrics.ui_text_xs))
-                                .text_color(rgb(theme.text_muted))
+                                .text_color(rgb(if has_background {
+                                    theme.text
+                                } else {
+                                    theme.text_muted
+                                }))
                                 .child(
                                     div()
                                         .rounded(px(self.tokens.radii.xs))
                                         .border_1()
                                         .border_color(rgba((theme.border << 8) | 0x80))
-                                        .bg(rgb(welcome_keycap_background(theme)))
+                                        .bg(fill(welcome_keycap_background(theme)))
                                         .px(px(5.0))
                                         .py(px(1.5))
                                         .font_family("Lilex")

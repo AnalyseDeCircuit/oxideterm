@@ -32,6 +32,7 @@
       }
     },
     "form": {
+      "demo_connection_hint": "Demoverbindungen verwenden simulierte Hosts. Zugangsdaten sind nicht erforderlich.",
       "title": "Neue Verbindung",
       "subtitle": "Konfigurieren Sie einen SSH-Host für Terminals, SFTP, Portweiterleitungen und die Bearbeitung entfernter Dateien.",
       "basic_information": "Grundinformationen",

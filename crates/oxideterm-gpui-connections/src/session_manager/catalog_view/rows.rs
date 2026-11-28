@@ -972,7 +972,7 @@ impl CatalogView {
             }),
             cx,
         ));
-        row.child(self.render_tree_mode_action_button(
+        row = row.child(self.render_tree_mode_action_button(
             LucideIcon::FolderInput,
             self.i18n.t("settings_view.connections.ssh_config.title"),
             has_background,
@@ -983,8 +983,11 @@ impl CatalogView {
                 cx.stop_propagation();
             }),
             cx,
-        ))
-        .child(self.render_tree_mode_action_button(
+        ));
+        if !self.host_tools {
+            return row;
+        }
+        row.child(self.render_tree_mode_action_button(
             LucideIcon::Download,
             self.i18n.t("settings_view.connections.importers.title"),
             has_background,
@@ -2704,7 +2707,9 @@ impl CatalogView {
                 SessionManagerRowActionTarget::Connection(_) => {
                     labels.push(self.i18n.t("sessionManager.actions.connect"));
                     labels.push(self.i18n.t("sessionManager.actions.edit"));
-                    labels.push(self.i18n.t("sessionManager.actions.test_connection"));
+                    if self.host_tools {
+                        labels.push(self.i18n.t("sessionManager.actions.test_connection"));
+                    }
                     labels.push(self.i18n.t("sessionManager.actions.duplicate"));
                     labels.push(self.i18n.t("sessionManager.actions.delete"));
                 }
@@ -2936,7 +2941,7 @@ impl CatalogView {
             ));
 
             let test_id = id.clone();
-            popup = popup.child(self.render_session_manager_menu_action(
+            popup = popup.when(self.host_tools, |popup| popup.child(self.render_session_manager_menu_action(
                 oxideterm_gpui_ui::dropdown_menu::dropdown_menu_item_with_icon(
                     &self.tokens,
                     "lucide/wifi.svg",
@@ -2952,7 +2957,7 @@ impl CatalogView {
                     cx.stop_propagation();
                 },
                 cx,
-            ));
+            )));
 
             let duplicate_id = id.clone();
             popup = popup
