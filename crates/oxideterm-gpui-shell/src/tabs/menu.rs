@@ -219,7 +219,8 @@ impl Options {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{BrowserOverlayPlacement, TAB_CONTEXT_SUBMENU_OVERLAP, place_tab_context_submenu};
+
     #[test]
     fn tab_context_merge_submenu_placement_flips_left_and_clamps_bottom() {
         let normal = place_tab_context_submenu(
