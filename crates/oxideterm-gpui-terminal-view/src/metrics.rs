@@ -185,6 +185,23 @@ pub struct ResolvedTerminalFont {
     pub unavailable_families: Vec<String>,
 }
 
+/// The portable host registers Lilex at startup. Use it after any configured families.
+pub fn resolve_portable_terminal_font(
+    text_system: &TextSystem,
+    term: &oxideterm_settings::TerminalSettings,
+) -> ResolvedTerminalFont {
+    let configured = term
+        .font_family
+        .terminal_family_name(&term.custom_font_family);
+    resolve_terminal_font(
+        text_system,
+        &format!("{configured}, Lilex"),
+        Some(&term.cjk_font_family),
+        term.font_ligatures,
+        term.font_weight as f32,
+    )
+}
+
 /// Resolves the primary family before either measuring or shaping terminal cells.
 pub fn resolve_terminal_font(
     text_system: &TextSystem,

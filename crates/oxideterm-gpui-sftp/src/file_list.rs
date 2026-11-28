@@ -3,10 +3,11 @@
 
 use std::{collections::HashSet, path::PathBuf, rc::Rc};
 
+#[cfg(not(target_family = "wasm"))]
+use gpui::ExternalPaths;
 use gpui::{
-    AnyElement, App, Context, Entity, ExternalPaths, FocusHandle, MouseButton, MouseDownEvent,
-    MouseMoveEvent, Rgba, Subscription, UniformListScrollHandle, Window, div, prelude::*, px, rgb,
-    rgba, svg,
+    AnyElement, App, Context, Entity, FocusHandle, MouseButton, MouseDownEvent, MouseMoveEvent,
+    Rgba, Subscription, UniformListScrollHandle, Window, div, prelude::*, px, rgb, rgba, svg,
 };
 use oxideterm_gpui_ui::{
     icons::LucideIcon,
@@ -35,7 +36,7 @@ const SFTP_MODIFIED_COL: f32 = 96.0; // Tauri w-24
 const SFTP_DRAG_BG_ALPHA: u32 = 0x1a; // Tauri bg-theme-accent/10
 const SFTP_SELECTED_BG_ALPHA: u32 = 0x33; // Tauri bg-theme-accent/20
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum SftpPane {
     Local,
     Remote,
@@ -81,6 +82,8 @@ pub enum SftpFileListRequest {
     },
     DragEnded(SftpPane),
     ExternalDrop(Vec<PathBuf>),
+    #[cfg(target_family = "wasm")]
+    BrowserDrop(gpui::BrowserFileDrop),
     ClearMenu,
     BlankPressed {
         pane: SftpPane,
@@ -393,6 +396,17 @@ impl Render for SftpFileListView {
                 self.request(move |_| SftpFileListRequest::DragEnded(pane)),
             )
             .when(pane == SftpPane::Remote, |list| {
+                #[cfg(target_family = "wasm")]
+                {
+                    list.can_drop(|drag, _, _| drag.is::<gpui::BrowserFileDrop>())
+                        .drag_over::<gpui::BrowserFileDrop>(move |row, _, _, _| {
+                            row.bg(rgba((theme.accent << 8) | SFTP_DRAG_BG_ALPHA))
+                        })
+                        .on_drop(self.request(|files: &gpui::BrowserFileDrop| {
+                            SftpFileListRequest::BrowserDrop(files.clone())
+                        }))
+                }
+                #[cfg(not(target_family = "wasm"))]
                 list.can_drop(|drag, _window, _cx| drag.is::<ExternalPaths>())
                     .on_drop(self.request(|paths: &ExternalPaths| {
                         SftpFileListRequest::ExternalDrop(paths.paths().to_vec())

@@ -237,7 +237,8 @@ pub enum SerialFlowControl {
     Hardware,
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SerialLineEnding {
     Lf,
     CrLf,

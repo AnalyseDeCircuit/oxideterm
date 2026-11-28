@@ -2,6 +2,7 @@ pub mod ai;
 pub mod appearance;
 pub mod appearance_page;
 pub mod components;
+pub mod ssh_import;
 pub mod dialog;
 pub mod general_page;
 pub mod help_page;
@@ -52,6 +53,10 @@ pub mod highlight;
 pub mod highlight_page;
 #[cfg(not(target_family = "wasm"))]
 pub mod knowledge_page;
+#[cfg(target_family = "wasm")]
+pub mod knowledge_page {
+    pub mod dialog;
+}
 #[cfg(not(target_family = "wasm"))]
 pub mod local_terminal;
 #[cfg(not(target_family = "wasm"))]

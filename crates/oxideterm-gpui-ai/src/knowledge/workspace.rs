@@ -193,6 +193,10 @@ impl KnowledgeViews {
     }
 }
 
+/// The navigator has finished reading the library. Other views can reuse its collection list.
+pub struct KnowledgeLibrarySnapshot(pub Result<Arc<Vec<oxideterm_ai::RagCollectionResponse>>, ()>);
+impl gpui::EventEmitter<KnowledgeLibrarySnapshot> for KnowledgeWorkspaceView {}
+
 pub struct KnowledgeWorkspaceView {
     state: Entity<KnowledgeWorkspaceEntity>,
     bindings: KnowledgeBindings,
@@ -741,9 +745,18 @@ impl KnowledgeWorkspaceView {
                     loaded: true,
                     ..KnowledgeNavigatorSnapshot::default()
                 });
-                let refresh_again = workspace.state.update(cx, |knowledge, _cx| {
+                let refresh_again = workspace.state.update(cx, |knowledge, _| {
                     knowledge.install_navigator_snapshot(generation, snapshot)
                 });
+                let current = &workspace.state.read(cx).navigator_snapshot;
+                if current.loaded {
+                    let collections = if current.error.is_some() {
+                        Err(())
+                    } else {
+                        Ok(Arc::clone(&current.collections))
+                    };
+                    cx.emit(KnowledgeLibrarySnapshot(collections));
+                }
                 if refresh_again {
                     workspace.refresh_knowledge_navigator(true, cx);
                 }

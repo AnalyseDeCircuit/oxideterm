@@ -9,6 +9,7 @@ mod contributions;
 pub mod discovery;
 mod language;
 mod manifest;
+pub mod catalog;
 mod registry;
 mod runtime;
 

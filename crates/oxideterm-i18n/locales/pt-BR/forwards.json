@@ -18,6 +18,7 @@
   "copy_address": "Copiar endereço",
   "copied": "Copiado!",
   "forwards": {
+    "preview_hint": "Rascunhos de regras para esta sessão de demonstração. Nenhuma porta é aberta.",
     "quick": {
       "title": "Encaminhamento rápido",
       "jupyter": "Jupyter (8888)",

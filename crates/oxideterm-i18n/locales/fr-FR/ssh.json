@@ -32,6 +32,7 @@
       }
     },
     "form": {
+      "demo_connection_hint": "Les connexions de démonstration utilisent des hôtes simulés, sans identifiants.",
       "title": "Nouvelle connexion",
       "subtitle": "Configurez un hôte SSH pour les terminaux, SFTP, les redirections de ports et l’édition de fichiers distants.",
       "basic_information": "Informations générales",

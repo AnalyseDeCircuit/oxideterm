@@ -6,6 +6,51 @@ use oxideterm_connections::{
 };
 use std::collections::{HashMap, HashSet};
 
+#[test]
+fn portable_catalog_groups_keep_profiles_when_moved_renamed_or_deleted() {
+    use SessionManagerOpenTarget as Open;
+    let mut data = PortableCatalogData::default();
+    data.ensure_group("Ops/Empty");
+    data.ensure_group("Ops/DB");
+    for (target, group) in [
+        (Open::Connection("shared".into()), "Ops/DB"),
+        (Open::StandaloneSftp("shared".into()), "Ops/DB"),
+        (Open::Ble("radio".into()), "OpsWest"),
+    ] {
+        let mut row = CatalogRow::new(target, "profile");
+        row.group = Some(group.into());
+        data.items.push(row);
+    }
+    data.move_to_group(
+        &[SessionManagerSelectionTarget::StandaloneSftp(
+            "shared".into(),
+        )],
+        Some("OpsWest"),
+    );
+    assert!(!data.rename_group("Ops", "OpsWest"));
+    assert!(data.rename_group("Ops", "Fleet"));
+    assert_eq!(data.items[0].group.as_deref(), Some("Fleet/DB"));
+    assert_eq!(
+        data.group_paths(),
+        ["Fleet", "Fleet/Empty", "Fleet/DB", "OpsWest"]
+            .map(String::from)
+            .into()
+    );
+    data.delete_group("Fleet");
+    assert_eq!(
+        data.items
+            .iter()
+            .map(|r| (&r.target, r.group.as_deref()))
+            .collect::<Vec<_>>(),
+        vec![
+            (&Open::Connection("shared".into()), None),
+            (&Open::StandaloneSftp("shared".into()), Some("OpsWest")),
+            (&Open::Ble("radio".into()), Some("OpsWest")),
+        ],
+    );
+    assert_eq!(data.group_paths(), ["OpsWest".to_owned()].into());
+}
+
 fn saved_connection_fixture(auth: SavedAuth) -> SavedConnection {
     let now = Utc::now();
     SavedConnection {

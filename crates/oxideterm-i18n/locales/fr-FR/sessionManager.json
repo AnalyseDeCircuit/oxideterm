@@ -1,5 +1,8 @@
 {
   "sessionManager": {
+    "browser_load_failed": "Impossible de charger les connexions enregistrées. Les modifications resteront dans cet onglet.",
+    "browser_not_saved": "Les modifications restent dans cet onglet. Autorisez le stockage du site et réessayez d’enregistrer.",
+    "browser_conflict": "Un autre onglet a modifié les connexions. Vos changements n’ont pas été enregistrés. Rechargez la page pour voir les versions enregistrées.",
     "title": "Gestionnaire de sessions",
     "toolbar": {
       "search_placeholder": "Rechercher des connexions...",

@@ -1,5 +1,6 @@
 {
   "terminal": {
+    "demo_shell_welcome": "ブラウザーのデモ端末です。help で使えるコマンドを表示します。",
     "ssh_latency": {
       "measured": "SSH 往復遅延：{{millis}} ms。ネットワークとサーバーの応答時間を含みます。{{seconds}} 秒前に更新。",
       "pending": "SSH の遅延を測定中…",
@@ -101,6 +102,7 @@
     },
     "paste": {
       "edit_title": "貼り付け前に編集",
+      "clipboard_read_failed": "クリップボードを読み取れませんでした。キーボードショートカットで貼り付けてください。",
       "send_by_line": "1 行ずつ送信",
       "stop_sending": "送信を停止",
       "interrupted": "{{sent}} 行を送信しました。{{line}} 行目で送信が中断されました。",
@@ -643,7 +645,7 @@
       "sftp": "SFTP",
       "convert": "IDE に変換",
       "return": "ターミナルに戻る",
-      "confirm": "未送信の入力がないシェルプロンプトであることを確認してください。コマンドとエージェントは現在のユーザー、コンテナー、ディレクトリを使用します。IDE から戻るまで端末入力は停止します。",
+      "confirm": "Linux シェルのみ対応しています。コマンドを入力していない状態で続行してください。",
       "failed": "ファイルアクセスを開始できません。シェルの状態と環境要件を確認してください。端末を復元できなかった場合は再接続してください。",
       "preparing": "IDE ファイルサービスを起動中です。ターミナル入力は一時停止しています…",
       "ssh": "SSH",
@@ -658,6 +660,7 @@
       "connection_failed": "BLE接続に失敗しました：{error}",
       "runtime_init_failed": "BLEランタイムの初期化に失敗しました",
       "adapter_index_out_of_range": "Bluetoothアダプターのインデックス {n} は範囲外です",
+      "write_failed": "Bluetooth の書き込みに失敗しました。デバイスを再接続してから送信してください。",
       "service_not_found": "サービス {uuid} が見つかりません",
       "no_notify_write_pair": "選択したサービスにnotify+writeキャラクタリスティックのペアがありません"
     }

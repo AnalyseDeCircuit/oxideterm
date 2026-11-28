@@ -1,5 +1,8 @@
 {
   "sessionManager": {
+    "browser_load_failed": "Không thể tải các kết nối đã lưu. Thay đổi sẽ chỉ được giữ trong thẻ này.",
+    "browser_not_saved": "Các thay đổi kết nối chỉ có trong thẻ này. Hãy cho phép trang web lưu dữ liệu rồi lưu lại.",
+    "browser_conflict": "Một thẻ khác đã thay đổi các kết nối. Các chỉnh sửa của bạn chưa được lưu. Hãy tải lại để xem phiên bản đã lưu.",
     "title": "Quản lý phiên",
     "toolbar": {
       "search_placeholder": "Tìm kiếm kết nối...",

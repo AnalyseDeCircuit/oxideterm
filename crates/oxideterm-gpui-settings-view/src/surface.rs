@@ -44,7 +44,8 @@ pub use section_cache::SettingsSectionList;
 mod portable;
 pub use crate::known_hosts_page::{PortableKnownHostEntry, PortableKnownHostsSnapshot};
 pub use portable::{
-    PortableKnownHostsAction, PortableProxyProbe, PortableSettingsChanged, PortableSettingsSurface,
+    BrowserWallpaperGallery, WallpaperAction, WallpaperTile, PortableKnowledgeLibrary, PortableKnownHostsAction, PortableProxyProbe,
+    PortableSettingsChanged, PortableSettingsSurface,
 };
 
 pub struct SettingsSurfaceFrame {
@@ -202,7 +203,7 @@ fn page_switcher<T: SettingsRouteOwner, Page: Copy + Eq + 'static>(
     navigation: &NavigationState,
     frame: &SettingsSurfaceFrame,
     id: &'static str,
-    pages: &'static [Page],
+    pages: &[Page],
     current: Page,
     previous: Page,
     label: impl Fn(Page) -> &'static str,

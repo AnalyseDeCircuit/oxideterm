@@ -1,5 +1,8 @@
 {
   "sessionManager": {
+    "browser_load_failed": "Não foi possível carregar as conexões salvas. As alterações ficarão apenas nesta aba.",
+    "browser_not_saved": "As alterações estão apenas nesta aba. Permita o armazenamento de dados do site e tente salvar novamente.",
+    "browser_conflict": "Outra aba alterou as conexões. Suas alterações não foram salvas. Recarregue a página para ver as versões salvas.",
     "title": "Gerenciador de sessões",
     "toolbar": {
       "search_placeholder": "Pesquisar conexões...",

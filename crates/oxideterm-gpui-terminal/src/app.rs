@@ -102,43 +102,7 @@ struct TmuxSeparatorDrag {
     last_point: TerminalPoint,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum TerminalShortcut {
-    Copy,
-    Paste,
-    Terminate,
-    Kill,
-    WordBackward,
-    WordForward,
-    SuggestPrevious,
-    SuggestNext,
-    PageUp,
-    PageDown,
-    LineUp,
-    LineDown,
-    Top,
-    Bottom,
-}
-
-pub struct TerminalKeybindings {
-    pub bindings: Vec<(gpui::KeyBinding, TerminalShortcut)>,
-    pub normalize: fn(&gpui::Keystroke) -> Option<gpui::Keystroke>,
-}
-impl gpui::Global for TerminalKeybindings {}
-impl TerminalKeybindings {
-    pub fn resolve(&self, key: &gpui::Keystroke) -> Option<TerminalShortcut> {
-        let key = (self.normalize)(key)?;
-        self.bindings
-            .iter()
-            .find(|(binding, _)| {
-                binding
-                    .keystrokes()
-                    .first()
-                    .is_some_and(|binding| key.should_match(binding))
-            })
-            .map(|(_, action)| *action)
-    }
-}
+pub use oxideterm_gpui_terminal_view::input::{TerminalKeybindings, TerminalShortcut};
 
 pub type SharedTerminalSession = Arc<Mutex<TerminalSession>>;
 /// Input interceptors receive the raw bytes plus the owning terminal session
@@ -2995,10 +2959,13 @@ impl TerminalPane {
     }
 
     pub fn can_open_shell_ide(&self) -> bool {
-        self.session_kind == TerminalSessionKind::SshPty
-            && self
+        match self.session_kind {
+            TerminalSessionKind::LocalPty => self.terminal.lock().is_interactive(),
+            TerminalSessionKind::SshPty => self
                 .ssh_connection_handle()
-                .is_none_or(|connection| connection.allows_additional_channels())
+                .is_none_or(|connection| connection.allows_additional_channels()),
+            _ => false,
+        }
     }
 
     pub fn ssh_connection_handle(&self) -> Option<SshConnectionHandle> {
@@ -5413,9 +5380,7 @@ impl TerminalPane {
 
 impl EventEmitter<TerminalPaneEvent> for TerminalPane {}
 
-pub fn paste_needs_confirmation(text: &str) -> bool {
-    text.contains(['\r', '\n'])
-}
+pub use oxideterm_gpui_terminal_view::input::paste_needs_confirmation;
 
 fn terminal_trigger_input(text: &str, append_enter: bool) -> Option<Zeroizing<String>> {
     if text.is_empty() && !append_enter {
@@ -5830,6 +5795,78 @@ mod tests {
                 None
             );
         });
+    }
+
+    #[cfg(unix)]
+    #[gpui::test]
+    fn shell_ide_is_available_for_a_live_local_terminal_and_hidden_in_playback(
+        cx: &mut TestAppContext,
+    ) {
+        let (live, cx) = cx.add_window_view(|window, cx| {
+            TerminalPane::new_local_with_config_and_preferences(
+                LocalPtyConfig {
+                    shell: Some(oxideterm_terminal::ShellInfo::new("sh", "sh", "/bin/sh")),
+                    load_profile: false,
+                    ..Default::default()
+                },
+                Default::default(),
+                window,
+                cx,
+            )
+            .unwrap()
+        });
+        assert!(live.read_with(cx, |pane, _| pane.can_open_shell_ide()));
+        live.update(cx, |pane, cx| {
+            let acquisition = pane.terminal.lock().acquire_shell_channel().unwrap();
+            let lease = acquisition.blocking_recv().unwrap().unwrap();
+            pane.recorder = Some(TerminalRecorder::start(
+                DEFAULT_COLS,
+                DEFAULT_ROWS,
+                TerminalRecordingOptions {
+                    capture_input: true,
+                    title: None,
+                    theme: None,
+                },
+            ));
+            assert!(!pane.send_broadcast_input(TerminalBroadcastInputKind::Text, b"false && ", cx));
+            drop(lease);
+            // Only execution by the shell produces the contiguous output marker.
+            let command = "printf 'pty-%s\\n' ok\r";
+            assert!(pane.send_broadcast_input(
+                TerminalBroadcastInputKind::Text,
+                command.as_bytes(),
+                cx
+            ));
+            let cast = pane.recorder.take().unwrap().stop();
+            let recording =
+                oxideterm_terminal_recording::AsciicastRecording::parse("broadcast.cast", &cast)
+                    .unwrap();
+            let inputs: Vec<_> = recording
+                .events
+                .iter()
+                .filter(|event| {
+                    event.kind == oxideterm_terminal_recording::AsciicastEventKind::Input
+                })
+                .map(|event| event.data.as_str())
+                .collect();
+            assert_eq!(inputs, [command]);
+        });
+        let terminal = live.read_with(cx, |pane, _| pane.terminal.clone());
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !terminal.lock().buffer_text().contains("pty-ok") {
+            assert!(
+                Instant::now() < deadline,
+                "the restored PTY did not execute the broadcast"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let playback = cx.update(|window, cx| {
+            cx.new(|cx| {
+                TerminalPane::new_recording_playback(80, 24, Default::default(), window, cx)
+                    .unwrap()
+            })
+        });
+        assert!(!playback.read_with(cx, |pane, _| pane.can_open_shell_ide()));
     }
 
     #[cfg(unix)]

@@ -5,7 +5,6 @@ use oxideterm_gpui_ui::text_input::{TextInputAnchorId, TextInputViewport};
 use oxideterm_i18n::I18n;
 use oxideterm_settings::HostToolsSettings;
 use oxideterm_theme::ThemeTokens;
-use oxideterm_topology::*;
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
@@ -152,7 +151,6 @@ fn demo_command_output(command: &str) -> String {
 }
 
 struct SampleHost {
-    started: web_time::SystemTime,
     sampling: Cell<bool>,
     gpu_sampling: Cell<bool>,
     history: Rc<RefCell<Vec<ResourceMetrics>>>,
@@ -344,45 +342,8 @@ impl SampleHost {
 
 impl HostToolsBridge for SampleHost {
     fn pool_snapshot(&self) -> HostPoolSnapshot {
-        let node = ConnectionTopologyNode {
-            connection_id: "demo".into(),
-            parent_connection_id: None,
-            host: "oxide.demo".into(),
-            port: 22,
-            username: "demo".into(),
-            status: ConnectionTopologyStatus::Active,
-            depth: 0,
-            ref_count: 2,
-            consumers: ConnectionTopologyConsumerSummary {
-                node_router: 1,
-                port_forwards: 1,
-                ..Default::default()
-            },
-        };
-        HostPoolSnapshot {
-            stats: Some(ConnectionPoolMonitorStats {
-                total_connections: 1,
-                active_connections: 1,
-                total_ref_count: 2,
-                ..Default::default()
-            }),
-            summaries: vec![ConnectionPoolEntrySummary {
-                id: node.connection_id.clone(),
-                host: node.host.clone(),
-                port: 22,
-                username: "demo".into(),
-                state: ConnectionPoolEntryState::Active,
-                ref_count: 2,
-                keep_alive: true,
-                created_at: self.started,
-                last_active_at: self.started,
-                terminal_count: 1,
-                has_sftp_session: true,
-                forward_count: 1,
-                parent_connection_id: None,
-            }],
-            topology: Some(ConnectionTopologySnapshot::new(vec![node], vec![])),
-        }
+        // Sample metrics don't represent an SSH pool owned by this browser.
+        HostPoolSnapshot { stats: None, summaries: Vec::new(), topology: None }
     }
     fn connections(&self) -> Vec<MonitorConnectionOption> {
         vec![MonitorConnectionOption {
@@ -490,21 +451,7 @@ impl Monitor {
         self.entity.read(cx).active_tool()
     }
 
-    pub fn pool_snapshot(
-        &self,
-        cx: &App,
-    ) -> (
-        Option<ConnectionPoolMonitorStats>,
-        Vec<ConnectionPoolEntrySummary>,
-        Option<ConnectionTopologySnapshot>,
-    ) {
-        let e = self.entity.read(cx);
-        (
-            e.pool_stats_snapshot(),
-            e.pool_summaries_snapshot(),
-            e.topology_snapshot(),
-        )
-    }
+    pub(crate) fn graph_controls(&self) -> Entity<HostToolsEntity> { self.entity.clone() }
 
     pub fn tool_enabled(&self, tool: ContextSidebarTool) -> bool {
         tool.monitoring_enabled(&self.monitoring)
@@ -558,7 +505,6 @@ impl Monitor {
         let entity = cx.new(|cx| {
             let mut entity = HostToolsEntity::with_bridge(
                 Box::new(SampleHost {
-                    started: web_time::SystemTime::now(),
                     sampling: Cell::new(true),
                     gpu_sampling: Cell::new(false),
                     history,

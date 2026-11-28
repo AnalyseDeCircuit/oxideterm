@@ -1169,17 +1169,7 @@ pub(crate) fn install_context_keybindings(overrides: &Map<String, Value>, cx: &m
     use oxideterm_gpui_editor::{EditorKeybindings, EditorShortcut};
     let mut bindings = Vec::new();
     let mut editor_context = Vec::new();
-    for (id, action) in [
-        ("editor.save", EditorShortcut::Save),
-        ("editor.copy", EditorShortcut::Copy),
-        ("editor.cut", EditorShortcut::Cut),
-        ("editor.paste", EditorShortcut::Paste),
-        ("editor.selectAll", EditorShortcut::SelectAll),
-        ("editor.undo", EditorShortcut::Undo),
-        ("editor.redo", EditorShortcut::Redo),
-        ("editor.addNextMatch", EditorShortcut::AddNextMatch),
-        ("editor.find", EditorShortcut::Find),
-    ] {
+    for &(id, action) in EditorShortcut::BINDINGS {
         let definition = action_definition(id).expect("editor shortcut is registered");
         for combo in effective_combos(definition, overrides, KeybindingSide::current()) {
             let keystroke = combo_to_gpui(&combo);
@@ -1198,45 +1188,9 @@ pub(crate) fn install_context_keybindings(overrides: &Map<String, Value>, cx: &m
         },
     });
     use oxideterm_gpui_terminal::{TerminalKeybindings, TerminalShortcut};
-    let mut bindings = Vec::new();
-    for (id, action) in [
-        ("terminal.copy", TerminalShortcut::Copy),
-        ("terminal.paste", TerminalShortcut::Paste),
-        ("terminal.copyAlternate", TerminalShortcut::Copy),
-        ("terminal.pasteAlternate", TerminalShortcut::Paste),
-        ("terminal.terminateTask", TerminalShortcut::Terminate),
-        ("terminal.killTask", TerminalShortcut::Kill),
-        ("terminal.wordBackward", TerminalShortcut::WordBackward),
-        ("terminal.wordForward", TerminalShortcut::WordForward),
-        (
-            "terminal.suggestPrevious",
-            TerminalShortcut::SuggestPrevious,
-        ),
-        ("terminal.suggestNext", TerminalShortcut::SuggestNext),
-        ("terminal.scrollPageUp", TerminalShortcut::PageUp),
-        ("terminal.scrollPageDown", TerminalShortcut::PageDown),
-        ("terminal.scrollLineUp", TerminalShortcut::LineUp),
-        ("terminal.scrollLineDown", TerminalShortcut::LineDown),
-        ("terminal.scrollTop", TerminalShortcut::Top),
-        ("terminal.scrollBottom", TerminalShortcut::Bottom),
-    ] {
-        for combo in effective_combos(
-            action_definition(id).unwrap(),
-            overrides,
-            KeybindingSide::current(),
-        ) {
-            bindings.push((
-                KeyBinding::new(&combo_to_gpui(&combo), NoAction {}, None),
-                action,
-            ));
-        }
-    }
     cx.set_global(TerminalKeybindings {
-        bindings,
-        normalize: |key| {
-            let combo = combo_from_keystroke(key)?;
-            Keystroke::parse(&combo_to_gpui(&combo)).ok()
-        },
+        bindings: shortcuts::context_bindings(&ACTION_DEFINITIONS, TerminalShortcut::BINDINGS, overrides, KeybindingSide::current()),
+        normalize: shortcuts::normalized_keystroke,
     });
 }
 

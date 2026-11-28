@@ -15,7 +15,7 @@ impl IdeSurface {
         let fs = if fs.is_bound() { fs } else { fs.scoped_owner() };
         Self {
             workspace: IdeWorkspace::new(),
-            shell_return_requested: false,
+            tab_close_batch: None,
             fs,
             tokens,
             labels,
@@ -55,9 +55,11 @@ impl IdeSurface {
             tree_scroll_handle: UniformListScrollHandle::new(),
             tab_scroll_handle: ScrollHandle::new(),
             search: ProjectSearchState::default(),
+            quick_open: None,
+            quick_open_focus: None,
             search_cache: HashMap::new(),
             search_cache_order: Vec::new(),
-            pending_search_queries: BTreeMap::new(),
+            pending_search_queries: HashMap::new(),
             pending_editor_reveals: BTreeMap::new(),
             tab_context_menu: None,
             tree_context_menu: None,
@@ -91,6 +93,7 @@ impl IdeSurface {
         #[cfg(not(target_family = "wasm"))]
         let was_visible = self.mount.is_visible();
         self.finish_tree_resize(cx);
+        self.reset_quick_open();
         self.mount = mount;
         self.sync_tab_render_caches(cx);
         #[cfg(not(target_family = "wasm"))]
@@ -214,9 +217,11 @@ impl IdeSurface {
     ) {
         let node_id = node_id.into();
         let root_path = root_path.into();
+        self.reset_quick_open();
         #[cfg(not(target_family = "wasm"))]
         {
             self.cancel_agent_sampling();
+            self.cancel_tree_transfer();
             if let Some(previous_node_id) = self.node_id.clone()
                 && previous_node_id != node_id
             {
@@ -236,6 +241,7 @@ impl IdeSurface {
         self.root_path = Some(root_path.clone());
         self.git_branch = None;
         self.load_state = IdeLoadState::Loading;
+        self.tab_close_batch = None;
         self.last_error = None;
         self.conflict_state = None;
         self.loading_paths.clear();
@@ -313,6 +319,8 @@ impl IdeSurface {
 
     #[cfg(not(target_family = "wasm"))]
     pub fn release_remote_session(&mut self, cx: &mut Context<Self>) {
+        self.reset_quick_open();
+        self.cancel_tree_transfer();
         self.cancel_backend_binding();
         self.cancel_agent_sampling();
         self.stop_agent_watch(cx);
@@ -344,6 +352,8 @@ impl IdeSurface {
 
     #[cfg(not(target_family = "wasm"))]
     pub fn mark_connection_interrupted(&mut self, cx: &mut Context<Self>) {
+        self.reset_quick_open();
+        self.cancel_tree_transfer();
         self.cancel_agent_sampling();
         self.stop_agent_watch(cx);
         self.clear_search_cache();
@@ -516,6 +526,7 @@ impl IdeSurface {
 #[cfg(not(target_family = "wasm"))]
 impl Drop for IdeSurface {
     fn drop(&mut self) {
+        self.cancel_tree_transfer();
         self.cancel_backend_binding();
         if let Some(abort_handle) = self.desktop.agent_sampling_backend_abort.take() {
             abort_handle.abort();
@@ -1014,6 +1025,86 @@ mod lifecycle_tests {
         release_queue.finish_stop(&fs);
         assert_eq!(ide_consumer_count(&handle, node_id), 0);
     }
+
+    fn open_close_test_tabs<const N: usize>(
+        surface: &mut IdeSurface,
+        paths: [&str; N],
+    ) -> [EditorTabId; N] {
+        surface.node_id = Some("test".into());
+        surface.root_path = Some("/work".into());
+        surface.load_state = IdeLoadState::Ready;
+        surface
+            .workspace
+            .open_project(IdeLocation::remote("test", "/work"), "work");
+        paths.map(|path| {
+            surface
+                .workspace
+                .open_file(
+                    IdeLocation::remote("test", path),
+                    "original",
+                    SavedFileVersion::default(),
+                )
+                .unwrap();
+            surface.workspace.active_tab().unwrap()
+        })
+    }
+
+    #[gpui::test]
+    fn file_tab_batch_close_preserves_pins_and_the_context_tab(cx: &mut TestAppContext) {
+        let surface = test_surface(cx);
+        let mut events = cx.events(&surface);
+        surface.update(cx, |surface, cx| {
+            let [pinned, keep, _active] =
+                open_close_test_tabs(surface, ["/work/pinned", "/work/keep", "/work/active"]);
+            surface.workspace.toggle_tab_pin(pinned).unwrap();
+            assert!(surface.can_close_file_tabs(Some(keep)));
+            surface.close_file_tabs(Some(keep), cx);
+            assert_eq!(surface.open_file_paths(), ["/work/pinned", "/work/keep"]);
+            assert!(!surface.can_close_file_tabs(Some(keep)));
+
+            surface.close_file_tabs(None, cx);
+            assert_eq!(surface.open_file_paths(), ["/work/pinned"]);
+            assert!(!surface.can_close_file_tabs(None));
+            surface.workspace.toggle_tab_pin(pinned).unwrap();
+            surface.close_file_tabs(None, cx);
+            assert!(surface.open_file_paths().is_empty());
+            assert_eq!(
+                surface.workspace.project_root(),
+                Some(&IdeLocation::remote("test", "/work"))
+            );
+        });
+        while let Ok(event) = events.try_recv() {
+            assert_ne!(event, IdeSurfaceEvent::ShellReturnReady);
+        }
+    }
+
+    #[gpui::test]
+    fn file_tab_batch_close_prompts_in_order_and_stops_on_cancel(cx: &mut TestAppContext) {
+        let surface = test_surface(cx);
+        surface.update(cx, |surface, cx| {
+            let [first, second, _later] =
+                open_close_test_tabs(surface, ["/work/first", "/work/second", "/work/later"]);
+            for (tab, text) in [(first, "edit one"), (second, "edit two")] {
+                surface.workspace.replace_buffer_text(tab, text).unwrap();
+            }
+
+            surface.close_file_tabs(None, cx);
+            assert_eq!(surface.workspace.pending_close().unwrap().tab_id, first);
+            surface.resolve_dirty_close(DirtyCloseDecision::Discard, cx);
+            assert_eq!(surface.workspace.pending_close().unwrap().tab_id, second);
+            surface.load_state = IdeLoadState::Disconnected;
+            surface.resolve_dirty_close(DirtyCloseDecision::Save, cx);
+            assert_eq!(surface.workspace.pending_close().unwrap().tab_id, second);
+            surface.resolve_dirty_close(DirtyCloseDecision::Cancel, cx);
+            assert!(surface.workspace.pending_close().is_none());
+            assert_eq!(surface.open_file_paths(), ["/work/second", "/work/later"]);
+            assert_eq!(
+                surface.workspace.buffer(second).unwrap().text.to_string(),
+                "edit two"
+            );
+        });
+    }
+
     #[gpui::test]
     fn shell_return_cancel_keeps_dirty_text_and_discard_closes_it(cx: &mut TestAppContext) {
         let surface = test_surface(cx);
@@ -1034,22 +1125,60 @@ mod lifecycle_tests {
                 .workspace
                 .replace_buffer_text(tab, "unsaved container edit")
                 .unwrap();
-            surface.shell_return_requested = true;
-            surface.advance_shell_return(cx);
+            let (cancel, receiver) = tokio::sync::watch::channel(false);
+            surface.desktop.transfer = Some(TreeTransfer {
+                label: surface.labels.upload.clone(),
+                percent: 50,
+                cancel,
+            });
+            surface.tab_close_batch = Some(TabCloseBatch::ReturnToTerminal);
+            surface.cancel_tree_transfer();
+            surface.advance_tab_close_batch(cx);
+            assert!(*receiver.borrow());
+            assert!(surface.workspace.pending_close().is_none());
+            surface.complete_tree_transfer(
+                surface.generation,
+                None,
+                Err(IdeFileError::new(
+                    IdeFileErrorKind::Cancelled,
+                    "transfer cancelled",
+                )),
+                cx,
+            );
+            assert!(surface.last_error.is_none());
             assert_eq!(surface.workspace.pending_close().unwrap().tab_id, tab);
             surface.resolve_dirty_close(DirtyCloseDecision::Cancel, cx);
-            surface.advance_shell_return(cx);
+            surface.advance_tab_close_batch(cx);
             assert_eq!(
                 surface.workspace.buffer(tab).unwrap().text.to_string(),
                 "unsaved container edit"
             );
-            assert!(!surface.shell_return_requested);
-            surface.shell_return_requested = true;
-            surface.advance_shell_return(cx);
+            assert!(!surface.shell_return_requested());
+            let (cancel, _receiver) = tokio::sync::watch::channel(false);
+            surface.desktop.transfer = Some(TreeTransfer {
+                label: surface.labels.download.clone(),
+                percent: 90,
+                cancel,
+            });
+            surface.tab_close_batch = Some(TabCloseBatch::ReturnToTerminal);
+            surface.cancel_tree_transfer();
+            surface.complete_tree_transfer(
+                surface.generation,
+                None,
+                Err(IdeFileError::new(
+                    IdeFileErrorKind::PermissionDenied,
+                    "cannot install downloaded file",
+                )),
+                cx,
+            );
+            assert_eq!(
+                surface.last_error.as_deref(),
+                Some("cannot install downloaded file")
+            );
             surface.resolve_dirty_close(DirtyCloseDecision::Discard, cx);
-            surface.advance_shell_return(cx);
+            surface.advance_tab_close_batch(cx);
             assert!(surface.workspace.tabs().is_empty());
-            assert!(!surface.shell_return_requested);
+            assert!(!surface.shell_return_requested());
         });
     }
 }
@@ -1070,27 +1199,71 @@ impl IdeSurface {
         if !self.is_shell_ide() {
             return;
         }
-        self.shell_return_requested = true;
-        self.advance_shell_return(cx);
+        self.tab_close_batch = Some(TabCloseBatch::ReturnToTerminal);
+        self.reset_quick_open();
+        #[cfg(not(target_family = "wasm"))]
+        self.cancel_tree_transfer();
+        self.advance_tab_close_batch(cx);
         cx.notify();
     }
 
-    fn advance_shell_return(&mut self, cx: &mut Context<Self>) {
-        if !self.shell_return_requested
-            || self.workspace.pending_close().is_some()
-            || !self.saving_tabs.is_empty()
-        {
-            return;
+    fn shell_return_requested(&self) -> bool {
+        matches!(self.tab_close_batch, Some(TabCloseBatch::ReturnToTerminal))
+    }
+
+    fn file_tabs_to_close(&self, keep: Option<EditorTabId>) -> impl Iterator<Item = EditorTabId> {
+        self.workspace
+            .tabs()
+            .iter()
+            .filter(move |tab| !tab.is_pinned && Some(tab.id) != keep)
+            .map(|tab| tab.id)
+    }
+
+    fn can_close_file_tabs(&self, keep: Option<EditorTabId>) -> bool {
+        self.tab_close_batch.is_none()
+            && self.workspace.pending_close().is_none()
+            && keep.is_none_or(|tab| self.workspace.buffer(tab).is_some())
+            && self.file_tabs_to_close(keep).next().is_some()
+    }
+
+    fn close_file_tabs(&mut self, keep: Option<EditorTabId>, cx: &mut Context<Self>) {
+        if self.can_close_file_tabs(keep) {
+            // A file opened while a save or confirmation is pending belongs to a later action.
+            let targets = self.file_tabs_to_close(keep).collect();
+            self.tab_close_batch = Some(TabCloseBatch::Files(targets));
+            self.advance_tab_close_batch(cx);
         }
-        self.sync_all_editors(cx);
-        while let Some(tab) = self.workspace.tabs().first().map(|tab| tab.id) {
-            self.close_tab(tab, cx);
-            if self.workspace.pending_close().is_some() {
+        cx.notify();
+    }
+
+    fn advance_tab_close_batch(&mut self, cx: &mut Context<Self>) {
+        while self.workspace.pending_close().is_none() {
+            let next = match &self.tab_close_batch {
+                None => return,
+                Some(TabCloseBatch::Files(targets)) => self
+                    .file_tabs_to_close(None)
+                    .find(|tab| targets.contains(tab)),
+                Some(TabCloseBatch::ReturnToTerminal) => {
+                    #[cfg(not(target_family = "wasm"))]
+                    if self.desktop.transfer.is_some() {
+                        return;
+                    }
+                    if !self.saving_tabs.is_empty() {
+                        return;
+                    }
+                    self.workspace.tabs().first().map(|tab| tab.id)
+                }
+            };
+            let Some(tab) = next else {
+                if let Some(TabCloseBatch::ReturnToTerminal) = self.tab_close_batch.take() {
+                    cx.emit(IdeSurfaceEvent::ShellReturnReady);
+                }
+                return;
+            };
+            if self.saving_tabs.contains(&tab) || !self.close_tab(tab, cx) {
                 return;
             }
         }
-        self.shell_return_requested = false;
-        cx.emit(IdeSurfaceEvent::ShellReturnReady);
     }
 }
 

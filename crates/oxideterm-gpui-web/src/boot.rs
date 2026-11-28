@@ -25,6 +25,17 @@ pub fn run() {
     )
     .expect("query string")
     .get("gateway");
+    wasm_bindgen_futures::spawn_local(async move {
+        let saved = crate::connections::storage::Snapshot::load(gateway.is_none()).await;
+        open_workspace(side, gateway, saved);
+    });
+}
+
+fn open_workspace(
+    side: KeybindingSide,
+    gateway: Option<String>,
+    saved: Result<crate::connections::storage::Snapshot, ()>,
+) {
     oxideterm_gpui_platform::application()
         .with_assets(PortableAssets)
         .run(move |cx| {
@@ -46,7 +57,7 @@ pub fn run() {
                     ..Default::default()
                 },
                 move |window, cx| {
-                    let host = cx.new(|cx| Workspace::new(side, gateway, window, cx));
+                    let host = cx.new(|cx| Workspace::new(side, gateway, saved, window, cx));
                     host.update(cx, |h, cx| h.start(window, cx));
                     let focus = host.read(cx).focus.clone();
                     cx.new(|cx| {

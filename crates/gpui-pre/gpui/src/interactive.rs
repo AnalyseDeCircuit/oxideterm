@@ -753,9 +753,50 @@ impl Render for ExternalPaths {
     }
 }
 
+/// Browser handles retained from a user drop, never paths on the visitor's filesystem.
+#[cfg(target_family = "wasm")]
+#[derive(Clone, Debug)]
+pub enum BrowserDropEntry {
+    /// A readable file.
+    File(web_sys::File),
+    /// A directory whose descendants may be enumerated after the drop.
+    Directory(web_sys::FileSystemEntry),
+}
+#[cfg(target_family = "wasm")]
+impl BrowserDropEntry {
+    /// The selected item's basename.
+    pub fn name(&self) -> String {
+        match self {
+            Self::File(f) => f.name(),
+            Self::Directory(d) => d.name(),
+        }
+    }
+}
+/// Ordered top-level entries delivered to the hit-tested drop target.
+#[cfg(target_family = "wasm")]
+#[derive(Clone, Debug, Default)]
+pub struct BrowserFileDrop(pub Vec<BrowserDropEntry>);
+#[cfg(target_family = "wasm")]
+impl Render for BrowserFileDrop {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        Empty
+    }
+}
+
 /// A file drop event from the platform, generated when files are dragged and dropped onto the window.
 #[derive(Debug, Clone)]
 pub enum FileDropEvent {
+    /// A drag left the browser canvas; never discard an unrelated internal drag.
+    #[cfg(target_family = "wasm")]
+    BrowserLeft,
+    /// During hover the browser hides file data. Supply the handles only on drop.
+    #[cfg(target_family = "wasm")]
+    BrowserFiles {
+        /// Position in the target window.
+        position: Point<Pixels>,
+        /// None during hover, Some on submission.
+        drop: Option<BrowserFileDrop>,
+    },
     /// The files have entered the window.
     Entered {
         /// The position of the mouse relative to the window.

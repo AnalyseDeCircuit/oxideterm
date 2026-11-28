@@ -179,6 +179,7 @@ impl IdeFileSystem for LocalIdeFileSystem {
             entries.push(FileTreeEntry {
                 location: IdeLocation::local(entry_path),
                 kind: file_kind_from_metadata(&metadata),
+                is_symlink: metadata.is_symlink(),
                 name: entry.file_name().to_string_lossy().into_owned(),
                 version: version_from_metadata(&metadata),
             });

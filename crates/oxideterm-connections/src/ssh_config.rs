@@ -5,6 +5,8 @@ use std::{
 };
 
 use anyhow::{Context, Result, anyhow, bail};
+use oxideterm_ssh_launch::config::host_patterns_match;
+pub(crate) use oxideterm_ssh_launch::config::{split_ssh_words, strip_comment};
 
 use crate::ssh_paths::{default_ssh_dir, expand_home_path, user_ssh_dir};
 use crate::{
@@ -837,51 +839,6 @@ fn resolve_options(alias: &str, blocks: &[SshHostBlock]) -> SshHostOptions {
     resolved
 }
 
-fn host_patterns_match(patterns: &[String], alias: &str) -> bool {
-    let mut positive_match = false;
-    for pattern in patterns {
-        let (negated, pattern) = pattern
-            .strip_prefix('!')
-            .map(|pattern| (true, pattern))
-            .unwrap_or((false, pattern.as_str()));
-        if wildcard_match(pattern, alias) {
-            if negated {
-                return false;
-            }
-            positive_match = true;
-        }
-    }
-    positive_match
-}
-
-fn wildcard_match(pattern: &str, value: &str) -> bool {
-    let pattern = pattern.to_ascii_lowercase().into_bytes();
-    let value = value.to_ascii_lowercase().into_bytes();
-    let mut pattern_index = 0;
-    let mut value_index = 0;
-    let mut star_index = None;
-    let mut star_value_index = 0;
-
-    while value_index < value.len() {
-        if pattern_index < pattern.len()
-            && (pattern[pattern_index] == b'?' || pattern[pattern_index] == value[value_index])
-        {
-            pattern_index += 1;
-            value_index += 1;
-        } else if pattern_index < pattern.len() && pattern[pattern_index] == b'*' {
-            star_index = Some(pattern_index);
-            pattern_index += 1;
-            star_value_index = value_index;
-        } else if let Some(star) = star_index {
-            pattern_index = star + 1;
-            star_value_index += 1;
-            value_index = star_value_index;
-        } else {
-            return false;
-        }
-    }
-    pattern[pattern_index..].iter().all(|byte| *byte == b'*')
-}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct ProxyJumpTarget {
@@ -1174,72 +1131,6 @@ fn remote_command_value(line: &str) -> Option<&str> {
     (!value.is_empty()).then_some(value)
 }
 
-pub(crate) fn strip_comment(line: &str) -> &str {
-    let mut in_quotes = false;
-    for (index, ch) in line.char_indices() {
-        match ch {
-            '"' => in_quotes = !in_quotes,
-            '#' if !in_quotes => return &line[..index],
-            _ => {}
-        }
-    }
-    line
-}
-
-pub(crate) fn split_ssh_words(line: &str) -> Vec<String> {
-    let mut words = Vec::new();
-    let mut current = String::new();
-    let mut word_started = false;
-    let mut in_quotes = false;
-    let mut chars = line.chars().peekable();
-    while let Some(ch) = chars.next() {
-        match ch {
-            '\\' => {
-                word_started = true;
-                // An escaped final backslash must not consume a quoted word's
-                // closing quote. Interior drive/UNC separators stay verbatim.
-                let mut remaining = chars.clone();
-                if in_quotes
-                    && remaining.next() == Some('\\')
-                    && remaining.next() == Some('"')
-                    && remaining.next().is_none_or(char::is_whitespace)
-                {
-                    chars.next();
-                    current.push('\\');
-                    continue;
-                }
-                // OpenSSH escaping is meaningful only for token delimiters here.
-                // Preserve Windows drive and UNC path separators verbatim.
-                if chars
-                    .peek()
-                    .is_some_and(|next| next.is_whitespace() || matches!(*next, '"' | '#'))
-                {
-                    current.push(chars.next().expect("peeked SSH config character"));
-                } else {
-                    current.push('\\');
-                }
-            }
-            '"' => {
-                word_started = true;
-                in_quotes = !in_quotes;
-            }
-            ch if ch.is_whitespace() && !in_quotes => {
-                if word_started {
-                    words.push(std::mem::take(&mut current));
-                    word_started = false;
-                }
-            }
-            _ => {
-                word_started = true;
-                current.push(ch);
-            }
-        }
-    }
-    if word_started {
-        words.push(current);
-    }
-    words
-}
 
 fn expand_include_path(base_dir: &Path, pattern: &str) -> Vec<PathBuf> {
     let pattern = expand_home(pattern);

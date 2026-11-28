@@ -10,12 +10,18 @@ pub struct Cursor {
     preferred_column: Option<usize>,
 }
 
-impl Cursor {
-    pub fn new(offset: BufferOffset) -> Self {
+impl From<Selection> for Cursor {
+    fn from(selection: Selection) -> Self {
         Self {
-            selection: Selection::caret(offset),
+            selection,
             preferred_column: None,
         }
+    }
+}
+
+impl Cursor {
+    pub fn new(offset: BufferOffset) -> Self {
+        Selection::caret(offset).into()
     }
 
     pub fn selection(&self) -> Selection {
@@ -47,6 +53,10 @@ impl Cursor {
 
     pub fn move_to(&mut self, offset: BufferOffset, extend: bool) {
         self.set_head(offset, extend);
+    }
+
+    pub fn preferred_column(&self) -> Option<usize> {
+        self.preferred_column
     }
 
     pub fn preferred_column_or(&mut self, current_column: usize) -> usize {

@@ -62,6 +62,7 @@ impl SftpWorkspaceEntity {
     }
 
     pub fn apply_pair_primary_path(&mut self, path: String) {
+        self.completion_selection.remove(&SftpPane::Local);
         self.local_path_completion.dismiss();
         self.local_path = normalize_remote_path(&path);
         self.local_path_input.clone_from(&self.local_path);
@@ -74,7 +75,7 @@ impl SftpWorkspaceEntity {
 
     pub fn apply_remote_path(&mut self, path: String) {
         self.remote_path_completion.dismiss();
-        self.remote_path_completion_pending_selection = None;
+        self.completion_selection.remove(&SftpPane::Remote);
         // Preserve the horizontal breadcrumb position when navigating through a long path.
         self.remote_path = path.clone();
         self.remote_path_input = path;

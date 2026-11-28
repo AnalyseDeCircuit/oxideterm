@@ -18,7 +18,7 @@ pub(super) struct SettingsSearchFilter {
     #[cfg(not(target_family = "wasm"))]
     observed_query: String,
     applied_query: String,
-    search: fn(&I18n, &str) -> Vec<SettingsSearchResult>,
+    search: Box<dyn Fn(&I18n, &str) -> Vec<SettingsSearchResult>>,
     cached: RefCell<Option<SearchCache>>,
     #[cfg(not(target_family = "wasm"))]
     pending: Option<Task<()>>,
@@ -31,14 +31,14 @@ impl Default for SettingsSearchFilter {
 }
 
 impl SettingsSearchFilter {
-    pub(super) fn new(search: fn(&I18n, &str) -> Vec<SettingsSearchResult>) -> Self {
+    pub(super) fn new(search: impl Fn(&I18n, &str) -> Vec<SettingsSearchResult> + 'static) -> Self {
         Self {
             #[cfg(not(target_family = "wasm"))]
             observed_query: String::new(),
             #[cfg(not(target_family = "wasm"))]
             pending: None,
             applied_query: String::new(),
-            search,
+            search: Box::new(search),
             cached: Default::default(),
         }
     }

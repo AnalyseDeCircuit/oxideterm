@@ -92,6 +92,77 @@ impl HelpPresentation<'_> {
         }
     }
 
+    pub(crate) fn browser_section(
+        &self,
+        section: SettingsSectionId,
+        export: Option<Rc<dyn Fn(&mut Window, &mut App)>>,
+        cx: &App,
+    ) -> AnyElement {
+        match section {
+            SettingsSectionId::HelpVersion => self.settings_card(
+                "settings_view.help.version_info",
+                "",
+                vec![
+                    self.help_key_value_row(
+                        "settings_view.help.app_name",
+                        "OxideTerm Web".into(),
+                        false,
+                        cx,
+                    ),
+                    self.help_key_value_row(
+                        "settings_view.help.version",
+                        env!("CARGO_PKG_VERSION").into(),
+                        true,
+                        cx,
+                    ),
+                ],
+            ),
+            SettingsSectionId::HelpDiagnostics => {
+                let Some(download) = export else {
+                    return div().into_any_element();
+                };
+                let button = toolbar_button(
+                    self.tokens,
+                    self.i18n.t("settings_view.help.memory_export"),
+                    Some(render_icon(
+                        "lucide/download.svg",
+                        14.,
+                        rgb(self.tokens.ui.text),
+                    )),
+                    ToolbarButtonOptions {
+                        button: ButtonOptions {
+                            variant: ButtonVariant::Outline,
+                            size: ButtonSize::Sm,
+                            radius: ButtonRadius::Md,
+                            disabled: false,
+                        },
+                        ..Default::default()
+                    },
+                )
+                .on_mouse_down(MouseButton::Left, move |_, w, cx| {
+                    download(w, cx);
+                    cx.stop_propagation();
+                })
+                .into_any_element();
+                let row = self.setting_row(
+                    "settings_view.help.browser_report",
+                    "settings_view.help.browser_report_hint",
+                    button,
+                    cx,
+                );
+                self.settings_card("settings_view.help.diagnostics", "", vec![row])
+            }
+            SettingsSectionId::HelpTechStack => self.tech_badges(&[
+                ("Rust", 0xf97316),
+                ("GPUI", 0x38bdf8),
+                ("WebAssembly", 0xa855f7),
+                ("wgpu", 0x3b82f6),
+                ("alacritty_terminal", 0xf46d01),
+            ]),
+            _ => self.section(section, cx),
+        }
+    }
+
     fn help_version_card(
         &self,
         is_portable: bool,
@@ -155,8 +226,12 @@ impl HelpPresentation<'_> {
     }
 
     fn help_tech_stack_card(&self) -> AnyElement {
+        self.tech_badges(&HELP_TECH_BADGES)
+    }
+
+    fn tech_badges(&self, stack: &[(&'static str, u32)]) -> AnyElement {
         let mut badges = div().flex().flex_row().flex_wrap().gap(px(8.0));
-        for (label, color) in HELP_TECH_BADGES {
+        for &(label, color) in stack {
             badges = badges.child(
                 div()
                     .rounded_full()

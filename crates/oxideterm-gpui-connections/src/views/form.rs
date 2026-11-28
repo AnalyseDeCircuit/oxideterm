@@ -170,8 +170,27 @@ pub struct FormTotpCredential {
     pub name: String,
 }
 
+#[derive(Clone, Copy)]
+pub struct BrowserConnectionCapabilities {
+    pub simulated_profiles: bool,
+    pub bluetooth: bool,
+}
+
+impl BrowserConnectionCapabilities {
+    pub fn supports(self, transport: NewConnectionTransport) -> bool {
+        match transport {
+            NewConnectionTransport::Ssh | NewConnectionTransport::StandaloneSftp => {
+                self.simulated_profiles
+            }
+            NewConnectionTransport::Ble => self.bluetooth,
+            _ => false,
+        }
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct ConnectionFormEnvironment {
+    pub browser: Option<BrowserConnectionCapabilities>,
     pub connections: Vec<ConnectionInfo>,
     pub groups: Vec<String>,
     pub totp: Vec<FormTotpCredential>,

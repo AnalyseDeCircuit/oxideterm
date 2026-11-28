@@ -1,5 +1,8 @@
 {
   "sessionManager": {
+    "browser_load_failed": "저장된 연결을 불러오지 못했습니다. 변경 사항은 이 탭에만 유지됩니다.",
+    "browser_not_saved": "연결 변경 사항이 이 탭에만 있습니다. 사이트 데이터 저장을 허용한 뒤 다시 저장하세요.",
+    "browser_conflict": "다른 탭에서 연결을 변경하여 이 탭의 수정 사항은 저장되지 않았습니다. 저장된 내용을 보려면 새로고침하세요.",
     "title": "세션 관리자",
     "toolbar": {
       "search_placeholder": "연결 검색...",

@@ -7,11 +7,12 @@ use super::{
     },
     *,
 };
-use crate::views::{ConnectionsEnvironment, ConnectionsEnvironmentSource, line_edit::LineEdit};
+use crate::views::{ConnectionsEnvironment, ConnectionsEnvironmentSource};
 use gpui::{
     App, AppContext, Context, Entity, EventEmitter, FocusHandle, Focusable, KeyDownEvent,
     MouseButton, Render, Window, div, prelude::*,
 };
+use oxideterm_gpui_editor::line_edit::LineEdit;
 use std::{
     collections::{HashMap, HashSet},
     rc::Rc,
@@ -27,15 +28,86 @@ pub struct PortableCatalogData {
     pub tunnel_status: HashMap<String, TunnelDisplayStatus>,
 }
 
-impl From<PortableCatalogData> for DisplayFrame {
-    fn from(data: PortableCatalogData) -> Self {
+impl PortableCatalogData {
+    pub fn group_paths(&self) -> HashSet<String> {
         let mut paths = HashSet::new();
-        let mut counts = HashMap::new();
-        for group in &data.groups {
+        for group in self
+            .groups
+            .iter()
+            .chain(self.items.iter().filter_map(|r| r.group.as_ref()))
+        {
             add_group_path_segments(group, &mut paths);
         }
+        paths
+    }
+
+    pub fn ensure_group(&mut self, group: &str) {
+        if !self.groups.iter().any(|g| g == group) {
+            self.groups.push(group.to_owned());
+        }
+    }
+
+    pub fn upsert_row(&mut self, mut row: CatalogRow) {
+        if let Some(group) = &row.group {
+            self.ensure_group(group);
+        }
+        if let Some(existing) = self.items.iter_mut().find(|r| r.target == row.target) {
+            row.last_used = existing.last_used.take();
+            *existing = row;
+        } else {
+            self.items.push(row);
+        }
+    }
+
+    pub fn rename_group(&mut self, old: &str, new: &str) -> bool {
+        let paths = self.group_paths();
+        if !paths.contains(old) || paths.contains(new) || session_group_path_is_within(new, old) {
+            return false;
+        }
+        for group in self
+            .groups
+            .iter_mut()
+            .chain(self.items.iter_mut().filter_map(|r| r.group.as_mut()))
+        {
+            if let Some(path) = renamed_session_group_path(group, old, new) {
+                *group = path;
+            }
+        }
+        true
+    }
+
+    pub fn delete_group(&mut self, group: &str) {
+        self.groups
+            .retain(|path| !session_group_path_is_within(path, group));
+        for row in &mut self.items {
+            if row.in_group(Some(group)) {
+                row.group = None;
+            }
+        }
+    }
+
+    pub fn move_to_group(
+        &mut self,
+        targets: &[SessionManagerSelectionTarget],
+        group: Option<&str>,
+    ) {
+        let selected: HashSet<_> = targets.iter().collect();
+        for row in &mut self.items {
+            if row
+                .selection_target()
+                .is_some_and(|target| selected.contains(&target))
+            {
+                row.group = group.map(str::to_owned);
+            }
+        }
+    }
+}
+
+impl From<PortableCatalogData> for DisplayFrame {
+    fn from(data: PortableCatalogData) -> Self {
+        let paths = data.group_paths();
+        let mut counts = HashMap::new();
         for group in data.items.iter().filter_map(|item| item.group.as_deref()) {
-            add_group_path_segments(group, &mut paths);
             let mut ancestor = Some(group);
             while let Some(path) = ancestor {
                 *counts.entry(path.to_owned()).or_default() += 1;
@@ -168,6 +240,23 @@ impl PortableCatalogView {
         env: ConnectionsEnvironment,
         cx: &mut Context<Self>,
     ) -> Self {
+        Self::mount(data, env, true, cx)
+    }
+
+    pub fn browser_workspace(
+        data: PortableCatalogData,
+        env: ConnectionsEnvironment,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        Self::mount(data, env, false, cx)
+    }
+
+    fn mount(
+        data: PortableCatalogData,
+        env: ConnectionsEnvironment,
+        host_tools: bool,
+        cx: &mut Context<Self>,
+    ) -> Self {
         // Default only creates interaction state; the desktop constructor also starts delivery.
         let manager = cx.new(|_| SessionManagerState::default());
         let owner = cx.weak_entity();
@@ -186,7 +275,7 @@ impl PortableCatalogView {
             Rc::new(move |field, cx| owner.upgrade()?.read(cx).ime_frame(field, cx));
         let mut mount = |kind| {
             cx.new(|cx| {
-                CatalogView::mount(
+                let mut view = CatalogView::mount(
                     kind,
                     manager.clone(),
                     theme.clone(),
@@ -194,7 +283,9 @@ impl PortableCatalogView {
                     ime.clone(),
                     dispatch.clone(),
                     cx,
-                )
+                );
+                view.host_tools = host_tools;
+                view
             })
         };
         let body = mount(CatalogMount::Main);
@@ -247,6 +338,28 @@ impl PortableCatalogView {
     pub fn set_environment(&mut self, env: ConnectionsEnvironment, cx: &mut Context<Self>) {
         self.environment = env;
         self.refresh(cx);
+    }
+    pub fn set_renamed_catalog_data(
+        &mut self,
+        data: PortableCatalogData,
+        old: &str,
+        new: &str,
+        cx: &mut Context<Self>,
+    ) {
+        self.manager.update(cx, |state, _| {
+            if let Some(group) = &mut state.selected_group
+                && let Some(path) = renamed_session_group_path(group, old, new)
+            {
+                *group = path;
+            }
+            state.expanded_groups = state
+                .expanded_groups
+                .drain()
+                .map(|g| renamed_session_group_path(&g, old, new).unwrap_or(g))
+                .collect();
+            expand_group_path(new, &mut state.expanded_groups);
+        });
+        self.set_catalog_data(data, cx);
     }
     /// Restrict the catalog to a group and its descendants, or show all groups with None.
     pub fn set_group_filter(&mut self, group: Option<String>, cx: &mut Context<Self>) {

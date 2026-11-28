@@ -212,6 +212,19 @@ impl SftpWorkspaceEntity {
             skipped: 0,
             queued: 0,
         };
+        // A generated name must not take an original name from a later file in this batch.
+        let mut reserved: HashSet<String> = if resolved_actions
+            .values()
+            .any(|r| *r == SftpConflictResolution::Rename)
+        {
+            target_files
+                .iter()
+                .map(|f| f.name.clone())
+                .chain(pending_transfers.iter().map(|p| p.name.clone()))
+                .collect()
+        } else {
+            HashSet::new()
+        };
         let planned_transfers = pending_transfers
             .into_iter()
             .filter_map(|transfer| {
@@ -224,7 +237,9 @@ impl SftpWorkspaceEntity {
                     return None;
                 }
                 let target_name = if resolution == Some(SftpConflictResolution::Rename) {
-                    unique_sftp_conflict_name(&transfer.name, target_files)
+                    let name = oxideterm_sftp::unique_conflict_name(&transfer.name, reserved.iter().map(String::as_str));
+                    reserved.insert(name.clone());
+                    name
                 } else {
                     transfer.name.clone()
                 };
@@ -232,14 +247,18 @@ impl SftpWorkspaceEntity {
                     batch.queued += 1;
                 }
                 batch.total += 1;
-                Some((transfer, target_name))
+                let replace = resolution == Some(SftpConflictResolution::Overwrite)
+                    || (resolution == Some(SftpConflictResolution::SkipOlder)
+                        && target_files.iter().find(|f| f.name == transfer.name && f.file_type != SftpFileType::Directory)
+                            .is_some_and(|target| matches!((transfer.source.modified, target.modified), (Some(source), Some(target)) if source > target)));
+                Some((transfer, target_name, replace))
             })
             .collect::<Vec<_>>();
 
         let batch_id = self.next_transfer_batch_id;
         self.next_transfer_batch_id += 1;
         let mut launches = Vec::with_capacity(planned_transfers.len());
-        for (transfer, target_name) in planned_transfers {
+        for (transfer, target_name, replace) in planned_transfers {
             let id = self.next_transfer_id;
             self.next_transfer_id += 1;
             let transfer_id = new_sftp_transfer_id(&remote_id, &transfer.name);
@@ -258,8 +277,7 @@ impl SftpWorkspaceEntity {
                 SftpTransferDirection::Download => transfer.source.path,
             };
             let protocol = transfer.protocol_override.unwrap_or(configured_protocol);
-            let resolution = resolved_actions.get(&transfer.name).copied();
-            let download_disposition = if resolution == Some(SftpConflictResolution::Overwrite) {
+            let download_disposition = if replace {
                 LocalDownloadDisposition::ReplaceExisting
             } else {
                 LocalDownloadDisposition::CreateNew
@@ -374,6 +392,10 @@ impl SftpWorkspaceEntity {
         match state {
             SftpTransferState::Completed => batch.success += 1,
             SftpTransferState::Error => batch.failed += 1,
+            SftpTransferState::Cancelled => {
+                batch.skipped += 1;
+                batch.total -= 1;
+            }
             _ => return None,
         }
         if batch.success + batch.failed < batch.total {

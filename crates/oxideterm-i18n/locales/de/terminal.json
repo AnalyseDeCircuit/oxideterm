@@ -1,5 +1,6 @@
 {
   "terminal": {
+    "demo_shell_welcome": "Demo-Shell im Browser. Mit help werden die Befehle angezeigt.",
     "ssh_latency": {
       "measured": "SSH-Rundlaufzeit: {{millis}} ms, einschließlich Netzwerk und Serverantwort. Vor {{seconds}} s aktualisiert.",
       "pending": "SSH-Latenz wird gemessen…",
@@ -101,6 +102,7 @@
     },
     "paste": {
       "edit_title": "Vor dem Einfügen bearbeiten",
+      "clipboard_read_failed": "Die Zwischenablage konnte nicht gelesen werden. Verwende zum Einfügen das Tastenkürzel.",
       "send_by_line": "Zeilenweise senden",
       "stop_sending": "Senden stoppen",
       "interrupted": "{{sent}} Zeilen vollständig gesendet. Versand in Zeile {{line}} gestoppt.",
@@ -643,7 +645,7 @@
       "sftp": "SFTP",
       "convert": "In IDE umwandeln",
       "return": "Zurück zum Terminal",
-      "confirm": "Bestätigen Sie eine Shell-Eingabeaufforderung ohne ausstehende Eingabe. Befehle oder Agent verwenden den aktuellen Benutzer, Container und Ordner. Die Terminaleingabe pausiert bis zur Rückkehr aus der IDE.",
+      "confirm": "Nur Linux-Shells werden unterstützt. Fahren Sie an einer leeren Eingabeaufforderung fort.",
       "failed": "Dateizugriff konnte nicht gestartet werden. Prüfen Sie Shell und Umgebung. Verbinden Sie das Terminal erneut, falls es nicht wiederhergestellt wurde.",
       "preparing": "IDE-Dateidienst wird gestartet; Terminaleingaben sind pausiert…",
       "ssh": "SSH",
@@ -658,6 +660,7 @@
       "connection_failed": "BLE-Verbindung fehlgeschlagen: {error}",
       "runtime_init_failed": "Initialisierung der BLE-Laufzeit fehlgeschlagen",
       "adapter_index_out_of_range": "Bluetooth-Adapter-Index {n} liegt außerhalb des gültigen Bereichs",
+      "write_failed": "Bluetooth-Schreibzugriff fehlgeschlagen. Verbinde das Gerät erneut, um weitere Daten zu senden.",
       "service_not_found": "Dienst {uuid} nicht gefunden",
       "no_notify_write_pair": "Der ausgewählte Dienst hat kein Paar aus Notify- und Write-Merkmal"
     }

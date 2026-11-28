@@ -1,3 +1,5 @@
+mod graph;
+pub use graph::{topology_canvas, topology_node};
 use super::*;
 use gpui::{MouseMoveEvent, ScrollEvent};
 use oxideterm_topology::{TOPOLOGY_NODE_HEIGHT, TOPOLOGY_NODE_WIDTH, TopologyLayoutNode};

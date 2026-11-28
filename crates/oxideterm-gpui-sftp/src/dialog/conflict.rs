@@ -53,10 +53,10 @@ impl SftpDialogView {
         }) else {
             return div().into_any_element();
         };
-        let source_newer = match (conflict.source_modified, conflict.target_modified) {
-            (Some(source), Some(target)) => Some(source > target),
-            _ => None,
-        };
+        let age = conflict
+            .source_modified
+            .zip(conflict.target_modified)
+            .map(|(source, target)| source.cmp(&target));
         let source_label_key = match conflict.direction {
             SftpTransferDirection::Upload => "sftp.conflict.local_file",
             SftpTransferDirection::Download => "sftp.conflict.remote_file",
@@ -114,7 +114,7 @@ impl SftpDialogView {
                             .min_w(px(0.0))
                             .child(self.render_sftp_file_compare_card(
                                 source_label_key,
-                                source_newer == Some(true),
+                                age == Some(std::cmp::Ordering::Greater),
                                 conflict.source_size,
                                 conflict.source_modified,
                                 has_background,
@@ -135,7 +135,7 @@ impl SftpDialogView {
                     .child(div().flex_1().min_w(px(0.0)).child(
                         self.render_sftp_file_compare_card(
                             target_label_key,
-                            source_newer == Some(false),
+                            age == Some(std::cmp::Ordering::Less),
                             conflict.target_size,
                             conflict.target_modified,
                             has_background,

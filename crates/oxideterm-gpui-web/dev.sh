@@ -10,4 +10,5 @@ cargo build --offline -p oxideterm-gpui-web --target wasm32-unknown-unknown
 mkdir -p dist/pkg
 wasm-bindgen --target web --out-dir dist/pkg "$target_dir/wasm32-unknown-unknown/debug/oxideterm_gpui_web.wasm"
 cp index.html dist/
+cp ../oxideterm-gpui-app/resources/backgrounds/LICENSE.md dist/background-artwork.md
 exec python3 -m http.server "${PORT:-8000}" --bind 127.0.0.1 --directory dist

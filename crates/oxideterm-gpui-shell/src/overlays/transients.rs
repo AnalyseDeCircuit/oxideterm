@@ -467,6 +467,7 @@ pub enum ToastRequest {
     Dismiss(u64),
     DismissProgress(String),
 }
+#[derive(Clone)]
 pub struct ToastContent {
     pub title: String,
     pub description: Option<String>,

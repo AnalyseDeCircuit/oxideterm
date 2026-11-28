@@ -8,6 +8,8 @@
 //! in `docs/native-editor-ide-plan.md`.
 
 mod languages;
+pub mod line_edit;
+pub mod paste;
 mod metrics;
 mod settings;
 mod surface;

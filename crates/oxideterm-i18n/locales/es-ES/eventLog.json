@@ -279,6 +279,7 @@
       "host_trust_add": "Confiar en clave del servidor",
       "host_trust_remove": "Quitar clave de servidor de confianza",
       "connection_dispatch_receive": "Recibir solicitud de conexión",
+      "show_target": "Mostrar en el espacio de trabajo",
       "audit_view": "Ver auditoría",
       "credential_delete": "Eliminar credencial",
       "ssh_node_state": "Cambiar estado del nodo SSH",

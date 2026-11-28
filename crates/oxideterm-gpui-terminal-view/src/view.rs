@@ -17,7 +17,10 @@ use crate::{TerminalLayoutCache, TerminalMetrics, TerminalUiTheme, selection::Te
 mod canvas;
 mod ime;
 mod interactions;
+mod preferences;
+pub use preferences::TerminalViewPreferences;
 mod selection;
+mod search;
 #[cfg(all(test, not(target_family = "wasm")))]
 mod tests;
 
@@ -25,6 +28,8 @@ mod tests;
 pub enum TerminalViewEvent {
     /// User input or a protocol reply; write these bytes to the peer without echoing them locally.
     SendBytes(Vec<u8>),
+    ReviewPaste(zeroize::Zeroizing<String>),
+    ClipboardReadFailed,
     Resized(TerminalSize),
     TitleChanged(Option<String>),
     Bell,
@@ -55,9 +60,12 @@ pub struct TerminalView {
     layout: Rc<RefCell<TerminalLayoutCache>>,
     viewport: Option<(Bounds<Pixels>, f32)>,
     selection: Option<TerminalSelection>,
+    search: Option<search::PaneSearch>,
     pointer: interactions::PointerState,
     composition: ime::Composition,
     cursor_visible: bool,
+    options: preferences::ViewOptions,
+    background_alpha: Option<u8>,
     blink_task: Option<Task<()>>,
     sync_task: Option<(Instant, Task<()>)>,
     alt_sends_escape: bool,
@@ -98,9 +106,12 @@ impl TerminalView {
             layout: Default::default(),
             viewport: None,
             selection: None,
+            search: None,
             pointer: Default::default(),
             composition: Default::default(),
             cursor_visible: true,
+            options: Default::default(),
+            background_alpha: None,
             blink_task: None,
             sync_task: None,
             alt_sends_escape: !cx.platform_info().is_mac(),
@@ -125,12 +136,20 @@ impl TerminalView {
     pub fn set_theme(&mut self, theme: TerminalUiTheme, cx: &mut Context<Self>) {
         let palette = theme.palette();
         self.theme = theme;
+        self.refresh_search_style(cx);
         self.set_palette(palette, cx);
     }
 
     pub fn set_palette(&mut self, palette: TerminalPalette, cx: &mut Context<Self>) {
         self.emulator.get_mut().set_palette(palette);
         self.publish_snapshot(true, cx);
+    }
+
+    pub fn set_background_alpha(&mut self, alpha: Option<u8>, cx: &mut Context<Self>) {
+        if self.background_alpha != alpha {
+            self.background_alpha = alpha;
+            cx.notify();
+        }
     }
 
     pub fn set_metrics(&mut self, metrics: TerminalMetrics, cx: &mut Context<Self>) {
@@ -163,6 +182,8 @@ impl TerminalView {
         self.route_events(events, cx);
         self.publish_snapshot(false, cx);
 
+        self.refresh_search(cx);
+
         // A peer can stop writing halfway through a synchronized frame. Its timeout
         // belongs to the parser, not to focus, cursor blink, or the next input packet.
         let deadline = self.emulator.get_mut().sync_deadline();
@@ -193,7 +214,9 @@ impl TerminalView {
                 TerminalEmulatorEvent::ResetTitle => cx.emit(TerminalViewEvent::TitleChanged(None)),
                 TerminalEmulatorEvent::Bell => cx.emit(TerminalViewEvent::Bell),
                 TerminalEmulatorEvent::ClipboardStore(_, mut text) => {
-                    cx.write_to_clipboard(ClipboardItem::new_string(mem::take(&mut *text)))
+                    if self.options.osc52_copy {
+                        cx.write_to_clipboard(ClipboardItem::new_string(mem::take(&mut *text)));
+                    }
                 }
                 // Both are reflected in the post-batch snapshot and cursor state.
                 TerminalEmulatorEvent::CursorBlinkingChange | TerminalEmulatorEvent::Wakeup => {}
@@ -217,6 +240,14 @@ impl TerminalView {
 
     pub fn send_text(&mut self, text: &str, cx: &mut Context<Self>) {
         self.send_user_bytes(text.as_bytes().to_vec(), cx);
+    }
+
+    fn request_paste(&mut self, text: zeroize::Zeroizing<String>, cx: &mut Context<Self>) {
+        if self.options.protected_paste && crate::input::paste_needs_confirmation(&text) {
+            cx.emit(TerminalViewEvent::ReviewPaste(text));
+        } else {
+            self.paste_text(&text, cx);
+        }
     }
 
     pub fn paste_text(&mut self, text: &str, cx: &mut Context<Self>) {

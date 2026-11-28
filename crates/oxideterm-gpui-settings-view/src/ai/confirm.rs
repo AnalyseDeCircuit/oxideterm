@@ -94,6 +94,23 @@ impl AiSettingsConfirm {
         cx.notify();
     }
 
+    pub fn handle_footer_key(&mut self, key: &gpui::Keystroke, cx: &mut Context<Self>) {
+        use ConfirmDialogAction::{Cancel, Confirm};
+        use oxideterm_gpui_ui::confirm::{ModalFooterKeyAction, modal_footer_key_action};
+        match modal_footer_key_action(
+            &key.key,
+            key.modifiers.shift,
+            &[Cancel, Confirm],
+            self.focus,
+            Cancel,
+        ) {
+            Some(ModalFooterKeyAction::Focus(f)) => self.set_focus(Some(f), cx),
+            Some(ModalFooterKeyAction::Activate(a)) => self.begin_exit(a == Confirm, cx),
+            Some(ModalFooterKeyAction::Cancel) => self.begin_exit(false, cx),
+            None => {}
+        }
+    }
+
     pub fn begin_exit(&mut self, confirmed: bool, cx: &mut Context<Self>) {
         self.exit(
             confirmed,

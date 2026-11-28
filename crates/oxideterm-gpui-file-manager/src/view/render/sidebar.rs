@@ -68,15 +68,17 @@ impl FileManagerView {
             ));
             item_geometry = item_geometry.next();
         }
-        navigation = navigation.child(div().mt(px(10.0)).child(
-            self.render_file_manager_sidebar_section_header(
-                self.i18n.t("fileManager.sidebarLocations"),
-                false,
-                false,
-                cx,
-            ),
-        ));
-        item_geometry = item_geometry.after_section_header();
+        if !drives.is_empty() || !cfg!(target_family = "wasm") {
+            navigation = navigation.child(div().mt(px(10.0)).child(
+                self.render_file_manager_sidebar_section_header(
+                    self.i18n.t("fileManager.sidebarLocations"),
+                    false,
+                    false,
+                    cx,
+                ),
+            ));
+            item_geometry = item_geometry.after_section_header();
+        }
         for drive in &drives {
             navigation = navigation.child(self.render_file_manager_sidebar_path_row(
                 drive.path.clone(),
@@ -90,53 +92,55 @@ impl FileManagerView {
             item_geometry = item_geometry.next();
         }
         panel = panel.child(navigation);
-        panel = panel.child(
-            div()
-                .border_t_1()
-                .border_color(file_manager_border(theme.border, has_background))
-                .p(px(8.0))
-                .child(
-                    div()
-                        .h(px(28.0))
-                        .w_full()
-                        .flex()
-                        .items_center()
-                        .gap(px(8.0))
-                        .px(px(8.0))
-                        .rounded(px(self.tokens.radii.sm))
-                        .cursor_pointer()
-                        .hover(move |button| {
-                            button.bg(file_manager_hover_bg(theme.bg_hover, has_background))
-                        })
-                        .child(Self::render_lucide_icon(
-                            LucideIcon::Terminal,
-                            FILE_MANAGER_ICON_MD,
-                            rgb(theme.text),
-                        ))
-                        .child(
-                            div()
-                                .text_size(px(FILE_MANAGER_TEXT_XS))
-                                .font_weight(gpui::FontWeight::MEDIUM)
-                                .text_color(rgb(theme.text))
-                                .child(self.render_display_text_with_role(
-                                    SelectableTextRole::NonSelectable,
-                                    "file-manager-action",
-                                    "open-terminal-here",
-                                    self.i18n.t("fileManager.openTerminalHere"),
-                                    theme.text,
-                                    cx,
-                                )),
-                        )
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _event, window, cx| {
-                                this.blur_file_manager_inline_inputs(cx);
-                                this.open_terminal_at_file_manager_path(window, cx);
-                                cx.stop_propagation();
-                            }),
-                        ),
-                ),
-        );
+        if self.file_manager.read(cx).fs.device_name().is_none() {
+            panel = panel.child(
+                div()
+                    .border_t_1()
+                    .border_color(file_manager_border(theme.border, has_background))
+                    .p(px(8.0))
+                    .child(
+                        div()
+                            .h(px(28.0))
+                            .w_full()
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
+                            .px(px(8.0))
+                            .rounded(px(self.tokens.radii.sm))
+                            .cursor_pointer()
+                            .hover(move |button| {
+                                button.bg(file_manager_hover_bg(theme.bg_hover, has_background))
+                            })
+                            .child(Self::render_lucide_icon(
+                                LucideIcon::Terminal,
+                                FILE_MANAGER_ICON_MD,
+                                rgb(theme.text),
+                            ))
+                            .child(
+                                div()
+                                    .text_size(px(FILE_MANAGER_TEXT_XS))
+                                    .font_weight(gpui::FontWeight::MEDIUM)
+                                    .text_color(rgb(theme.text))
+                                    .child(self.render_display_text_with_role(
+                                        SelectableTextRole::NonSelectable,
+                                        "file-manager-action",
+                                        "open-terminal-here",
+                                        self.i18n.t("fileManager.openTerminalHere"),
+                                        theme.text,
+                                        cx,
+                                    )),
+                            )
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _event, window, cx| {
+                                    this.blur_file_manager_inline_inputs(cx);
+                                    this.open_terminal_at_file_manager_path(window, cx);
+                                    cx.stop_propagation();
+                                }),
+                            ),
+                    ),
+            );
+        }
         let label = self.i18n.t("fileManager.resizeFavorites");
         panel = panel.child(
             oxideterm_gpui_ui::separator::sidebar_resize_hotzone_chrome(

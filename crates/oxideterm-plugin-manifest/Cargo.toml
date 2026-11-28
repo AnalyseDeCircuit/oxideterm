@@ -8,6 +8,7 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+chrono.workspace = true
 oxideterm-remote-desktop = { path = "../oxideterm-remote-desktop" }
 uuid.workspace = true
 serde.workspace = true

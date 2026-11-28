@@ -129,6 +129,7 @@ mod tree_selection_tests {
         let root = IdeLocation::remote("selection-test", "/repo");
         let entries = ["a.txt", "b.txt", "c.txt"].map(|name| FileTreeEntry {
             location: IdeLocation::remote("selection-test", format!("/repo/{name}")),
+            is_symlink: false,
             name: name.into(),
             kind: FileKind::File,
             version: SavedFileVersion::unknown(),
@@ -266,12 +267,14 @@ mod tree_selection_tests {
             );
             let directory = FileTreeEntry {
                 location: IdeLocation::remote("selection-test", "/repo/folder"),
+                is_symlink: false,
                 name: "folder".into(),
                 kind: FileKind::Directory,
                 version: SavedFileVersion::unknown(),
             };
             let child = FileTreeEntry {
                 location: IdeLocation::remote("selection-test", "/repo/folder/child.txt"),
+                is_symlink: false,
                 name: "child.txt".into(),
                 kind: FileKind::File,
                 version: SavedFileVersion::unknown(),

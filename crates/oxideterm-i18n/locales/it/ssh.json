@@ -32,6 +32,7 @@
       }
     },
     "form": {
+      "demo_connection_hint": "Le connessioni demo usano host simulati e non richiedono credenziali.",
       "title": "Nuova connessione",
       "subtitle": "Configura un host SSH per terminali, SFTP, inoltro porte e modifica di file remoti.",
       "basic_information": "Informazioni di base",

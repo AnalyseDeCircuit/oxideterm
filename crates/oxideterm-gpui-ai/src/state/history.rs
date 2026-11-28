@@ -426,7 +426,7 @@ fn metadata(conversation: &AiConversation) -> AiConversation {
 }
 
 impl AiWorkspaceEntity {
-    pub(crate) fn committed_history(&mut self) -> futures::channel::oneshot::Receiver<bool> {
+    pub fn committed_history(&mut self) -> futures::channel::oneshot::Receiver<bool> {
         let (sender, receiver) = futures::channel::oneshot::channel();
         self.after_history_commit(Box::new(sender));
         receiver

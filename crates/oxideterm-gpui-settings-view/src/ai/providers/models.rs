@@ -51,7 +51,7 @@ impl AiProviderSettingsView {
                             .flex_wrap()
                             .items_center()
                             .gap(px(8.0))
-                            .child(self.ai_provider_refresh_button(index, provider, cx))
+                            .when(!self.session_only, |row| row.child(self.ai_provider_refresh_button(index, provider, cx)))
                             .when(
                                 provider.models.len() > AI_PROVIDER_VISIBLE_MODEL_LIMIT,
                                 |row| {
@@ -149,7 +149,7 @@ impl AiProviderSettingsView {
         let input = SettingsInput::AiProviderNewModel(index);
         let can_add = (self.bindings.controls)(cx).is_some_and(|controls| {
             let frame = controls.ime.frame(input, "", cx);
-            frame.focused && !frame.value.trim().is_empty()
+            (self.session_only || frame.focused) && !frame.value.trim().is_empty()
         });
         let provider_id = provider.id.clone();
         let mut options = ToolbarButtonOptions::compact_text(
@@ -199,7 +199,7 @@ impl AiProviderSettingsView {
         };
         let frame = controls.ime.frame(input, "", cx);
         let model = frame.value.trim().to_owned();
-        if !frame.focused || model.is_empty() {
+        if (!self.session_only && !frame.focused) || model.is_empty() {
             return;
         }
         let provider_id = provider_id.to_owned();

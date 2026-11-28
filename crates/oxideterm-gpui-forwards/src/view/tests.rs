@@ -20,7 +20,11 @@ impl Render for TestPage {
     }
 }
 
-fn open(cx: &mut TestAppContext, id: u64) -> (Entity<TestPage>, &mut VisualTestContext) {
+fn open(
+    cx: &mut TestAppContext,
+    id: u64,
+    preview: Option<Rc<Cell<Option<u16>>>>,
+) -> (Entity<TestPage>, &mut VisualTestContext) {
     let tab = TabId(id);
     cx.add_window_view(|_, cx| {
         let state = cx.new(|_| ForwardsPageState::new());
@@ -50,15 +54,56 @@ fn open(cx: &mut TestAppContext, id: u64) -> (Entity<TestPage>, &mut VisualTestC
             ime: Rc::new(|_, _| None),
             dispatch: Rc::new(|_, _, _| {}),
         };
-        TestPage(ForwardsViews::new(state, bindings, cx))
+        if let Some(submitted) = preview {
+            TestPage(ForwardsViews::configuration_preview(
+                state,
+                move |cx| (bindings.frame)(cx),
+                move |req, _, _| {
+                    if let ForwardsRequest::Operation {
+                        operation: ForwardingRuntimeOperation::Update { update, .. },
+                        ..
+                    } = req
+                    {
+                        submitted.set(update.bind_port);
+                    }
+                },
+                cx,
+            ))
+        } else {
+            TestPage(ForwardsViews::new(state, bindings, cx))
+        }
     })
 }
 
 #[gpui::test]
+fn draft_only_rule_edits_selected_port_digits_without_offering_start(cx: &mut TestAppContext) {
+    let submitted = Rc::new(Cell::new(None));
+    let (_, window) = open(cx, 9, Some(submitted.clone()));
+    window.simulate_resize(gpui::size(px(1000.), px(720.)));
+    window.update(|w, cx| w.draw(cx).clear(cx));
+    assert!(
+        window
+            .debug_bounds("forward-icon-lucide/play.svg")
+            .is_none()
+    );
+    let edit = window
+        .debug_bounds("forward-icon-lucide/pencil.svg")
+        .unwrap();
+    window.simulate_click(edit.center(), Default::default());
+    window.update(|w, cx| w.draw(cx).clear(cx));
+    let port = window.debug_bounds("forward-input-EditBindPort").unwrap();
+    window.simulate_click(port.center(), Default::default());
+    window.simulate_keystrokes("end shift-left shift-left");
+    window.simulate_input("24");
+    window.simulate_keystrokes("enter");
+    assert_eq!(submitted.get(), Some(8024));
+}
+
+#[gpui::test]
 fn edit_dialog_is_notified_only_in_its_own_window(cx: &mut TestAppContext) {
-    let (a, a_window) = open(cx, 1);
+    let (a, a_window) = open(cx, 1, None);
     let mut a_window = a_window.clone();
-    let (b, b_window) = open(cx, 2);
+    let (b, b_window) = open(cx, 2, None);
     let mut b_window = b_window.clone();
     let (a_state, a_dialogs) = a.read_with(&a_window, |view, _| {
         (view.0.state.clone(), view.0.dialogs.clone())

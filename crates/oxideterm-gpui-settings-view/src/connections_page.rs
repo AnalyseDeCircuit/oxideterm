@@ -676,167 +676,30 @@ impl ConnectionPage<'_> {
         .into_any_element()
     }
 
-    fn ssh_config_host_row(&self, host: SshConfigHost, selected: bool, cx: &App) -> AnyElement {
-        let theme = self.tokens.ui;
+    fn ssh_config_host_row(&self, host: SshConfigHost, selected: bool, _: &App) -> AnyElement {
         let alias = host.alias.clone();
-        let disabled = host.already_imported;
         let detail = format!(
             "{}@{}:{}",
             host.user.as_deref().unwrap_or_default(),
-            host.hostname.as_deref().unwrap_or(alias.as_str()),
+            host.hostname.as_deref().unwrap_or(&alias),
             host.port.unwrap_or(22)
         );
-
-        div()
-            .w_full()
-            .mb(px(4.0))
-            .flex()
-            .flex_row()
-            .items_center()
-            .justify_between()
-            .gap(px(12.0))
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(rgba(0x00000000))
-            .bg(rgba(0x00000000))
-            .p(px(12.0))
-            .opacity(if disabled { 0.5 } else { 1.0 })
-            .hover(|style| {
-                if disabled {
-                    style
-                } else {
-                    style
-                        .bg(rgb(self.tokens.ui.bg_hover))
-                        .border_color(rgb(self.tokens.ui.border))
-                }
-            })
-            .child(
-                div()
-                    .cursor_pointer()
-                    .min_w(px(0.0))
-                    .flex_1()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap(px(8.0))
-                    .child(self.ssh_config_checkbox(selected))
-                    .child(
-                        div()
-                            .min_w(px(0.0))
-                            .flex()
-                            .flex_col()
-                            .gap(px(3.0))
-                            .child(
-                                div()
-                                    .flex()
-                                    .flex_row()
-                                    .items_center()
-                                    .gap(px(8.0))
-                                    .child(
-                                        div()
-                                            .text_size(px(self.tokens.metrics.ui_text_sm))
-                                            .font_weight(gpui::FontWeight::MEDIUM)
-                                            .text_color(rgb(theme.text))
-                                            .child(host.alias.clone()),
-                                    )
-                                    .when(host.already_imported, |row| {
-                                        row.child(self.ssh_config_imported_badge())
-                                    }),
-                            )
-                            .child(
-                                div()
-                                    .truncate()
-                                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                                    .text_color(rgb(theme.text_muted))
-                                    .child(detail),
-                            ),
-                    )
-                    .when(!disabled, |left| {
-                        let alias = alias.clone();
-                        left.on_mouse_down(
-                            MouseButton::Left,
-                            self.select(move |state, cx| {
-                                state.toggle_ssh_config_host(alias.clone(), cx)
-                            }),
-                        )
-                    }),
-            )
-            .child(self.ssh_config_import_button(host.alias, disabled, cx))
-            .into_any_element()
-    }
-
-    fn ssh_config_import_button(&self, alias: String, disabled: bool, _cx: &App) -> AnyElement {
-        // Host-row import uses the shared outline action path but preserves
-        // Tauri's pill shape with a post-primitive radius override.
-        self.workspace_toolbar_action_button(
-            self.i18n.t("settings_view.connections.ssh_config.import"),
-            Some(render_icon(
-                "lucide/folder-input.svg",
-                16.0,
-                rgb(self.tokens.ui.text),
-            )),
-            ToolbarButtonOptions {
-                button: ButtonOptions {
-                    variant: ButtonVariant::Outline,
-                    size: ButtonSize::Sm,
-                    radius: ButtonRadius::Md,
-                    disabled,
-                },
-                background: Some(rgba(0x00000000)),
-                border: Some(rgb(self.tokens.ui.border)),
-                text_color: Some(rgb(self.tokens.ui.text)),
-                hover_background: Some(rgb(self.tokens.ui.bg_hover)),
-                height: Some(34.0),
-                padding_x: Some(14.0),
-                font_size: Some(self.tokens.metrics.ui_text_sm),
-                ..ToolbarButtonOptions::default()
-            },
+        crate::ssh_import::host_row(
+            &self.tokens,
+            &self.i18n,
+            host.alias.clone(),
+            detail,
+            selected,
+            host.already_imported,
+            self.select(move |state, cx| state.toggle_ssh_config_host(alias.clone(), cx)),
             self.press(ConnectionRequest::Local(ConnectionAction::ImportSsh(
-                alias.clone(),
+                host.alias,
             ))),
         )
-        .rounded_full()
-        .into_any_element()
     }
 
     fn ssh_config_checkbox(&self, checked: bool) -> AnyElement {
-        div()
-            .size(px(20.0))
-            .flex_none()
-            .flex()
-            .items_center()
-            .justify_center()
-            .rounded(px(self.tokens.radii.sm))
-            .border_1()
-            .border_color(rgb(if checked {
-                self.tokens.ui.accent
-            } else {
-                self.tokens.ui.text_muted
-            }))
-            .bg(if checked {
-                rgb(self.tokens.ui.accent)
-            } else {
-                rgba(0x00000000)
-            })
-            .text_size(px(12.0))
-            .text_color(rgb(self.tokens.ui.accent_text))
-            .child(if checked { "✓" } else { "" })
-            .into_any_element()
-    }
-
-    fn ssh_config_imported_badge(&self) -> AnyElement {
-        div()
-            .px(px(6.0))
-            .py(px(2.0))
-            .rounded(px(self.tokens.radii.sm))
-            .bg(rgba((self.tokens.ui.accent << 8) | 0x20))
-            .text_size(px(self.tokens.metrics.ui_text_2xs))
-            .text_color(rgb(self.tokens.ui.accent_secondary))
-            .child(
-                self.i18n
-                    .t("settings_view.connections.ssh_config.already_imported"),
-            )
-            .into_any_element()
+        crate::ssh_import::check(&self.tokens, checked)
     }
 
     fn ssh_config_source_description(&self) -> String {

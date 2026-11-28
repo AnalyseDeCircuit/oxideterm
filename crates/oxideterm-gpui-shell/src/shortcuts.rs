@@ -50,6 +50,27 @@ impl TabShortcut {
         }
     }
 }
+pub fn context_bindings<T: std::marker::Copy>(
+    definitions: &[ActionDefinition],
+    actions: &[(&str, T)],
+    overrides: &Map<String, Value>,
+    side: KeybindingSide,
+) -> Vec<(gpui::KeyBinding, T)> {
+    let mut bindings = Vec::new();
+    for &(id, action) in actions {
+        if let Some(def) = definitions.iter().find(|def| def.id == id) {
+            for combo in effective_combos(def, overrides, side) {
+                bindings.push((gpui::KeyBinding::new(&combo_to_gpui(&combo), gpui::NoAction {}, None), action));
+            }
+        }
+    }
+    bindings
+}
+
+pub fn normalized_keystroke(key: &Keystroke) -> Option<Keystroke> {
+    Keystroke::parse(&combo_to_gpui(&combo_from_keystroke(key)?)).ok()
+}
+
 pub fn combo_to_gpui(combo: &KeyCombo) -> String {
     let mut parts = Vec::new();
     if combo.meta {

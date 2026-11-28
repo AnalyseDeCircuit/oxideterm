@@ -9,6 +9,7 @@
 //! view-model helpers.
 
 pub mod ai;
+pub mod browser_preferences;
 pub mod cloud_sync_form;
 pub mod input_draft;
 pub mod knowledge;

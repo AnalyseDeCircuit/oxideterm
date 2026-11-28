@@ -1,5 +1,8 @@
 {
   "sessionManager": {
+    "browser_load_failed": "Impossibile caricare le connessioni salvate. Le modifiche rimarranno in questa scheda.",
+    "browser_not_saved": "Le modifiche sono disponibili solo in questa scheda. Consenti al sito di memorizzare dati e riprova a salvare.",
+    "browser_conflict": "Un’altra scheda ha modificato le connessioni. Le tue modifiche non sono state salvate. Ricarica per vedere le versioni salvate.",
     "title": "Gestore sessioni",
     "toolbar": {
       "search_placeholder": "Cerca connessioni...",

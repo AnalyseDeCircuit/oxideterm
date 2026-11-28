@@ -1,3 +1,5 @@
+pub mod scrollback;
+
 use alacritty_terminal::{
     event::EventListener,
     grid::Dimensions,

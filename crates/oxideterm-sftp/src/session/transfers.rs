@@ -111,29 +111,222 @@ impl SftpSession {
         progress_tx: Option<tokio::sync::mpsc::Sender<TransferProgress>>,
         transfer_manager: Option<Arc<SftpTransferManager>>,
     ) -> Result<u64, SftpError> {
-        let audit = self.audit_operation("file_transfer", &format!("download: {remote_path} → {local_path}"));
-        let result = async {
+        let audit = self.audit_operation(
+            "file_transfer",
+            &format!("download: {remote_path} → {local_path}"),
+        );
         let _control = transfer_manager
             .as_ref()
             .map(|manager| manager.register(transfer_id));
         let _guard = SftpTransferGuard::new(transfer_manager.as_ref(), transfer_id);
-        let canonical_remote = self.resolve_path(remote_path).await?;
-        let remote_info = self.stat(&canonical_remote).await?;
+        let result = async {
+            let info = self.stat(remote_path).await?;
+            self.download_file_inner(
+                info,
+                local_path,
+                transfer_id,
+                &progress_tx,
+                &transfer_manager,
+            )
+            .await
+        }
+        .await;
+        finish_sftp_file_transfer_audit(audit, &result);
+        result
+    }
+
+    /// The caller owns cancellation and audits the final installation of the staged file.
+    pub async fn download_into_staging(
+        &self,
+        remote_path: &str,
+        local_path: &str,
+        transfer_id: &str,
+        progress_tx: Option<tokio::sync::mpsc::Sender<TransferProgress>>,
+        transfer_manager: Option<Arc<SftpTransferManager>>,
+    ) -> Result<u64, SftpError> {
+        let info = self.stat(remote_path).await?;
+        if info.file_type != FileType::File {
+            return Err(SftpError::InvalidPath(info.path));
+        }
         self.download_file_inner(
-            &DownloadFileJob {
-                remote_path: canonical_remote,
-                local_path: local_path.to_string(),
-                total_bytes: remote_info.size,
-            },
+            info,
+            local_path,
             transfer_id,
             &progress_tx,
             &transfer_manager,
         )
-        .await?;
-        Ok(remote_info.size)
-        }.await;
-        finish_sftp_file_transfer_audit(audit, &result);
+        .await
+    }
+
+    /// Keep the destination intact until the pipeline and its cancellation check finish.
+    pub async fn upload_staged_file(
+        &self,
+        local: &str,
+        remote: &str,
+        id: &str,
+        overwrite: bool,
+        progress: tokio::sync::mpsc::Sender<TransferProgress>,
+        manager: Arc<SftpTransferManager>,
+    ) -> Result<u64, SftpError> {
+        let metadata = tokio::fs::metadata(local).await?;
+        if !metadata.is_file() {
+            return Err(SftpError::InvalidPath(local.to_owned()));
+        }
+        let local_file = tokio::fs::File::open(local).await?;
+        let target = self.resolve_new_file_path(remote).await?;
+        let (parent, _) = target
+            .rsplit_once('/')
+            .ok_or_else(|| SftpError::InvalidPath(target.clone()))?;
+        let suffix = uuid::Uuid::new_v4().simple().to_string();
+        let stage = format!("{parent}/.oxideterm-{suffix}.tmp");
+        let file = self
+            .sftp
+            .open_with_flags_and_attributes(
+                &*stage,
+                OpenFlags::CREATE | OpenFlags::EXCLUDE | OpenFlags::WRITE,
+                FileAttributes {
+                    permissions: Some(0o600),
+                    ..FileAttributes::empty()
+                },
+            )
+            .await
+            .map_err(|error| self.map_sftp_error(error, &stage))?;
+        let result = async {
+            let manager = Some(manager);
+            let count = self
+                .upload_open_files(
+                    local_file,
+                    file,
+                    &UploadFileJob {
+                        local_path: local.to_owned(),
+                        remote_path: target.clone(),
+                        total_bytes: metadata.len(),
+                    },
+                    id,
+                    &Some(progress),
+                    &manager,
+                    None,
+                )
+                .await?;
+            let staged = self
+                .sftp
+                .symlink_metadata(&stage)
+                .await
+                .map_err(|error| self.map_sftp_error(error, &stage))?;
+            if !staged.is_regular() || staged.size != Some(count) || count != metadata.len() {
+                return Err(SftpError::WriteError("Incomplete upload".into()));
+            }
+            let existing = match self.sftp.symlink_metadata(&target).await {
+                Ok(attrs) if overwrite && attrs.is_regular() => Some(attrs),
+                Ok(_) => return Err(SftpError::Conflict(target.clone())),
+                Err(SftpErrorInner::Status(status))
+                    if !overwrite
+                        && status.status_code == russh_sftp::protocol::StatusCode::NoSuchFile =>
+                {
+                    None
+                }
+                Err(error) => return Err(self.map_sftp_error(error, &target)),
+            };
+            if let Some(attrs) = existing {
+                let change_owner = attrs.uid.zip(attrs.gid).is_some()
+                    && (attrs.uid, attrs.gid) != (staged.uid, staged.gid);
+                if change_owner {
+                    self.sftp
+                        .set_metadata(
+                            &*stage,
+                            FileAttributes {
+                                uid: attrs.uid,
+                                gid: attrs.gid,
+                                ..FileAttributes::empty()
+                            },
+                        )
+                        .await
+                        .map_err(|error| self.map_sftp_error(error, &stage))?;
+                }
+                // A successful chown can clear setuid/setgid on the staged file.
+                if attrs.permissions.is_some()
+                    && (change_owner || attrs.permissions != staged.permissions)
+                {
+                    self.sftp
+                        .set_metadata(
+                            &*stage,
+                            FileAttributes {
+                                permissions: attrs.permissions,
+                                ..FileAttributes::empty()
+                            },
+                        )
+                        .await
+                        .map_err(|error| self.map_sftp_error(error, &stage))?;
+                }
+                check_transfer_control(&manager, id).await?;
+                if self
+                    .sftp
+                    .posix_rename(&*stage, &*target)
+                    .await
+                    .map_err(|error| self.map_sftp_error(error, &target))?
+                {
+                    return Ok(count);
+                }
+                let backup = format!("{parent}/.oxideterm-{suffix}.bak");
+                self.replace_file_with_backup(&stage, &target, &backup)
+                    .await?;
+            } else {
+                check_transfer_control(&manager, id).await?;
+                self.sftp
+                    .rename(&stage, &target)
+                    .await
+                    .map_err(|error| self.map_sftp_error(error, &target))?;
+            }
+            Ok(count)
+        }
+        .await;
+        if result.is_err()
+            && let Err(error) = self.sftp.remove_file(&stage).await
+        {
+            warn!("Failed to remove staged SFTP file: {error}");
+        }
         result
+    }
+
+    async fn replace_file_with_backup(
+        &self,
+        stage: &str,
+        target: &str,
+        backup: &str,
+    ) -> Result<(), SftpError> {
+        self.sftp
+            .rename(target, backup)
+            .await
+            .map_err(|error| self.map_sftp_error(error, target))?;
+        // Check the entry actually moved: another client can replace the destination
+        // with a directory between the initial check and the v3 rename.
+        let install = async {
+            let original = self
+                .sftp
+                .symlink_metadata(backup)
+                .await
+                .map_err(|error| self.map_sftp_error(error, backup))?;
+            if !original.is_regular() {
+                return Err(SftpError::Conflict(target.to_owned()));
+            }
+            self.sftp
+                .rename(stage, target)
+                .await
+                .map_err(|error| self.map_sftp_error(error, target))
+        }
+        .await;
+        if let Err(error) = install {
+            if let Err(rollback) = self.sftp.rename(backup, target).await {
+                return Err(SftpError::WriteError(format!(
+                    "{error}; restore failed: {rollback}. Original remains at {backup}"
+                )));
+            }
+            return Err(error);
+        }
+        if let Err(error) = self.sftp.remove_file(backup).await {
+            warn!("Failed to remove SFTP backup after installing the upload: {error}");
+        }
+        Ok(())
     }
 
     pub async fn upload_file(
@@ -882,20 +1075,26 @@ impl SftpSession {
 
     async fn download_file_inner(
         &self,
-        job: &DownloadFileJob,
+        info: FileInfo,
+        local_path: &str,
         transfer_id: &str,
         progress_tx: &Option<tokio::sync::mpsc::Sender<TransferProgress>>,
         transfer_manager: &Option<Arc<SftpTransferManager>>,
-    ) -> Result<(), SftpError> {
+    ) -> Result<u64, SftpError> {
         self.download_file_inner_with_sftp(
             self.sftp.clone(),
-            job,
+            &DownloadFileJob {
+                remote_path: info.path,
+                local_path: local_path.to_string(),
+                total_bytes: info.size,
+            },
             transfer_id,
             progress_tx,
             transfer_manager,
             None,
         )
-        .await
+        .await?;
+        Ok(info.size)
     }
 
     async fn download_file_inner_with_sftp(
@@ -1053,7 +1252,7 @@ impl SftpSession {
         transfer_manager: &Option<Arc<SftpTransferManager>>,
         directory_rate_limiter: Option<&DirectoryRateLimiter>,
     ) -> Result<(), SftpError> {
-        let mut local_file = tokio::fs::File::open(&job.local_path)
+        let local_file = tokio::fs::File::open(&job.local_path)
             .await
             .map_err(SftpError::IoError)?;
         let remote_file = sftp
@@ -1063,6 +1262,29 @@ impl SftpSession {
             )
             .await
             .map_err(|error| self.map_sftp_error(error, &job.remote_path))?;
+        self.upload_open_files(
+            local_file,
+            remote_file,
+            job,
+            transfer_id,
+            progress_tx,
+            transfer_manager,
+            directory_rate_limiter,
+        )
+        .await
+        .map(|_| ())
+    }
+
+    async fn upload_open_files(
+        &self,
+        mut local_file: tokio::fs::File,
+        remote_file: russh_sftp::client::fs::File,
+        job: &UploadFileJob,
+        transfer_id: &str,
+        progress_tx: &Option<tokio::sync::mpsc::Sender<TransferProgress>>,
+        transfer_manager: &Option<Arc<SftpTransferManager>>,
+        directory_rate_limiter: Option<&DirectoryRateLimiter>,
+    ) -> Result<u64, SftpError> {
         let mut remote_writer = remote_file.into_pipelined_uploader(
             0,
             AdaptiveChunkSizer::MAX_CHUNK,
@@ -1146,7 +1368,7 @@ impl SftpSession {
             None,
         )
         .await;
-        Ok(())
+        Ok(transferred)
     }
 
     async fn download_file_resume_inner(

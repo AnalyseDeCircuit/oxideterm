@@ -193,14 +193,16 @@ impl ConnectionFormState {
             "escape" => (FormKeyAction::CloseForm, false),
             "enter" if form.jump_server_form.is_some() => (FormKeyAction::AddJumpServer, false),
             "enter" => (FormKeyAction::Submit, false),
+            "tab" if tunnel_fields.is_some_and(<[_]>::is_empty) => (FormKeyAction::Handled, false),
             "tab" => {
                 form.focused_field = if let Some(fields) = tunnel_fields {
-                    let current = fields
+                    let index = fields
                         .iter()
-                        .position(|field| *field == form.focused_field)
-                        .unwrap_or(0);
-                    fields[(current + if modifiers.shift { fields.len() - 1 } else { 1 })
-                        % fields.len()]
+                        .position(|field| form.field_focused && *field == form.focused_field);
+                    let step = if modifiers.shift { fields.len() - 1 } else { 1 };
+                    fields[index.map_or(if modifiers.shift { fields.len() - 1 } else { 0 }, |i| {
+                        (i + step) % fields.len()
+                    })]
                 } else if let Some(jump_form) = form.jump_server_form.as_ref() {
                     next_jump_connection_field(
                         form.focused_field,

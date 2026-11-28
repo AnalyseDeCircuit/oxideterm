@@ -5,6 +5,9 @@ use wasm_bindgen::{JsCast, closure::Closure};
 use web_sys::{Event, MessageEvent, WebSocket};
 use zeroize::Zeroizing;
 
+mod session;
+pub use session::GatewaySessionState;
+
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum GatewayRequest {
@@ -39,6 +42,8 @@ pub enum GatewayRequest {
 #[derive(Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum GatewayEvent {
+    #[serde(skip)]
+    DemoDirectoryChanged { session: u64 },
     Connected,
     Disconnected,
     Output {
@@ -55,6 +60,10 @@ pub enum GatewayEvent {
 
 pub trait WebTransport {
     fn send(&mut self, request: GatewayRequest) -> Result<(), ()>;
+    fn directory(&self, _session: u64) -> Option<&str> { None }
+    fn change_directory(&mut self, _session: u64, _path: &str) -> Result<(), &'static str> {
+        Err("sftp.toolbar.terminal_directory_unavailable")
+    }
 }
 
 pub type Events = UnboundedSender<GatewayEvent>;

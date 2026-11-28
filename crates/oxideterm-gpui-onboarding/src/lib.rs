@@ -15,6 +15,7 @@ mod widgets;
 pub use request::{OnboardingRequest, OnboardingThemeTarget};
 pub use types::{
     ONBOARDING_FONT_OPTIONS, ONBOARDING_TOTAL_STEPS, OnboardingCliSnapshot, OnboardingFrame,
-    OnboardingImportStatus, OnboardingShortcutItem, OnboardingStep, OnboardingViewBindings,
+    OnboardingImportStatus, OnboardingLaunchActions, OnboardingShortcutItem, OnboardingStep,
+    OnboardingViewBindings,
 };
 pub use view::OnboardingView;

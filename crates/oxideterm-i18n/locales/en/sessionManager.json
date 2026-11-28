@@ -1,5 +1,8 @@
 {
   "sessionManager": {
+    "browser_load_failed": "Couldn’t load saved connections. Changes will stay in this tab.",
+    "browser_not_saved": "Connection changes are only in this tab. Allow site storage and try saving again.",
+    "browser_conflict": "Another tab changed these connections. Your edits weren’t saved. Reload to see the saved versions.",
     "title": "Session Manager",
     "toolbar": {
       "search_placeholder": "Search connections...",

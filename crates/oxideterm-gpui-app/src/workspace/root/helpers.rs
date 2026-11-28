@@ -1,31 +1,7 @@
 use super::super::*;
 use oxideterm_atomic_file::durable_write_with_before_replace;
 
-pub(in crate::workspace) fn tab_background_key(kind: &TabKind) -> &'static str {
-    match kind {
-        TabKind::Workspace => "terminal",
-        TabKind::LocalTerminal => "local_terminal",
-        TabKind::SshTerminal => "terminal",
-        TabKind::MoshTerminal => "terminal",
-        TabKind::FileManager => "file_manager",
-        TabKind::Graphics => "graphics",
-        TabKind::Runtime => "runtime",
-        TabKind::ConnectionPool => "runtime",
-        TabKind::Topology => "topology",
-        TabKind::NotificationCenter => "notification_center",
-        TabKind::Sftp => "sftp",
-        TabKind::Ide => "ide",
-        TabKind::Forwards => "forwards",
-        TabKind::SessionManager => "session_manager",
-        TabKind::PluginManager => "plugin_manager",
-        TabKind::Plugin { .. } => "plugin",
-        TabKind::CloudSync => "cloud_sync",
-        TabKind::Knowledge => "knowledge",
-        TabKind::RemoteDesktop => "remote_desktop",
-        TabKind::Settings => "settings",
-        TabKind::Onboarding => "onboarding",
-    }
-}
+pub(in crate::workspace) use oxideterm_workspace::tab_background_key;
 
 /// Resolves the background routing key for rendered tab content. Terminal-like
 /// tabs without a live pane render the empty welcome canvas instead, so they
@@ -68,7 +44,7 @@ pub(in crate::workspace) fn background_scope_includes_content(
     enabled_tabs: &[String],
     background_key: &str,
 ) -> bool {
-    scope == BackgroundScope::Content && enabled_tabs.iter().any(|tab| tab == background_key)
+    scope.includes_content(enabled_tabs, background_key)
 }
 
 pub(in crate::workspace) fn background_scope_includes_window(scope: BackgroundScope) -> bool {

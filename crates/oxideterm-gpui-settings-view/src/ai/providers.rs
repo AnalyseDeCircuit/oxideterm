@@ -87,6 +87,7 @@ pub struct AiProviderBindings {
 
 pub struct AiProviderSettingsView {
     bindings: AiProviderBindings,
+    session_only: bool,
     tokens: ThemeTokens,
     i18n: I18n,
     enabled: bool,
@@ -107,9 +108,13 @@ pub(crate) struct ProviderLayoutChanged;
 impl EventEmitter<ProviderLayoutChanged> for AiProviderSettingsView {}
 
 impl AiProviderSettingsView {
+    pub(crate) fn for_session(bindings: AiProviderBindings) -> Self {
+        Self {session_only: true, ..Self::new(bindings)}
+    }
     pub fn new(bindings: AiProviderBindings) -> Self {
         Self {
             bindings,
+            session_only: false,
             tokens: oxideterm_theme::default_tokens(),
             i18n: I18n::default(),
             enabled: false,

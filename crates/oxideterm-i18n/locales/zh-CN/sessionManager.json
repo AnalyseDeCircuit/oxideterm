@@ -1,5 +1,8 @@
 {
   "sessionManager": {
+    "browser_load_failed": "无法读取已保存的连接。更改将只保留在当前标签页。",
+    "browser_not_saved": "连接更改只保留在当前标签页。请允许网站存储后重新保存。",
+    "browser_conflict": "其他标签页已修改连接，本次更改未保存。刷新可查看已保存的版本。",
     "title": "会话管理器",
     "toolbar": {
       "search_placeholder": "搜索连接...",

@@ -111,7 +111,7 @@ impl SftpWorkspaceEntity {
         self.remote_path = remembered_remote.clone();
         self.remote_path_input = remembered_remote;
         self.remote_path_completion.dismiss();
-        self.remote_path_completion_pending_selection = None;
+        self.completion_selection.clear();
         self.remote_files.clear();
         self.remote_selected.clear();
         self.remote_last_selected = None;
@@ -133,6 +133,13 @@ impl SftpWorkspaceEntity {
         primary_initial_path: Option<String>,
     ) {
         self.activate_view(surface_id, secondary_remote_id);
+        self.set_primary_endpoint(primary_remote_id, primary_initial_path);
+    }
+
+    /// Replacing the left endpoint must not restart or clear the right directory.
+    pub fn set_primary_endpoint(&mut self, primary_remote_id: SftpRemoteId, primary_initial_path: Option<String>) {
+        self.completion_selection.remove(&SftpPane::Local);
+        self.local_path_completion.dismiss();
         self.pair_primary_remote_id = Some(primary_remote_id.clone());
         let path = primary_initial_path
             .filter(|path| !path.trim().is_empty())
@@ -176,7 +183,7 @@ impl SftpWorkspaceEntity {
         self.remote_selected.clear();
         self.remote_last_selected = None;
         self.remote_path_completion.dismiss();
-        self.remote_path_completion_pending_selection = None;
+        self.completion_selection.clear();
         self.set_input_focus(None, cx);
         self.editing_local_path = false;
         self.editing_remote_path = false;
@@ -239,16 +246,7 @@ impl SftpWorkspaceEntity {
                 self.clear_sftp_tree_state();
                 self.remote_selected.clear();
                 self.remote_last_selected = None;
-                if self
-                    .remote_path_completion_pending_selection
-                    .as_ref()
-                    .is_some_and(|(parent_path, _)| parent_path == &cwd)
-                    && let Some((_, name)) = self.remote_path_completion_pending_selection.take()
-                    && self.remote_files.iter().any(|entry| entry.name == name)
-                {
-                    self.remote_selected.insert(name.clone());
-                    self.remote_last_selected = Some(name);
-                }
+                self.select_completed_path(SftpPane::Remote);
                 self.init_error = None;
                 SftpRemoteListOutcome {
                     bind_session: Some((remote_id.clone(), session_id, cwd)),
@@ -459,6 +457,7 @@ impl SftpWorkspaceEntity {
                         self.local_files = listing.files;
                         self.local_selected.clear();
                         self.local_last_selected = None;
+                        self.select_completed_path(SftpPane::Local);
                         self.init_error = None;
                     }
                     Err(error) => {
@@ -516,7 +515,7 @@ impl SftpWorkspaceEntity {
                 let should_refresh =
                     if let Some(item) = self.transfers.iter_mut().find(|item| item.id == id) {
                         let should_refresh = apply_tauri_transfer_completion(item, &result);
-                        batch_update = item.batch_id.map(|batch_id| (batch_id, item.state));
+                        batch_update = item.batch_id.take().map(|batch_id| (batch_id, item.state));
                         should_refresh
                     } else {
                         success
@@ -890,12 +889,21 @@ impl SftpWorkspaceEntity {
                         AssetFileKind::Image | AssetFileKind::Video | AssetFileKind::Office => {}
                     }
                 }
+                self.preview_image = match &content {
+                    PreviewContent::Image { data, mime_type } => {
+                        use base64::Engine;
+                        gpui::ImageFormat::from_mime_type(mime_type).and_then(|format|
+                            base64::engine::general_purpose::STANDARD.decode(data).ok().map(|bytes|Arc::new(gpui::Image::from_bytes(format,bytes))))
+                    }
+                    _ => None,
+                };
                 self.preview_asset_owner = asset_owner;
                 self.preview_content = Some(Arc::new(content));
                 self.preview_error = None;
             }
             Err(error) => {
                 self.preview_content = None;
+                self.preview_image = None;
                 self.preview_asset_owner = None;
                 self.preview_error = Some(error);
             }
@@ -954,7 +962,7 @@ impl SftpWorkspaceEntity {
         true
     }
 
-    pub(crate) fn apply_preview_saved(
+    pub fn apply_preview_saved(
         &mut self,
         generation: u64,
         path: String,

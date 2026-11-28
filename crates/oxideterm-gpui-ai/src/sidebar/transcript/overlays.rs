@@ -299,7 +299,14 @@ impl AiAssistantSidebarView {
                 &self.i18n.t("ai.chat.yesterday"),
             )
         );
-        let title_control = if is_renaming {
+        let title_control = if is_renaming && let Some(field) = &rename.field {
+            div()
+                .min_w_0()
+                .flex_1()
+                .h(px(20.0))
+                .child(field.clone())
+                .into_any_element()
+        } else if is_renaming {
             let set_anchor = self.bindings.text_anchor.clone();
             let input = text_input_with_viewport_and_content_align(
                 &self.tokens,

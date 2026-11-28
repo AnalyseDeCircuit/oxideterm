@@ -18,6 +18,7 @@
   "copy_address": "주소 복사",
   "copied": "복사됨!",
   "forwards": {
+    "preview_hint": "이 데모 세션의 규칙 초안입니다. 포트는 열리지 않습니다.",
     "quick": {
       "title": "빠른 포워딩",
       "jupyter": "Jupyter (8888)",

@@ -32,6 +32,7 @@
       }
     },
     "form": {
+      "demo_connection_hint": "Kết nối demo dùng máy chủ mô phỏng và không cần thông tin xác thực.",
       "title": "Kết nối mới",
       "subtitle": "Cấu hình một máy chủ SSH cho terminal, SFTP, chuyển tiếp cổng và chỉnh sửa tệp từ xa.",
       "basic_information": "Thông tin cơ bản",

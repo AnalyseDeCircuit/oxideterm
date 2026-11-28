@@ -84,6 +84,7 @@ pub struct MeasuredTabStrip {
     scrollbar_hovered: bool,
     scrollbar_grab: Option<f32>,
     content_width: f32,
+    painted_layout: Option<Rc<TabStripLayout>>,
 }
 
 impl MeasuredTabStrip {
@@ -98,8 +99,26 @@ impl MeasuredTabStrip {
             scrollbar_hovered: false,
             scrollbar_grab: None,
             content_width: 0.,
+            painted_layout: None,
             content_drop: None,
         }
+    }
+
+    pub fn live_tab_at(&self, position: Point<Pixels>) -> Option<TabId> {
+        let viewport = self.state.scroll_handle.bounds();
+        if !viewport.contains(&position) {
+            return None;
+        }
+        self.painted_layout.as_ref()?.live_tab_at(f32::from(
+            position.x - viewport.origin.x - self.state.scroll_handle.offset().x,
+        ))
+    }
+
+    pub fn displayed_tab_width(&self, id: TabId) -> Option<f32> {
+        self.painted_layout
+            .as_ref()?
+            .bounds(id)
+            .map(|b| b.end - b.start)
     }
 
     pub fn with_content_drop(
@@ -356,6 +375,7 @@ impl Render for MeasuredTabStrip {
         };
         let layout = Rc::new(frame.layout);
         self.content_width = layout.content_width();
+        self.painted_layout = Some(layout.clone());
         self.state.advance_edge_scroll(&layout, window, cx);
         let tokens = frame.tokens;
         let theme = tokens.ui;

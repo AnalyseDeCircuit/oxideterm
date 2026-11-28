@@ -8,12 +8,17 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+oxideterm-ide-core = { path = "../oxideterm-ide-core" }
+oxideterm-preview = { path = "../oxideterm-preview" }
+encoding_rs.workspace = true
+zeroize.workspace = true
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
 anyhow.workspace = true
 memchr.workspace = true
 uuid.workspace = true
 oxideterm-audit = { path = "../oxideterm-audit" }
 oxideterm-backend-classification = { path = "../oxideterm-backend-classification" }
-oxideterm-ide-core = { path = "../oxideterm-ide-core" }
 oxideterm-sftp = { path = "../oxideterm-sftp" }
 oxideterm-terminal = { path = "../oxideterm-terminal" }
 oxideterm-ssh = { path = "../oxideterm-ssh" }
@@ -29,11 +34,8 @@ tokio.workspace = true
 tracing.workspace = true
 zstd = "0.13"
 
-oxideterm-preview = { path = "../oxideterm-preview" }
-encoding_rs.workspace = true
-zeroize.workspace = true
+tempfile = "3.23"
 
 [dev-dependencies]
-tempfile = "3.23"
 tokio = { workspace = true, features = ["test-util"] }
 rand10.workspace = true

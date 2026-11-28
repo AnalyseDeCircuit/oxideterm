@@ -1,5 +1,8 @@
 {
   "sessionManager": {
+    "browser_load_failed": "無法讀取已儲存的連線。變更只會保留在目前分頁。",
+    "browser_not_saved": "連線變更只保留在目前分頁。請允許網站儲存資料後再儲存。",
+    "browser_conflict": "其他分頁已修改連線，這次變更未儲存。重新整理可查看已儲存的版本。",
     "title": "工作階段管理器",
     "toolbar": {
       "search_placeholder": "搜尋連線...",

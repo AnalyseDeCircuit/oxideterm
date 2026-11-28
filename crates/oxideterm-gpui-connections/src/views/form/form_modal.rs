@@ -156,7 +156,17 @@ impl ConnectionFormModalSnapshot {
                 || !form.pre_connect_command.trim().is_empty()
                 || !form.post_connect_command.trim().is_empty(),
             #[cfg(target_family = "wasm")]
-            ble_can_open: false,
+            ble_can_open: form.ble.web_device_id.is_some()
+                && form.ble.selected_service_uuid.is_some_and(|uuid| {
+                    if form.ble.web_services.is_empty() {
+                        // The chooser verifies the saved device identity on the next open.
+                        return form.ble.profile_id.is_some();
+                    }
+                    form.ble.web_services.iter().any(|service| {
+                        service.uuid == uuid
+                            && (service.has_notify || service.has_write || service.has_write_without_response)
+                    })
+                }),
             #[cfg(not(target_family = "wasm"))]
             ble_can_open: form
                 .ble
@@ -326,6 +336,7 @@ impl ConnectionFormView {
             && !edit_properties_mode
             && !saved_profile_edit_mode
             && !drill_down_mode;
+        let demo_ssh = ssh_submission_mode && self.environment.browser.is_some();
         let shows_icon_field = connection_icon_field_visible(mode, drill_down_mode, form.transport);
         let title = if local_terminal_mode {
             self.i18n
@@ -453,9 +464,6 @@ impl ConnectionFormView {
         } else if wsl_graphics_mode {
             true
         } else if ble_mode {
-            // The primary action is enabled only once a service with both
-            // notify and write characteristics is selected in the details
-            // table; that pairing is the minimum for a read/write channel.
             form.ble_can_open
         } else if container_mode {
             form.container_can_open
@@ -980,7 +988,10 @@ impl ConnectionFormView {
                                         ))
                                     },
                                 )
-                                .when(show_general_page, |content| content.child({
+                                .when(demo_ssh && show_general_page, |content| content.child(
+                                    self.render_connection_hint(self.i18n.t("ssh.form.demo_connection_hint"))
+                                ))
+                                .when(show_general_page && !demo_ssh, |content| content.child({
                                     let selector = self.render_auth_selector(
                                         form.auth_tab,
                                         if prompt_mode {
@@ -1616,7 +1627,7 @@ impl ConnectionFormView {
                                             .flex()
                                             .flex_col()
                                             .gap(px(2.0))
-                                            .child(self.form_hairline())
+                                            .when(!demo_ssh, |row| row.child(self.form_hairline())
                                             .child(self.render_connection_disclosure_row(
                                                 "ssh-summary-Route",
                                                 LucideIcon::Network,
@@ -1625,7 +1636,7 @@ impl ConnectionFormView {
                                                 route_highlighted,
                                                 ConnectionFormDrawer::Route,
                                                 cx,
-                                            ))
+                                            )))
                                             .child(self.form_hairline())
                                             .child(self.render_connection_disclosure_row(
                                                 "ssh-summary-SshSecurity",
@@ -1636,7 +1647,7 @@ impl ConnectionFormView {
                                                 ConnectionFormDrawer::SshSecurity,
                                                 cx,
                                             ))
-                                            .child(self.form_hairline())
+                                            .when(!demo_ssh, |row| row.child(self.form_hairline())
                                             .child(self.render_connection_disclosure_row(
                                                 "ssh-summary-Terminal",
                                                 LucideIcon::Terminal,
@@ -1645,7 +1656,7 @@ impl ConnectionFormView {
                                                 form.terminal_customized,
                                                 ConnectionFormDrawer::Terminal,
                                                 cx,
-                                            ))
+                                            )))
                                             .child(self.form_hairline())
                                             .child(self.render_connection_disclosure_row(
                                                 "ssh-summary-Notes",
@@ -1907,7 +1918,7 @@ impl ConnectionFormView {
                         ),
                 )
                 .child({
-                    let show_test_button = !form.discovery && !reauthentication_mode
+                    let show_test_button = self.environment.browser.is_none() && !form.discovery && !reauthentication_mode
                         && !edit_properties_mode
                         && self.connection_form_state(cx).saved_connection_prompt_action.is_none()
                         && !drill_down_mode

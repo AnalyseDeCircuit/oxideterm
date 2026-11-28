@@ -32,6 +32,84 @@ pub enum TerminalScrollAction {
     Bottom,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TerminalShortcut {
+    Copy,
+    Paste,
+    Terminate,
+    Kill,
+    WordBackward,
+    WordForward,
+    SuggestPrevious,
+    SuggestNext,
+    PageUp,
+    PageDown,
+    LineUp,
+    LineDown,
+    Top,
+    Bottom,
+}
+
+pub struct TerminalKeybindings {
+    pub bindings: Vec<(gpui::KeyBinding, TerminalShortcut)>,
+    pub normalize: fn(&gpui::Keystroke) -> Option<gpui::Keystroke>,
+}
+impl gpui::Global for TerminalKeybindings {}
+impl TerminalKeybindings {
+    pub fn resolve(&self, key: &gpui::Keystroke) -> Option<TerminalShortcut> {
+        let key = (self.normalize)(key)?;
+        self.bindings
+            .iter()
+            .find(|(binding, _)| {
+                binding
+                    .keystrokes()
+                    .first()
+                    .is_some_and(|binding| key.should_match(binding))
+            })
+            .map(|(_, action)| *action)
+    }
+}
+
+impl TerminalShortcut {
+    pub const BINDINGS: &'static [(&'static str, Self)] = &[
+        ("terminal.copy", Self::Copy),
+        ("terminal.paste", Self::Paste),
+        ("terminal.copyAlternate", Self::Copy),
+        ("terminal.pasteAlternate", Self::Paste),
+        ("terminal.terminateTask", Self::Terminate),
+        ("terminal.killTask", Self::Kill),
+        ("terminal.wordBackward", Self::WordBackward),
+        ("terminal.wordForward", Self::WordForward),
+        (
+            "terminal.suggestPrevious",
+            Self::SuggestPrevious,
+        ),
+        ("terminal.suggestNext", Self::SuggestNext),
+        ("terminal.scrollPageUp", Self::PageUp),
+        ("terminal.scrollPageDown", Self::PageDown),
+        ("terminal.scrollLineUp", Self::LineUp),
+        ("terminal.scrollLineDown", Self::LineDown),
+        ("terminal.scrollTop", Self::Top),
+        ("terminal.scrollBottom", Self::Bottom),
+    ];
+
+    pub fn scroll_action(self) -> Option<TerminalScrollAction> {
+        Some(match self {
+            Self::LineUp => TerminalScrollAction::LineUp,
+            Self::LineDown => TerminalScrollAction::LineDown,
+            Self::PageUp => TerminalScrollAction::PageUp,
+            Self::PageDown => TerminalScrollAction::PageDown,
+            Self::Top => TerminalScrollAction::Top,
+            Self::Bottom => TerminalScrollAction::Bottom,
+            _ => return None,
+        })
+    }
+}
+
+pub fn paste_needs_confirmation(text: &str) -> bool {
+    text.contains(['\r', '\n'])
+}
+
 pub fn oxideterm_terminal_scroll_action(
     keystroke: &gpui::Keystroke,
 ) -> Option<TerminalScrollAction> {

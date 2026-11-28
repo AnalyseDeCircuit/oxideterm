@@ -1,6 +1,8 @@
 // Copyright (C) 2026 OxideTerm contributors.
 // SPDX-License-Identifier: GPL-3.0-only
 
+pub mod command_sender;
+
 use std::{borrow::Cow, fmt};
 
 use encoding_rs::{

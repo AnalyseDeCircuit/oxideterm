@@ -35,6 +35,7 @@ Move inward only when evidence says the outer layer is correct. For example, an 
 | --- | --- |
 | Understand subsystem ownership and data flow | [Architecture](../user-guide/en/architecture.md) |
 | Find the correct crate or entry point | [Crate map](crate-map.md) |
+| Compare browser Demo and WSS behavior with desktop, including native-only actions | [Desktop–WASM parity audit (中文)](wasm-desktop-parity.zh-Hans.md) · [Page, settings and shortcut inventory](wasm-desktop-parity-inventory.zh-Hans.md) |
 | Build a product page with existing controls, focus, IME, and overlays | [GPUI product UI](gpui-product-ui.md) |
 | Change tab scopes, shared search, or motion | [Product UI contracts](gpui-product-ui.md) and [workspace behavior](../user-guide/en/workspace.md) |
 | Build and run on desktop or in a browser | [Local development](local-development.md) · [Browser setup](local-development.md#browser-wasm) |

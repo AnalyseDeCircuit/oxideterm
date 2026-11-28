@@ -732,13 +732,7 @@ impl<T> Term<T> {
 
         self.event_proxy.send_event(title_event);
 
-        if self.mode.contains(TermMode::ALT_SCREEN) {
-            self.inactive_grid.update_history(self.config.scrolling_history);
-        } else {
-            self.grid.update_history(self.config.scrolling_history);
-        }
-        let primary = if self.mode.contains(TermMode::ALT_SCREEN) { &self.inactive_grid } else { &self.grid };
-        self.record_graphics_change(graphics::GraphicsGridChange::TrimHistory { topmost: primary.topmost_line().0 });
+        self.resize_primary_history();
 
         if self.config.kitty_keyboard != old_config.kitty_keyboard {
             self.keyboard_mode_stack = Vec::new();
@@ -748,6 +742,27 @@ impl<T> Term<T> {
 
         // Damage everything on config updates.
         self.mark_fully_damaged();
+    }
+
+    /// Resize the primary history without replaying title or keyboard configuration changes.
+    pub fn set_scrollback_limit(&mut self, lines: usize) -> bool {
+        if self.config.scrolling_history == lines {
+            return false;
+        }
+        self.config.scrolling_history = lines;
+        self.resize_primary_history();
+        self.mark_fully_damaged();
+        true
+    }
+
+    fn resize_primary_history(&mut self) {
+        if self.mode.contains(TermMode::ALT_SCREEN) {
+            self.inactive_grid.update_history(self.config.scrolling_history);
+        } else {
+            self.grid.update_history(self.config.scrolling_history);
+        }
+        let primary = if self.mode.contains(TermMode::ALT_SCREEN) { &self.inactive_grid } else { &self.grid };
+        self.record_graphics_change(graphics::GraphicsGridChange::TrimHistory { topmost: primary.topmost_line().0 });
     }
 
     /// Convert the active selection to a String.

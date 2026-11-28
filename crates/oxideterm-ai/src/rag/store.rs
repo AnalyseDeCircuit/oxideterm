@@ -520,20 +520,8 @@ impl RagStore {
         for entry in t.iter()? {
             let (_, v) = entry?;
             let col: DocCollection = rmp_serde::from_slice(v.value())?;
-            match scope_filter {
-                Some("global") => {
-                    if col.scope == DocScope::Global {
-                        result.push(col);
-                    }
-                }
-                Some(conn_id) => {
-                    if col.scope == DocScope::Global
-                        || col.scope == DocScope::Connection(conn_id.to_string())
-                    {
-                        result.push(col);
-                    }
-                }
-                None => result.push(col),
+            if col.scope.visible_to(scope_filter) {
+                result.push(col);
             }
         }
         Ok(result)

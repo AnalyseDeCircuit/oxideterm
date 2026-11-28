@@ -86,6 +86,120 @@ fn mount_form(
 }
 
 #[gpui::test]
+fn browser_studio_switches_between_available_protocols(cx: &mut gpui::TestAppContext) {
+    use crate::views::{
+        BrowserConnectionCapabilities, PortableConnectionFormEnvironment,
+        PortableConnectionFormView,
+    };
+
+    for bluetooth in [false, true] {
+        let (view, window) = cx.add_window_view(|_, cx| {
+            let mut tokens = oxideterm_theme::default_tokens();
+            tokens.apply_motion(oxideterm_theme::UiMotionProfile::Off);
+            let mut env = PortableConnectionFormEnvironment::new(ConnectionsEnvironment {
+                tokens,
+                i18n: I18n::new(Locale::En),
+            });
+            env.form.browser = Some(BrowserConnectionCapabilities {
+                simulated_profiles: true,
+                bluetooth,
+            });
+            PortableConnectionFormView::new(NewConnectionTransport::Ssh, env, cx)
+        });
+        window.simulate_resize(gpui::size(px(1000.0), px(750.0)));
+        window.update(|w, app| w.draw(app).clear(app));
+        assert_eq!(
+            window
+                .debug_bounds("new-connection-transport-Ble")
+                .is_some(),
+            bluetooth,
+        );
+        assert!(
+            window
+                .debug_bounds("new-connection-transport-Ftp")
+                .is_none()
+        );
+        assert!(window.debug_bounds("ssh-summary-Route").is_none());
+        assert!(window.debug_bounds("ssh-summary-Terminal").is_none());
+        assert!(window.debug_bounds("ssh-summary-Notes").is_some());
+        let options = window.debug_bounds("ssh-summary-SshSecurity").unwrap();
+        window.simulate_click(options.center(), gpui::Modifiers::default());
+        window.simulate_keystrokes("tab");
+        view.read_with(window, |v, app| assert!(!v.form(app).unwrap().field_focused));
+        window.simulate_keystrokes("escape");
+        let sftp = window
+            .debug_bounds("new-connection-transport-StandaloneSftp")
+            .unwrap();
+        window.simulate_click(sftp.center(), gpui::Modifiers::default());
+        window.update(|w, app| w.draw(app).clear(app));
+        assert!(window.debug_bounds("standalone-sftp-summary-Route").is_none());
+        view.read_with(window, |view, app| {
+            assert_eq!(
+                view.form(app).unwrap().transport,
+                NewConnectionTransport::StandaloneSftp
+            );
+        });
+        assert!(
+            window
+                .debug_bounds("new-connection-transport-Ssh")
+                .is_some()
+        );
+        assert!(
+            window
+                .debug_bounds("new-connection-transport-Tunnel")
+                .is_none()
+        );
+    }
+}
+
+#[gpui::test]
+fn portable_catalog_duplicate_submits_a_new_ssh_profile_without_connecting(
+    cx: &mut gpui::TestAppContext,
+) {
+    use crate::views::portable_form::PortableProtocolDraft;
+    use crate::views::{
+        PortableConnectionFormEnvironment, PortableConnectionFormEvent, PortableConnectionFormView,
+    };
+    use gpui::Focusable;
+    use std::cell::RefCell;
+
+    let (form, window) = cx.add_window_view(|_, cx| {
+        let mut draft = NewConnectionForm::for_transport(NewConnectionTransport::Ssh);
+        draft.name = "Server Copy".into();
+        draft.host = "server.test".into();
+        draft.username = "ops".into();
+        let env = PortableConnectionFormEnvironment::new(ConnectionsEnvironment {
+            tokens: oxideterm_theme::default_tokens(),
+            i18n: I18n::new(Locale::En),
+        });
+        PortableConnectionFormView::duplicate_ssh("original".into(), draft, env, cx)
+    });
+    let submitted = Rc::new(RefCell::new(Vec::new()));
+    let _subscription = window.update(|w, app| {
+        w.focus(&form.read(app).focus_handle(app), app);
+        let submitted = submitted.clone();
+        app.subscribe(&form, move |_, event: &PortableConnectionFormEvent, _| {
+            let PortableConnectionFormEvent::Save(draft) = event else {
+                panic!("expected save only")
+            };
+            let PortableProtocolDraft::Ssh(endpoint, _) = &draft.protocol else {
+                panic!("expected SSH")
+            };
+            submitted.borrow_mut().push((
+                draft.profile_id.clone(),
+                draft.name.clone(),
+                endpoint.host.clone(),
+            ));
+        })
+    });
+    window.simulate_keystrokes("enter");
+    assert_eq!(
+        *submitted.borrow(),
+        [(None, "Server Copy".into(), "server.test".into())]
+    );
+}
+
+#[gpui::test]
 fn standalone_sftp_keeps_transport_switcher_and_scrolls_vertically(cx: &mut gpui::TestAppContext) {
     let (view, cx) = cx.add_window_view(|_, cx| {
         mount_form(cx, |form| {

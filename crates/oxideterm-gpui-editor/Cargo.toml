@@ -14,6 +14,7 @@ default = []
 gpui.workspace = true
 oxideterm-gpui-ui = { path = "../oxideterm-gpui-ui" }
 tracing.workspace = true
+zeroize.workspace = true
 serde.workspace = true
 regex.workspace = true
 oxideterm-editor-core = { path = "../oxideterm-editor-core" }

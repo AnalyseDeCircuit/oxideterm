@@ -50,6 +50,10 @@ mod providers;
 mod rag;
 #[path = "rag/model.rs"]
 mod rag_model;
+#[path = "rag/chunker.rs"]
+mod rag_chunker;
+#[path = "rag/keyword.rs"]
+pub mod rag_keyword;
 mod reasoning;
 mod references;
 mod responses_state;

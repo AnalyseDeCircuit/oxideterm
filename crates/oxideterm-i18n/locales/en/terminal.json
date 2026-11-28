@@ -1,5 +1,6 @@
 {
   "terminal": {
+    "demo_shell_welcome": "Browser demo shell. Type help to list commands.",
     "ssh_latency": {
       "measured": "SSH round-trip time: {{millis}} ms, including network and server response. Updated {{seconds}} s ago.",
       "pending": "Measuring SSH latency…",
@@ -192,6 +193,7 @@
     "typeSsh": "SSH",
     "paste": {
       "edit_title": "Edit before pasting",
+      "clipboard_read_failed": "Could not read the clipboard. Paste using the keyboard shortcut instead.",
       "send_by_line": "Send line by line",
       "stop_sending": "Stop sending",
       "interrupted": "Complete lines submitted: {{sent}}. Stopped at line {{line}}.",
@@ -643,7 +645,7 @@
       "sftp": "SFTP",
       "convert": "Convert to IDE",
       "return": "Return to terminal",
-      "confirm": "Confirm this terminal is at a shell prompt with no unfinished input. Choose commands or an agent to use its current user, container and directory. Terminal input pauses until you return from the IDE.",
+      "confirm": "Only Linux shells are supported. Continue at an empty shell prompt.",
       "failed": "Could not start file access. Check shell readiness and environment requirements. Reconnect if the terminal could not be restored.",
       "preparing": "Starting IDE file service; terminal input is paused…",
       "ssh": "SSH",
@@ -658,6 +660,7 @@
       "connection_failed": "BLE connection failed: {error}",
       "runtime_init_failed": "failed to initialize BLE runtime",
       "adapter_index_out_of_range": "bluetooth adapter index {n} is out of range",
+      "write_failed": "Bluetooth write failed. Reconnect the device to send more data.",
       "service_not_found": "service {uuid} not found",
       "no_notify_write_pair": "selected service has no notify+write characteristic pair"
     }

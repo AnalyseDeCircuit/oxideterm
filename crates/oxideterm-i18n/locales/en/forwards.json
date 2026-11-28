@@ -18,6 +18,7 @@
   "copy_address": "Copy address",
   "copied": "Copied!",
   "forwards": {
+    "preview_hint": "Rule drafts for this demo session. No ports are opened.",
     "quick": {
       "title": "Quick Forwards",
       "jupyter": "Jupyter (8888)",

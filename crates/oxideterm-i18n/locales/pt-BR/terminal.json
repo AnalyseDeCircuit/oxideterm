@@ -1,5 +1,6 @@
 {
   "terminal": {
+    "demo_shell_welcome": "Terminal de demonstração no navegador. Digite help para listar os comandos.",
     "ssh_latency": {
       "measured": "Tempo de ida e volta SSH: {{millis}} ms, incluindo rede e resposta do servidor. Atualizado há {{seconds}} s.",
       "pending": "Medindo latência SSH…",
@@ -101,6 +102,7 @@
     },
     "paste": {
       "edit_title": "Editar antes de colar",
+      "clipboard_read_failed": "Não foi possível ler a área de transferência. Use o atalho de teclado para colar.",
       "send_by_line": "Enviar linha por linha",
       "stop_sending": "Parar envio",
       "interrupted": "{{sent}} linhas enviadas por completo. Envio interrompido na linha {{line}}.",
@@ -643,7 +645,7 @@
       "sftp": "SFTP",
       "convert": "Converter em IDE",
       "return": "Voltar ao terminal",
-      "confirm": "Confirme que o terminal esteja no prompt sem entrada pendente. Comandos ou agente usam o usuário, contêiner e diretório atuais. A entrada fica pausada até voltar do IDE.",
+      "confirm": "Somente shells Linux são compatíveis. Continue com a linha de comando vazia.",
       "failed": "Não foi possível iniciar o acesso aos arquivos. Verifique o shell e os requisitos do ambiente. Reconecte o terminal se ele não foi restaurado.",
       "preparing": "Iniciando o serviço de arquivos do IDE; a entrada do terminal está pausada…",
       "ssh": "SSH",
@@ -658,6 +660,7 @@
       "connection_failed": "Falha na conexão BLE: {error}",
       "runtime_init_failed": "Falha ao inicializar o runtime BLE",
       "adapter_index_out_of_range": "O índice do adaptador Bluetooth {n} está fora do intervalo",
+      "write_failed": "Falha na gravação por Bluetooth. Reconecte o dispositivo para enviar mais dados.",
       "service_not_found": "Serviço {uuid} não encontrado",
       "no_notify_write_pair": "O serviço selecionado não tem um par de características notify+write"
     }

@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use url::Host;
 use zeroize::Zeroizing;
 
+pub mod config;
 mod local;
 pub use local::{LocalTerminalLaunch, MAX_LOCAL_LAUNCH_BYTES};
 
@@ -564,6 +565,27 @@ pub fn parse_explicit_user_host_port_target(target: &str) -> Option<(String, Str
     Some((username.to_string(), host, port))
 }
 
+/// Parses a pasted SSH URI or an explicit user@host target without mixing credentials into its display name.
+pub fn parse_quick_ssh_launch(target: &str) -> Option<TemporarySshLaunch> {
+    let launch = if target.starts_with("ssh://") {
+        parse_connection_uri(target, None).ok()?
+    } else if target
+        .split_once('@')
+        .is_some_and(|(user_info, _)| user_info.contains(':'))
+    {
+        // Accept pasted user:password@host without putting the password in the username.
+        let uri = Zeroizing::new(format!("ssh://{target}"));
+        parse_connection_uri(&uri, None).ok()?
+    } else {
+        let (username, host, port) = parse_explicit_user_host_port_target(target)?;
+        return Some(TemporarySshLaunch { username, host, port, password: None });
+    };
+    match launch {
+        NativeConnectionLaunch::Ssh(ssh) => Some(ssh),
+        _ => None,
+    }
+}
+
 /// Formats a parsed target while preserving an unambiguous IPv6 authority.
 pub fn format_user_host_port_target(username: &str, host: &str, port: u16) -> String {
     let host = if host.contains(':') && !host.starts_with('[') {
@@ -660,6 +682,17 @@ mod tests {
             format_user_host_port_target("root", "::1", 2200),
             "root@[::1]:2200"
         );
+        for target in ["ssh://root:pass%40word@[::1]:2200", "root:pass%40word@[::1]:2200"] {
+            let launch = parse_quick_ssh_launch(target).unwrap();
+            assert_eq!(
+                format_user_host_port_target(&launch.username, &launch.host, launch.port),
+                "root@[::1]:2200"
+            );
+            assert_eq!(
+                launch.password.as_ref().map(|s| s.as_str()),
+                Some("pass@word")
+            );
+        }
     }
 
     #[test]

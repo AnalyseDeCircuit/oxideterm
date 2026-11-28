@@ -98,7 +98,7 @@ impl ConnectionFormView {
                                     .font_weight(gpui::FontWeight::MEDIUM)
                                     .text_color(rgb(theme.text))
                                     .child(device_name.unwrap_or_else(|| {
-                                        self.i18n.t("modals.new_connection.ble_no_devices")
+                                        self.i18n.t("modals.new_connection.ble_web_no_selection")
                                     })),
                             ),
                     )

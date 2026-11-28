@@ -21,6 +21,20 @@ pub enum EditorShortcut {
     Find,
 }
 
+impl EditorShortcut {
+    pub const BINDINGS: &'static [(&'static str, Self)] = &[
+        ("editor.save", Self::Save),
+        ("editor.copy", Self::Copy),
+        ("editor.cut", Self::Cut),
+        ("editor.paste", Self::Paste),
+        ("editor.selectAll", Self::SelectAll),
+        ("editor.undo", Self::Undo),
+        ("editor.redo", Self::Redo),
+        ("editor.addNextMatch", Self::AddNextMatch),
+        ("editor.find", Self::Find),
+    ];
+}
+
 pub struct EditorKeybindings {
     pub bindings: Vec<(gpui::KeyBinding, EditorShortcut)>,
     pub normalize: fn(&gpui::Keystroke) -> Option<gpui::Keystroke>,
@@ -114,15 +128,10 @@ impl TextEditorView {
         if self.read_only {
             return self.copy_selection_to_clipboard(cx);
         }
-        let ranges = self
-            .all_selections()
-            .into_iter()
-            .filter_map(|selection| (!selection.is_caret()).then_some(selection.range()))
-            .collect::<Vec<_>>();
-        if ranges.is_empty() || !self.copy_selection_to_clipboard(cx) {
+        if !self.copy_selection_to_clipboard(cx) {
             return false;
         }
-        self.replace_ranges_with_caret(ranges, "", cx);
+        self.replace_selection_ranges(self.cursor.selection().range(), "", cx);
         true
     }
 
@@ -215,13 +224,60 @@ impl TextEditorView {
             return;
         }
 
+        let mac = cx.platform_info().is_mac();
+        let word_modifier = if mac {
+            modifiers.alt && !modifiers.platform
+        } else {
+            modifiers.control && !modifiers.alt
+        };
+        let forward = matches!(key, "right" | "arrowright" | "delete");
+        if word_modifier
+            && matches!(
+                key,
+                "left" | "arrowleft" | "right" | "arrowright" | "backspace" | "delete"
+            )
+        {
+            if matches!(key, "backspace" | "delete") {
+                if !self.read_only {
+                    let ranges = self
+                        .selections_primary_first()
+                        .map(|selection| {
+                            if selection.is_caret() {
+                                super::TextRange::new(
+                                    selection.head,
+                                    self.buffer.word_boundary(selection.head, forward),
+                                )
+                            } else {
+                                selection.range()
+                            }
+                        })
+                        .collect();
+                    self.replace_ranges_with_caret(ranges, "", cx);
+                }
+            } else {
+                self.move_horizontal(forward, true, modifiers.shift);
+                cx.notify();
+            }
+            cx.stop_propagation();
+            return;
+        }
+        if mac && modifiers.platform && matches!(key, "left" | "right" | "arrowleft" | "arrowright")
+        {
+            self.move_to_line_boundary(forward, modifiers.shift, cx);
+            cx.stop_propagation();
+            return;
+        }
         match key {
+            "escape" if !self.secondary_cursors.is_empty() => {
+                self.clear_secondary_cursors(cx);
+                cx.stop_propagation();
+            }
             "left" | "arrowleft" => {
-                self.cursor.move_left(&self.buffer, modifiers.shift);
+                self.move_horizontal(false, false, modifiers.shift);
                 cx.notify();
             }
             "right" | "arrowright" => {
-                self.cursor.move_right(&self.buffer, modifiers.shift);
+                self.move_horizontal(true, false, modifiers.shift);
                 cx.notify();
             }
             "up" | "arrowup" => self.move_vertically(-1, modifiers.shift, cx),
@@ -236,92 +292,103 @@ impl TextEditorView {
             "end" => self.move_to_line_boundary(true, modifiers.shift, cx),
             "backspace" => self.delete_backward(cx),
             "delete" => self.delete_forward(cx),
-            "enter" => self.insert_text(self.indented_newline(), cx),
-            "tab" => self.insert_text(self.settings.indentation_unit(), cx),
+            "enter" if !self.read_only && self.marked_text.is_none() => {
+                let ranges = self.selections_primary_first().map(|s| s.range()).collect();
+                self.replace_cursor_ranges(ranges, Self::indented_newline, cx);
+                window.prevent_default();
+                cx.stop_propagation();
+            }
+            "tab" if !self.read_only && self.marked_text.is_none() => {
+                self.insert_text(self.settings.indentation_unit(), cx);
+                window.prevent_default();
+                cx.stop_propagation();
+            }
             _ => {}
         }
     }
 
     fn selected_text(&self) -> Option<String> {
         let parts = self
-            .all_selections()
+            .active_selections()
             .into_iter()
-            .filter_map(|selection| {
-                (!selection.is_caret())
-                    .then(|| self.buffer.slice(selection.range()).ok())
-                    .flatten()
-            })
+            .filter_map(|selection| self.buffer.slice(selection.range()).ok())
             .collect::<Vec<_>>();
         (!parts.is_empty()).then(|| parts.join("\n"))
     }
 
-    fn move_to_line_boundary(&mut self, to_end: bool, extend: bool, cx: &mut Context<Self>) {
-        let Ok(position) = self.buffer.offset_to_line_col(self.cursor.selection().head) else {
-            return;
+    fn move_horizontal(&mut self, forward: bool, by_word: bool, extend: bool) {
+        let move_cursor = |cursor: &mut super::Cursor| {
+            if by_word {
+                cursor.move_to(
+                    self.buffer.word_boundary(cursor.selection().head, forward),
+                    extend,
+                );
+            } else if forward {
+                cursor.move_right(&self.buffer, extend);
+            } else {
+                cursor.move_left(&self.buffer, extend);
+            }
         };
-        let offset = if to_end {
-            self.buffer.line_end_offset(position.line)
-        } else {
-            self.buffer.line_start_offset(position.line)
-        };
-        if let Some(offset) = offset {
-            self.cursor.move_to(offset, extend);
-            self.marked_text = None;
-            cx.notify();
+        for cursor in std::iter::once(&mut self.cursor).chain(&mut self.secondary_cursors) {
+            move_cursor(cursor);
         }
     }
 
-    fn move_vertically(&mut self, row_delta: isize, extend: bool, cx: &mut Context<Self>) {
-        let Some((current_index, _current_row, current_screen_column)) =
-            self.current_display_row_and_screen_column()
-        else {
-            return;
+    fn move_to_line_boundary(&mut self, to_end: bool, extend: bool, cx: &mut Context<Self>) {
+        let boundary = |head| {
+            let line = self.buffer.offset_to_line_col(head).ok()?.line;
+            if to_end {
+                self.buffer.line_end_offset(line)
+            } else {
+                self.buffer.line_start_offset(line)
+            }
         };
-        let rows = self.display_rows();
-        let max_index = rows.len().saturating_sub(1);
-        let target_index = current_index
-            .saturating_add_signed(row_delta)
-            .min(max_index);
-        let Some(target_row) = rows.get(target_index) else {
-            return;
-        };
-        let preferred_column = self.cursor.preferred_column_or(current_screen_column);
-        let target_visual_column = target_row.start_col.saturating_add(preferred_column);
-        let Some(offset) =
-            self.offset_for_line_visual_column(target_row.line, target_visual_column)
-        else {
-            return;
-        };
-        self.cursor
-            .move_to_with_preferred_column(offset, extend, preferred_column);
-        self.secondary_selections.clear();
+        for cursor in std::iter::once(&mut self.cursor).chain(&mut self.secondary_cursors) {
+            if let Some(offset) = boundary(cursor.selection().head) {
+                cursor.move_to(offset, extend);
+            }
+        }
         self.marked_text = None;
-        self.reveal_display_row(target_index);
         cx.notify();
     }
 
-    fn current_display_row_and_screen_column(&self) -> Option<(usize, super::DisplayRow, usize)> {
-        let position = self
-            .buffer
-            .offset_to_line_col(self.cursor.selection().head)
-            .ok()?;
-        let line_text = self.buffer.line_text(position.line).unwrap_or_default();
-        let visual_column =
-            super::coords::visual_column_for_byte_column(&line_text, position.column);
+    fn move_vertically(&mut self, row_delta: isize, extend: bool, cx: &mut Context<Self>) {
         let rows = self.display_rows();
-        super::wrap::display_row_for_visual_column(&rows, position.line, visual_column)
-    }
-
-    fn offset_for_line_visual_column(
-        &self,
-        line: usize,
-        visual_column: usize,
-    ) -> Option<BufferOffset> {
-        let line_text = self.buffer.line_text(line).unwrap_or_default();
-        let byte_column = super::coords::byte_column_for_visual_column(&line_text, visual_column);
-        self.buffer
-            .line_col_to_offset(LineCol::new(line, byte_column))
-            .ok()
+        let move_cursor = |cursor: &mut super::Cursor| {
+            let position = self
+                .buffer
+                .offset_to_line_col(cursor.selection().head)
+                .ok()?;
+            let text = self.buffer.line_text(position.line)?;
+            let visual = super::coords::visual_column_for_byte_column(&text, position.column);
+            let (index, _, column) =
+                super::wrap::display_row_for_visual_column(&rows, position.line, visual)?;
+            let index = index
+                .saturating_add_signed(row_delta)
+                .min(rows.len().saturating_sub(1));
+            let row = rows.get(index)?;
+            let column = cursor.preferred_column().unwrap_or(column);
+            let text = self.buffer.line_text(row.line)?;
+            let byte_column = super::coords::byte_column_for_visual_column(
+                &text,
+                (row.start_col + column).min(row.end_col),
+            );
+            let offset = self
+                .buffer
+                .line_col_to_offset(LineCol::new(row.line, byte_column))
+                .ok()?;
+            cursor.move_to_with_preferred_column(offset, extend, column);
+            Some(index)
+        };
+        let Some(index) = move_cursor(&mut self.cursor) else {
+            return;
+        };
+        for cursor in &mut self.secondary_cursors {
+            move_cursor(cursor);
+        }
+        self.marked_text = None;
+        self.reveal_display_row(index);
+        cx.notify();
     }
 
     fn visible_page_rows(&self) -> usize {
@@ -334,22 +401,45 @@ impl TextEditorView {
     }
 
     pub(super) fn undo(&mut self, cx: &mut Context<Self>) {
-        if self.buffer.undo().ok() == Some(true) {
-            self.after_history_change(cx);
+        if !self.read_only && self.buffer.undo().ok() == Some(true) {
+            self.after_history_change(self.buffer.selections_after_undo().map(<[_]>::to_vec), cx);
         }
     }
 
     pub(super) fn redo(&mut self, cx: &mut Context<Self>) {
-        if self.buffer.redo().ok() == Some(true) {
-            self.after_history_change(cx);
+        if !self.read_only && self.buffer.redo().ok() == Some(true) {
+            self.after_history_change(self.buffer.selections_after_redo().map(<[_]>::to_vec), cx);
         }
     }
 
-    fn after_history_change(&mut self, cx: &mut Context<Self>) {
+    fn after_history_change(
+        &mut self,
+        selections: Option<Vec<super::Selection>>,
+        cx: &mut Context<Self>,
+    ) {
         self.request_syntax(None, true, cx);
         self.clear_folds_after_buffer_change();
         self.refresh_find_matches(cx);
-        self.secondary_selections.clear();
+        self.secondary_cursors.clear();
+        if let Some((primary, rest)) = selections.as_deref().and_then(|s| s.split_first()) {
+            self.cursor.set_selection(*primary);
+            self.secondary_cursors
+                .extend(rest.iter().copied().map(super::Cursor::from));
+        } else if self
+            .buffer
+            .offset_to_line_col(self.cursor.selection().head)
+            .is_err()
+            || self
+                .buffer
+                .offset_to_line_col(self.cursor.selection().anchor)
+                .is_err()
+        {
+            let mut head = BufferOffset(self.cursor.selection().head.0.min(self.buffer.len()));
+            while self.buffer.offset_to_line_col(head).is_err() {
+                head.0 -= 1;
+            }
+            self.cursor.move_to(head, false);
+        }
         self.save_status = if self.buffer.is_dirty() {
             EditorSaveStatus::Dirty
         } else {
@@ -362,9 +452,8 @@ impl TextEditorView {
         cx.notify();
     }
 
-    fn indented_newline(&self) -> String {
-        let selection = self.cursor.selection();
-        let Ok(position) = self.buffer.offset_to_line_col(selection.range().start) else {
+    fn indented_newline(&self, range: super::TextRange) -> String {
+        let Ok(position) = self.buffer.offset_to_line_col(range.start) else {
             return "\n".to_string();
         };
         let line = self.buffer.line_text(position.line).unwrap_or_default();

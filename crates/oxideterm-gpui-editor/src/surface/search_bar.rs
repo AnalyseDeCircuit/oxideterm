@@ -184,6 +184,24 @@ mod tests {
                     .collect::<Vec<_>>(),
                 vec![1..5, 11..15]
             );
+
+            editor.replace_text_external("a.p\nA.p\nxa.p\nAxp\naxp", cx);
+            let mut settings = editor.settings.clone();
+            settings.find_case_sensitive = true;
+            settings.find_whole_word = true;
+            editor.set_settings(settings, cx);
+            editor.set_find_query_at_line("a.p", 3, cx);
+            assert_eq!(editor.active_find_position(), Some((3, 3)));
+            assert_eq!(editor.cursor.selection().range().start.0, 9);
+            editor.open_search(cx);
+            assert_eq!(
+                editor
+                    .find_matches
+                    .iter()
+                    .map(|hit| hit.range.start.0..hit.range.end.0)
+                    .collect::<Vec<_>>(),
+                [0..3, 17..20]
+            );
         });
     }
 
@@ -400,7 +418,11 @@ impl TextEditorView {
         };
         if let Some(bar) = self.search_bar.as_mut() {
             bar.focus_query = true;
-            cx.notify();
+            if self.find_work.project_query {
+                self.set_find_query(self.find_query.clone(), cx);
+            } else {
+                cx.notify();
+            }
             return true;
         }
         let selected = self.cursor.selection();
@@ -747,7 +769,7 @@ impl TextEditorView {
             .child(
                 search_mode_group()
                     .child(
-                        search_mode_button(&tokens, "Aa", self.settings.find_case_sensitive)
+                        search_mode_button(&tokens, "Aa", self.find_options().case_sensitive)
                             .id("find-match-case")
                             .debug_selector(|| "find-match-case".into())
                             .aria_label(labels.match_case.clone())
@@ -758,7 +780,7 @@ impl TextEditorView {
                                 MouseButton::Left,
                                 cx.listener(|this, _, _, cx| {
                                     this.set_find_case_sensitive(
-                                        !this.settings.find_case_sensitive,
+                                        !this.find_options().case_sensitive,
                                         cx,
                                     );
                                     cx.stop_propagation();
@@ -766,7 +788,7 @@ impl TextEditorView {
                             ),
                     )
                     .child(
-                        search_mode_button(&tokens, ".*", self.find_regex)
+                        search_mode_button(&tokens, ".*", self.find_uses_regex())
                             .id("find-use-regex")
                             .debug_selector(|| "find-use-regex".into())
                             .aria_label(labels.use_regex.clone())
@@ -776,7 +798,7 @@ impl TextEditorView {
                             .on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(|this, _, _, cx| {
-                                    this.set_find_regex(!this.find_regex, cx);
+                                    this.set_find_regex(!this.find_uses_regex(), cx);
                                     cx.stop_propagation();
                                 }),
                             ),

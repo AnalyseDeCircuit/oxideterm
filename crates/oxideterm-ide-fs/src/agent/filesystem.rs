@@ -1,5 +1,5 @@
 use crate::text::decode_file;
-use oxideterm_ide_core::TextFileFormat;
+use oxideterm_ide_core::{SearchPaths, TextFileFormat};
 impl NodeAgentIdeFileSystem {
     pub fn new(router: NodeRouter, mode: NodeAgentMode) -> Self {
         Self {
@@ -639,12 +639,11 @@ impl NodeAgentIdeFileSystem {
                 .await
             {
                 Ok(matches) => {
-                    return Ok(matches
-                        .into_iter()
-                        .map(|hit| {
-                            search_match_from_agent(hit, &query.pattern, query.case_sensitive)
-                        })
-                        .collect());
+                    let matcher = query.text_matcher()?;
+                    return Ok(matches.into_iter().filter_map(|hit| {
+                        let found = matcher.find_at(&hit.text, hit.column.saturating_sub(1) as usize)?;
+                        Some(IdeSearchMatch::from_line(&hit.path, hit.line, &hit.text, found.range()))
+                    }).collect());
                 }
                 Err(error) => self.handle_file_rpc_error(&node_id, error, "grep via agent failed; falling back to exec grep")?,
             }
@@ -685,13 +684,13 @@ impl NodeAgentIdeFileSystem {
             .acquire_ide_connection(node_id)
             .await
             .map_err(crate::node_sftp::map_route_error)?;
-        let escaped_query = regex_escape_for_basic_grep(&query.pattern);
+        let case_flag = if query.case_sensitive { "" } else { "-i" };
         let include_patterns = grep_include_patterns(&query.include_globs);
         let command = format!(
-            "cd {} && grep -rn -I {} --color=never -- -e '{}' . 2>/dev/null | head -{}",
+            "cd {} && grep -rnIF --exclude-dir=.git {case_flag} {} --color=never -e '{}' -- . 2>/dev/null | head -{}",
             shell_cd_arg(&query.root_path),
             include_patterns,
-            shell_single_quote(&escaped_query),
+            shell_single_quote(&query.pattern),
             query.max_results
         );
         let output = resolved
@@ -699,7 +698,7 @@ impl NodeAgentIdeFileSystem {
             .run_command(&command, Duration::from_secs(30), 256 * 1024)
             .await
             .map_err(|error| ide_error_from_agent_message(error.to_string()))?;
-        Ok(parse_grep_output(&output, &query.pattern, false))
+        Ok(parse_grep_output(&output, &query.text_matcher()?))
     }
 
     pub fn release_ide_session_for_node(&self, node_id: &str) {
@@ -1132,64 +1131,14 @@ fn node_agent_rpc_error_from_agent(error: AgentError) -> NodeAgentRpcError {
     }
 }
 
-fn search_match_from_agent(
-    hit: AgentGrepMatch,
-    pattern: &str,
-    case_sensitive: bool,
-) -> IdeSearchMatch {
-    let preview = hit.text.trim().chars().take(200).collect::<String>();
-    let match_start = find_match_start(&preview, pattern, case_sensitive).unwrap_or(0);
-    IdeSearchMatch {
-        path: hit.path,
-        line: hit.line,
-        column: hit.column,
-        preview,
-        match_start,
-        match_end: match_start.saturating_add(pattern.len()),
-    }
-}
-
-fn parse_grep_output(output: &str, pattern: &str, case_sensitive: bool) -> Vec<IdeSearchMatch> {
-    output
-        .lines()
-        .filter_map(|line| {
-            let (path, rest) = line.split_once(':')?;
-            let (line_number, content) = rest.split_once(':')?;
-            let line = line_number.parse::<u32>().ok()?;
-            let path = path.strip_prefix("./").unwrap_or(path).to_string();
-            let preview = content.trim().chars().take(200).collect::<String>();
-            let match_start = find_match_start(&preview, pattern, case_sensitive).unwrap_or(0);
-            Some(IdeSearchMatch {
-                path,
-                line,
-                column: match_start as u32,
-                preview,
-                match_start,
-                match_end: match_start.saturating_add(pattern.len()),
-            })
-        })
-        .collect()
-}
-
-fn find_match_start(text: &str, pattern: &str, case_sensitive: bool) -> Option<usize> {
-    if case_sensitive {
-        text.find(pattern)
-    } else {
-        text.to_lowercase().find(&pattern.to_lowercase())
-    }
-}
-
-fn regex_escape_for_basic_grep(pattern: &str) -> String {
-    pattern.chars().fold(String::new(), |mut escaped, ch| {
-        if matches!(
-            ch,
-            '.' | '*' | '+' | '?' | '^' | '$' | '{' | '}' | '(' | ')' | '|' | '[' | ']' | '\\'
-        ) {
-            escaped.push('\\');
-        }
-        escaped.push(ch);
-        escaped
-    })
+fn parse_grep_output(output: &str, matcher: &regex::Regex) -> Vec<IdeSearchMatch> {
+    output.lines().filter_map(|line| {
+        let (path, rest) = line.split_once(':')?;
+        let (line_number, content) = rest.split_once(':')?;
+        let found = matcher.find(content)?;
+        Some(IdeSearchMatch::from_line(path.strip_prefix("./").unwrap_or(path),
+            line_number.parse().ok()?, content, found.range()))
+    }).collect()
 }
 
 fn normalize_agent_watch_path(path: &str) -> String {
@@ -1204,7 +1153,7 @@ fn normalize_agent_watch_path(path: &str) -> String {
 fn grep_include_patterns(globs: &[String]) -> String {
     globs
         .iter()
-        .map(|glob| format!("--include={}", shell_single_quote(glob)))
+        .map(|glob| format!("--include='{}'", shell_single_quote(glob)))
         .collect::<Vec<_>>()
         .join(" ")
 }
@@ -1417,15 +1366,7 @@ impl NodeAgentIdeFileSystem {
         query: &IdeSearchQuery,
         paths: &SearchPaths,
     ) -> Result<Vec<IdeSearchMatch>, IdeFileError> {
-        let pattern = if query.regex {
-            query.pattern.clone()
-        } else {
-            regex::escape(&query.pattern)
-        };
-        let matcher = regex::RegexBuilder::new(&pattern)
-            .case_insensitive(!query.case_sensitive)
-            .build()
-            .map_err(|_| IdeFileError::new(IdeFileErrorKind::Other, "Invalid search pattern"))?;
+        let matcher = query.text_matcher()?;
         let mut directories = vec![query.root_path.clone()];
         let mut hits = Vec::new();
         while let Some(path) = directories.pop() {
@@ -1440,7 +1381,9 @@ impl NodeAgentIdeFileSystem {
                     continue;
                 }
                 if entry.kind == FileKind::Directory {
-                    if !matches!(entry.name.as_str(), "node_modules" | "target" | ".git") {
+                    if !entry.is_symlink
+                        && !matches!(entry.name.as_str(), "node_modules" | "target" | ".git")
+                    {
                         if let IdeLocation::Remote { path, .. } = entry.location {
                             directories.push(path);
                         }
@@ -1460,7 +1403,14 @@ impl NodeAgentIdeFileSystem {
                 }
                 let file = match self.sftp.read_file(&entry.location, None).await {
                     Ok(file) => file,
-                    Err(error) if error.kind == IdeFileErrorKind::Unsupported => continue,
+                    Err(error)
+                        if matches!(
+                            error.kind,
+                            IdeFileErrorKind::Binary | IdeFileErrorKind::Unsupported
+                        ) =>
+                    {
+                        continue;
+                    }
                     Err(error) => return Err(error),
                 };
                 let IdeLocation::Remote { path, .. } = entry.location else {
@@ -1468,15 +1418,7 @@ impl NodeAgentIdeFileSystem {
                 };
                 for (index, line) in file.text.lines().enumerate() {
                     if let Some(found) = matcher.find(line) {
-                        let preview = line.chars().take(200).collect::<String>();
-                        hits.push(IdeSearchMatch {
-                            path: path.clone(),
-                            line: (index + 1) as u32,
-                            column: (found.start() + 1) as u32,
-                            preview,
-                            match_start: found.start(),
-                            match_end: found.end(),
-                        });
+                        hits.push(IdeSearchMatch::from_line(&path, index as u32 + 1, line, found.range()));
                         if hits.len() >= query.max_results as usize {
                             return Ok(hits);
                         }
@@ -1485,89 +1427,5 @@ impl NodeAgentIdeFileSystem {
             }
         }
         Ok(hits)
-    }
-}
-
-
-pub(super) struct SearchPaths {
-    root: String,
-    hidden: bool,
-    includes: regex::RegexSet,
-    excludes: regex::RegexSet,
-}
-impl SearchPaths {
-    pub(super) fn new(query: &IdeSearchQuery) -> Result<Self, IdeFileError> {
-        fn patterns(globs: &[String]) -> Result<regex::RegexSet, IdeFileError> {
-            let patterns = globs.iter().map(|glob| {
-                let mut pattern = String::from("^");
-                if !glob.contains('/') {
-                    pattern.push_str("(?:.*/)?");
-                }
-                let mut chars = glob.chars().peekable();
-                while let Some(ch) = chars.next() {
-                    match ch {
-                        '*' if chars.peek() == Some(&'*') => {
-                            chars.next();
-                            if chars.peek() == Some(&'/') {
-                                chars.next();
-                                pattern.push_str("(?:.*/)?");
-                            } else {
-                                pattern.push_str(".*");
-                            }
-                        }
-                        '*' => pattern.push_str("[^/]*"),
-                        '?' => pattern.push_str("[^/]"),
-                        other => pattern.push_str(&regex::escape(&other.to_string())),
-                    }
-                }
-                pattern.push('$');
-                pattern
-            });
-            regex::RegexSet::new(patterns)
-                .map_err(|_| IdeFileError::new(IdeFileErrorKind::Other, "Invalid search filter"))
-        }
-        Ok(Self {
-            root: query.root_path.trim_end_matches('/').to_owned(),
-            hidden: query.include_hidden,
-            includes: patterns(&query.include_globs)?,
-            excludes: patterns(&query.exclude_globs)?,
-        })
-    }
-    pub(super) fn allows(&self, path: &str) -> bool {
-        let relative = path
-            .strip_prefix(&self.root)
-            .unwrap_or(path)
-            .trim_start_matches('/');
-        (self.hidden || !relative.split('/').any(|part| part.starts_with('.')))
-            && (self.includes.is_empty() || self.includes.is_match(relative))
-            && !self.excludes.is_match(relative)
-    }
-}
-
-#[cfg(test)]
-mod search_tests {
-    use super::*;
-
-    #[test]
-    fn search_filters_apply_to_root_nested_excluded_and_hidden_files() {
-        let mut query = IdeSearchQuery::tauri_literal_project_search("text", "/work", 20, 0);
-        query.include_globs = vec!["**/*.rs".into()];
-        query.exclude_globs = vec!["vendor/**".into()];
-        let paths = SearchPaths::new(&query).unwrap();
-        for (path, expected) in [
-            ("/work/main.rs", true),
-            ("/work/src/lib.rs", true),
-            ("/work/vendor/lib.rs", false),
-            ("/work/.hidden/main.rs", false),
-            ("/work/src/app.ts", false),
-        ] {
-            assert_eq!(paths.allows(path), expected, "{path}");
-        }
-        query.include_hidden = true;
-        assert!(
-            SearchPaths::new(&query)
-                .unwrap()
-                .allows("/work/.hidden/main.rs")
-        );
     }
 }

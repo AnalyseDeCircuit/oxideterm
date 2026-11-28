@@ -18,6 +18,7 @@ pub(super) fn serve(token: &str) -> io::Result<()> {
     let mut output = io::stdout().lock();
     writeln!(output, "\x1e{token}:READY")?;
     output.flush()?;
+    let mut upload = None;
     loop {
         let mut line = Zeroizing::new(Vec::new());
         let count = input
@@ -42,7 +43,7 @@ pub(super) fn serve(token: &str) -> io::Result<()> {
         let request: Request = serde_json::from_value(envelope)
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Invalid request"))?;
         let shutdown = request.method == "sys/shutdown";
-        let response = handle_request(request);
+        let response = handle_request(request, &mut upload);
         let bytes = Zeroizing::new(serde_json::to_vec(&response)?);
         if bytes.len() as u64 > MAX_FRAME_BYTES {
             return Err(io::Error::new(
@@ -152,22 +153,7 @@ pub(super) fn write_file(params: IdeWriteParams) -> Result<WriteFileResult, RpcE
     let result = (|| {
         file.write_all(&bytes).map_err(|e| map_io_error(e, &path))?;
         if let Ok(metadata) = fs::metadata(&path) {
-            #[cfg(unix)]
-            {
-                use std::os::{fd::AsRawFd, unix::fs::MetadataExt};
-                let created = file.metadata().map_err(|e| map_io_error(e, &path))?;
-                if (created.uid(), created.gid()) != (metadata.uid(), metadata.gid()) {
-                    // A privileged shell must preserve the target's owner, rather than
-                    // leaving a root-owned replacement after editing another user's file.
-                    if unsafe { libc::fchown(file.as_raw_fd(), metadata.uid(), metadata.gid()) }
-                        != 0
-                    {
-                        return Err(map_io_error(io::Error::last_os_error(), &path));
-                    }
-                }
-            }
-            file.set_permissions(metadata.permissions())
-                .map_err(|e| map_io_error(e, &path))?;
+            preserve_file_attributes(&file, &metadata).map_err(|e| map_io_error(e, &path))?;
         }
         file.sync_all().map_err(|e| map_io_error(e, &path))?;
         fs::rename(&swap, &path).map_err(|e| map_io_error(e, &path))?;
@@ -183,6 +169,21 @@ pub(super) fn write_file(params: IdeWriteParams) -> Result<WriteFileResult, RpcE
         let _ = fs::remove_file(&swap);
     }
     result
+}
+
+pub(super) fn preserve_file_attributes(file: &File, metadata: &fs::Metadata) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::{fd::AsRawFd, unix::fs::MetadataExt};
+        let created = file.metadata()?;
+        if (created.uid(), created.gid()) != (metadata.uid(), metadata.gid())
+            && unsafe { libc::fchown(file.as_raw_fd(), metadata.uid(), metadata.gid()) } != 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+    }
+    // Changing ownership may clear setuid and setgid, so restore permissions last.
+    file.set_permissions(metadata.permissions())
 }
 
 fn create_save_temp(path: &Path) -> io::Result<File> {

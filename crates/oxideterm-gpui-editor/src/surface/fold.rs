@@ -88,7 +88,7 @@ impl TextEditorView {
         }
         if let Some(offset) = self.buffer.line_start_offset(range.start_line) {
             self.cursor.set_selection(Selection::caret(offset));
-            self.secondary_selections.clear();
+            self.secondary_cursors.clear();
             self.marked_text = None;
             cx.notify();
         }

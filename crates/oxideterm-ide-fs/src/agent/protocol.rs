@@ -6,6 +6,14 @@ struct AgentRequest {
     params: serde_json::Value,
 }
 
+impl Drop for AgentRequest {
+    fn drop(&mut self) {
+        if let Some(serde_json::Value::String(content)) = self.params.get_mut("content") {
+            zeroize::Zeroize::zeroize(content);
+        }
+    }
+}
+
 #[derive(Deserialize)]
 struct AgentResponse {
     id: u64,
@@ -148,15 +156,7 @@ pub struct SymbolIndexResult {
     pub file_count: u32,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct IdeSearchMatch {
-    pub path: String,
-    pub line: u32,
-    pub column: u32,
-    pub preview: String,
-    pub match_start: usize,
-    pub match_end: usize,
-}
+pub use oxideterm_ide_core::IdeSearchMatch;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct RemoteAgentVersionInfo {

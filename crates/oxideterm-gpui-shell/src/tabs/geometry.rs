@@ -61,6 +61,18 @@ impl TabStripLayout {
             .collect()
     }
 
+    pub fn live_tab_at(&self, x: f32) -> Option<TabId> {
+        let mut left = self.leading;
+        for item in &self.items {
+            let right = left + item.width;
+            if (left..right).contains(&x) {
+                return (item.kind == TabStripItemKind::Live).then_some(item.tab_id);
+            }
+            left = right;
+        }
+        None
+    }
+
     pub fn insertion_index(&self, pointer_x: f32) -> usize {
         let mut left = self.leading;
         let mut index = 0;
@@ -550,5 +562,45 @@ impl TabDragState {
             )),
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{TabId, TabStripItem, TabStripItemKind, TabStripLayout};
+
+    #[test]
+    fn hovering_a_drag_skips_leading_space_and_transient_tabs() {
+        use TabStripItemKind::{Exiting, Live, Returning};
+        let layout = TabStripLayout {
+            leading: 10.,
+            items: [
+                (1, 20., Live),
+                (2, 12., Exiting(0)),
+                (3, 18., Returning),
+                (4, 30., Live),
+            ]
+            .map(|(id, width, kind)| TabStripItem {
+                tab_id: TabId(id),
+                width,
+                kind,
+            })
+            .into(),
+        };
+        let hits = [9., 10., 29., 30., 42., 59., 60., 89., 90.].map(|x| layout.live_tab_at(x));
+        assert_eq!(
+            hits,
+            [
+                None,
+                Some(TabId(1)),
+                Some(TabId(1)),
+                None,
+                None,
+                None,
+                Some(TabId(4)),
+                Some(TabId(4)),
+                None
+            ]
+        );
     }
 }

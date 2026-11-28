@@ -603,20 +603,54 @@ impl IdeSurface {
         }
 
         for group in &self.search.results {
+            let expanded = self.search.expanded_paths.contains(&group.path);
+            let path = SharedString::from(group.path.clone());
             list = list.child(
                 div()
+                    .id(path.clone())
+                    .debug_selector(|| format!("ide-search-file-{path}"))
+                    .role(gpui::Role::Button)
+                    .aria_label(path.clone())
+                    .aria_expanded(expanded)
+                    .flex()
+                    .flex_none()
+                    .items_center()
+                    .gap_1()
+                    .rounded(px(tokens.radii.sm))
                     .px_2()
-                    .pt_2()
+                    .py_1()
+                    .cursor_pointer()
+                    .hover(|style| style.bg(rgb(tokens.ui.bg_hover)))
                     .text_size(px(tokens.metrics.ui_text_xs))
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(rgb(tokens.ui.text))
-                    .child(group.path.clone()),
+                    .child(tree_chevron_icon(
+                        tokens,
+                        "ide-search-chevron",
+                        12.0,
+                        tokens.ui.text_secondary,
+                        expanded,
+                    ))
+                    .child(div().min_w_0().child(path.clone()))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if !this.search.expanded_paths.remove(path.as_ref()) {
+                            this.search.expanded_paths.insert(path.to_string());
+                        }
+                        cx.notify();
+                    })),
             );
+            if !expanded {
+                continue;
+            }
             for hit in &group.matches {
                 let hit_for_click = hit.clone();
                 list = list.child(
                     div()
+                        .debug_selector(|| {
+                            format!("ide-search-match-{}-{}-{}", hit.path, hit.line, hit.column)
+                        })
                         .rounded(px(tokens.radii.sm))
+                        .ml_4()
                         .px_2()
                         .py_1()
                         .flex()

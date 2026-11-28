@@ -778,36 +778,7 @@ impl Default for TerminalKittyFileTransmissionLabels {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct TerminalPasteLabels {
-    pub edit_title: String,
-    pub strip_fence: String,
-    pub send_by_line: String,
-    pub stop_sending: String,
-    pub interrupted: String,
-    pub undo: String,
-    pub redo: String,
-    pub editor_menu: oxideterm_gpui_editor::EditorContextMenuLabels,
-    pub cancel: String,
-    pub paste: String,
-}
-
-impl Default for TerminalPasteLabels {
-    fn default() -> Self {
-        Self {
-            edit_title: "Edit before pasting".into(),
-            strip_fence: "Remove code block markers".into(),
-            send_by_line: "Send line by line".into(),
-            stop_sending: "Stop sending".into(),
-            interrupted: "Complete lines submitted: {{sent}}. Stopped at line {{line}}.".into(),
-            undo: "Undo".into(),
-            redo: "Redo".into(),
-            editor_menu: oxideterm_gpui_editor::EditorContextMenuLabels::default(),
-            cancel: "Cancel".to_string(),
-            paste: "Paste".to_string(),
-        }
-    }
-}
+pub use oxideterm_gpui_editor::paste::TerminalPasteLabels;
 
 pub use oxideterm_gpui_background::{
     BackgroundFit as TerminalBackgroundFit, BackgroundPreferences as TerminalBackgroundPreferences,

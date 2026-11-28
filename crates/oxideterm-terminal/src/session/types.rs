@@ -172,7 +172,7 @@ pub trait TerminalSessionBackend: Send {
         false
     }
     fn acquire_shell_channel(&mut self) -> Result<crate::ShellChannelAcquisition> {
-        bail!("Shell IDE requires an SSH terminal")
+        bail!("This terminal does not support Shell IDE")
     }
     fn write_input(&mut self, bytes: &[u8]) -> Result<()>;
     fn reconnect_ssh(&mut self, _config: SshSessionConfig) -> Result<()> {

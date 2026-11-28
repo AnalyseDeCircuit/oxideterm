@@ -33,7 +33,7 @@ impl AiProviderSettingsView {
         let input = SettingsInput::AiProviderApiKey(index);
         let save_disabled = (self.bindings.controls)(cx).is_none_or(|controls| {
             let frame = controls.ime.frame(input, "", cx);
-            !frame.focused || frame.value.trim().is_empty()
+            (!self.session_only && !frame.focused) || frame.value.trim().is_empty()
         });
         let Some(provider_id) = self.provider(index).map(|provider| provider.id.clone()) else {
             return div().into_any_element();

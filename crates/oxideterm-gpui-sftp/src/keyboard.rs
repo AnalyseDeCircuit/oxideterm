@@ -20,6 +20,39 @@ pub enum SftpKeyAction {
     SaveEditor,
 }
 
+impl SftpKeyAction {
+    pub fn resolve(
+        dialog: Option<&SftpDialog>,
+        mut matches: impl FnMut(&str) -> bool,
+    ) -> Option<Self> {
+        [
+            ("sftp.selectAll", Self::SelectAll),
+            ("sftp.editPath", Self::EditPath),
+            (
+                "sftp.revealTerminalDirectory",
+                Self::RevealTerminalDirectory,
+            ),
+            ("sftp.open", Self::Open),
+            ("sftp.preview", Self::Preview),
+            ("sftp.upload", Self::Upload),
+            ("sftp.download", Self::Download),
+            ("sftp.delete", Self::Delete),
+            ("sftp.rename", Self::Rename),
+            ("sftp.togglePreviewSource", Self::TogglePreviewSource),
+            ("editor.save", Self::SaveEditor),
+        ]
+        .into_iter()
+        .find_map(|(id, action)| {
+            let active = match dialog {
+                Some(SftpDialog::Editor { .. }) => id == "editor.save",
+                Some(_) => id == "sftp.togglePreviewSource",
+                None => !matches!(id, "editor.save" | "sftp.togglePreviewSource"),
+            };
+            (active && matches(id)).then_some(action)
+        })
+    }
+}
+
 pub enum SftpKeyResult {
     Ignored,
     Handled,
@@ -31,6 +64,74 @@ pub enum SftpKeyResult {
     OpenFile(SftpPane, SftpFileEntry),
     Transfer(SftpPane, SftpTransferDirection),
     RevealTerminalDirectory,
+}
+
+#[cfg(all(test, not(target_family = "wasm")))]
+mod tests {
+    use super::*;
+    use gpui::{AppContext, TestAppContext};
+
+    #[gpui::test]
+    fn the_same_shortcut_previews_the_selected_remote_file_then_toggles_its_markdown(
+        cx: &mut TestAppContext,
+    ) {
+        let view = cx.new(SftpWorkspaceEntity::new);
+        let cx = cx.add_empty_window();
+        cx.update(|window, cx| {
+            view.update(cx, |s, cx| {
+                let name = "README.md";
+                s.remote_files = vec![sftp_file_entry(
+                    name.into(),
+                    "/right/README.md".into(),
+                    SftpFileType::File,
+                    3,
+                    None,
+                )];
+                s.local_files = vec![sftp_file_entry(
+                    name.into(),
+                    "/left/README.md".into(),
+                    SftpFileType::File,
+                    5,
+                    None,
+                )];
+                s.remote_selected.insert(name.into());
+                s.local_selected.insert(name.into());
+                let chord = Keystroke::parse("f6").unwrap();
+                let action = |s: &SftpWorkspaceEntity| {
+                    SftpKeyAction::resolve(s.dialog().as_ref(), |id| {
+                        matches!(id, "sftp.preview" | "sftp.togglePreviewSource")
+                    })
+                };
+                let SftpKeyResult::OpenFile(pane, file) =
+                    s.handle_key(&chord, action(s), false, window, cx)
+                else {
+                    panic!("file shortcut did not open the preview")
+                };
+                assert_eq!(
+                    (pane, file.path.as_str()),
+                    (SftpPane::Remote, "/right/README.md")
+                );
+                let generation = s.begin_remote_preview(pane, &file, None, cx);
+                s.apply_preview_loaded(
+                    generation,
+                    file.path,
+                    Ok(PreviewContent::Text {
+                        data: "# A".into(),
+                        encoding: "UTF-8".into(),
+                        confidence: 1.0,
+                        has_bom: false,
+                        version: None,
+                        mime_type: Some("text/markdown".into()),
+                        language: Some("markdown".into()),
+                    }),
+                    None,
+                    cx,
+                );
+                s.handle_key(&chord, action(s), false, window, cx);
+                assert!(s.preview_markdown_source_mode);
+            })
+        });
+    }
 }
 
 impl SftpWorkspaceEntity {

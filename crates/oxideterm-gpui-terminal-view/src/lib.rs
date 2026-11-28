@@ -23,7 +23,7 @@ pub use host::{TerminalCanvasHost, TerminalElementInput};
 pub use metrics::TerminalMetrics;
 pub use theme::TerminalUiTheme;
 pub use timestamps::TerminalRowTimestampStore;
-pub use view::{TerminalView, TerminalViewEvent};
+pub use view::{TerminalView, TerminalViewEvent, TerminalViewPreferences};
 
 #[cfg(test)]
 mod tests;

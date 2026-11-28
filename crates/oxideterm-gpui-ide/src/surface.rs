@@ -119,7 +119,7 @@ const IDE_TAB_CONTEXT_MENU_ITEM_HEIGHT: f32 = 28.0;
 const IDE_TAB_CONTEXT_MENU_Z: usize = 50;
 const IDE_TAB_REORDER_ACTIVATION_PX: f32 = 5.0;
 const IDE_TREE_CONTEXT_MENU_WIDTH: f32 = 196.0;
-const IDE_TREE_CONTEXT_MENU_MAX_HEIGHT: f32 = 280.0;
+const IDE_TREE_CONTEXT_MENU_MAX_HEIGHT: f32 = 308.0;
 const IDE_TREE_CONTEXT_MENU_Z: usize = 100;
 const IDE_AGENT_MENU_ITEM_HEIGHT: f32 = 28.0;
 const IDE_AGENT_MENU_Z: usize = 110;
@@ -395,11 +395,16 @@ struct FileSaveRequest {
     close_request: Option<CloseRequestId>,
 }
 
+enum TabCloseBatch {
+    Files(HashSet<EditorTabId>),
+    ReturnToTerminal,
+}
+
 /// Owns the project and its open editors independently of terminal panes.
 /// On desktop the file adapter acquires SFTP through the node router.
 pub struct IdeSurface {
     workspace: IdeWorkspace,
-    shell_return_requested: bool,
+    tab_close_batch: Option<TabCloseBatch>,
     fs: FileHost,
     #[cfg(not(target_family = "wasm"))]
     desktop: DesktopSession,
@@ -439,9 +444,11 @@ pub struct IdeSurface {
     tree_scroll_handle: UniformListScrollHandle,
     tab_scroll_handle: ScrollHandle,
     search: ProjectSearchState,
+    quick_open: Option<QuickOpenState>,
+    quick_open_focus: Option<EditorTabId>,
     search_cache: HashMap<String, SearchCacheEntry>,
     search_cache_order: Vec<String>,
-    pending_search_queries: BTreeMap<String, String>,
+    pending_search_queries: HashMap<EditorTabId, (String, PendingEditorReveal)>,
     pending_editor_reveals: BTreeMap<String, PendingEditorReveal>,
     tab_context_menu: Option<TabContextMenu>,
     tree_context_menu: Option<TreeContextMenu>,
@@ -457,12 +464,15 @@ pub struct IdeSurface {
 #[cfg(not(target_family = "wasm"))]
 include!("surface/desktop_session.rs");
 #[cfg(not(target_family = "wasm"))]
+include!("surface/transfer.rs");
+#[cfg(not(target_family = "wasm"))]
 include!("surface/node_watch.rs");
 #[cfg(not(target_family = "wasm"))]
 include!("surface/node_symbols.rs");
 include!("surface/lifecycle.rs");
 include!("surface/folder_picker.rs");
 include!("surface/editor_actions.rs");
+include!("surface/quick_open.rs");
 include!("surface/tree_name_input.rs");
 include!("surface/render_root.rs");
 include!("surface/render_tree.rs");

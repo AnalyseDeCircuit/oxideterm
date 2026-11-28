@@ -35,6 +35,7 @@ use oxideterm_gpui_ui::{
 };
 
 mod editor;
+mod field;
 mod manager;
 mod rows;
 
@@ -239,7 +240,10 @@ fn quick_command_template_error_label(i18n: &I18n, error: &QuickCommandTemplateE
 
 pub struct QuickCommandsView {
     pub(crate) state: QuickCommandsAccess,
-    pub(crate) bindings: QuickCommandsBindings,
+    frame_source: QuickCommandsFrameSource,
+    dispatcher: QuickCommandsDispatch,
+    selectable: QuickCommandsText,
+    host_input: Option<HostInput>,
     frame: QuickCommandsFrame,
     manager: bool,
 }
@@ -254,7 +258,7 @@ impl std::ops::Deref for QuickCommandsView {
 
 impl gpui::Render for QuickCommandsView {
     fn render(&mut self, _: &mut gpui::Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let Some(mut frame) = (self.bindings.frame)(cx) else {
+        let Some(mut frame) = (self.frame_source)(cx) else {
             return div().into_any_element();
         };
         // Runtime context may include selected terminal text and must not outlive this render.
@@ -281,19 +285,56 @@ impl QuickCommandsViews {
         frame: QuickCommandsFrame,
         cx: &mut App,
     ) -> Self {
-        let dock = cx.new(|_| QuickCommandsView {
-            state: state.clone(),
-            bindings: bindings.clone(),
-            frame: frame.clone(),
-            manager: false,
-        });
-        let manager = cx.new(|_| QuickCommandsView {
+        Self::mount(
             state,
-            bindings,
+            bindings.frame,
+            bindings.dispatch,
+            bindings.selectable,
+            Some(HostInput {
+                ime: bindings.ime,
+                anchor: bindings.anchor,
+            }),
             frame,
-            manager: true,
-        });
-        Self { dock, manager }
+            cx,
+        )
+    }
+
+    /// Use focused GPUI fields when the host has no window-wide IME router.
+    pub fn with_local_inputs(
+        state: QuickCommandsAccess,
+        source: QuickCommandsFrameSource,
+        dispatch: QuickCommandsDispatch,
+        selectable: QuickCommandsText,
+        frame: QuickCommandsFrame,
+        cx: &mut App,
+    ) -> Self {
+        Self::mount(state, source, dispatch, selectable, None, frame, cx)
+    }
+
+    fn mount(
+        state: QuickCommandsAccess,
+        source: QuickCommandsFrameSource,
+        dispatch: QuickCommandsDispatch,
+        selectable: QuickCommandsText,
+        input: Option<HostInput>,
+        frame: QuickCommandsFrame,
+        cx: &mut App,
+    ) -> Self {
+        let mut view = |manager| {
+            cx.new(|_| QuickCommandsView {
+                state: state.clone(),
+                frame_source: source.clone(),
+                dispatcher: dispatch.clone(),
+                selectable: selectable.clone(),
+                host_input: input.clone(),
+                frame: frame.clone(),
+                manager,
+            })
+        };
+        Self {
+            dock: view(false),
+            manager: view(true),
+        }
     }
 }
 
@@ -317,7 +358,7 @@ impl QuickCommandsView {
         window: Option<&mut gpui::Window>,
         cx: &mut App,
     ) {
-        (self.bindings.dispatch)(request, window, cx);
+        (self.dispatcher)(request, window, cx);
     }
 
     pub(crate) fn quick_commands_render_snapshot(
@@ -435,7 +476,7 @@ impl QuickCommandsView {
                 .text_color(rgb(color))
                 .child(text)
                 .into_any_element(),
-            SelectableTextRole::PlainDocument => (self.bindings.selectable)(
+            SelectableTextRole::PlainDocument => (self.selectable)(
                 QuickCommandsSelectableText {
                     id: selection_id(scope, (key, text.as_str())),
                     text,
@@ -476,7 +517,7 @@ impl QuickCommandsView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let text = text.into();
-        (self.bindings.selectable)(
+        (self.selectable)(
             QuickCommandsSelectableText {
                 id: selection_id(scope, (key, text.as_str())),
                 text,

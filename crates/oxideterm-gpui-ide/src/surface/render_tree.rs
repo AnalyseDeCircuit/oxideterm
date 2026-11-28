@@ -233,6 +233,52 @@ impl IdeSurface {
                             .flex()
                             .items_center()
                             .gap_1()
+                            .child({
+                                use oxideterm_gpui_ui::button::{IconButtonOptions, icon_button};
+                                icon_button(
+                                    &self.tokens,
+                                    self.icon(
+                                        "lucide/list-filter.svg",
+                                        IDE_TREE_TOOLBAR_ICON_SIZE,
+                                        self.tokens.ui.text_muted,
+                                    ),
+                                    IconButtonOptions {
+                                        disabled: search_disabled,
+                                        ..IconButtonOptions::opaque_toolbar(
+                                            IDE_TREE_TOOLBAR_BUTTON_SIZE,
+                                            ButtonRadius::Sm,
+                                        )
+                                    },
+                                )
+                                .id("ide-tree-quick-open")
+                                .debug_selector(|| "ide-tree-quick-open".into())
+                                .tooltip({
+                                    let tokens = self.tokens;
+                                    let label = self.labels.find_file_by_name.clone();
+                                    move |_, cx| {
+                                        let shortcut = if cx.platform_info().is_mac() {
+                                            "⌘P"
+                                        } else {
+                                            "Ctrl+P"
+                                        };
+                                        oxideterm_gpui_ui::tooltip::tooltip_view(
+                                            tokens,
+                                            label.clone(),
+                                            Some(shortcut.into()),
+                                            cx,
+                                        )
+                                    }
+                                })
+                                .on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener(move |this, _, window, cx| {
+                                        if !search_disabled {
+                                            this.open_quick_open(window, cx);
+                                        }
+                                        cx.stop_propagation();
+                                    }),
+                                )
+                            })
                             .child(
                                 div()
                                     .id("ide-tree-search")
@@ -657,6 +703,7 @@ mod tree_resize_tests {
                     (0..60)
                         .map(|index| FileTreeEntry {
                             location: IdeLocation::local(format!("/repo/{index:02}.rs")),
+                            is_symlink: false,
                             name: format!("{index:02}_long_filename_for_resize.rs"),
                             kind: FileKind::File,
                             version: SavedFileVersion::unknown(),

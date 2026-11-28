@@ -279,6 +279,7 @@
       "host_trust_add": "호스트 키 신뢰",
       "host_trust_remove": "신뢰하는 호스트 키 제거",
       "connection_dispatch_receive": "연결 요청 수신",
+      "show_target": "작업 공간에서 보기",
       "audit_view": "감사 보기",
       "credential_delete": "자격 증명 삭제",
       "ssh_node_state": "SSH 노드 상태 변경",

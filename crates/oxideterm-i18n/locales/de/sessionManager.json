@@ -1,5 +1,8 @@
 {
   "sessionManager": {
+    "browser_load_failed": "Gespeicherte Verbindungen konnten nicht geladen werden. Änderungen bleiben in diesem Tab.",
+    "browser_not_saved": "Die Änderungen sind nur in diesem Tab verfügbar. Erlaube die Speicherung von Websitedaten und speichere erneut.",
+    "browser_conflict": "Ein anderer Tab hat die Verbindungen geändert. Deine Änderungen wurden nicht gespeichert. Lade die Seite neu, um die gespeicherten Versionen zu sehen.",
     "title": "Sitzungsmanager",
     "toolbar": {
       "search_placeholder": "Verbindungen suchen...",

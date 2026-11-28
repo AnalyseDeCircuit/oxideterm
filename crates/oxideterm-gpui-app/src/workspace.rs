@@ -74,7 +74,7 @@ mod tabs;
 mod terminal_archive;
 mod terminal_cast;
 mod terminal_command_bar;
-mod terminal_command_sender;
+use oxideterm_gpui_command_sender as terminal_command_sender;
 mod terminal_context_actions;
 mod terminal_cwd;
 mod terminal_entity;
@@ -334,13 +334,6 @@ use oxideterm_gpui_shell::tabs::{
     strip::{MeasuredTabStrip, ShellTabRequest},
 };
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct TabContextMenu {
-    tab_id: TabId,
-    x: f32,
-    y: f32,
-    merge_submenu: Option<SplitDirection>,
-}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct TabRenameDialog {
@@ -425,7 +418,7 @@ pub(super) struct ThemeTransitionState {
 pub(crate) struct WorkspaceApp {
     focus_handle: FocusHandle,
     main_window_tabs: Entity<MeasuredTabStrip>,
-    tab_context_menu: Option<TabContextMenu>,
+    tab_context_menu: Option<(TabId, Entity<oxideterm_gpui_shell::tabs::menu::TabMenu>)>,
     tab_rename_dialog: Option<TabRenameDialog>,
     detached_tab_return_drag: Option<DetachedTabReturnDrag>,
     detached_tab_return_handoff: Option<DetachedTabReturnHandoff>,

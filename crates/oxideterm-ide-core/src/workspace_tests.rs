@@ -240,6 +240,7 @@ fn file_tree_state_is_included_in_snapshot_restore() {
     let root = IdeLocation::remote("node-a", "/home/demo");
     let child = FileTreeEntry {
         location: IdeLocation::remote("node-a", "/home/demo/src"),
+        is_symlink: false,
         kind: FileKind::Directory,
         name: "src".into(),
         version: SavedFileVersion::unknown(),

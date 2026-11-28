@@ -157,6 +157,102 @@ fn shell_protocol_uses_inherited_directory_preserves_file_bytes_and_exits() {
         assert_eq!(deleted["error"]["code"], -4);
         assert!(!target.exists());
     }
+    let target = "container/空 'binary";
+    let original = vec![0xa5; 32768];
+    use base64::Engine;
+    let codec = base64::engine::general_purpose::STANDARD;
+    for finish in ["transfer/abort", "transfer/commit"] {
+        agent.call("transfer/begin", json!({"id":SESSION,"path":target}));
+        agent.call(
+            "transfer/append",
+            json!({"id":SESSION,"offset":0,"content":codec.encode(&original)}),
+        );
+        agent.call(
+            "transfer/append",
+            json!({"id":SESSION,"offset":32768,"content":"AP8="}),
+        );
+        assert!(!agent.root.join(target).exists());
+        agent.call(finish, json!({"id":SESSION,"size":32770,"overwrite":false}));
+        if finish == "transfer/abort" {
+            assert!(!agent.root.join(target).exists());
+        }
+    }
+    let mut expected = original;
+    expected.extend([0, 255]);
+    assert_eq!(fs::read(agent.root.join(target)).unwrap(), expected);
+    let tail = agent.call("transfer/read", json!({"path":target,"offset":32768}));
+    assert_eq!(tail["result"]["content"], "AP8=");
+    assert_eq!(tail["result"]["size"], 32770);
+    #[cfg(unix)]
+    {
+        let link = "download-link";
+        std::os::unix::fs::symlink(target, agent.root.join(link)).unwrap();
+        let linked = agent.call("transfer/read", json!({"path":link,"offset":0}));
+        assert_eq!(
+            linked["result"]["content"],
+            codec.encode(&expected[..32768])
+        );
+        assert_eq!(linked["result"]["version"], tail["result"]["version"]);
+
+        let path = agent.root.join(target);
+        let modified = fs::metadata(&path).unwrap().modified().unwrap();
+        let replacement = agent.root.join("replacement");
+        expected[32768] = 255;
+        fs::write(&replacement, &expected).unwrap();
+        fs::File::options()
+            .write(true)
+            .open(&replacement)
+            .unwrap()
+            .set_modified(modified)
+            .unwrap();
+        fs::rename(&replacement, &path).unwrap();
+        let replaced = agent.call("transfer/read", json!({"path":link,"offset":32768}));
+        assert_eq!(replaced["result"]["content"], "//8=");
+        assert_ne!(replaced["result"]["version"], tail["result"]["version"]);
+
+        let device = agent.call("transfer/read", json!({"path":"/dev/null","offset":0}));
+        assert_eq!(device["error"]["code"], -32602);
+    }
+    agent.call("transfer/begin", json!({"id":SESSION,"path":target}));
+    assert_eq!(
+        agent.call(
+            "transfer/commit",
+            json!({"id":SESSION,"size":0,"overwrite":false})
+        )["error"]["code"],
+        -4
+    );
+    assert_eq!(fs::read(agent.root.join(target)).unwrap(), expected);
+    #[cfg(unix)]
+    let original_metadata = {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt, chown};
+        let path = agent.root.join(target);
+        if path.metadata().unwrap().uid() == 0 {
+            chown(&path, Some(1234), Some(2345)).unwrap();
+        }
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o2750)).unwrap();
+        path.metadata().unwrap()
+    };
+    agent.call(
+        "transfer/commit",
+        json!({"id":SESSION,"size":0,"overwrite":true}),
+    );
+    assert_eq!(fs::read(agent.root.join(target)).unwrap(), Vec::<u8>::new());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let saved = fs::metadata(agent.root.join(target)).unwrap();
+        assert_eq!(
+            (saved.uid(), saved.gid(), saved.mode()),
+            (
+                original_metadata.uid(),
+                original_metadata.gid(),
+                original_metadata.mode()
+            )
+        );
+    }
+    let empty = agent.call("transfer/read", json!({"path":target,"offset":0}));
+    assert_eq!(empty["result"]["size"], 0);
+    assert_eq!(empty["result"]["content"], "");
     agent.call("sys/shutdown", json!({}));
     assert!(agent.process.wait().unwrap().success());
 }
