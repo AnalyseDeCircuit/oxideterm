@@ -775,17 +775,7 @@ impl WorkspaceApp {
             let runtime_settings = self.ide_runtime_settings();
             let initial_path = initial_path_override.unwrap_or_else(|| "/".to_string());
 
-            self.insert_tab(
-                Tab {
-                    id: tab_id,
-                    kind: TabKind::Ide,
-                    title,
-                    title_source: TabTitleSource::Static,
-                    root_pane: None,
-                    active_pane_id: None,
-                },
-                cx,
-            );
+            // Tab insertion selects it immediately and delivers its first mount to the surface.
             self.ide_workspace.update(cx, |workspace, cx| {
                 workspace.create_folder_picker_surface(
                     tab_id,
@@ -798,6 +788,17 @@ impl WorkspaceApp {
                     cx,
                 );
             });
+            self.insert_tab(
+                Tab {
+                    id: tab_id,
+                    kind: TabKind::Ide,
+                    title,
+                    title_source: TabTitleSource::Static,
+                    root_pane: None,
+                    active_pane_id: None,
+                },
+                cx,
+            );
             tab_id
         };
 
