@@ -116,9 +116,12 @@ impl SftpBrowserView {
                 menu_el
             } else {
                 let can_extract = selected_count == 1
-                    && oxideterm_environment::archive::archive_kind(&file.name).is_some_and(|kind| {
-                        !cfg!(target_family = "wasm") || kind == oxideterm_environment::archive::ArchiveKind::Zip
-                    })
+                    && oxideterm_environment::archive::archive_kind(&file.name).is_some_and(
+                        |kind| {
+                            !cfg!(target_family = "wasm")
+                                || kind == oxideterm_environment::archive::ArchiveKind::Zip
+                        },
+                    )
                     && !matches!(
                         self.sftp_view().read(cx).current_remote_id.clone(),
                         Some(SftpRemoteId::Ftp(_))

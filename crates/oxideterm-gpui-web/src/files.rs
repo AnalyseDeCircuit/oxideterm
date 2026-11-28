@@ -2,11 +2,11 @@ mod ide;
 mod manager;
 mod manager_tabs;
 pub(crate) use manager_tabs::DeviceManagers;
+mod device;
+mod embedded;
 mod memory;
 mod preview;
-mod embedded;
 mod projects;
-mod device;
 pub(crate) use device::can_pick_directory;
 pub(crate) use projects::Projects;
 pub(crate) use projects::runtime_settings as file_editor_settings;
@@ -74,7 +74,10 @@ impl Workspace {
 
     pub(crate) fn open_file_manager_at(&mut self, path: Option<String>, cx: &mut Context<Self>) {
         if let Some(files) = &self.files {
-            files.manager.body.update(cx, |v, cx| v.open_location(path, cx));
+            files
+                .manager
+                .body
+                .update(cx, |v, cx| v.open_location(path, cx));
             self.open_page(TabKind::FileManager, "sidebar.panels.files", cx);
         }
     }
@@ -85,7 +88,10 @@ impl Workspace {
             .as_ref()
             .and_then(|f| f.sftp_profiles.get(id))
             .cloned();
-        let target = SftpTarget { id: id.into(), profile };
+        let target = SftpTarget {
+            id: id.into(),
+            profile,
+        };
         if target.profile.is_some() || !self.demo || crate::ble::is_ble_node(id) {
             self.open_sftp_target(target, cx);
         } else {
@@ -196,18 +202,27 @@ impl FileViews {
             recent_terminals: HashMap::new(),
         }
     }
-    pub(crate) fn cwd_entries(&self, node: &str, path: &str) -> Option<Vec<oxideterm_environment::CurrentDirectoryEntry>> {
+    pub(crate) fn cwd_entries(
+        &self,
+        node: &str,
+        path: &str,
+    ) -> Option<Vec<oxideterm_environment::CurrentDirectoryEntry>> {
         use oxideterm_environment::{CurrentDirectoryEntry, sort_current_directory_entries};
         let drive = self.drives.files(Drive::Node(node.into()));
         let fs = drive.borrow();
-        let mut entries: Vec<_> = fs.list(path).ok()?.into_iter().filter_map(|(p, e)| {
-            let name = Path::new(p).file_name()?.to_str()?;
-            if e.data.is_none() {
-                CurrentDirectoryEntry::new(name, p)
-            } else {
-                CurrentDirectoryEntry::new_file(name, p)
-            }
-        }).collect();
+        let mut entries: Vec<_> = fs
+            .list(path)
+            .ok()?
+            .into_iter()
+            .filter_map(|(p, e)| {
+                let name = Path::new(p).file_name()?.to_str()?;
+                if e.data.is_none() {
+                    CurrentDirectoryEntry::new(name, p)
+                } else {
+                    CurrentDirectoryEntry::new_file(name, p)
+                }
+            })
+            .collect();
         sort_current_directory_entries(&mut entries);
         entries.truncate(oxideterm_gpui_command_sender::cwd::MAX_ENTRIES);
         Some(entries)
@@ -219,7 +234,12 @@ impl FileViews {
             _ => div().into_any_element(),
         }
     }
-    pub(crate) fn forget_file_terminal(&mut self, node: &str, id: oxideterm_workspace::TerminalSessionId, cx: &mut App) {
+    pub(crate) fn forget_file_terminal(
+        &mut self,
+        node: &str,
+        id: oxideterm_workspace::TerminalSessionId,
+        cx: &mut App,
+    ) {
         if self.recent_terminals.get(node) == Some(&id) {
             self.recent_terminals.remove(node);
             self.refresh_terminal_directory(node, cx);
@@ -228,7 +248,7 @@ impl FileViews {
     pub(crate) fn refresh_terminal_directory(&self, node: &str, cx: &mut App) {
         for page in self.sftp_pages.values().chain(self.embedded.views.values()) {
             if page.read(cx).target.profile.is_none() && page.read(cx).target.id == node {
-                App::notify(cx,page.entity_id());
+                App::notify(cx, page.entity_id());
             }
         }
     }
@@ -242,13 +262,7 @@ impl FileViews {
                 .update(cx, |s, cx| s.open_location(None, cx));
         }
     }
-    pub fn refresh(
-        &self,
-        t: ThemeTokens,
-        i: &I18n,
-        ui_font: &SharedString,
-        cx: &mut App,
-    ) {
+    pub fn refresh(&self, t: ThemeTokens, i: &I18n, ui_font: &SharedString, cx: &mut App) {
         for page in self.sftp_pages.values().chain(self.embedded.views.values()) {
             page.update(cx, |s, cx| {
                 s.tokens = t;

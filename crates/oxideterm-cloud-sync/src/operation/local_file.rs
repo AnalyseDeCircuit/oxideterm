@@ -93,6 +93,14 @@ impl CloudSyncOperationService {
             filter_serial_profiles_snapshot(&mut snapshot, filter.serial_profile_ids.as_ref());
             options.serial_profiles_json = Some(serde_json::to_string(&snapshot)?);
         }
+        if scope.sync_container_profiles {
+            let mut snapshot = connections.export_container_profiles_snapshot()?;
+            filter_container_profiles_snapshot(
+                &mut snapshot,
+                filter.container_profile_ids.as_ref(),
+            );
+            options.container_profiles_json = Some(serde_json::to_string(&snapshot)?);
+        }
         if scope.sync_telnet_profiles {
             let mut snapshot = connections.export_telnet_profiles_snapshot()?;
             filter_telnet_profiles_snapshot(&mut snapshot, filter.telnet_profile_ids.as_ref());

@@ -264,6 +264,10 @@ fn export_connections_to_oxide_inner(
         count_quick_commands_for_export(options.quick_commands_json.as_deref());
     let serial_profiles_count =
         count_serial_profiles_for_export(options.serial_profiles_json.as_deref());
+    // The counter is a generic snapshot parser; reuse it for the identically
+    // shaped container snapshot instead of duplicating the function.
+    let container_profiles_count =
+        count_serial_profiles_for_export(options.container_profiles_json.as_deref());
     let telnet_profiles_count =
         count_telnet_profiles_for_export(options.telnet_profiles_json.as_deref());
     let mosh_profiles_count =
@@ -278,6 +282,7 @@ fn export_connections_to_oxide_inner(
         || !plugin_profiles.is_empty()
         || options.quick_commands_json.is_some()
         || options.serial_profiles_json.is_some()
+        || options.container_profiles_json.is_some()
         || options.telnet_profiles_json.is_some()
         || options.mosh_profiles_json.is_some()
         || standalone_sftp_profiles_json.is_some()
@@ -293,6 +298,7 @@ fn export_connections_to_oxide_inner(
         app_settings_json: options.app_settings_json,
         quick_commands_json: options.quick_commands_json,
         serial_profiles_json: options.serial_profiles_json,
+        container_profiles_json: options.container_profiles_json,
         telnet_profiles_json: options.telnet_profiles_json,
         mosh_profiles_json: options.mosh_profiles_json,
         standalone_sftp_profiles_json,
@@ -326,6 +332,7 @@ fn export_connections_to_oxide_inner(
         quick_commands_count: quick_command_counts.map(|counts| counts.0),
         quick_command_categories_count: quick_command_counts.map(|counts| counts.1),
         serial_profiles_count,
+        container_profiles_count,
         telnet_profiles_count,
         mosh_profiles_count,
         standalone_sftp_profiles_count,

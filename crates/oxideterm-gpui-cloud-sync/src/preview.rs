@@ -13,10 +13,10 @@ use oxideterm_cloud_sync::{
     state::CloudSyncPersistedState,
 };
 use oxideterm_connections::{
-    BleProfile, BleProfilesSyncSnapshot, ConnectionInfo, ConnectionOptions,
-    MoshProfilesSyncSnapshot, RemoteDesktopProfilesSyncSnapshot, SavedConnectionsSyncSnapshot,
-    SerialProfile, SerialProfilesSyncSnapshot, TelnetProfilesSyncSnapshot,
-    oxide_file::AppSettingsSectionPreview,
+    BleProfile, BleProfilesSyncSnapshot, ConnectionInfo, ConnectionOptions, ContainerProfile,
+    ContainerProfilesSyncSnapshot, MoshProfilesSyncSnapshot, RemoteDesktopProfilesSyncSnapshot,
+    SavedConnectionsSyncSnapshot, SerialProfile, SerialProfilesSyncSnapshot,
+    TelnetProfilesSyncSnapshot, oxide_file::AppSettingsSectionPreview,
 };
 use oxideterm_forwarding::{PersistedForwardDto, SavedForwardsSyncSnapshot};
 use oxideterm_quick_commands::{QuickCommand, QuickCommandsSnapshot};
@@ -66,6 +66,7 @@ pub struct CloudSyncPreviewSummary {
     pub forwards: usize,
     pub quick_commands: usize,
     pub serial_profiles: usize,
+    pub container_profiles: usize,
     pub ble_profiles: usize,
     pub telnet_profiles: usize,
     pub mosh_profiles: usize,
@@ -219,6 +220,7 @@ pub struct CloudSyncLocalFieldDiffSnapshot {
     pub forwards: Option<SavedForwardsSyncSnapshot>,
     pub quick_commands: Option<QuickCommandsSnapshot>,
     pub serial_profiles: Option<SerialProfilesSyncSnapshot>,
+    pub container_profiles: Option<ContainerProfilesSyncSnapshot>,
     pub ble_profiles: Option<BleProfilesSyncSnapshot>,
     pub standalone_sftp_profiles: Option<oxideterm_connections::StandaloneSftpProfilesSyncSnapshot>,
     pub telnet_profiles: Option<TelnetProfilesSyncSnapshot>,

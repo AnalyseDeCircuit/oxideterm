@@ -723,6 +723,126 @@ impl WorkspaceApp {
         Ok(session_id)
     }
 
+    /// Opens a container exec terminal (Docker socket or kube pod). Container
+    /// identities are volatile, so records keep the resolved launch config; a
+    /// record whose profile or target is reopened reuses its row instead of
+    /// stacking a duplicate.
+    pub(in crate::workspace) fn create_container_terminal_tab_for_connection(
+        &mut self,
+        config: oxideterm_docker::ContainerConnectionConfig,
+        terminal_options: ConnectionTerminalOptions,
+        title: String,
+        connection_attempt_id: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<TerminalSessionId> {
+        if let Some(id) = connection_attempt_id.as_deref()
+            && !self.standalone_connections.is_connecting_attempt(id)
+        {
+            anyhow::bail!("Container connection attempt is no longer active");
+        }
+        // Reopening an identical container target focuses the live session
+        // instead of stacking a duplicate tab and active-session row, matching
+        // the SSH saved-connection reuse behavior.
+        if let Some(session_id) = self
+            .tab_host
+            .read(cx)
+            .container_session_id_matching(&config, cx)
+            && self.focus_terminal_session(session_id, window, cx)
+        {
+            if let Some(attempt_id) = &connection_attempt_id {
+                let surface =
+                    standalone_connections::StandaloneConnectionSurface::Terminal(session_id);
+                self.standalone_connections
+                    .adopt_existing_surface_for_attempt(attempt_id, surface);
+            }
+            return Ok(session_id);
+        }
+        let tab_id = self.alloc_tab_id(cx);
+        let pane_id = self.alloc_pane_id(cx);
+        let session_id = self.alloc_session_id(cx);
+        // BLE-style revive: a closed tab leaves its released row until
+        // retention prunes it, so a form reopen reuses that row instead of
+        // stacking a second active-session record for the same target.
+        let connection_attempt_id = match connection_attempt_id {
+            Some(attempt_id) => attempt_id,
+            None => self
+                .standalone_connections
+                .released_container_record(&config)
+                .and_then(|record_id| self.begin_standalone_reconnect(&record_id, cx))
+                .unwrap_or_else(|| {
+                    self.standalone_connections.insert_pending(
+                        standalone_connections::StandaloneConnectionKind::Container,
+                        title.clone(),
+                        standalone_connections::StandaloneConnectionLaunch::Container {
+                            config: config.clone(),
+                            terminal_options: terminal_options.clone(),
+                        },
+                    )
+                }),
+        };
+        // Sync the resolved identity onto the row (the profile-backed draft is
+        // name-keyed) so later reopens match the live pane's config, and keep
+        // the row title aligned with the fresh tab label.
+        self.standalone_connections.set_attempt_container_config(
+            &connection_attempt_id,
+            &config,
+            &title,
+        );
+        let mut preference_overrides = terminal_preference_overrides(
+            terminal_options,
+            &self.settings_store.settings().terminal,
+        );
+        preference_overrides.session_log_context = Some(TerminalSessionLogContext {
+            session: title.clone(),
+            host: match &config.engine {
+                oxideterm_docker::EngineTarget::DockerSocket { socket_path } => socket_path.clone(),
+                oxideterm_docker::EngineTarget::Kube { namespace, .. } => namespace.clone(),
+            },
+            username: String::new(),
+            protocol: "container-exec".to_string(),
+        });
+        let mut preferences =
+            self.prepare_terminal_preferences_for_tab_kind(&TabKind::LocalTerminal, cx);
+        // Container shells must not share the user's local shell history.
+        preferences.command_history = SharedTerminalCommandHistory::default();
+        preference_overrides.apply_to(&mut preferences);
+        let pane_config = oxideterm_terminal::DockerExecSessionConfig { connection: config };
+        let pane = cx.new(|cx| {
+            TerminalPane::new_container_exec_with_preferences(pane_config, preferences, window, cx)
+                .expect("failed to initialize container terminal pane")
+                .with_preference_overrides(preference_overrides)
+        });
+
+        // Same local-transport treatment as Telnet: no SSH node ownership, but
+        // full tab/pane/session registry participation.
+        self.register_terminal_pane(pane_id, session_id, pane.clone(), window, cx);
+        self.refresh_native_plugin_terminal_hooks(cx);
+        self.insert_tab(
+            Tab {
+                id: tab_id,
+                kind: TabKind::LocalTerminal,
+                title,
+                title_source: TabTitleSource::Static,
+                root_pane: Some(PaneNode::leaf(pane_id, session_id)),
+                active_pane_id: Some(pane_id),
+            },
+            cx,
+        );
+        self.bind_terminal_location(tab_id, pane_id, session_id, cx);
+        let surface = standalone_connections::StandaloneConnectionSurface::Terminal(session_id);
+        self.standalone_connections
+            .bind_surface_for_attempt(&connection_attempt_id, surface);
+        self.set_main_window_active_tab(Some(tab_id), cx);
+        self.active_surface = ActiveSurface::Terminal;
+        self.sync_active_ssh_node_from_terminal_session(cx);
+        self.needs_active_pane_focus = true;
+        pane.update(cx, |pane, cx| pane.focus(window, cx));
+        self.reveal_active_tab(window, cx);
+        cx.notify();
+        Ok(session_id)
+    }
+
     pub(in crate::workspace) fn create_serial_terminal_tab(
         &mut self,
         config: SerialSessionConfig,

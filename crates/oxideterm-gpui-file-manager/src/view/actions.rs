@@ -858,7 +858,9 @@ impl FileManagerView {
         let audio_stop_error = self.file_manager.update(cx, |file_manager, cx| {
             file_manager.preview_task = None;
             file_manager.stream_task = None;
-            file_manager.dialog = Some(FileManagerDialog::Preview { entry: entry.clone() });
+            file_manager.dialog = Some(FileManagerDialog::Preview {
+                entry: entry.clone(),
+            });
             file_manager.dialog_presence.reopen();
             file_manager.preview = Some(Arc::new(LocalPreview::Loading));
             file_manager.preview_plugin = None;

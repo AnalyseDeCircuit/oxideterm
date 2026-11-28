@@ -337,6 +337,13 @@
       "preset_aws_name": "Plantilla predefinida - AWS",
       "apply_blocked_issues": "Corrige los problemas listados antes de añadir",
       "templates_load_failed": "No se pudieron leer las plantillas guardadas"
+    },
+    "container_profiles": {
+      "delete": "Eliminar",
+      "open_failed": "Error al abrir el perfil de contenedor",
+      "container_not_found": "Ningún contenedor coincide con el nombre guardado; puede que se haya eliminado o renombrado.",
+      "confirm_delete": "¿Eliminar el perfil de contenedor \"{{name}}\"?",
+      "delete_failed": "Error al eliminar el perfil de contenedor"
     }
   }
 }

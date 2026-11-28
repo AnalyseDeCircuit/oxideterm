@@ -24,7 +24,9 @@ impl DraftForwards {
         self.pages.remove(&tab);
     }
     pub(crate) fn refresh(&self, cx: &mut App) {
-        for p in self.pages.values() { cx.notify(p.views.state.entity_id()); }
+        for p in self.pages.values() {
+            cx.notify(p.views.state.entity_id());
+        }
     }
     pub(crate) fn editing_text(&self, w: &Window) -> bool {
         self.pages.values().any(|p| p.views.editing_text(w))

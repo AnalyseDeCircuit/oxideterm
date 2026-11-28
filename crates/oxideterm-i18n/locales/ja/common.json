@@ -521,7 +521,8 @@
         "github_oauth_client_id": "GitHub OAuth Client ID",
         "microsoft_oauth_client_id": "Microsoft OAuth クライアント ID",
         "microsoft_access_token": "Microsoft アクセストークン",
-        "google_oauth_client_id": "Google OAuth クライアント ID"
+        "google_oauth_client_id": "Google OAuth クライアント ID",
+        "sync_container_profiles": "コンテナプロファイルを同期"
       },
       "auth": {
         "bearer": "Bearer",
@@ -561,7 +562,8 @@
         "plugin_settings_selected_detail": "選択済みプラグイン: {{plugins}}",
         "plugin_settings_disabled_detail": "現在の同期範囲ではプラグイン設定は除外されています。",
         "sensitive_credentials_enabled_detail": "暗号化された機密資格情報オブジェクトが含まれます。",
-        "sensitive_credentials_disabled_detail": "接続パスワード、鍵パスフレーズ、管理対象秘密鍵、AI キー、権限昇格資格情報は、機密資格情報同期を有効にするまで除外されます。"
+        "sensitive_credentials_disabled_detail": "接続パスワード、鍵パスフレーズ、管理対象秘密鍵、AI キー、権限昇格資格情報は、機密資格情報同期を有効にするまで除外されます。",
+        "container_profiles_detail": "コンテナ接続プロファイルが含まれます。"
       },
       "notes": {
         "upload_only": "自動同期はアップロードのみ行います。リモートの更新は常にユーザーの確認が必要です。",
@@ -775,7 +777,9 @@
         "sensitive_summary_title": "機密資格情報",
         "profile_credential_actions": "{{name}}：保存済み認証情報 {{stored}} 件、削除要求 {{cleared}} 件。",
         "sensitive_remote_summary": "リモートの暗号化資格情報には {{connections}} 件の接続レコードと {{portableSecrets}} 件のポータブルシークレットが含まれます。値は常に非表示です。",
-        "sensitive_upload_summary": "{{passwords}} 件のパスワード、{{keyPassphrases}} 件の鍵パスフレーズ、{{managedKeys}} 件の管理鍵、{{managedKeyPassphrases}} 件の管理鍵パスフレーズ、{{portableSecrets}} 件のポータブルシークレットをアップロードします。"
+        "sensitive_upload_summary": "{{passwords}} 件のパスワード、{{keyPassphrases}} 件の鍵パスフレーズ、{{managedKeys}} 件の管理鍵、{{managedKeyPassphrases}} 件の管理鍵パスフレーズ、{{portableSecrets}} 件のポータブルシークレットをアップロードします。",
+        "container_profiles_label": "コンテナプロファイル",
+        "toggle_container_profiles": "コンテナプロファイルをインポート ({{count}})"
       },
       "confirm": {
         "import_title": "リモートスナップショットをインポートしますか？",
@@ -940,7 +944,10 @@
         "tls_mode": "TLS モード",
         "tls_verification": "TLS 検証",
         "tls_server_name": "TLS サーバー名",
-        "setting_field": "設定フィールド"
+        "setting_field": "設定フィールド",
+        "container_name": "コンテナ名",
+        "engine": "エンジン",
+        "launch_mode": "起動モード"
       },
       "tabs": {
         "overview": "概要",

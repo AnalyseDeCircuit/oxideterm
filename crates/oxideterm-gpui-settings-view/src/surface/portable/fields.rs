@@ -150,12 +150,14 @@ impl SettingsImeSource for PageState {
             .clone();
         let focused = self.fields.active == Some(input);
         let stored_value = self.fields.value(input).or_else(|| match input {
-            SettingsInput::AiProviderApiKey(index) => {
-                self.ai_api_key_drafts.get(self.provider_id_at(index)?).map(|k| k.as_str())
-            }
-            SettingsInput::AiProviderNewModel(index) => {
-                self.ai_new_model_drafts.get(self.provider_id_at(index)?).map(String::as_str)
-            }
+            SettingsInput::AiProviderApiKey(index) => self
+                .ai_api_key_drafts
+                .get(self.provider_id_at(index)?)
+                .map(|k| k.as_str()),
+            SettingsInput::AiProviderNewModel(index) => self
+                .ai_new_model_drafts
+                .get(self.provider_id_at(index)?)
+                .map(String::as_str),
             _ => None,
         });
         SettingsImeFrame {
@@ -178,7 +180,7 @@ impl SettingsImeSource for PageState {
 }
 
 impl PageState {
-    pub(super) fn provider_id_at(&self,index:usize)->Option<&str> {
+    pub(super) fn provider_id_at(&self, index: usize) -> Option<&str> {
         self.settings.ai.providers.get(index)?.get("id")?.as_str()
     }
 
@@ -206,12 +208,14 @@ impl PageState {
                 Some(self.shortcuts.keybinding_search_query().to_owned())
             }
             SettingsInput::AiProviderApiKey(index) => Some(
-                self.provider_id_at(index).and_then(|id| self.ai_api_key_drafts.get(id))
+                self.provider_id_at(index)
+                    .and_then(|id| self.ai_api_key_drafts.get(id))
                     .map(|k| k.as_str().to_owned())
                     .unwrap_or_default(),
             ),
             SettingsInput::AiProviderNewModel(index) => Some(
-                self.provider_id_at(index).and_then(|id| self.ai_new_model_drafts.get(id))
+                self.provider_id_at(index)
+                    .and_then(|id| self.ai_new_model_drafts.get(id))
                     .cloned()
                     .unwrap_or_default(),
             ),
@@ -265,12 +269,13 @@ impl PageState {
                 self.shortcuts.keybinding_search_query.clone_from(draft)
             }
             SettingsInput::AiProviderApiKey(index) => {
-                if let Some(id)=self.provider_id_at(index).map(str::to_owned) {
-                    self.ai_api_key_drafts.insert(id, Zeroizing::new(draft.to_owned()));
+                if let Some(id) = self.provider_id_at(index).map(str::to_owned) {
+                    self.ai_api_key_drafts
+                        .insert(id, Zeroizing::new(draft.to_owned()));
                 }
             }
             SettingsInput::AiProviderNewModel(index) => {
-                if let Some(id)=self.provider_id_at(index).map(str::to_owned) {
+                if let Some(id) = self.provider_id_at(index).map(str::to_owned) {
                     self.ai_new_model_drafts.insert(id, draft.to_owned());
                 }
             }

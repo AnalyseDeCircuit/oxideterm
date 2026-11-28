@@ -553,6 +553,9 @@ impl PortableConnectionDraft {
                         },
                     )
                 }
+                // Container connections depend on a local Docker/kube engine and
+                // are not portable; the portable form never exposes the transport.
+                Container => return Err("ssh.form.validation_required"),
                 WslGraphics => return Err("ssh.form.validation_required"),
             }
         };

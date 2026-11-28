@@ -1,7 +1,7 @@
-mod monitor;
 mod forwards;
-pub(crate) use forwards::DraftForwards;
+mod monitor;
 use crate::host::{Action, Workspace};
+pub(crate) use forwards::DraftForwards;
 use gpui::{prelude::*, *};
 use oxideterm_gpui_onboarding::*;
 use oxideterm_gpui_quick_commands::*;
@@ -453,7 +453,10 @@ impl Workspace {
     fn target(&self) -> Option<QuickCommandTargetContext> {
         self.target_context(self.active_session()?)
     }
-    fn target_context(&self, id: oxideterm_workspace::TerminalSessionId) -> Option<QuickCommandTargetContext> {
+    fn target_context(
+        &self,
+        id: oxideterm_workspace::TerminalSessionId,
+    ) -> Option<QuickCommandTargetContext> {
         let s = self.sessions.get(&id)?;
         if !s.writable(self.ready) {
             return None;
@@ -546,13 +549,23 @@ impl Workspace {
             }
             Run(command) => {
                 q.close_manager();
-                let targets: Vec<_> = self.quick_target_sessions(cx).into_iter().filter_map(|id| {
-                    let mut target = self.target_context(id)?;
-                    if command.command.contains("ctx.selection") {
-                        target.values.selection = self.sessions.get(&id)?.view.read(cx).selected_text().map(zeroize::Zeroizing::new);
-                    }
-                    Some(target)
-                }).collect();
+                let targets: Vec<_> = self
+                    .quick_target_sessions(cx)
+                    .into_iter()
+                    .filter_map(|id| {
+                        let mut target = self.target_context(id)?;
+                        if command.command.contains("ctx.selection") {
+                            target.values.selection = self
+                                .sessions
+                                .get(&id)?
+                                .view
+                                .read(cx)
+                                .selected_text()
+                                .map(zeroize::Zeroizing::new);
+                        }
+                        Some(target)
+                    })
+                    .collect();
                 let confirm = self
                     .settings
                     .read(cx)
@@ -609,7 +622,14 @@ impl Workspace {
                     QuickCommandsNoticeKind::Success => ToastVariant::Success,
                     QuickCommandsNoticeKind::Error => ToastVariant::Error,
                 };
-                self.record_notice(oxideterm_notification_center::NotificationKind::Transfer, variant, n.title, n.description, None, cx);
+                self.record_notice(
+                    oxideterm_notification_center::NotificationKind::Transfer,
+                    variant,
+                    n.title,
+                    n.description,
+                    None,
+                    cx,
+                );
             }
             _ => {}
         }

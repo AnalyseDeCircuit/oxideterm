@@ -513,7 +513,8 @@
         "github_oauth_client_id": "GitHub OAuth Client ID",
         "microsoft_oauth_client_id": "Microsoft OAuth Client ID",
         "microsoft_access_token": "Microsoft Access Token",
-        "google_oauth_client_id": "Google OAuth Client ID"
+        "google_oauth_client_id": "Google OAuth Client ID",
+        "sync_container_profiles": "Sync container profiles"
       },
       "auth": {
         "bearer": "Bearer",
@@ -553,7 +554,8 @@
         "plugin_settings_selected_detail": "Selected plugins: {{plugins}}",
         "plugin_settings_disabled_detail": "Plugin settings are excluded by the current sync scope.",
         "sensitive_credentials_enabled_detail": "Encrypted sensitive credential objects are included.",
-        "sensitive_credentials_disabled_detail": "Connection passwords, key passphrases, managed private keys, AI keys, and privilege credentials are excluded until sensitive credential sync is enabled."
+        "sensitive_credentials_disabled_detail": "Connection passwords, key passphrases, managed private keys, AI keys, and privilege credentials are excluded until sensitive credential sync is enabled.",
+        "container_profiles_detail": "Container connection profiles are included."
       },
       "notes": {
         "upload_only": "Auto sync only uploads. Remote updates always require user confirmation.",
@@ -767,7 +769,9 @@
         "sensitive_summary_title": "Sensitive credentials",
         "profile_credential_actions": "{{name}}: {{stored}} saved credential(s), {{cleared}} deletion request(s).",
         "sensitive_remote_summary": "Remote encrypted credentials include {{connections}} connection record(s) and {{portableSecrets}} portable secret(s). Values stay hidden.",
-        "sensitive_upload_summary": "Will upload {{passwords}} password(s), {{keyPassphrases}} key passphrase(s), {{managedKeys}} managed key(s), {{managedKeyPassphrases}} managed-key passphrase(s), and {{portableSecrets}} portable secret(s)."
+        "sensitive_upload_summary": "Will upload {{passwords}} password(s), {{keyPassphrases}} key passphrase(s), {{managedKeys}} managed key(s), {{managedKeyPassphrases}} managed-key passphrase(s), and {{portableSecrets}} portable secret(s).",
+        "container_profiles_label": "Container Profiles",
+        "toggle_container_profiles": "Import container profiles ({{count}})"
       },
       "confirm": {
         "import_title": "Import remote snapshot?",
@@ -932,7 +936,10 @@
         "tls_mode": "TLS mode",
         "tls_verification": "TLS verification",
         "tls_server_name": "TLS server name",
-        "setting_field": "Setting field"
+        "setting_field": "Setting field",
+        "container_name": "Container name",
+        "engine": "Engine",
+        "launch_mode": "Launch mode"
       },
       "tabs": {
         "overview": "Overview",

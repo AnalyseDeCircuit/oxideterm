@@ -19,8 +19,8 @@ mod ime;
 mod interactions;
 mod preferences;
 pub use preferences::TerminalViewPreferences;
-mod selection;
 mod search;
+mod selection;
 #[cfg(all(test, not(target_family = "wasm")))]
 mod tests;
 

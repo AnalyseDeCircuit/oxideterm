@@ -1239,6 +1239,117 @@ pub struct SaveSerialProfileRequest {
     pub connect_on_open: Option<bool>,
 }
 
+/// Persisted container launch profile. Addresses the container by name (plus
+/// namespace for kube) instead of the volatile container id, so a recreated
+/// container keeps its profile working; the opener resolves the current id.
+/// Carries no credentials: engine access is granted by the local socket or
+/// kubeconfig, never by stored secrets.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ContainerProfile {
+    pub id: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
+    /// Free-form user metadata. UI copy warns against storing credentials here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon_background_color: Option<String>,
+    pub engine: oxideterm_docker::EngineTarget,
+    /// Primary match key on open: Docker container name or kube pod name.
+    pub container_name: String,
+    /// Kube only: namespace the pod lives in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub namespace: Option<String>,
+    /// Kube only: target container inside a multi-container pod.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pod_container: Option<String>,
+    pub launch: oxideterm_docker::ContainerLaunchMode,
+    #[serde(
+        default,
+        skip_serializing_if = "ConnectionTerminalOptions::inherits_application_defaults"
+    )]
+    pub terminal: ConnectionTerminalOptions,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_used_at: Option<DateTime<Utc>>,
+}
+
+impl ContainerProfile {
+    pub fn new(
+        name: impl Into<String>,
+        engine: oxideterm_docker::EngineTarget,
+        container_name: impl Into<String>,
+        namespace: Option<String>,
+        pod_container: Option<String>,
+        launch: oxideterm_docker::ContainerLaunchMode,
+    ) -> Self {
+        let now = Utc::now();
+        Self {
+            id: Uuid::new_v4().to_string(),
+            name: name.into(),
+            group: None,
+            notes: None,
+            icon: None,
+            color: None,
+            icon_background_color: None,
+            engine,
+            container_name: container_name.into(),
+            namespace,
+            pod_container,
+            launch,
+            terminal: ConnectionTerminalOptions::default(),
+            created_at: now,
+            updated_at: now,
+            last_used_at: None,
+        }
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        if self.id.trim().is_empty() {
+            bail!("Container profile id is required");
+        }
+        if self.name.trim().is_empty() {
+            bail!("Container profile name is required");
+        }
+        if self.container_name.trim().is_empty() {
+            bail!("Container profile container name is required");
+        }
+        if matches!(self.engine, oxideterm_docker::EngineTarget::Kube { .. })
+            && self
+                .namespace
+                .as_deref()
+                .is_none_or(|namespace| namespace.trim().is_empty())
+        {
+            bail!("Kube container profile requires a namespace");
+        }
+        Ok(())
+    }
+}
+
+// No Default: engine target and launch mode are mandatory user choices.
+#[derive(Clone, Debug)]
+pub struct SaveContainerProfileRequest {
+    pub id: Option<String>,
+    pub name: String,
+    pub group: Option<String>,
+    pub notes: Option<String>,
+    pub icon: Option<String>,
+    pub color: Option<String>,
+    pub icon_background_color: Option<String>,
+    pub engine: oxideterm_docker::EngineTarget,
+    pub container_name: String,
+    pub namespace: Option<String>,
+    pub pod_container: Option<String>,
+    pub launch: oxideterm_docker::ContainerLaunchMode,
+    pub terminal: ConnectionTerminalOptions,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct BleProfile {
     pub id: String,
@@ -2425,6 +2536,10 @@ pub struct ConnectionStoreData {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub serial_tombstones: Vec<DeletedConnectionTombstone>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub container_profiles: Vec<ContainerProfile>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub container_tombstones: Vec<DeletedConnectionTombstone>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ble_profiles: Vec<BleProfile>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ble_tombstones: Vec<DeletedConnectionTombstone>,
@@ -2481,6 +2596,8 @@ impl Default for ConnectionStoreData {
             managed_ssh_keys: Vec::new(),
             serial_profiles: Vec::new(),
             serial_tombstones: Vec::new(),
+            container_profiles: Vec::new(),
+            container_tombstones: Vec::new(),
             ble_profiles: Vec::new(),
             ble_tombstones: Vec::new(),
             local_terminal_profiles: Vec::new(),
@@ -2510,6 +2627,17 @@ pub struct SerialProfilesSyncSnapshot {
     pub exported_at: String,
     #[serde(default)]
     pub records: Vec<SerialProfile>,
+    #[serde(default)]
+    pub tombstones: Vec<DeletedConnectionTombstone>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContainerProfilesSyncSnapshot {
+    pub revision: String,
+    pub exported_at: String,
+    #[serde(default)]
+    pub records: Vec<ContainerProfile>,
     #[serde(default)]
     pub tombstones: Vec<DeletedConnectionTombstone>,
 }

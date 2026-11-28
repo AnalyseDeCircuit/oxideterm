@@ -191,20 +191,22 @@ impl CatalogView {
                 )
                 .flex_none(),
             )
-            .when(self.host_tools, |toolbar| toolbar.child(
-                self.render_toolbar_button(
-                    LucideIcon::Layers,
-                    self.i18n.t("sessionManager.batchAdd.button"),
-                    ButtonVariant::Ghost,
-                    has_background,
-                    show_primary_labels,
-                    cx.listener(|this, _event, _window, cx| {
-                        this.action(CatalogAction::ShowBatchAdd, None, cx);
-                        cx.stop_propagation();
-                    }),
+            .when(self.host_tools, |toolbar| {
+                toolbar.child(
+                    self.render_toolbar_button(
+                        LucideIcon::Layers,
+                        self.i18n.t("sessionManager.batchAdd.button"),
+                        ButtonVariant::Ghost,
+                        has_background,
+                        show_primary_labels,
+                        cx.listener(|this, _event, _window, cx| {
+                            this.action(CatalogAction::ShowBatchAdd, None, cx);
+                            cx.stop_propagation();
+                        }),
+                    )
+                    .flex_none(),
                 )
-                .flex_none(),
-            ))
+            })
             .child(
                 div()
                     .flex_none()

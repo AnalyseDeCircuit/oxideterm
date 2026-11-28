@@ -58,7 +58,9 @@ pub(super) fn ai_providers_view(
                         s.changed(cx);
                     }
                     AiProviderRequest::SaveKey { index, provider_id } => {
-                        if s.provider_id_at(index) != Some(provider_id.as_str()) { return; }
+                        if s.provider_id_at(index) != Some(provider_id.as_str()) {
+                            return;
+                        }
                         if s.fields.active == Some(SettingsInput::AiProviderApiKey(index)) {
                             s.fields.blur();
                         }
@@ -75,7 +77,9 @@ pub(super) fn ai_providers_view(
                         if s.fields.active == Some(SettingsInput::AiProviderNewModel(index)) {
                             s.fields.blur();
                         }
-                        if let Some(id) = s.provider_id_at(index).map(str::to_owned) { s.ai_new_model_drafts.remove(&id); }
+                        if let Some(id) = s.provider_id_at(index).map(str::to_owned) {
+                            s.ai_new_model_drafts.remove(&id);
+                        }
                         cx.notify();
                     }
                     AiProviderRequest::Confirm(intent, _) => match intent {
@@ -426,7 +430,10 @@ impl PageState {
                 self.reset_open = false;
                 if apply {
                     for action in &self.catalog {
-                        self.settings.keybindings.overrides.remove(action.id.as_ref());
+                        self.settings
+                            .keybindings
+                            .overrides
+                            .remove(action.id.as_ref());
                     }
                     self.changed(cx);
                 }

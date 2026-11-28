@@ -132,6 +132,8 @@ impl ConnectionFormState {
                 | NewConnectionField::Color
                 | NewConnectionField::IdentityAgent
                 | NewConnectionField::TelnetProfileName
+                | NewConnectionField::ContainerShell
+                | NewConnectionField::ContainerCommand
                 | NewConnectionField::MoshServerExecutable
                 | NewConnectionField::MoshUdpHost
                 | NewConnectionField::MoshLocale

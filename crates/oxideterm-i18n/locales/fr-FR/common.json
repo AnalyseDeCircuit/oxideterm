@@ -521,7 +521,8 @@
         "github_oauth_client_id": "GitHub OAuth Client ID",
         "microsoft_oauth_client_id": "ID client OAuth Microsoft",
         "microsoft_access_token": "Jeton d’accès Microsoft",
-        "google_oauth_client_id": "ID client OAuth Google"
+        "google_oauth_client_id": "ID client OAuth Google",
+        "sync_container_profiles": "Synchroniser les profils de conteneurs"
       },
       "auth": {
         "bearer": "Bearer",
@@ -561,7 +562,8 @@
         "plugin_settings_selected_detail": "Plugins sélectionnés : {{plugins}}",
         "plugin_settings_disabled_detail": "Les paramètres de plugins sont exclus du périmètre de synchronisation actuel.",
         "sensitive_credentials_enabled_detail": "Les objets chiffrés contenant des identifiants sensibles sont inclus.",
-        "sensitive_credentials_disabled_detail": "Les mots de passe de connexion, phrases secrètes de clés, clés privées gérées, clés IA et identifiants d'élévation sont exclus tant que la synchronisation des identifiants sensibles n'est pas activée."
+        "sensitive_credentials_disabled_detail": "Les mots de passe de connexion, phrases secrètes de clés, clés privées gérées, clés IA et identifiants d'élévation sont exclus tant que la synchronisation des identifiants sensibles n'est pas activée.",
+        "container_profiles_detail": "Les profils de connexion de conteneurs sont inclus."
       },
       "notes": {
         "upload_only": "La synchronisation automatique ne fait qu'envoyer. Les mises à jour distantes nécessitent toujours une confirmation de l'utilisateur.",
@@ -775,7 +777,9 @@
         "sensitive_summary_title": "Identifiants sensibles",
         "profile_credential_actions": "{{name}} : {{stored}} identifiants enregistrés, {{cleared}} demandes de suppression.",
         "sensitive_remote_summary": "Les identifiants distants chiffrés contiennent {{connections}} enregistrement(s) de connexion et {{portableSecrets}} secret(s) portable(s). Les valeurs restent masquées.",
-        "sensitive_upload_summary": "Enverra {{passwords}} mot(s) de passe, {{keyPassphrases}} phrase(s) secrète(s) de clé, {{managedKeys}} clé(s) gérée(s), {{managedKeyPassphrases}} phrase(s) de clé gérée et {{portableSecrets}} secret(s) portable(s)."
+        "sensitive_upload_summary": "Enverra {{passwords}} mot(s) de passe, {{keyPassphrases}} phrase(s) secrète(s) de clé, {{managedKeys}} clé(s) gérée(s), {{managedKeyPassphrases}} phrase(s) de clé gérée et {{portableSecrets}} secret(s) portable(s).",
+        "container_profiles_label": "Profils de conteneurs",
+        "toggle_container_profiles": "Importer les profils de conteneurs ({{count}})"
       },
       "confirm": {
         "import_title": "Importer le snapshot distant ?",
@@ -940,7 +944,10 @@
         "tls_mode": "Mode TLS",
         "tls_verification": "Vérification TLS",
         "tls_server_name": "Nom du serveur TLS",
-        "setting_field": "Champ de réglage"
+        "setting_field": "Champ de réglage",
+        "container_name": "Nom du conteneur",
+        "engine": "Moteur",
+        "launch_mode": "Mode de lancement"
       },
       "tabs": {
         "overview": "Aperçu",

@@ -25,6 +25,24 @@ pub fn next_connection_field(
     if transport == NewConnectionTransport::WslGraphics {
         return NewConnectionField::Name;
     }
+    if transport == NewConnectionTransport::Container {
+        let fields = [
+            NewConnectionField::SerialProfileName,
+            NewConnectionField::ContainerShell,
+        ];
+        let index = fields
+            .iter()
+            .position(|candidate| *candidate == field)
+            .unwrap_or(0);
+        let next = if forward {
+            (index + 1) % fields.len()
+        } else if index == 0 {
+            fields.len() - 1
+        } else {
+            index - 1
+        };
+        return fields[next];
+    }
     if transport == NewConnectionTransport::Serial {
         let fields = [
             NewConnectionField::SerialProfileName,

@@ -498,6 +498,11 @@ pub fn cloud_sync_preview_summary(preview: &CloudSyncPendingPreview) -> CloudSyn
                     .as_ref()
                     .map(|snapshot| snapshot.records.len() + snapshot.tombstones.len())
                     .unwrap_or(0),
+                container_profiles: preview
+                    .container_profiles_snapshot
+                    .as_ref()
+                    .map(|snapshot| snapshot.records.len() + snapshot.tombstones.len())
+                    .unwrap_or(0),
                 ble_profiles: preview
                     .ble_profiles_snapshot
                     .as_ref()
@@ -552,6 +557,7 @@ pub fn cloud_sync_preview_summary(preview: &CloudSyncPendingPreview) -> CloudSyn
             forwards: preview.preview.total_forwards,
             quick_commands: preview.metadata.quick_commands_count.unwrap_or(0),
             serial_profiles: preview.metadata.serial_profiles_count.unwrap_or(0),
+            container_profiles: preview.metadata.container_profiles_count.unwrap_or(0),
             ble_profiles: preview.metadata.ble_profiles_count.unwrap_or(0),
             telnet_profiles: preview.metadata.telnet_profiles_count.unwrap_or(0),
             mosh_profiles: preview.metadata.mosh_profiles_count.unwrap_or(0),

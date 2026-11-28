@@ -42,7 +42,9 @@ impl AuditStore {
             std::fs::create_dir_all(parent).map_err(|_| AuditError::Storage)?;
         }
         let mut db = Connection::open(path).map_err(|_| AuditError::Storage)?;
-        db.busy_timeout(Duration::from_millis(500))
+        // Opening takes a write lock for schema and key initialization. Another
+        // process may still be loading its key or committing an event batch.
+        db.busy_timeout(Duration::from_secs(5))
             .map_err(|_| AuditError::Storage)?;
         db.pragma_update(None, "journal_mode", "WAL")
             .map_err(|_| AuditError::Storage)?;
@@ -156,6 +158,9 @@ impl AuditStore {
             }
         };
         tx.commit().map_err(|_| AuditError::Storage)?;
+        // Keep the normal writer's shorter latency bound after startup.
+        db.busy_timeout(Duration::from_millis(500))
+            .map_err(|_| AuditError::Storage)?;
         std::fs::create_dir_all(&recording_dir).map_err(|_| AuditError::Storage)?;
         #[cfg(unix)]
         {

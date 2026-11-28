@@ -51,7 +51,9 @@ impl AiProviderSettingsView {
                             .flex_wrap()
                             .items_center()
                             .gap(px(8.0))
-                            .when(!self.session_only, |row| row.child(self.ai_provider_refresh_button(index, provider, cx)))
+                            .when(!self.session_only, |row| {
+                                row.child(self.ai_provider_refresh_button(index, provider, cx))
+                            })
                             .when(
                                 provider.models.len() > AI_PROVIDER_VISIBLE_MODEL_LIMIT,
                                 |row| {

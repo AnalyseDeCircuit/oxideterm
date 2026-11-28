@@ -88,8 +88,10 @@ impl SftpRemoteMutation {
     }
 
     pub fn complete_with_count(self, result: Result<Option<u64>, String>) -> SftpWorkerResult {
-        let description =
-            MutationNotice::success_detail(self.notice.detail, result.as_ref().ok().copied().flatten());
+        let description = MutationNotice::success_detail(
+            self.notice.detail,
+            result.as_ref().ok().copied().flatten(),
+        );
         SftpWorkerResult::RemoteMutationComplete {
             result: result.map(|_| ()),
             refresh_remote: self.pane == SftpPane::Remote,

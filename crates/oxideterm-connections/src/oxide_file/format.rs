@@ -117,6 +117,8 @@ pub struct OxideMetadata {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub serial_profiles_count: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub container_profiles_count: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub telnet_profiles_count: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mosh_profiles_count: Option<usize>,
@@ -148,6 +150,8 @@ pub struct EncryptedPayload {
     pub quick_commands_json: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub serial_profiles_json: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub container_profiles_json: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub telnet_profiles_json: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

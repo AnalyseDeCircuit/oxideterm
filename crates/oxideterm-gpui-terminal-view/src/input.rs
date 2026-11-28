@@ -80,10 +80,7 @@ impl TerminalShortcut {
         ("terminal.killTask", Self::Kill),
         ("terminal.wordBackward", Self::WordBackward),
         ("terminal.wordForward", Self::WordForward),
-        (
-            "terminal.suggestPrevious",
-            Self::SuggestPrevious,
-        ),
+        ("terminal.suggestPrevious", Self::SuggestPrevious),
         ("terminal.suggestNext", Self::SuggestNext),
         ("terminal.scrollPageUp", Self::PageUp),
         ("terminal.scrollPageDown", Self::PageDown),

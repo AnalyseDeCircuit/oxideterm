@@ -122,7 +122,12 @@ impl SftpWorkspaceEntity {
 
     pub(crate) fn preview_pane_is_editable(&self) -> bool {
         #[cfg(target_family = "wasm")]
-        if self.preview_pane == Some(SftpPane::Local) && matches!(self.pair_primary_remote_id,Some(SftpRemoteId::DeviceFolder(_))) {
+        if self.preview_pane == Some(SftpPane::Local)
+            && matches!(
+                self.pair_primary_remote_id,
+                Some(SftpRemoteId::DeviceFolder(_))
+            )
+        {
             return true;
         }
         self.preview_pane == Some(SftpPane::Remote)

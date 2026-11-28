@@ -123,6 +123,7 @@ impl CloudSyncOperationService {
             forwards_snapshot: None,
             quick_commands_snapshot_json: None,
             serial_profiles_snapshot: None,
+            container_profiles_snapshot: None,
             ble_profiles_snapshot: None,
             telnet_profiles_snapshot: None,
             mosh_profiles_snapshot: None,
@@ -132,6 +133,7 @@ impl CloudSyncOperationService {
             base_forwards_snapshot: None,
             base_quick_commands_snapshot_json: None,
             base_serial_profiles_snapshot: None,
+            base_container_profiles_snapshot: None,
             base_ble_profiles_snapshot: None,
             base_telnet_profiles_snapshot: None,
             base_mosh_profiles_snapshot: None,
@@ -171,6 +173,12 @@ impl CloudSyncOperationService {
                 .read_required_object(settings, &metadata_secrets, entry)
                 .await?;
             preview.serial_profiles_snapshot = Some(serde_json::from_slice(&object.bytes)?);
+        }
+        if let Some(entry) = preview.manifest.sections.container_profiles.as_ref() {
+            let object = self
+                .read_required_object(settings, &metadata_secrets, entry)
+                .await?;
+            preview.container_profiles_snapshot = Some(serde_json::from_slice(&object.bytes)?);
         }
         if let Some(entry) = preview.manifest.sections.ble_profiles.as_ref() {
             let object = self
@@ -236,6 +244,14 @@ impl CloudSyncOperationService {
                 &metadata_secrets,
                 previous.serial_profiles.as_deref(),
                 serial_profiles_object_path,
+            )
+            .await?;
+            preview.base_container_profiles_snapshot = read_optional_snapshot_at_revision(
+                self,
+                settings,
+                &metadata_secrets,
+                previous.container_profiles.as_deref(),
+                container_profiles_object_path,
             )
             .await?;
             preview.base_ble_profiles_snapshot = read_optional_snapshot_at_revision(

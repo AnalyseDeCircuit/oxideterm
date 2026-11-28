@@ -337,6 +337,13 @@
       "preset_aws_name": "Mẫu có sẵn - AWS",
       "apply_blocked_issues": "Hãy sửa các vấn đề đã liệt kê trước khi thêm",
       "templates_load_failed": "Không đọc được mẫu đã lưu"
+    },
+    "container_profiles": {
+      "delete": "Xóa",
+      "open_failed": "Mở hồ sơ container thất bại",
+      "container_not_found": "Không có container nào khớp với tên đã lưu; nó có thể đã bị xóa hoặc đổi tên.",
+      "confirm_delete": "Xóa hồ sơ container \"{{name}}\"?",
+      "delete_failed": "Xóa hồ sơ container thất bại"
     }
   }
 }

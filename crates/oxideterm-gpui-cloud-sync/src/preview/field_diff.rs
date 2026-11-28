@@ -569,6 +569,31 @@ impl ProfileFieldDiffRecord for SerialProfile {
     }
 }
 
+impl ProfileFieldDiffRecord for ContainerProfile {
+    const SETTINGS_KEY: &'static str = "plugin.cloud_sync.settings.sync_container_profiles";
+    fn diff_record_id(&self) -> &str {
+        &self.id
+    }
+    fn diff_record_name(&self) -> &str {
+        &self.name
+    }
+    fn diff_merge_fields(
+        base: &Self,
+        local: &Self,
+        remote: &Self,
+        effective_remote: &Self,
+        conflict_strategy: &ConflictStrategy,
+    ) -> Vec<CloudSyncFieldDiffField> {
+        container_profile_merge_fields(base, local, remote, effective_remote, conflict_strategy)
+    }
+    fn diff_changed_fields(remote: &Self, local: &Self) -> Vec<CloudSyncFieldDiffField> {
+        container_profile_changed_fields(remote, local)
+    }
+    fn diff_summary_fields(profile: &Self) -> Vec<CloudSyncFieldDiffField> {
+        container_profile_summary_fields(profile)
+    }
+}
+
 fn push_upload_profile_field_diffs<P: ProfileFieldDiffRecord>(
     items: &mut Vec<CloudSyncFieldDiffItem>,
     remote_records: &[P],
@@ -715,6 +740,36 @@ pub(super) fn push_upload_serial_profile_field_diffs(
             .map(|snapshot| snapshot.records.as_slice())
             .unwrap_or(&[]),
         &local.records,
+    );
+}
+
+pub(super) fn push_upload_container_profile_field_diffs(
+    items: &mut Vec<CloudSyncFieldDiffItem>,
+    remote: Option<&ContainerProfilesSyncSnapshot>,
+    local: &ContainerProfilesSyncSnapshot,
+) {
+    push_upload_profile_field_diffs(
+        items,
+        remote
+            .map(|snapshot| snapshot.records.as_slice())
+            .unwrap_or(&[]),
+        &local.records,
+    );
+}
+
+pub(super) fn push_container_profile_field_diffs(
+    items: &mut Vec<CloudSyncFieldDiffItem>,
+    remote: &ContainerProfilesSyncSnapshot,
+    base: Option<&ContainerProfilesSyncSnapshot>,
+    local: Option<&ContainerProfilesSyncSnapshot>,
+    conflict_strategy: &ConflictStrategy,
+) {
+    push_profile_field_diffs(
+        items,
+        &remote.records,
+        base.map(|snapshot| snapshot.records.as_slice()),
+        local.map(|snapshot| snapshot.records.as_slice()),
+        conflict_strategy,
     );
 }
 

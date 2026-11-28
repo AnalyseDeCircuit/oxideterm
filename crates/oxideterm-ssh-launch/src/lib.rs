@@ -578,7 +578,12 @@ pub fn parse_quick_ssh_launch(target: &str) -> Option<TemporarySshLaunch> {
         parse_connection_uri(&uri, None).ok()?
     } else {
         let (username, host, port) = parse_explicit_user_host_port_target(target)?;
-        return Some(TemporarySshLaunch { username, host, port, password: None });
+        return Some(TemporarySshLaunch {
+            username,
+            host,
+            port,
+            password: None,
+        });
     };
     match launch {
         NativeConnectionLaunch::Ssh(ssh) => Some(ssh),
@@ -682,7 +687,10 @@ mod tests {
             format_user_host_port_target("root", "::1", 2200),
             "root@[::1]:2200"
         );
-        for target in ["ssh://root:pass%40word@[::1]:2200", "root:pass%40word@[::1]:2200"] {
+        for target in [
+            "ssh://root:pass%40word@[::1]:2200",
+            "root:pass%40word@[::1]:2200",
+        ] {
             let launch = parse_quick_ssh_launch(target).unwrap();
             assert_eq!(
                 format_user_host_port_target(&launch.username, &launch.host, launch.port),

@@ -839,7 +839,6 @@ fn resolve_options(alias: &str, blocks: &[SshHostBlock]) -> SshHostOptions {
     resolved
 }
 
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct ProxyJumpTarget {
     host: String,
@@ -1130,7 +1129,6 @@ fn remote_command_value(line: &str) -> Option<&str> {
     let value = value.strip_prefix('=').unwrap_or(value).trim();
     (!value.is_empty()).then_some(value)
 }
-
 
 fn expand_include_path(base_dir: &Path, pattern: &str) -> Vec<PathBuf> {
     let pattern = expand_home(pattern);

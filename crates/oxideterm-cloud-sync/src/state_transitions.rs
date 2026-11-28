@@ -49,6 +49,12 @@ pub fn history_summary_from_manifest(manifest: &StructuredManifest) -> CloudSync
             .as_ref()
             .and_then(|entry| entry.record_count)
             .unwrap_or(0),
+        container_profiles: manifest
+            .sections
+            .container_profiles
+            .as_ref()
+            .and_then(|entry| entry.record_count)
+            .unwrap_or(0),
         telnet_profiles: manifest
             .sections
             .telnet_profiles
@@ -154,6 +160,7 @@ pub fn finish_causal_sync_state(
             forwards: scope.sync_forwards,
             quick_commands: scope.sync_quick_commands,
             serial_profiles: scope.sync_serial_profiles,
+            container_profiles: scope.sync_container_profiles,
             ble_profiles: scope.sync_ble_profiles,
             telnet_profiles: scope.sync_telnet_profiles,
             mosh_profiles: scope.sync_mosh_profiles,
@@ -189,6 +196,11 @@ pub fn finish_causal_sync_state(
             },
             serial_profiles: if scope.sync_serial_profiles {
                 local.serial_profiles_record_count
+            } else {
+                0
+            },
+            container_profiles: if scope.sync_container_profiles {
+                local.container_profiles_record_count
             } else {
                 0
             },
@@ -276,6 +288,7 @@ pub fn structured_apply_covers_full_remote(
         && (manifest.sections.forwards.is_none() || selection.forwards)
         && (manifest.sections.quick_commands.is_none() || selection.quick_commands)
         && (manifest.sections.serial_profiles.is_none() || selection.serial_profiles)
+        && (manifest.sections.container_profiles.is_none() || selection.container_profiles)
         && (manifest.sections.ble_profiles.is_none() || selection.ble_profiles)
         && (manifest.sections.telnet_profiles.is_none() || selection.telnet_profiles)
         && (manifest.sections.mosh_profiles.is_none() || selection.mosh_profiles)
@@ -312,6 +325,9 @@ pub fn merge_structured_remote_baseline(
     }
     if selection.serial_profiles {
         merged.serial_profiles = next.serial_profiles.clone();
+    }
+    if selection.container_profiles {
+        merged.container_profiles = next.container_profiles.clone();
     }
     if selection.ble_profiles {
         merged.ble_profiles = next.ble_profiles.clone();
@@ -522,6 +538,7 @@ mod tests {
             forwards: None,
             quick_commands: None,
             serial_profiles: None,
+            container_profiles: None,
             ble_profiles: None,
             telnet_profiles: None,
             mosh_profiles: None,
@@ -616,6 +633,7 @@ mod tests {
             forwards: None,
             quick_commands: None,
             serial_profiles: None,
+            container_profiles: None,
             ble_profiles: None,
             telnet_profiles: None,
             mosh_profiles: None,
@@ -643,6 +661,7 @@ mod tests {
                 forwards: None,
                 quick_commands_applied: 0,
                 serial_profiles_applied: 0,
+                container_profiles_applied: 0,
                 ble_profiles_applied: 0,
                 telnet_profiles_applied: 0,
                 mosh_profiles_applied: 0,
@@ -659,6 +678,7 @@ mod tests {
                 forwards: false,
                 quick_commands: false,
                 serial_profiles: false,
+                container_profiles: false,
                 ble_profiles: false,
                 telnet_profiles: false,
                 mosh_profiles: false,

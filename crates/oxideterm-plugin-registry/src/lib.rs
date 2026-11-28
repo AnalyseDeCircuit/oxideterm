@@ -88,6 +88,7 @@ pub use contributions::{
 };
 pub use discovery::{load_native_plugin_config, save_native_plugin_config};
 pub use install::{NATIVE_PLUGIN_LANGUAGE_ICON_MAX_BYTES, load_verified_language_icon_bytes};
+pub use oxideterm_plugin_manifest::catalog as catalog_browser;
 pub use oxideterm_plugin_manifest::discovery::{
     DiscoveryConfigUse, DiscoveryLaunchKind, NativePluginDiscoveryProviderDef,
 };
@@ -97,7 +98,6 @@ pub use permissions::{
     native_plugin_capability_approval_matches, native_plugin_requested_capabilities,
     native_plugin_requires_permission_review, normalize_native_plugin_capabilities,
 };
-pub use oxideterm_plugin_manifest::catalog as catalog_browser;
 pub use registry::{
     NativePluginRegistry, OFFICIAL_NATIVE_PLUGIN_REGISTRY_URL,
     OFFICIAL_NATIVE_PLUGIN_REGISTRY_V2_URL,

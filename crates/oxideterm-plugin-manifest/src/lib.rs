@@ -3,13 +3,13 @@
 
 //! Native plugin manifest and registry data model.
 
+pub mod catalog;
 mod config;
 mod connection;
 mod contributions;
 pub mod discovery;
 mod language;
 mod manifest;
-pub mod catalog;
 mod registry;
 mod runtime;
 

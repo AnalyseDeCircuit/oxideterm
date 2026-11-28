@@ -520,27 +520,47 @@ impl PortableConnectionFormView {
         if self.active_field(cx).is_some() && key == "space" {
             return;
         }
-        let fields = self.environment.borrow().tunnel.as_ref().map(|t| {
-            use NewConnectionField::*;
-            let mut fields = vec![Name, Host, Port];
-            if t.kind != TunnelKind::Dynamic {
-                fields.extend([TunnelTargetHost, TunnelTargetPort]);
-            }
-            fields
-        }).or_else(|| {
-            self.environment.borrow().browser?;
-            let form = self.form(cx)?;
-            use crate::form_state::{ConnectionFormDrawer as Drawer, NewConnectionField::*};
-            Some(match (form.transport, form.active_drawer) {
-                (NewConnectionTransport::Ssh, None) => vec![Name, Username, Host, Port],
-                (NewConnectionTransport::StandaloneSftp, None) => vec![Name],
-                (NewConnectionTransport::StandaloneSftp, Some(Drawer::StandaloneSftpPrimary)) => vec![Username, Host, Port, InitialRemotePath],
-                (NewConnectionTransport::StandaloneSftp, Some(Drawer::StandaloneSftpSecondary)) => vec![StandaloneSftpSecondaryUsername, StandaloneSftpSecondaryHost, StandaloneSftpSecondaryPort, StandaloneSftpSecondaryInitialRemotePath],
-                (NewConnectionTransport::Ssh | NewConnectionTransport::StandaloneSftp, Some(Drawer::Notes)) => vec![Color, IconBackgroundColor, Notes],
-                (NewConnectionTransport::Ssh, Some(Drawer::SshSecurity)) => vec![],
-                _ => return None,
+        let fields = self
+            .environment
+            .borrow()
+            .tunnel
+            .as_ref()
+            .map(|t| {
+                use NewConnectionField::*;
+                let mut fields = vec![Name, Host, Port];
+                if t.kind != TunnelKind::Dynamic {
+                    fields.extend([TunnelTargetHost, TunnelTargetPort]);
+                }
+                fields
             })
-        });
+            .or_else(|| {
+                self.environment.borrow().browser?;
+                let form = self.form(cx)?;
+                use crate::form_state::{ConnectionFormDrawer as Drawer, NewConnectionField::*};
+                Some(match (form.transport, form.active_drawer) {
+                    (NewConnectionTransport::Ssh, None) => vec![Name, Username, Host, Port],
+                    (NewConnectionTransport::StandaloneSftp, None) => vec![Name],
+                    (
+                        NewConnectionTransport::StandaloneSftp,
+                        Some(Drawer::StandaloneSftpPrimary),
+                    ) => vec![Username, Host, Port, InitialRemotePath],
+                    (
+                        NewConnectionTransport::StandaloneSftp,
+                        Some(Drawer::StandaloneSftpSecondary),
+                    ) => vec![
+                        StandaloneSftpSecondaryUsername,
+                        StandaloneSftpSecondaryHost,
+                        StandaloneSftpSecondaryPort,
+                        StandaloneSftpSecondaryInitialRemotePath,
+                    ],
+                    (
+                        NewConnectionTransport::Ssh | NewConnectionTransport::StandaloneSftp,
+                        Some(Drawer::Notes),
+                    ) => vec![Color, IconBackgroundColor, Notes],
+                    (NewConnectionTransport::Ssh, Some(Drawer::SshSecurity)) => vec![],
+                    _ => return None,
+                })
+            });
         let result = self.state.update(cx, |s, cx| {
             if super::algorithms::handle_key(s, &self.algorithms, e, cx) {
                 cx.notify();

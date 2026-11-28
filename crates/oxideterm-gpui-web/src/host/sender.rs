@@ -1,6 +1,6 @@
 mod directory;
-use directory::{Directory, Picker};
 use super::*;
+use directory::{Directory, Picker};
 use oxideterm_gpui_command_sender::{
     ExpandedSender, SenderAction, SenderPanelFrame, TERMINAL_SENDER_RESIZE_HOTZONE_HEIGHT,
     TerminalCommandSenderEntity as Model, TerminalCommandSenderId, TerminalCommandSenderStatus,
@@ -87,7 +87,9 @@ impl WebSender {
     }
 
     pub(super) fn owns_keys(&self, w: &Window, cx: &App) -> bool {
-        self.picker.as_ref().is_some_and(|p| p.search.focus_handle(cx).is_focused(w))
+        self.picker
+            .as_ref()
+            .is_some_and(|p| p.search.focus_handle(cx).is_focused(w))
             || self.compact.focus_handle(cx).is_focused(w)
             || self
                 .model
@@ -312,7 +314,11 @@ impl Render for WebSender {
             .gap(px(6.))
             .border_t_1()
             .border_color(frame.divider)
-            .bg(if frame.has_background {oxideterm_gpui_ui::tab_base_background(&tokens)} else {rgb(tokens.ui.bg)})
+            .bg(if frame.has_background {
+                oxideterm_gpui_ui::tab_base_background(&tokens)
+            } else {
+                rgb(tokens.ui.bg)
+            })
             .relative()
             .children(self.directory_chip(&tokens, cx))
             .child(button(

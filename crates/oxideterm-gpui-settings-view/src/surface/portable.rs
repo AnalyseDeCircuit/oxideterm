@@ -38,7 +38,7 @@ use crate::{
 mod actions;
 mod fields;
 mod wallpaper;
-use oxideterm_settings_model::browser_preferences::{BundledWallpaper,WallpaperId};
+use oxideterm_settings_model::browser_preferences::{BundledWallpaper, WallpaperId};
 mod host;
 pub use host::{PortableKnownHostsAction, PortableProxyProbe};
 mod pages;
@@ -335,7 +335,9 @@ impl PortableSettingsSurface {
     ) -> Self {
         let section_filter: SectionFilter = match host {
             SettingsHost::Browser if wallpaper_gallery.is_some() => |tab, section| {
-                browser_section(tab, section) || (tab == SettingsTab::Appearance && section == SettingsSectionId::AppearanceBackground)
+                browser_section(tab, section)
+                    || (tab == SettingsTab::Appearance
+                        && section == SettingsSectionId::AppearanceBackground)
             },
             SettingsHost::Browser => browser_section,
             _ => supported,
@@ -420,7 +422,8 @@ impl PortableSettingsSurface {
 
     pub fn captures_workspace_shortcuts(&self, cx: &App) -> bool {
         let state = self.state.read(cx);
-        state.ai_confirm.read(cx).state().is_some() || state.reset_open
+        state.ai_confirm.read(cx).state().is_some()
+            || state.reset_open
             || state.shortcuts.keybinding_recording_action_id().is_some()
     }
 
@@ -457,7 +460,11 @@ impl PortableSettingsSurface {
     }
 
     pub fn update_wallpaper_gallery(
-        &self, tiles: Vec<WallpaperTile>, busy: bool, error: Option<&'static str>, cx: &mut App,
+        &self,
+        tiles: Vec<WallpaperTile>,
+        busy: bool,
+        error: Option<&'static str>,
+        cx: &mut App,
     ) {
         self.state.update(cx, |s, cx| {
             s.wallpaper_tiles = tiles;
@@ -475,9 +482,9 @@ impl PortableSettingsSurface {
     }
 
     pub fn open_ai_providers(&self, cx: &mut App) {
-        self.state.update(cx, |s,cx| {
+        self.state.update(cx, |s, cx| {
             s.route.set_ai_page(AiSettingsPage::Providers);
-            s.navigate(SettingsTab::Ai,None,cx);
+            s.navigate(SettingsTab::Ai, None, cx);
         });
     }
 
@@ -516,13 +523,16 @@ impl PortableSettingsSurface {
         });
     }
 
-    pub fn on_browser_report(&self, download: impl Fn(&mut Window, &mut App) + 'static, cx: &mut App) {
+    pub fn on_browser_report(
+        &self,
+        download: impl Fn(&mut Window, &mut App) + 'static,
+        cx: &mut App,
+    ) {
         self.state.update(cx, |s, cx| {
             s.browser_report = Some(Rc::new(download));
             cx.notify();
         });
     }
-
 
     pub fn set_app_icon_picker(
         &self,
@@ -618,7 +628,10 @@ impl PageState {
     fn has_wallpaper(&self) -> bool {
         let t = &self.settings.terminal;
         self.wallpaper_gallery.is_some()
-            && t.background_enabled && WallpaperId::selected(t).is_some_and(|id|matches!(id,WallpaperId::Bundled(_))||self.loaded_wallpaper==Some(id))
+            && t.background_enabled
+            && WallpaperId::selected(t).is_some_and(|id| {
+                matches!(id, WallpaperId::Bundled(_)) || self.loaded_wallpaper == Some(id)
+            })
             && (t.background_scope == oxideterm_settings::BackgroundScope::Window
                 || t.background_scope
                     .includes_content(&t.background_enabled_tabs, "settings"))
@@ -768,12 +781,18 @@ impl PageState {
                     Some(SettingsSectionId::AppearanceBackground) => {
                         self.settings.terminal.background_image.hash(&mut h);
                         self.settings.terminal.background_enabled.hash(&mut h);
-                        self.settings.terminal.background_opacity.to_bits().hash(&mut h);
+                        self.settings
+                            .terminal
+                            .background_opacity
+                            .to_bits()
+                            .hash(&mut h);
                         (self.settings.terminal.background_scope as u8).hash(&mut h);
                         self.settings.terminal.background_enabled_tabs.hash(&mut h);
                         self.gallery_busy.hash(&mut h);
                         self.gallery_error.hash(&mut h);
-                        for tile in &self.wallpaper_tiles { tile.id.hash(&mut h); }
+                        for tile in &self.wallpaper_tiles {
+                            tile.id.hash(&mut h);
+                        }
                     }
                     Some(SettingsSectionId::AppearanceTheme) => {
                         self.settings
@@ -832,7 +851,9 @@ impl PageState {
                 ui_font: oxideterm_gpui_ui::typography::tauri_ui_font_family(
                     &self.settings.appearance.ui_font_family,
                 ),
-                divider: gpui::rgba((tokens.ui.border << 8) | if self.has_wallpaper() { 0x26 } else { 0x66 }),
+                divider: gpui::rgba(
+                    (tokens.ui.border << 8) | if self.has_wallpaper() { 0x26 } else { 0x66 },
+                ),
                 groups,
             },
             sections,

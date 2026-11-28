@@ -175,6 +175,10 @@ impl ConnectionStore {
         audit_configuration_snapshot("serial_profiles", || build_serial_profiles_sync_snapshot(&self.data), |snapshot| snapshot.records.len())
     }
 
+    pub fn export_container_profiles_snapshot(&self) -> Result<ContainerProfilesSyncSnapshot> {
+        audit_configuration_snapshot("container_profiles", || build_container_profiles_sync_snapshot(&self.data), |snapshot| snapshot.records.len())
+    }
+
     pub fn export_ble_profiles_snapshot(&self) -> Result<BleProfilesSyncSnapshot> {
         audit_configuration_snapshot("ble_profiles", || build_ble_profiles_sync_snapshot(&self.data), |snapshot| snapshot.records.len())
     }
@@ -638,6 +642,77 @@ impl ConnectionStore {
                 }
             } else {
                 self.data.serial_profiles.push(profile);
+                applied += 1;
+            }
+        }
+        changed |= applied > 0;
+        if changed {
+            self.normalize();
+            self.save()?;
+        }
+        Ok(applied)
+    }
+
+    pub fn apply_container_profiles_snapshot(
+        &mut self,
+        snapshot: ContainerProfilesSyncSnapshot,
+    ) -> Result<usize> {
+        // Validate the complete batch before mutating store data so a bad late
+        // record cannot leave earlier profiles applied in memory.
+        for profile in &snapshot.records {
+            profile.validate()?;
+        }
+        let mut applied = 0usize;
+        let mut changed = false;
+        for tombstone in snapshot.tombstones {
+            if let Some(local) = self
+                .data
+                .container_tombstones
+                .iter_mut()
+                .find(|t| t.id == tombstone.id)
+            {
+                if tombstone.deleted_at > local.deleted_at {
+                    local.deleted_at = tombstone.deleted_at;
+                    changed = true;
+                }
+            } else {
+                self.data.container_tombstones.push(tombstone);
+                changed = true;
+            }
+        }
+        let record_count = self.data.container_profiles.len();
+        self.data.container_profiles.retain(|profile| {
+            !self
+                .data
+                .container_tombstones
+                .iter()
+                .any(|t| t.id == profile.id && t.deleted_at >= profile.updated_at)
+        });
+        changed |= self.data.container_profiles.len() != record_count;
+        for profile in snapshot.records {
+            // A deletion that postdates the incoming record suppresses it; a
+            // record re-created after the deletion keeps its newer timestamp
+            // and must survive.
+            if self
+                .data
+                .container_tombstones
+                .iter()
+                .any(|t| t.id == profile.id && t.deleted_at >= profile.updated_at)
+            {
+                continue;
+            }
+            if let Some(existing) = self
+                .data
+                .container_profiles
+                .iter_mut()
+                .find(|existing| existing.id == profile.id)
+            {
+                if profile.updated_at >= existing.updated_at {
+                    *existing = profile;
+                    applied += 1;
+                }
+            } else {
+                self.data.container_profiles.push(profile);
                 applied += 1;
             }
         }
@@ -1187,6 +1262,30 @@ fn build_serial_profiles_sync_snapshot(
     ))?;
 
     Ok(SerialProfilesSyncSnapshot {
+        revision,
+        exported_at: Utc::now().to_rfc3339(),
+        records,
+        tombstones,
+    })
+}
+
+fn build_container_profiles_sync_snapshot(
+    data: &ConnectionStoreData,
+) -> Result<ContainerProfilesSyncSnapshot> {
+    // Container profiles carry no local-only secrets, so records export as-is.
+    let mut records = data.container_profiles.clone();
+    records.sort_by(|left, right| left.id.cmp(&right.id));
+    let mut tombstones = data.container_tombstones.clone();
+    tombstones.sort_by(|left, right| left.id.cmp(&right.id));
+    let revision = sha256_hex(&(
+        records
+            .iter()
+            .map(|profile| (&profile.id, profile.updated_at.to_rfc3339()))
+            .collect::<Vec<_>>(),
+        &tombstones,
+    ))?;
+
+    Ok(ContainerProfilesSyncSnapshot {
         revision,
         exported_at: Utc::now().to_rfc3339(),
         records,

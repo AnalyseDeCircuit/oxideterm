@@ -151,6 +151,7 @@ impl SessionManagerState {
             Row::Group(group) => return self.request_delete_session_group(group, cx),
             Row::Connection(id) => name.map(|name| Confirm::Single { id, name }),
             Row::Serial(id) => name.map(|name| Confirm::SerialProfile { id, name }),
+            Row::Container(id) => name.map(|name| Confirm::ContainerProfile { id, name }),
             Row::Ble(id) => name.map(|name| Confirm::BleProfile { id, name }),
             Row::LocalTerminal(id) => name.map(|name| Confirm::LocalTerminalProfile { id, name }),
             Row::Telnet(id) => name.map(|name| Confirm::TelnetProfile { id, name }),
@@ -215,6 +216,7 @@ impl SessionManagerState {
         let target = match self.take_delete(cx)? {
             Confirm::Single { id, .. } => SessionManagerSelectionTarget::Connection(id),
             Confirm::SerialProfile { id, .. } => SessionManagerSelectionTarget::Serial(id),
+            Confirm::ContainerProfile { id, .. } => SessionManagerSelectionTarget::Container(id),
             Confirm::BleProfile { id, .. } => SessionManagerSelectionTarget::Ble(id),
             Confirm::LocalTerminalProfile { id, .. } => {
                 SessionManagerSelectionTarget::LocalTerminal(id)

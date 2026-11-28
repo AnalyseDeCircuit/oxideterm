@@ -23,6 +23,7 @@ impl SessionManagerState {
                 .iter()
                 .find(|p| p.id == *id)
                 .map(|p| &p.name),
+            Row::Container(id) => store.get_container_profile(id).map(|p| &p.name),
             Row::Ble(id) => store
                 .ble_profiles()
                 .iter()
@@ -58,6 +59,10 @@ impl SessionManagerState {
             Target::Serial(_) => (
                 "sessionManager.serial_profiles.delete",
                 "sessionManager.serial_profiles.delete_failed",
+            ),
+            Target::Container(_) => (
+                "sessionManager.container_profiles.delete",
+                "sessionManager.container_profiles.delete_failed",
             ),
             Target::Ble(_) => (
                 "sessionManager.ble_profiles.delete",
@@ -113,6 +118,7 @@ fn delete_catalog_profile(store: &mut ConnectionStore, target: &Target) -> anyho
     match target {
         Target::Plugin(id) => store.delete_plugin_profile(id),
         Target::Ble(id) => store.delete_ble_profile(id),
+        Target::Container(id) => store.delete_container_profile(id),
         Target::LocalTerminal(id) => store.delete_local_terminal_profile(id),
         Target::Ftp(id) => store.delete_ftp_profile(id),
         Target::StandaloneSftp(id) => store.delete_standalone_sftp_profile(id),

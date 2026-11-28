@@ -678,5 +678,18 @@
   },
   "workspace": {
     "new_local_terminal": "Terminal cục bộ mới"
+  },
+  "local_shell": {
+    "background": {
+      "kill": "Kết thúc",
+      "lines": "dòng",
+      "resume": "Tiếp tục",
+      "title": "Phiên nền"
+    },
+    "toast": {
+      "attached": "Phiên đã được tiếp tục",
+      "detached": "Phiên đã chuyển vào nền",
+      "detached_desc": "{{shell}} đang chạy trong nền"
+    }
   }
 }

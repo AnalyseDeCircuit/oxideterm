@@ -8,11 +8,10 @@ use crate::{
 use gpui::prelude::*;
 use gpui::{
     self, AnchoredPositionMode, AnyElement, AnyView, App, ClipboardItem, Context, Corner,
-    ElementId, Entity, EventEmitter, IntoElement, KeyDownEvent, ListAlignment,
-    ListState, MouseButton, MouseDownEvent, MouseMoveEvent, ObjectFit, ParentElement, Pixels,
-    Point, Render, Rgba, ScrollEvent, ScrollHandle, SharedString, Styled, StyledImage,
-    Subscription, Task, UniformListScrollHandle, Window, anchored, deferred, div, px, relative,
-    rgb, rgba, svg,
+    ElementId, Entity, EventEmitter, IntoElement, KeyDownEvent, ListAlignment, ListState,
+    MouseButton, MouseDownEvent, MouseMoveEvent, ObjectFit, ParentElement, Pixels, Point, Render,
+    Rgba, ScrollEvent, ScrollHandle, SharedString, Styled, StyledImage, Subscription, Task,
+    UniformListScrollHandle, Window, anchored, deferred, div, px, relative, rgb, rgba, svg,
 };
 use oxideterm_editor_core::utf16::replace_utf16;
 use oxideterm_gpui_editor::{EditorContextMenuLabels, TextEditorView};
@@ -1261,7 +1260,14 @@ mod tests {
             let progress = file_manager.operation_progress.as_ref().expect("progress");
             assert!(!progress.active);
             assert_eq!((progress.current, progress.total), (1, 2));
-            assert_eq!(file_manager.files.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(), ["first"]);
+            assert_eq!(
+                file_manager
+                    .files
+                    .iter()
+                    .map(|f| f.name.as_str())
+                    .collect::<Vec<_>>(),
+                ["first"]
+            );
             assert!(progress.file_name.is_empty());
         });
     }
@@ -1326,7 +1332,9 @@ impl FileManagerView {
                     FileManagerNoticeKind::Success,
                     cx,
                 ),
-                FileManagerWorkspaceEvent::BookmarksSaved(change) => this.bookmark_saved(change,cx),
+                FileManagerWorkspaceEvent::BookmarksSaved(change) => {
+                    this.bookmark_saved(change, cx)
+                }
                 FileManagerWorkspaceEvent::OpenEntry(entry) => {
                     this.open_file_manager_entry(entry.clone(), cx)
                 }

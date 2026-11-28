@@ -112,8 +112,7 @@ impl Peer {
                 r#"mkdir "$HOME/work tree"
 cd "$HOME/work tree"
 printf 'remote file\n' > note.txt
-export PS1='remote-fixture> '
-exec script -qefc '/bin/sh -i' /dev/null"#,
+exec script -qefc 'printf "remote-pty-ready\n"; exec /bin/sh -i' /dev/null"#,
             ]);
         } else if !self.exec {
             // Shell-only gateways can expose dd without GNU's byte-skip and status operands.
@@ -427,7 +426,9 @@ async fn local_pty_ide_reads_and_restores_the_native_ssh_shell() {
         shell_single_quote(&known_hosts.to_string_lossy())
     );
     terminal.write_input(login.as_bytes()).unwrap();
-    output_until(&mut terminal, b"remote-fixture> ").await;
+    // script invokes the runner's shell with -c; bash clears an inherited PS1.
+    // The marker comes from the slave PTY, independently of the user's prompt.
+    output_until(&mut terminal, b"remote-pty-ready").await;
     terminal
         .write_input(b"shell_only=retained; printf 'prepared-%s\\n' yes\r")
         .unwrap();

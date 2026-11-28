@@ -52,6 +52,7 @@ pub fn public_sync_scope(
         sync_forwards: Some(contains(PublicSyncSection::Forwards)),
         sync_quick_commands: Some(contains(PublicSyncSection::QuickCommands)),
         sync_serial_profiles: Some(contains(PublicSyncSection::SerialProfiles)),
+        sync_container_profiles: Some(contains(PublicSyncSection::ContainerProfiles)),
         sync_ble_profiles: Some(contains(PublicSyncSection::BleProfiles)),
         sync_telnet_profiles: Some(contains(PublicSyncSection::TelnetProfiles)),
         sync_mosh_profiles: Some(contains(PublicSyncSection::MoshProfiles)),
@@ -90,6 +91,11 @@ pub fn raw_scope_sections(scope: &RawSyncScope) -> Vec<PublicSyncSection> {
         &mut sections,
         scope.sync_serial_profiles,
         PublicSyncSection::SerialProfiles,
+    );
+    push_enabled_sync_section(
+        &mut sections,
+        scope.sync_container_profiles,
+        PublicSyncSection::ContainerProfiles,
     );
     push_enabled_sync_section(
         &mut sections,
@@ -143,6 +149,7 @@ pub fn full_sync_scope() -> RawSyncScope {
         sync_forwards: Some(true),
         sync_quick_commands: Some(true),
         sync_serial_profiles: Some(true),
+        sync_container_profiles: Some(true),
         sync_ble_profiles: Some(true),
         sync_telnet_profiles: Some(true),
         sync_mosh_profiles: Some(true),
@@ -175,6 +182,9 @@ pub fn dirty_sections_projection(snapshot: &CloudSyncLocalSnapshot) -> Vec<&'sta
     }
     if dirty.serial_profiles {
         sections.push("serial_profiles");
+    }
+    if dirty.container_profiles {
+        sections.push("container_profiles");
     }
     if dirty.ble_profiles {
         sections.push("ble_profiles");

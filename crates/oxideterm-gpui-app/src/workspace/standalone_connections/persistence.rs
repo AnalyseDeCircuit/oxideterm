@@ -31,6 +31,10 @@ enum LaunchSnapshot {
         upstream_proxy: SavedUpstreamProxyPolicy,
         terminal: ConnectionTerminalOptions,
     },
+    Container {
+        config: oxideterm_docker::ContainerConnectionConfig,
+        terminal: ConnectionTerminalOptions,
+    },
     Ble {
         clues: BleConnectionClues,
         terminal: ConnectionTerminalOptions,
@@ -92,6 +96,10 @@ impl StandaloneConnectionRegistry {
         let snapshots = self
             .records
             .iter()
+            .filter(|record| !matches!(&record.launch,
+                StandaloneConnectionLaunch::Container { config, .. }
+                if matches!(config.launch, oxideterm_docker::ContainerLaunchMode::Command { .. })
+            ))
             .map(|record| SessionSnapshot {
                 id: record.id.clone(),
                 title: record.title.clone(),
@@ -137,6 +145,7 @@ impl LaunchSnapshot {
         match &record.launch {
             StandaloneConnectionLaunch::SavedSerial { profile_id, .. }
             | StandaloneConnectionLaunch::SavedTelnet { profile_id, .. }
+            | StandaloneConnectionLaunch::SavedContainer { profile_id, .. }
             | StandaloneConnectionLaunch::SavedMosh { profile_id }
             | StandaloneConnectionLaunch::SavedRemoteDesktop { profile_id } => Self::Saved {
                 profile_id: profile_id.clone(),
@@ -155,6 +164,13 @@ impl LaunchSnapshot {
             } => Self::Telnet {
                 config: config.clone(),
                 upstream_proxy: upstream_proxy.clone(),
+                terminal: terminal_options.clone(),
+            },
+            StandaloneConnectionLaunch::Container {
+                config,
+                terminal_options,
+            } => Self::Container {
+                config: config.clone(),
                 terminal: terminal_options.clone(),
             },
             StandaloneConnectionLaunch::Ble {
@@ -336,6 +352,16 @@ impl LaunchSnapshot {
                     store.get_remote_desktop_profile(&profile_id)?;
                     StandaloneConnectionLaunch::SavedRemoteDesktop { profile_id }
                 }
+                StandaloneConnectionKind::Container => {
+                    let profile = store.get_container_profile(&profile_id)?;
+                    // The placeholder id is replaced by a live name match on
+                    // every reconnect.
+                    StandaloneConnectionLaunch::SavedContainer {
+                        profile_id,
+                        config: container_launch_config_from_profile(profile),
+                        terminal_options: profile.terminal.clone(),
+                    }
+                }
             },
             Self::Serial { config, terminal } if kind == StandaloneConnectionKind::Serial => {
                 StandaloneConnectionLaunch::Serial {
@@ -352,6 +378,12 @@ impl LaunchSnapshot {
                 upstream_proxy,
                 terminal_options: terminal,
             },
+            Self::Container { config, terminal } if kind == StandaloneConnectionKind::Container => {
+                StandaloneConnectionLaunch::Container {
+                    config,
+                    terminal_options: terminal,
+                }
+            }
             Self::Ble { clues, terminal } if kind == StandaloneConnectionKind::Ble => {
                 StandaloneConnectionLaunch::Ble {
                     clues,

@@ -7,8 +7,8 @@
 use super::*;
 use crate::workspace::terminal_command_sender::{
     CompactSuggestionMode, TERMINAL_SENDER_MIN_HEIGHT, TERMINAL_SENDER_RESIZE_HOTZONE_HEIGHT,
-    TerminalCommandSenderDocumentSnapshot, TerminalCommandSenderId,
-    TerminalCommandSenderStatus, TerminalCommandSenderTarget, TerminalCommandSenderTargetScope,
+    TerminalCommandSenderDocumentSnapshot, TerminalCommandSenderId, TerminalCommandSenderStatus,
+    TerminalCommandSenderTarget, TerminalCommandSenderTargetScope,
 };
 use oxideterm_editor_core::utf16::{byte_index_for_utf16, replace_utf16};
 use oxideterm_terminal::TerminalSenderInputMode;
@@ -480,10 +480,12 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-
-
-    fn expanded_sender(&self, entries: Vec<(TerminalCommandSenderTarget, String, TabKind)>, cx: &mut Context<Self>) -> AnyElement {
-        use oxideterm_gpui_command_sender::{SenderAction, ExpandedSender, SenderPanelFrame};
+    fn expanded_sender(
+        &self,
+        entries: Vec<(TerminalCommandSenderTarget, String, TabKind)>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        use oxideterm_gpui_command_sender::{ExpandedSender, SenderAction, SenderPanelFrame};
         let owner = cx.weak_entity();
         let frame = SenderPanelFrame {
             tokens: self.tokens,
@@ -491,21 +493,46 @@ impl WorkspaceApp {
             divider: self.workspace_chrome_divider(),
             has_background: self.window_background_preferences().is_some(),
             current: self.terminal_command_active_target_label(cx),
-            targets: entries.into_iter().map(|(target, label, _)| (target.pane_id, label)).collect(),
-            groups: self.terminal_broadcast_groups().iter().map(|group| (group.id, group.name.clone())).collect(),
+            targets: entries
+                .into_iter()
+                .map(|(target, label, _)| (target.pane_id, label))
+                .collect(),
+            groups: self
+                .terminal_broadcast_groups()
+                .iter()
+                .map(|group| (group.id, group.name.clone()))
+                .collect(),
         };
-        ExpandedSender::new(self.terminal_command_sender.clone(), frame, self.i18n.clone(), move |action, w, cx| {
-            let _ = owner.update(cx, |app, cx| match action {
-                SenderAction::Start(id) => { app.start_terminal_command_sender(id, cx); }
-                SenderAction::Group(id, group) => {
-                    let panes = app.resolve_terminal_broadcast_group(group, cx);
-                    app.terminal_command_sender.update(cx, |s, cx| s.set_target_group(id, group, &panes, cx));
-                }
-                SenderAction::FocusEditor(id) => app.focus_terminal_command_sender_editor(id, w, cx),
-                SenderAction::FocusCompact => { app.clear_ime_selection(); app.focus_compact_terminal_command_sender(w, cx); }
-                SenderAction::BlurHostInput => { if app.blur_host_tools_input(cx) { cx.notify(); } }
-            });
-        }).into_any_element()
+        ExpandedSender::new(
+            self.terminal_command_sender.clone(),
+            frame,
+            self.i18n.clone(),
+            move |action, w, cx| {
+                let _ = owner.update(cx, |app, cx| match action {
+                    SenderAction::Start(id) => {
+                        app.start_terminal_command_sender(id, cx);
+                    }
+                    SenderAction::Group(id, group) => {
+                        let panes = app.resolve_terminal_broadcast_group(group, cx);
+                        app.terminal_command_sender
+                            .update(cx, |s, cx| s.set_target_group(id, group, &panes, cx));
+                    }
+                    SenderAction::FocusEditor(id) => {
+                        app.focus_terminal_command_sender_editor(id, w, cx)
+                    }
+                    SenderAction::FocusCompact => {
+                        app.clear_ime_selection();
+                        app.focus_compact_terminal_command_sender(w, cx);
+                    }
+                    SenderAction::BlurHostInput => {
+                        if app.blur_host_tools_input(cx) {
+                            cx.notify();
+                        }
+                    }
+                });
+            },
+        )
+        .into_any_element()
     }
 
     fn terminal_command_sender_target_entries(
@@ -525,9 +552,14 @@ impl WorkspaceApp {
                                 use oxideterm_terminal::TerminalSenderFrame::*;
                                 pane.update(cx, |pane, cx| match frame {
                                     TextLine(line) => pane.send_command_sender_line(line, cx),
-                                    TextChunk(text) => pane.send_command_sender_text_chunk(text, cx),
-                                    RawBytes(bytes) => pane.send_command_sender_raw_bytes(bytes, cx),
-                                }).ok()
+                                    TextChunk(text) => {
+                                        pane.send_command_sender_text_chunk(text, cx)
+                                    }
+                                    RawBytes(bytes) => {
+                                        pane.send_command_sender_raw_bytes(bytes, cx)
+                                    }
+                                })
+                                .ok()
                             }),
                         },
                         format!("{} · #{}", entry.label, entry.pane_id.0),

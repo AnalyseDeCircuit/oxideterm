@@ -467,7 +467,9 @@ impl WorkspaceApp {
                     cx.stop_propagation();
                     return;
                 }
-                if this.tab_context_menu.is_some() { return; }
+                if this.tab_context_menu.is_some() {
+                    return;
+                }
                 if this.active_window_modal_owner(cx).is_some() {
                     // Yield only to the modal's own input or editor, never background routing.
                     return;

@@ -521,7 +521,8 @@
         "github_oauth_client_id": "GitHub OAuth Client ID",
         "microsoft_oauth_client_id": "ID de cliente OAuth da Microsoft",
         "microsoft_access_token": "Token de acesso da Microsoft",
-        "google_oauth_client_id": "ID do cliente OAuth do Google"
+        "google_oauth_client_id": "ID do cliente OAuth do Google",
+        "sync_container_profiles": "Sincronizar perfis de contêineres"
       },
       "auth": {
         "bearer": "Bearer",
@@ -561,7 +562,8 @@
         "plugin_settings_selected_detail": "Plugins selecionados: {{plugins}}",
         "plugin_settings_disabled_detail": "As configurações de plugins estão excluídas do escopo de sincronização atual.",
         "sensitive_credentials_enabled_detail": "Objetos criptografados de credenciais sensíveis são incluídos.",
-        "sensitive_credentials_disabled_detail": "Senhas de conexão, frases-senha de chaves, chaves privadas gerenciadas, chaves de IA e credenciais de privilégio são excluídas até a sincronização de credenciais sensíveis ser ativada."
+        "sensitive_credentials_disabled_detail": "Senhas de conexão, frases-senha de chaves, chaves privadas gerenciadas, chaves de IA e credenciais de privilégio são excluídas até a sincronização de credenciais sensíveis ser ativada.",
+        "container_profiles_detail": "Perfis de conexão de contêineres são incluídos."
       },
       "notes": {
         "upload_only": "A sincronização automática apenas envia. Atualizações remotas sempre exigem confirmação do usuário.",
@@ -775,7 +777,9 @@
         "sensitive_summary_title": "Credenciais sensíveis",
         "profile_credential_actions": "{{name}}: {{stored}} credenciais salvas, {{cleared}} solicitações de exclusão.",
         "sensitive_remote_summary": "As credenciais remotas criptografadas incluem {{connections}} registro(s) de conexão e {{portableSecrets}} segredo(s) portáteis. Os valores permanecem ocultos.",
-        "sensitive_upload_summary": "Enviará {{passwords}} senha(s), {{keyPassphrases}} frase(s) secreta(s) de chave, {{managedKeys}} chave(s) gerenciada(s), {{managedKeyPassphrases}} frase(s) de chaves gerenciadas e {{portableSecrets}} segredo(s) portáteis."
+        "sensitive_upload_summary": "Enviará {{passwords}} senha(s), {{keyPassphrases}} frase(s) secreta(s) de chave, {{managedKeys}} chave(s) gerenciada(s), {{managedKeyPassphrases}} frase(s) de chaves gerenciadas e {{portableSecrets}} segredo(s) portáteis.",
+        "container_profiles_label": "Perfis de contêineres",
+        "toggle_container_profiles": "Importar perfis de contêineres ({{count}})"
       },
       "confirm": {
         "import_title": "Importar snapshot remoto?",
@@ -940,7 +944,10 @@
         "tls_mode": "Modo TLS",
         "tls_verification": "Verificação TLS",
         "tls_server_name": "Nome do servidor TLS",
-        "setting_field": "Campo de configuração"
+        "setting_field": "Campo de configuração",
+        "container_name": "Nome do contêiner",
+        "engine": "Motor",
+        "launch_mode": "Modo de inicialização"
       },
       "tabs": {
         "overview": "Visão Geral",

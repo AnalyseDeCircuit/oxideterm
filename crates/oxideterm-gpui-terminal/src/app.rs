@@ -431,6 +431,7 @@ fn populate_default_session_log_context(
         TerminalSessionKind::Mosh => "mosh",
         TerminalSessionKind::Serial => "serial",
         TerminalSessionKind::Ble => "ble",
+        TerminalSessionKind::ContainerExec => "container",
     };
     if context.protocol.is_empty() {
         context.protocol = protocol.to_string();
@@ -1042,6 +1043,25 @@ impl TerminalPane {
             preferences.terminal_encoding,
             preferences.scrollback_lines,
         )));
+        Self::from_session(terminal, preferences, window, cx)
+    }
+
+    pub fn new_container_exec_with_preferences(
+        config: oxideterm_terminal::DockerExecSessionConfig,
+        preferences: TerminalUiPreferences,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<Self> {
+        let terminal = Arc::new(Mutex::new(
+            TerminalSession::container_exec_with_graphics_and_encoding(
+                config,
+                DEFAULT_COLS,
+                DEFAULT_ROWS,
+                graphics_options_from_preferences(&preferences),
+                preferences.terminal_encoding,
+                preferences.scrollback_lines,
+            ),
+        ));
         Self::from_session(terminal, preferences, window, cx)
     }
 

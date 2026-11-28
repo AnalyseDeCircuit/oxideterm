@@ -112,7 +112,9 @@ impl DeviceManagers {
 
 impl Workspace {
     pub(crate) fn focused_manager(&self) -> Option<&FileManagerViews> {
-        let tab = self.focused_tab().filter(|t| t.kind == TabKind::FileManager)?;
+        let tab = self
+            .focused_tab()
+            .filter(|t| t.kind == TabKind::FileManager)?;
         self.manager_for(tab.id)
     }
 

@@ -337,6 +337,13 @@
       "preset_aws_name": "預設範本-aws",
       "apply_blocked_issues": "請先修正列出的問題再新增",
       "templates_load_failed": "無法讀取已儲存的範本"
+    },
+    "container_profiles": {
+      "delete": "刪除",
+      "open_failed": "開啟容器設定檔失敗",
+      "container_not_found": "沒有符合已儲存名稱的容器，可能已被移除或重新命名。",
+      "confirm_delete": "刪除容器設定檔「{{name}}」？",
+      "delete_failed": "刪除容器設定檔失敗"
     }
   }
 }

@@ -1189,7 +1189,12 @@ pub(crate) fn install_context_keybindings(overrides: &Map<String, Value>, cx: &m
     });
     use oxideterm_gpui_terminal::{TerminalKeybindings, TerminalShortcut};
     cx.set_global(TerminalKeybindings {
-        bindings: shortcuts::context_bindings(&ACTION_DEFINITIONS, TerminalShortcut::BINDINGS, overrides, KeybindingSide::current()),
+        bindings: shortcuts::context_bindings(
+            &ACTION_DEFINITIONS,
+            TerminalShortcut::BINDINGS,
+            overrides,
+            KeybindingSide::current(),
+        ),
         normalize: shortcuts::normalized_keystroke,
     });
 }

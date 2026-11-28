@@ -656,17 +656,18 @@ pub(super) fn render_section(
                 }),
             };
             if state.host == SettingsHost::Browser {
-                page.browser_section(section,state.browser_report.clone(),cx)
+                page.browser_section(section, state.browser_report.clone(), cx)
             } else {
-                page.section(section,cx)
+                page.section(section, cx)
             }
         }
         SftpOpening | SftpPerformance | SftpConflict => c.settings_sftp_section(section, cx),
         IdeEditing | IdeTypography | IdeAgent | IdeAgentPrivacy => {
             c.settings_ide_section(section, state.ide_custom, cx)
         }
-        AppearanceTheme | AppearanceBackground | AppearanceLayout | AppearanceEffects | AppearanceAppIcon => {
-            let settings_owner=owner;
+        AppearanceTheme | AppearanceBackground | AppearanceLayout | AppearanceEffects
+        | AppearanceAppIcon => {
+            let settings_owner = owner;
             let owner = owner.downgrade();
             let page = CoreAppearancePage {
                 controls: c,
@@ -679,7 +680,7 @@ pub(super) fn render_section(
                 }),
             };
             match section {
-                AppearanceBackground => wallpaper::card(&page,settings_owner,cx),
+                AppearanceBackground => wallpaper::card(&page, settings_owner, cx),
                 AppearanceTheme => {
                     let rows = page.appearance_theme_controls_with_hints(&state.settings, true, cx);
                     page.appearance_card(state.i18n.t("settings_view.appearance.theme"), None, rows)

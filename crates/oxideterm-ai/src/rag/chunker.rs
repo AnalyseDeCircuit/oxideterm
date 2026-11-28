@@ -1,8 +1,8 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::rag_model::{DocChunk, DocFormat};
 use crate::rag_keyword::is_cjk;
+use crate::rag_model::{DocChunk, DocFormat};
 use uuid::Uuid;
 
 // ═══════════════════════════════════════════════════════════════════════════

@@ -108,6 +108,7 @@ pub fn cloud_sync_section_signature(
             state.sync_scope.sync_forwards.hash(&mut hasher);
             state.sync_scope.sync_quick_commands.hash(&mut hasher);
             state.sync_scope.sync_serial_profiles.hash(&mut hasher);
+            state.sync_scope.sync_container_profiles.hash(&mut hasher);
             state.sync_scope.sync_ble_profiles.hash(&mut hasher);
             state.sync_scope.sync_telnet_profiles.hash(&mut hasher);
             state.sync_scope.sync_mosh_profiles.hash(&mut hasher);

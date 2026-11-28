@@ -16,6 +16,7 @@ pub(super) enum StandaloneConnectionKind {
     Mosh,
     Telnet,
     Serial,
+    Container,
     Ble,
     Rdp,
     Vnc,
@@ -42,10 +43,21 @@ pub(super) enum StandaloneConnectionLaunch {
         upstream_proxy: SavedUpstreamProxyPolicy,
         terminal_options: ConnectionTerminalOptions,
     },
+    Container {
+        config: oxideterm_docker::ContainerConnectionConfig,
+        terminal_options: ConnectionTerminalOptions,
+    },
     SavedTelnet {
         profile_id: String,
         config: TelnetSessionConfig,
         upstream_proxy: SavedUpstreamProxyPolicy,
+        terminal_options: ConnectionTerminalOptions,
+    },
+    SavedContainer {
+        profile_id: String,
+        // Carries the last resolved identity so a deleted profile can still
+        // reconnect; the live id is re-resolved from the profile on every open.
+        config: oxideterm_docker::ContainerConnectionConfig,
         terminal_options: ConnectionTerminalOptions,
     },
     Ble {
@@ -106,6 +118,11 @@ enum StandaloneReconnectPlan {
         terminal_options: ConnectionTerminalOptions,
         saved_profile_id: Option<String>,
     },
+    Container {
+        config: oxideterm_docker::ContainerConnectionConfig,
+        terminal_options: ConnectionTerminalOptions,
+        saved_profile_id: Option<String>,
+    },
     Ble {
         clues: BleConnectionClues,
         terminal_options: ConnectionTerminalOptions,
@@ -127,6 +144,88 @@ enum StandaloneReconnectPlan {
     SavedRemoteDesktop {
         profile_id: String,
     },
+}
+
+/// Builds the launch config carried by saved container records before the live
+/// container id is resolved. `container_id` is a placeholder holding the
+/// stored container name; every open and reconnect replaces it from the
+/// engine listing.
+pub(super) fn container_launch_config_from_profile(
+    profile: &oxideterm_connections::ContainerProfile,
+) -> oxideterm_docker::ContainerConnectionConfig {
+    oxideterm_docker::ContainerConnectionConfig {
+        engine: profile.engine.clone(),
+        container_id: profile.container_name.clone(),
+        label: profile.name.clone(),
+        namespace: profile.namespace.clone(),
+        pod_container: profile.pod_container.clone(),
+        launch: profile.launch.clone(),
+    }
+}
+
+pub(super) enum SavedContainerResolveError {
+    /// The engine surface itself (daemon socket or kubeconfig) is unreachable.
+    Engine(oxideterm_docker::ContainerError),
+    /// No live container matched the stored name, so the id cannot be resolved.
+    ContainerNotFound,
+}
+
+pub(super) fn saved_container_error_label(
+    error: SavedContainerResolveError,
+    i18n: &oxideterm_i18n::I18n,
+) -> String {
+    match error {
+        SavedContainerResolveError::Engine(error) => format!(
+            "{}: {error}",
+            i18n.t("sessionManager.container_profiles.open_failed")
+        ),
+        SavedContainerResolveError::ContainerNotFound => {
+            i18n.t("sessionManager.container_profiles.container_not_found")
+        }
+    }
+}
+
+/// Resolves a saved container profile against the live engine listing. The
+/// profile stores the container name (ids are volatile), so the current id
+/// must be re-resolved on every open.
+pub(super) async fn resolve_saved_container_launch(
+    profile: oxideterm_connections::ContainerProfile,
+) -> Result<oxideterm_docker::ContainerConnectionConfig, SavedContainerResolveError> {
+    let engine = profile.engine.clone();
+    let containers = oxideterm_docker::list_containers(&engine)
+        .await
+        .map_err(SavedContainerResolveError::Engine)?;
+    let entry = containers
+        .into_iter()
+        .find(|entry| {
+            entry.name == profile.container_name
+                && match (&entry.namespace, &profile.namespace) {
+                    (Some(namespace), Some(profile_namespace)) => namespace == profile_namespace,
+                    // Docker entries carry no namespace; a namespace match is
+                    // only enforceable when both sides report one.
+                    _ => true,
+                }
+        })
+        .ok_or(SavedContainerResolveError::ContainerNotFound)?;
+    // Normalize the pin with the rule the form applies on selection; keeping
+    // the launch identity equal to a form-opened session lets reconnect dedup
+    // match instead of stacking a second pane.
+    if profile
+        .pod_container
+        .as_deref()
+        .is_some_and(|pin| !entry.contains_pod_container(pin))
+    {
+        return Err(SavedContainerResolveError::ContainerNotFound);
+    }
+    let pod_container = entry.normalize_pod_container(profile.pod_container.as_deref());
+    Ok(oxideterm_docker::ContainerConnectionConfig {
+        engine: profile.engine,
+        container_id: entry.id,
+        label: profile.name,
+        namespace: profile.namespace,
+        pod_container,
+        launch: profile.launch,
+    })
 }
 
 #[derive(Default)]
@@ -229,6 +328,94 @@ impl WorkspaceApp {
                         );
                     }
                 }),
+            StandaloneReconnectPlan::Container {
+                config,
+                terminal_options,
+                saved_profile_id,
+            } => match saved_profile_id {
+                None => self
+                    .create_container_terminal_tab_for_connection(
+                        config,
+                        terminal_options,
+                        title,
+                        Some(connection_attempt_id.clone()),
+                        window,
+                        cx,
+                    )
+                    .map(|_| ()),
+                Some(profile_id) => {
+                    let profile = self
+                        .connection_store
+                        .get_container_profile(&profile_id)
+                        .cloned();
+                    match profile {
+                        // Profile deleted meanwhile: the cached config holds
+                        // the last resolved identity and still reconnects.
+                        None => self
+                            .create_container_terminal_tab_for_connection(
+                                config,
+                                terminal_options,
+                                title,
+                                Some(connection_attempt_id.clone()),
+                                window,
+                                cx,
+                            )
+                            .map(|_| ()),
+                        Some(profile) => {
+                            let attempt_id = connection_attempt_id.clone();
+                            // bollard requires a Tokio context; the engine
+                            // listing must run on the workspace task runtime.
+                            let task_runtime = self.workspace_runtime.read(cx).task_runtime();
+                            cx.spawn_in(window, async move |workspace, cx| {
+                                let resolved =
+                                    task_runtime
+                                        .spawn(async move {
+                                            resolve_saved_container_launch(profile).await
+                                        })
+                                        .await
+                                        .unwrap_or_else(|join_error| {
+                                            Err(SavedContainerResolveError::Engine(
+                                                oxideterm_docker::ContainerError::Engine(
+                                                    join_error.to_string(),
+                                                ),
+                                            ))
+                                        });
+                                let _ =
+                                    workspace.update_in(cx, |this, window, cx| match resolved {
+                                        Ok(config) => {
+                                            let _ = this
+                                                .create_container_terminal_tab_for_connection(
+                                                    config,
+                                                    terminal_options,
+                                                    title,
+                                                    Some(attempt_id.clone()),
+                                                    window,
+                                                    cx,
+                                                );
+                                        }
+                                        Err(error) => {
+                                            this.standalone_connections
+                                                .mark_attempt_error(&attempt_id);
+                                            this.connections.session_manager.update(
+                                                cx,
+                                                |state, cx| {
+                                                    state.set_status(
+                                                        Some(saved_container_error_label(
+                                                            error, &this.i18n,
+                                                        )),
+                                                        cx,
+                                                    );
+                                                },
+                                            );
+                                        }
+                                    });
+                            })
+                            .detach();
+                            Ok(())
+                        }
+                    }
+                }
+            },
             StandaloneReconnectPlan::Ble {
                 clues,
                 terminal_options,
@@ -455,6 +642,36 @@ impl WorkspaceApp {
                 terminal_options: terminal_options.clone(),
                 saved_profile_id: None,
             },
+            StandaloneConnectionLaunch::Container {
+                config,
+                terminal_options,
+            } => StandaloneReconnectPlan::Container {
+                config: config.clone(),
+                terminal_options: terminal_options.clone(),
+                saved_profile_id: None,
+            },
+            StandaloneConnectionLaunch::SavedContainer {
+                profile_id,
+                config,
+                terminal_options,
+            } => {
+                // The saved profile stays authoritative; the container id is
+                // re-resolved by name on every reconnect.
+                let current_profile = self
+                    .connection_store
+                    .container_profiles()
+                    .iter()
+                    .find(|profile| profile.id == *profile_id);
+                StandaloneReconnectPlan::Container {
+                    config: current_profile
+                        .map_or_else(|| config.clone(), container_launch_config_from_profile),
+                    terminal_options: current_profile.map_or_else(
+                        || terminal_options.clone(),
+                        |profile| profile.terminal.clone(),
+                    ),
+                    saved_profile_id: Some(profile_id.clone()),
+                }
+            }
             StandaloneConnectionLaunch::SavedTelnet {
                 profile_id,
                 config,
@@ -699,6 +916,163 @@ mod tests {
         assert_eq!(registry.released_saved_ble_record("profile-2"), None);
     }
 
+    fn container_config(container_id: &str) -> oxideterm_docker::ContainerConnectionConfig {
+        oxideterm_docker::ContainerConnectionConfig {
+            engine: oxideterm_docker::EngineTarget::DockerSocket {
+                socket_path: "/var/run/docker.sock".to_string(),
+            },
+            container_id: container_id.to_string(),
+            label: format!("Docker {container_id}"),
+            namespace: None,
+            pod_container: None,
+            launch: oxideterm_docker::ContainerLaunchMode::Shell { shell: None },
+        }
+    }
+
+    #[test]
+    fn transient_container_commands_are_not_written_to_session_history() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sessions.json");
+        let mut registry = StandaloneConnectionRegistry {
+            snapshot_path: Some(path.clone()),
+            ..Default::default()
+        };
+        for (name, launch) in [
+            (
+                "shell",
+                oxideterm_docker::ContainerLaunchMode::Shell { shell: None },
+            ),
+            (
+                "temporary",
+                oxideterm_docker::ContainerLaunchMode::Command {
+                    command: "private-test-argument".into(),
+                },
+            ),
+        ] {
+            let mut config = container_config(name);
+            config.launch = launch;
+            registry.insert_pending(
+                StandaloneConnectionKind::Container,
+                name.into(),
+                StandaloneConnectionLaunch::Container {
+                    config,
+                    terminal_options: Default::default(),
+                },
+            );
+        }
+        let entries: Vec<serde_json::Value> =
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        assert_eq!(
+            entries
+                .iter()
+                .map(|e| e["title"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            ["shell"]
+        );
+    }
+
+    #[test]
+    fn released_container_record_revives_matching_released_row() {
+        let mut registry = StandaloneConnectionRegistry::default();
+        let first_surface = StandaloneConnectionSurface::Terminal(TerminalSessionId(71));
+        let first = registry.insert(
+            StandaloneConnectionKind::Container,
+            "web first".to_string(),
+            StandaloneConnectionLaunch::Container {
+                config: container_config("abc"),
+                terminal_options: ConnectionTerminalOptions::default(),
+            },
+            first_surface,
+        );
+        registry.release_surface(first_surface);
+        // A live row for another container is never a revive candidate.
+        registry.insert(
+            StandaloneConnectionKind::Container,
+            "db live".to_string(),
+            StandaloneConnectionLaunch::Container {
+                config: container_config("xyz"),
+                terminal_options: ConnectionTerminalOptions::default(),
+            },
+            StandaloneConnectionSurface::Terminal(TerminalSessionId(72)),
+        );
+        assert_eq!(
+            registry
+                .released_container_record(&container_config("abc"))
+                .as_deref(),
+            Some(first.as_str())
+        );
+        assert_eq!(
+            registry.released_container_record(&container_config("xyz")),
+            None
+        );
+        // An in-flight attempt is not released; its failure is.
+        let attempt_id = registry.begin_reconnect(&first).unwrap();
+        assert_eq!(
+            registry.released_container_record(&container_config("abc")),
+            None
+        );
+        registry.mark_attempt_error(&attempt_id);
+        assert_eq!(
+            registry
+                .released_container_record(&container_config("abc"))
+                .as_deref(),
+            Some(first.as_str())
+        );
+        // With two released rows for the target the most recently inserted one
+        // wins, so reopening never stacks onto the stale first row.
+        let second_surface = StandaloneConnectionSurface::Terminal(TerminalSessionId(73));
+        let second = registry.insert(
+            StandaloneConnectionKind::Container,
+            "web second".to_string(),
+            StandaloneConnectionLaunch::Container {
+                config: container_config("abc"),
+                terminal_options: ConnectionTerminalOptions::default(),
+            },
+            second_surface,
+        );
+        registry.release_surface(second_surface);
+        assert_eq!(
+            registry
+                .released_container_record(&container_config("abc"))
+                .as_deref(),
+            Some(second.as_str())
+        );
+    }
+
+    #[test]
+    fn released_saved_container_record_matches_profile_only() {
+        let mut registry = StandaloneConnectionRegistry::default();
+        let record_surface = StandaloneConnectionSurface::Terminal(TerminalSessionId(74));
+        let record = registry.insert(
+            StandaloneConnectionKind::Container,
+            "web".to_string(),
+            StandaloneConnectionLaunch::SavedContainer {
+                profile_id: "profile-1".to_string(),
+                config: container_config("abc"),
+                terminal_options: ConnectionTerminalOptions::default(),
+            },
+            record_surface,
+        );
+        registry.release_surface(record_surface);
+        registry.insert(
+            StandaloneConnectionKind::Container,
+            "api".to_string(),
+            StandaloneConnectionLaunch::SavedContainer {
+                profile_id: "profile-2".to_string(),
+                config: container_config("def"),
+                terminal_options: ConnectionTerminalOptions::default(),
+            },
+            StandaloneConnectionSurface::Terminal(TerminalSessionId(75)),
+        );
+        assert_eq!(
+            registry
+                .released_saved_container_record("profile-1")
+                .as_deref(),
+            Some(record.as_str())
+        );
+        assert_eq!(registry.released_saved_container_record("profile-2"), None);
+    }
+
     #[test]
     fn ble_pending_open_is_cancelled_on_disconnect_retry_and_remove() {
         let runtime = tokio::runtime::Builder::new_current_thread()
@@ -938,6 +1312,111 @@ impl StandaloneConnectionRegistry {
         }
     }
 
+    /// Reopening a live container session must not stack a second active-session
+    /// row: when another record already owns that surface, the new attempt
+    /// record is dropped; otherwise (a reconnect attempt) it adopts the surface
+    /// and keeps its own row identity.
+    pub(super) fn adopt_existing_surface_for_attempt(
+        &mut self,
+        attempt_id: &str,
+        surface: StandaloneConnectionSurface,
+    ) {
+        let surface_taken_elsewhere = self
+            .records
+            .iter()
+            .any(|record| record.attempt_id != attempt_id && record.surface == Some(surface));
+        if surface_taken_elsewhere {
+            self.remove_attempt(attempt_id);
+        } else {
+            self.bind_surface_for_attempt(attempt_id, surface);
+        }
+    }
+
+    /// Stores the resolved launch identity on the in-flight record so its row
+    /// carries the same container id the live pane holds; the profile-backed
+    /// draft is name-keyed and would never match a later reopen otherwise. The
+    /// title rides along so a revived released row shows the fresh label
+    /// instead of the one from the closed session.
+    pub(super) fn set_attempt_container_config(
+        &mut self,
+        attempt_id: &str,
+        config: &oxideterm_docker::ContainerConnectionConfig,
+        title: &str,
+    ) {
+        let Some(record) = self
+            .records
+            .iter_mut()
+            .find(|record| record.attempt_id == attempt_id)
+        else {
+            return;
+        };
+        match &mut record.launch {
+            StandaloneConnectionLaunch::Container {
+                config: existing, ..
+            }
+            | StandaloneConnectionLaunch::SavedContainer {
+                config: existing, ..
+            } => *existing = config.clone(),
+            _ => {}
+        }
+        record.title = title.to_string();
+        self.persist();
+    }
+
+    /// Reopening a saved container profile revives its released row instead of
+    /// stacking a second one, mirroring the BLE contract: the most recent row
+    /// for this profile whose surface is gone and whose attempt settled.
+    pub(super) fn released_saved_container_record(&self, profile_id: &str) -> Option<String> {
+        self.records.iter().rev().find_map(|record| {
+            let matches_profile = matches!(
+                &record.launch,
+                StandaloneConnectionLaunch::SavedContainer { profile_id: id, .. } if id == profile_id
+            );
+            if matches_profile
+                && record.surface.is_none()
+                && matches!(
+                    record.readiness,
+                    ActiveSessionReadiness::Disconnected | ActiveSessionReadiness::Error
+                )
+            {
+                Some(record.id.clone())
+            } else {
+                None
+            }
+        })
+    }
+
+    /// A closed container tab leaves its record visible until retention prunes
+    /// it; a form reopen of the same target revives that row (matched on the
+    /// resolved launch identity) instead of stacking a duplicate.
+    pub(super) fn released_container_record(
+        &self,
+        config: &oxideterm_docker::ContainerConnectionConfig,
+    ) -> Option<String> {
+        self.records.iter().rev().find_map(|record| {
+            let same_target = match &record.launch {
+                StandaloneConnectionLaunch::Container {
+                    config: existing, ..
+                }
+                | StandaloneConnectionLaunch::SavedContainer {
+                    config: existing, ..
+                } => existing.launch_identity() == config.launch_identity(),
+                _ => false,
+            };
+            if same_target
+                && record.surface.is_none()
+                && matches!(
+                    record.readiness,
+                    ActiveSessionReadiness::Disconnected | ActiveSessionReadiness::Error
+                )
+            {
+                Some(record.id.clone())
+            } else {
+                None
+            }
+        })
+    }
+
     pub(super) fn begin_reconnect(&mut self, id: &str) -> Option<String> {
         let record = self.record_mut(id)?;
         record.pending_ble = None;
@@ -1010,6 +1489,10 @@ impl StandaloneConnectionRegistry {
             return;
         };
         match record.kind {
+            StandaloneConnectionKind::Container => {
+                // Container launches keep their own config; a saved profile
+                // replacement does not apply.
+            }
             StandaloneConnectionKind::Serial => {
                 if let StandaloneConnectionLaunch::Serial {
                     config,

@@ -44,8 +44,9 @@ pub use section_cache::SettingsSectionList;
 mod portable;
 pub use crate::known_hosts_page::{PortableKnownHostEntry, PortableKnownHostsSnapshot};
 pub use portable::{
-    BrowserWallpaperGallery, WallpaperAction, WallpaperTile, PortableKnowledgeLibrary, PortableKnownHostsAction, PortableProxyProbe,
-    PortableSettingsChanged, PortableSettingsSurface,
+    BrowserWallpaperGallery, PortableKnowledgeLibrary, PortableKnownHostsAction,
+    PortableProxyProbe, PortableSettingsChanged, PortableSettingsSurface, WallpaperAction,
+    WallpaperTile,
 };
 
 pub struct SettingsSurfaceFrame {

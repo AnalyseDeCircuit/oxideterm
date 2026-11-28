@@ -337,6 +337,13 @@
       "preset_aws_name": "Standardvorlage - AWS",
       "apply_blocked_issues": "Beheben Sie zuerst die aufgeführten Probleme",
       "templates_load_failed": "Gespeicherte Vorlagen konnten nicht gelesen werden"
+    },
+    "container_profiles": {
+      "delete": "Löschen",
+      "open_failed": "Container-Profil konnte nicht geöffnet werden",
+      "container_not_found": "Kein Container passt zum gespeicherten Namen; er wurde möglicherweise entfernt oder umbenannt.",
+      "confirm_delete": "Container-Profil „{{name}}“ löschen?",
+      "delete_failed": "Container-Profil konnte nicht gelöscht werden"
     }
   }
 }

@@ -35,6 +35,9 @@ impl WorkspaceApp {
             SessionManagerOpenTarget::Serial(profile_id) => {
                 self.open_saved_serial_profile(&profile_id, window, cx)
             }
+            SessionManagerOpenTarget::Container(profile_id) => {
+                self.open_saved_container_profile(&profile_id, window, cx)
+            }
             SessionManagerOpenTarget::Ble(profile_id) => {
                 self.open_saved_ble_profile(&profile_id, window, cx)
             }

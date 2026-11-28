@@ -630,16 +630,18 @@ impl ConnectionFormView {
             );
         }
         summary_rows = summary_rows
-            .when(self.environment.browser.is_none(), |row| row.child(self.form_hairline())
-            .child(self.render_connection_disclosure_row(
-                "standalone-sftp-summary-Route",
-                LucideIcon::Network,
-                self.i18n.t("ssh.form.connection_route"),
-                route_summary,
-                form.route_customized,
-                ConnectionFormDrawer::Route,
-                cx,
-            )))
+            .when(self.environment.browser.is_none(), |row| {
+                row.child(self.form_hairline())
+                    .child(self.render_connection_disclosure_row(
+                        "standalone-sftp-summary-Route",
+                        LucideIcon::Network,
+                        self.i18n.t("ssh.form.connection_route"),
+                        route_summary,
+                        form.route_customized,
+                        ConnectionFormDrawer::Route,
+                        cx,
+                    ))
+            })
             .child(self.form_hairline())
             .child(self.render_connection_disclosure_row(
                 "standalone-sftp-summary-Notes",
@@ -666,7 +668,9 @@ impl ConnectionFormView {
                 cx,
             ))
             .child(self.form_hairline())
-            .when(self.environment.browser.is_some(), |col| col.child(self.render_connection_hint(self.i18n.t("ssh.form.demo_connection_hint"))))
+            .when(self.environment.browser.is_some(), |col| {
+                col.child(self.render_connection_hint(self.i18n.t("ssh.form.demo_connection_hint")))
+            })
             .child(self.render_standalone_sftp_transfer_mode(form.transfer_mode, cx))
             .child(summary_rows)
             .when_some(form.error.clone(), |content, error| {
@@ -938,32 +942,34 @@ impl ConnectionFormView {
                 layout.content_width,
                 cx,
             ))
-            .when(self.environment.browser.is_none(), |col| col.child(self.form_hairline())
-            .child(self.render_standalone_sftp_endpoint_auth(
-                auth_tab,
-                secondary,
-                key_path,
-                managed_key_id,
-                cert_path,
-                identity_agent,
-                if secondary {
-                    form.secondary_gssapi_enabled
-                } else {
-                    form.gssapi_enabled
-                },
-                gssapi_server_identity,
-                gssapi_delegate_credentials,
-                form.gssapi_credentials_available,
-                agent_available,
-                saved_credential_present,
-                save_password,
-                if secondary {
-                    form.secondary_empty_password
-                } else {
-                    form.empty_password
-                },
-                cx,
-            )))
+            .when(self.environment.browser.is_none(), |col| {
+                col.child(self.form_hairline())
+                    .child(self.render_standalone_sftp_endpoint_auth(
+                        auth_tab,
+                        secondary,
+                        key_path,
+                        managed_key_id,
+                        cert_path,
+                        identity_agent,
+                        if secondary {
+                            form.secondary_gssapi_enabled
+                        } else {
+                            form.gssapi_enabled
+                        },
+                        gssapi_server_identity,
+                        gssapi_delegate_credentials,
+                        form.gssapi_credentials_available,
+                        agent_available,
+                        saved_credential_present,
+                        save_password,
+                        if secondary {
+                            form.secondary_empty_password
+                        } else {
+                            form.empty_password
+                        },
+                        cx,
+                    ))
+            })
             .child(self.form_hairline())
             .child(options)
             .into_any_element()

@@ -788,7 +788,10 @@ impl Browser {
                     return;
                 }
             }
-            SftpDialogRequest::CompareDeviceFile(name) => {self.compare_device_file(&name,cx);return;}
+            SftpDialogRequest::CompareDeviceFile(name) => {
+                self.compare_device_file(&name, cx);
+                return;
+            }
             SftpDialogRequest::Download(name) => {
                 let Some(path) = self.state.read(cx).preview_path.clone() else {
                     return;

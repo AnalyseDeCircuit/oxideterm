@@ -521,7 +521,8 @@
         "github_oauth_client_id": "GitHub OAuth Client ID",
         "microsoft_oauth_client_id": "ID client OAuth Microsoft",
         "microsoft_access_token": "Token di accesso Microsoft",
-        "google_oauth_client_id": "ID client OAuth Google"
+        "google_oauth_client_id": "ID client OAuth Google",
+        "sync_container_profiles": "Sincronizza profili container"
       },
       "auth": {
         "bearer": "Bearer",
@@ -561,7 +562,8 @@
         "plugin_settings_selected_detail": "Plugin selezionati: {{plugins}}",
         "plugin_settings_disabled_detail": "Le impostazioni dei plugin sono escluse dall'ambito di sincronizzazione corrente.",
         "sensitive_credentials_enabled_detail": "Sono inclusi gli oggetti crittografati con credenziali sensibili.",
-        "sensitive_credentials_disabled_detail": "Password di connessione, passphrase delle chiavi, chiavi private gestite, chiavi AI e credenziali di privilegio sono escluse finché non abiliti la sincronizzazione delle credenziali sensibili."
+        "sensitive_credentials_disabled_detail": "Password di connessione, passphrase delle chiavi, chiavi private gestite, chiavi AI e credenziali di privilegio sono escluse finché non abiliti la sincronizzazione delle credenziali sensibili.",
+        "container_profiles_detail": "I profili di connessione container sono inclusi."
       },
       "notes": {
         "upload_only": "La sincronizzazione automatica esegue solo il caricamento. Gli aggiornamenti remoti richiedono sempre la conferma dell'utente.",
@@ -775,7 +777,9 @@
         "sensitive_summary_title": "Credenziali sensibili",
         "profile_credential_actions": "{{name}}: {{stored}} credenziali salvate, {{cleared}} richieste di eliminazione.",
         "sensitive_remote_summary": "Le credenziali remote cifrate includono {{connections}} record di connessione e {{portableSecrets}} segreti portabili. I valori restano nascosti.",
-        "sensitive_upload_summary": "Caricherà {{passwords}} password, {{keyPassphrases}} passphrase di chiavi, {{managedKeys}} chiavi gestite, {{managedKeyPassphrases}} passphrase di chiavi gestite e {{portableSecrets}} segreti portabili."
+        "sensitive_upload_summary": "Caricherà {{passwords}} password, {{keyPassphrases}} passphrase di chiavi, {{managedKeys}} chiavi gestite, {{managedKeyPassphrases}} passphrase di chiavi gestite e {{portableSecrets}} segreti portabili.",
+        "container_profiles_label": "Profili container",
+        "toggle_container_profiles": "Importa profili container ({{count}})"
       },
       "confirm": {
         "import_title": "Importare lo snapshot remoto?",
@@ -940,7 +944,10 @@
         "tls_mode": "Modalità TLS",
         "tls_verification": "Verifica TLS",
         "tls_server_name": "Nome server TLS",
-        "setting_field": "Campo impostazione"
+        "setting_field": "Campo impostazione",
+        "container_name": "Nome del container",
+        "engine": "Motore",
+        "launch_mode": "Modalità di avvio"
       },
       "tabs": {
         "overview": "Panoramica",

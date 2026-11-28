@@ -175,6 +175,10 @@ impl ConnectionFormView {
                 LucideIcon::AppWindow,
                 self.i18n.t("modals.new_connection.transport_wsl_graphics"),
             ),
+            NewConnectionTransport::Container => (
+                LucideIcon::Package,
+                self.i18n.t("modals.new_connection.transport_container"),
+            ),
             NewConnectionTransport::LocalTerminal => (
                 LucideIcon::Terminal,
                 self.i18n
@@ -265,6 +269,7 @@ impl ConnectionFormView {
         let mut should_refresh_ports = false;
         #[cfg(not(target_family = "wasm"))]
         let mut should_refresh_ble_adapters = false;
+        let mut should_refresh_container_engines = false;
         self.update_connection_form_state(cx, |state| {
             if let Some(form) = state.form.as_mut() {
                 let previous_transport = form.transport;
@@ -295,6 +300,22 @@ impl ConnectionFormView {
                     form.ble.inspect_error = None;
                     form.ble.selected_service_uuid = None;
                 }
+                if transport != NewConnectionTransport::Container {
+                    form.container.generation += 1;
+                    form.container.engines_generation += 1;
+                    form.container.engines_loading = false;
+                    form.container.containers_loading = false;
+                    // The cached engine list and rows are reused when the user
+                    // returns to this transport, so keep the engine index they
+                    // belong to instead of pointing it at another engine.
+                    form.container.selected_container_index = None;
+                    form.container.launch_mode = ContainerFormLaunchMode::default();
+                    form.container.custom_command.clear();
+                    form.container.details = None;
+                    form.container.details_loading = false;
+                    form.container.details_generation += 1;
+                    form.container.running_only = false;
+                }
                 form.transport = transport;
                 form.transport_picker_open = false;
                 form.appearance_popover_open = false;
@@ -311,6 +332,9 @@ impl ConnectionFormView {
                         && form.ble.adapters.is_empty()
                         && !form.ble.adapters_loading;
                 }
+                should_refresh_container_engines = transport == NewConnectionTransport::Container
+                    && form.container.engines.is_empty()
+                    && !form.container.engines_loading;
             }
         });
         self.close_new_connection_select(cx);
@@ -320,6 +344,11 @@ impl ConnectionFormView {
         #[cfg(not(target_family = "wasm"))]
         if should_refresh_ble_adapters {
             self.refresh_ble_adapters(cx);
+        }
+        if should_refresh_container_engines {
+            // Initial entry resets the selection and chains into the first
+            // engine's container list.
+            self.refresh_container_engines(true, cx);
         }
         cx.notify();
     }
@@ -375,6 +404,10 @@ impl ConnectionFormView {
                 ProtocolEntry::BuiltIn(
                     NewConnectionTransport::Serial,
                     NewConnectionField::SerialPortPath,
+                ),
+                ProtocolEntry::BuiltIn(
+                    NewConnectionTransport::Container,
+                    NewConnectionField::ContainerShell,
                 ),
                 ProtocolEntry::BuiltIn(
                     NewConnectionTransport::Ble,

@@ -532,6 +532,12 @@ impl CatalogView {
                     .replace("{{name}}", name),
                 self.i18n.t("sessionManager.serial_profiles.delete"),
             ),
+            SessionManagerDeleteConfirm::ContainerProfile { name, .. } => (
+                self.i18n
+                    .t("sessionManager.container_profiles.confirm_delete")
+                    .replace("{{name}}", name),
+                self.i18n.t("sessionManager.container_profiles.delete"),
+            ),
             SessionManagerDeleteConfirm::BleProfile { name, .. } => (
                 self.i18n
                     .t("sessionManager.ble_profiles.confirm_delete")

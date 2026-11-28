@@ -3853,12 +3853,20 @@ fn normalized_optional_string(value: &str) -> Option<String> {
 
 use oxideterm_gpui_settings_view::select_menu::plugin_marketplace_sort_label;
 
-use plugin_host::catalog_browser::{entry_matches as native_plugin_marketplace_entry_matches, filter_tags as native_plugin_filter_tags, tag_matches as native_plugin_tag_matches};
+use plugin_host::catalog_browser::{
+    entry_matches as native_plugin_marketplace_entry_matches,
+    filter_tags as native_plugin_filter_tags, tag_matches as native_plugin_tag_matches,
+};
 
-fn sort_plugin_marketplace_entries(entries: &mut [plugin_host::NativePluginRegistryEntry], sort: oxideterm_settings::PluginMarketplaceSort) {
+fn sort_plugin_marketplace_entries(
+    entries: &mut [plugin_host::NativePluginRegistryEntry],
+    sort: oxideterm_settings::PluginMarketplaceSort,
+) {
     plugin_host::catalog_browser::sort_entries(entries, |entry| match sort {
         oxideterm_settings::PluginMarketplaceSort::Name => None,
-        oxideterm_settings::PluginMarketplaceSort::RecentUpdates => entry.latest_release_at.as_deref(),
+        oxideterm_settings::PluginMarketplaceSort::RecentUpdates => {
+            entry.latest_release_at.as_deref()
+        }
         oxideterm_settings::PluginMarketplaceSort::NewestListings => entry.listed_at.as_deref(),
     });
 }

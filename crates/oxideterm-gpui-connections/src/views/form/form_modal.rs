@@ -66,6 +66,10 @@ struct ConnectionFormModalSnapshot {
     // True when the selected BLE service offers both notify and write, i.e. it
     // can back a read/write terminal channel.
     ble_can_open: bool,
+    // True when a container is picked; without one the form can only save
+    // metadata for a profile that already exists.
+    container_can_open: bool,
+    container_profile_saved: bool,
 }
 
 impl ConnectionFormModalSnapshot {
@@ -93,6 +97,8 @@ impl ConnectionFormModalSnapshot {
             local_profile_id: form.local_profile_id.clone(),
             telnet_profile_id: form.telnet_profile_id.clone(),
             ble_profile_id: form.ble.profile_id.clone(),
+            container_can_open: form.container.selected_container_index.is_some(),
+            container_profile_saved: form.container.profile_id.is_some(),
             saved_password_keychain_id: form.saved_password_keychain_id.clone(),
             password_loaded: form.password_loaded,
             key_path: form.key_path.clone(),
@@ -158,7 +164,9 @@ impl ConnectionFormModalSnapshot {
                     }
                     form.ble.web_services.iter().any(|service| {
                         service.uuid == uuid
-                            && (service.has_notify || service.has_write || service.has_write_without_response)
+                            && (service.has_notify
+                                || service.has_write
+                                || service.has_write_without_response)
                     })
                 }),
             #[cfg(not(target_family = "wasm"))]
@@ -268,6 +276,11 @@ impl ConnectionFormView {
             && !edit_properties_mode
             && !drill_down_mode
             && form.transport == NewConnectionTransport::Ble;
+        let container_mode = !prompt_mode
+            && !duplicate_mode
+            && !edit_properties_mode
+            && !drill_down_mode
+            && form.transport == NewConnectionTransport::Container;
         let telnet_mode = !prompt_mode
             && !duplicate_mode
             && !edit_properties_mode
@@ -309,7 +322,7 @@ impl ConnectionFormView {
             && !edit_properties_mode
             && !drill_down_mode
             && form.transport == NewConnectionTransport::WslGraphics;
-        let local_transport_mode = serial_mode || telnet_mode || ble_mode;
+        let local_transport_mode = serial_mode || telnet_mode || ble_mode || container_mode;
         let ftp_mode = form.transport == NewConnectionTransport::Ftp;
         let remote_desktop_mode = remote_desktop_protocol.is_some();
         let ssh_submission_mode = !local_terminal_mode
@@ -345,6 +358,8 @@ impl ConnectionFormView {
             self.i18n.t("modals.new_connection.transport_ftp")
         } else if ble_mode {
             self.i18n.t("ssh.form.title")
+        } else if container_mode {
+            self.i18n.t("modals.new_connection.transport_container")
         } else if mosh_mode {
             self.i18n.t("mosh.form.title")
         } else if standalone_sftp_mode {
@@ -387,6 +402,8 @@ impl ConnectionFormView {
             self.i18n.t("modals.new_connection.ble_description")
         } else if serial_mode {
             self.i18n.t("modals.new_connection.serial_description")
+        } else if container_mode {
+            self.i18n.t("modals.new_connection.container_description")
         } else if remote_desktop_protocol
             == Some(oxideterm_remote_desktop::RemoteDesktopProtocol::Rdp)
         {
@@ -450,6 +467,8 @@ impl ConnectionFormView {
             true
         } else if ble_mode {
             form.ble_can_open
+        } else if container_mode {
+            form.container_can_open
         } else {
             !form.host.trim().is_empty()
                 && !form.username.trim().is_empty()
@@ -459,9 +478,12 @@ impl ConnectionFormView {
         };
         let primary_disabled = form.pending || !has_required_fields;
         // Editing a saved BLE profile can persist metadata changes without a
-        // live scan because the stored device identity is reused on save.
-        let save_disabled =
-            form.pending || !(has_required_fields || (ble_mode && form.ble_profile_id.is_some()));
+        // live scan because the stored device identity is reused on save; a
+        // container profile keeps its stored address the same way.
+        let save_disabled = form.pending
+            || !(has_required_fields
+                || (ble_mode && form.ble_profile_id.is_some())
+                || (container_mode && form.container_profile_saved));
         let form_visible = self.connection_form_state(cx).presence.phase()
             == oxideterm_gpui_ui::motion::ExitPhase::Visible;
         let viewport_margin = composer::studio_viewport_margin(window);
@@ -527,6 +549,7 @@ impl ConnectionFormView {
                 || remote_desktop_mode
                 || serial_mode
                 || ble_mode
+                || container_mode
                 || telnet_mode
                 || ftp_mode
                 || local_terminal_mode);
@@ -803,6 +826,14 @@ impl ConnectionFormView {
                                                 ))
                                             }
                                         })
+                                        .when(container_mode, |content| {
+                                            content.child(self.render_container_form_branch(
+                                                form.active_drawer,
+                                                studio_layout,
+                                                window,
+                                                cx,
+                                            ))
+                                        })
                                         .when(telnet_mode, |content| {
                                             content.child(self.render_telnet_form_branch(
                                                 form.active_drawer,
@@ -831,6 +862,7 @@ impl ConnectionFormView {
                                         .when(
                                             !serial_mode
                                                 && !ble_mode
+                                                && !container_mode
                                                 && !local_terminal_mode
                                                 && !telnet_mode
                                                 && !ftp_mode
@@ -1975,7 +2007,8 @@ impl ConnectionFormView {
                                 && !saved_profile_edit_mode
                                 && self.connection_form_state(cx).saved_connection_prompt_action.is_none()
                                 && !remote_desktop_mode
-                                && !wsl_graphics_mode,
+                                && !wsl_graphics_mode
+                                && !container_mode,
                             |footer| {
                                 let primary_label = if local_transport_mode || local_terminal_mode {
                                     self.i18n.t("modals.new_connection.local_save_and_open")
@@ -1996,6 +2029,30 @@ impl ConnectionFormView {
                                     ))
                                     .child(self.render_split_primary_action_button(
                                         primary_label,
+                                        primary_disabled,
+                                        cx,
+                                    ))
+                            },
+                        )
+                        .when(
+                            // Container profiles are addressed by name, so they
+                            // persist safely; Save and Open is the default and
+                            // the one-off Open lives in the split menu, matching
+                            // every other transport.
+                            container_mode
+                                && !reauthentication_mode
+                                && self.connection_form_state(cx).saved_connection_prompt_action.is_none(),
+                            |footer| {
+                                footer
+                                    .child(self.render_connection_button(
+                                        self.i18n.t("ssh.form.save"),
+                                        false,
+                                        ConnectionButtonAction::Save,
+                                        save_disabled,
+                                        cx,
+                                    ))
+                                    .child(self.render_split_primary_action_button(
+                                        self.i18n.t("modals.new_connection.local_save_and_open"),
                                         primary_disabled,
                                         cx,
                                     ))

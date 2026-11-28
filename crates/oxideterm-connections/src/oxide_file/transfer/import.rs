@@ -100,6 +100,7 @@ fn apply_oxide_import_with_options_inner(
         app_settings_json,
         quick_commands_json,
         serial_profiles_json,
+        container_profiles_json,
         telnet_profiles_json,
         mosh_profiles_json,
         standalone_sftp_profiles_json,
@@ -128,6 +129,18 @@ fn apply_oxide_import_with_options_inner(
                     "Invalid serial profiles snapshot in .oxide payload: {error}"
                 ))
             })
+        })
+        .transpose()?;
+    let container_profiles_snapshot = container_profiles_json
+        .as_deref()
+        .map(|snapshot_json| {
+            serde_json::from_str::<ContainerProfilesSyncSnapshot>(snapshot_json).map_err(
+                |error| {
+                    OxideFileError::InvalidFormat(format!(
+                        "Invalid container profiles snapshot in .oxide payload: {error}"
+                    ))
+                },
+            )
         })
         .transpose()?;
     if options.import_serial_profiles {
@@ -293,6 +306,7 @@ fn apply_oxide_import_with_options_inner(
         app_settings_json,
         quick_commands_json,
         serial_profiles_json,
+        container_profiles_json,
         telnet_profiles_json,
         mosh_profiles_json,
         standalone_sftp_profiles_json,
@@ -534,6 +548,22 @@ fn apply_oxide_import_with_options_inner(
                     serial_profiles_count.saturating_sub(result.imported_serial_profiles);
             } else {
                 result.skipped_serial_profiles = serial_profiles_count;
+            }
+        }
+        if let Some(container_profiles_snapshot) = container_profiles_snapshot {
+            let container_profiles_count = container_profiles_snapshot.records.len();
+            if options.import_container_profiles {
+                result.imported_container_profiles = store
+                    .apply_container_profiles_snapshot(container_profiles_snapshot)
+                    .map_err(|error| {
+                        OxideFileError::InvalidFormat(format!(
+                            "Failed to import container profiles from .oxide payload: {error}"
+                        ))
+                    })?;
+                result.skipped_container_profiles = container_profiles_count
+                    .saturating_sub(result.imported_container_profiles);
+            } else {
+                result.skipped_container_profiles = container_profiles_count;
             }
         }
         if let Some(telnet_profiles_snapshot) = telnet_profiles_snapshot {

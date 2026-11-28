@@ -580,6 +580,7 @@ mod tests {
             standalone_sftp_profiles_json: None,
             remote_desktop_profiles_json: None,
             ble_profiles_json: None,
+            container_profiles_json: None,
             plugin_settings: Vec::new(),
             portable_secrets: Vec::new(),
             checksum: String::new(),

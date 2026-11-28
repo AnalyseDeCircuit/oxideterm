@@ -97,7 +97,7 @@ impl Workspace {
 
     fn show_notice_target(&mut self, id: u64, w: &mut Window, cx: &mut Context<Self>) {
         match self.notice_targets.get(&id).copied() {
-            Some(NoticeTarget::EmbeddedFiles(entity)) => self.show_sidebar_notice(entity,cx),
+            Some(NoticeTarget::EmbeddedFiles(entity)) => self.show_sidebar_notice(entity, cx),
             Some(NoticeTarget::Page(page)) if self.layout.tab_by_id(page).is_some() => {
                 self.activate_page(page, cx);
                 w.focus(&self.focus, cx);
@@ -129,7 +129,9 @@ impl Workspace {
         let frame = frame(
             self.tokens,
             &self.i18n,
-            self.wallpaper.as_ref().is_some_and(|bg|bg.includes("notification_center")),
+            self.wallpaper
+                .as_ref()
+                .is_some_and(|bg| bg.includes("notification_center")),
             &self.notifications,
             &self.notice_targets,
             cx.weak_entity(),
@@ -140,7 +142,7 @@ impl Workspace {
 pub(super) fn frame(
     tokens: ThemeTokens,
     i: &I18n,
-    has_background:bool,
+    has_background: bool,
     n: &NotificationState,
     targets: &HashMap<u64, NoticeTarget>,
     host: WeakEntity<Workspace>,

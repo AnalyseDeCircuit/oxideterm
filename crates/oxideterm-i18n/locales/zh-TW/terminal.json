@@ -678,5 +678,18 @@
   },
   "workspace": {
     "new_local_terminal": "新增本機終端機"
+  },
+  "local_shell": {
+    "background": {
+      "kill": "終止",
+      "lines": "行",
+      "resume": "恢復",
+      "title": "背景工作階段"
+    },
+    "toast": {
+      "attached": "工作階段已恢復",
+      "detached": "工作階段已移至背景",
+      "detached_desc": "{{shell}} 正在背景執行"
+    }
   }
 }

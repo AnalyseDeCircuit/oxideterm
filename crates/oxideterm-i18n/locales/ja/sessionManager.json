@@ -337,6 +337,13 @@
       "preset_aws_name": "プリセットテンプレート-aws",
       "apply_blocked_issues": "一覧の問題を修正してから追加してください",
       "templates_load_failed": "保存済みテンプレートを読み込めませんでした"
+    },
+    "container_profiles": {
+      "delete": "削除",
+      "open_failed": "コンテナプロファイルを開けませんでした",
+      "container_not_found": "保存された名前に一致するコンテナがありません。削除または名前変更された可能性があります。",
+      "confirm_delete": "コンテナプロファイル「{{name}}」を削除しますか？",
+      "delete_failed": "コンテナプロファイルの削除に失敗しました"
     }
   }
 }

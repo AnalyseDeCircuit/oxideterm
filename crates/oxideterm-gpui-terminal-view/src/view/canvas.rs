@@ -2,7 +2,8 @@ use std::time::Duration;
 
 use gpui::{
     App, Bounds, Context, Entity, FocusHandle, InteractiveElement, IntoElement, MouseButton,
-    ParentElement, Pixels, Render, StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder,
+    ParentElement, Pixels, Render, StatefulInteractiveElement, Styled, Window, div,
+    prelude::FluentBuilder,
 };
 use oxideterm_terminal_emulator::{TermMode, TerminalSize};
 
@@ -180,7 +181,10 @@ impl Render for TerminalView {
             self.cursor_visible,
             self.composition.marked_text(),
             None,
-            self.search.as_ref().map(|s| s.matches.clone()).unwrap_or_default(),
+            self.search
+                .as_ref()
+                .map(|s| s.matches.clone())
+                .unwrap_or_default(),
             self.search.as_ref().and_then(|s| s.selected),
             self.pointer.hovered.clone(),
             self.options.bidi,
@@ -222,6 +226,10 @@ impl Render for TerminalView {
                 .on_mouse_up(button, cx.listener(Self::mouse_up))
                 .on_mouse_up_out(button, cx.listener(Self::mouse_up));
         }
-        div().relative().size_full().child(root.child(element)).children(self.search_panel(cx))
+        div()
+            .relative()
+            .size_full()
+            .child(root.child(element))
+            .children(self.search_panel(cx))
     }
 }

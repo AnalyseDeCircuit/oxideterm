@@ -1816,6 +1816,7 @@ impl CatalogView {
                 ui.accent_secondary
             }
             SessionManagerOpenTarget::Serial(_)
+            | SessionManagerOpenTarget::Container(_)
             | SessionManagerOpenTarget::Ble(_)
             | SessionManagerOpenTarget::LocalTerminal(_) => ui.warning,
             SessionManagerOpenTarget::Telnet(_)
@@ -2181,6 +2182,72 @@ impl CatalogView {
                         move |this, event, _window, cx| {
                             this.open_session_manager_row_action_menu(
                                 SessionManagerRowActionTarget::Serial(menu_id.clone()),
+                                f32::from(event.position.x),
+                                f32::from(event.position.y),
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        },
+                        cx,
+                    ))
+            }
+            SessionManagerOpenTarget::Container(id) => {
+                let open_id = id.clone();
+                let edit_id = id.clone();
+                let menu_id = id.clone();
+                div()
+                    .w(px(MANAGER_ROW_ACTIONS_WIDTH))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_end()
+                    .gap(px(MANAGER_ROW_ACTION_GAP))
+                    .child(self.render_row_icon_button(
+                        LucideIcon::Play,
+                        MANAGER_ROW_ACTION_BUTTON,
+                        MANAGER_ROW_ACTION_ICON_SIZE,
+                        rgb(self.tokens.ui.accent),
+                        has_background,
+                        move |this, _event, window, cx| {
+                            this.action(
+                                CatalogAction::Open {
+                                    target: SessionManagerOpenTarget::Container(open_id.to_owned()),
+                                    open_sftp: false,
+                                },
+                                Some(window),
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        },
+                        cx,
+                    ))
+                    .child(self.render_row_icon_button(
+                        LucideIcon::Pencil,
+                        MANAGER_ROW_ACTION_BUTTON,
+                        MANAGER_ROW_ACTION_ICON_SIZE,
+                        rgb(self.tokens.ui.text),
+                        has_background,
+                        move |this, _event, window, cx| {
+                            this.action(
+                                CatalogAction::Edit(SessionManagerOpenTarget::Container(
+                                    edit_id.to_owned(),
+                                )),
+                                Some(window),
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        },
+                        cx,
+                    ))
+                    .child(self.render_row_icon_button(
+                        LucideIcon::MoreVertical,
+                        MANAGER_ROW_ACTION_BUTTON,
+                        MANAGER_ROW_ACTION_ICON_SIZE,
+                        rgb(self.tokens.ui.text),
+                        has_background,
+                        move |this, event, _window, cx| {
+                            this.open_session_manager_row_action_menu(
+                                SessionManagerRowActionTarget::Container(menu_id.clone()),
                                 f32::from(event.position.x),
                                 f32::from(event.position.y),
                                 cx,
@@ -2651,6 +2718,7 @@ impl CatalogView {
                 MANAGER_ROW_ACTION_MENU_CONNECTION_HEIGHT
             }
             SessionManagerRowActionTarget::Serial(_)
+            | SessionManagerRowActionTarget::Container(_)
             | SessionManagerRowActionTarget::Tunnel(_)
             | SessionManagerRowActionTarget::Ble(_)
             | SessionManagerRowActionTarget::Plugin(_)
@@ -2941,23 +3009,25 @@ impl CatalogView {
             ));
 
             let test_id = id.clone();
-            popup = popup.when(self.host_tools, |popup| popup.child(self.render_session_manager_menu_action(
-                oxideterm_gpui_ui::dropdown_menu::dropdown_menu_item_with_icon(
-                    &self.tokens,
-                    "lucide/wifi.svg",
-                    self.i18n.t("sessionManager.actions.test_connection"),
+            popup = popup.when(self.host_tools, |popup| {
+                popup.child(self.render_session_manager_menu_action(
+                    oxideterm_gpui_ui::dropdown_menu::dropdown_menu_item_with_icon(
+                        &self.tokens,
+                        "lucide/wifi.svg",
+                        self.i18n.t("sessionManager.actions.test_connection"),
+                        false,
+                        false,
+                    ),
                     false,
                     false,
-                ),
-                false,
-                false,
-                has_background,
-                move |this, _event, window, cx| {
-                    this.action(CatalogAction::Test(test_id.to_owned()), Some(window), cx);
-                    cx.stop_propagation();
-                },
-                cx,
-            )));
+                    has_background,
+                    move |this, _event, window, cx| {
+                        this.action(CatalogAction::Test(test_id.to_owned()), Some(window), cx);
+                        cx.stop_propagation();
+                    },
+                    cx,
+                ))
+            });
 
             let duplicate_id = id.clone();
             popup = popup
@@ -3114,6 +3184,35 @@ impl CatalogView {
                     move |this, _event, window, cx| {
                         this.action(
                             CatalogAction::Edit(SessionManagerOpenTarget::Serial(
+                                edit_id.to_owned(),
+                            )),
+                            Some(window),
+                            cx,
+                        );
+                        cx.stop_propagation();
+                    },
+                    cx,
+                ))
+                .child(dropdown_menu_separator(&self.tokens));
+        }
+
+        if let SessionManagerRowActionTarget::Container(id) = &menu.target {
+            let edit_id = id.clone();
+            popup = popup
+                .child(self.render_session_manager_menu_action(
+                    oxideterm_gpui_ui::dropdown_menu::dropdown_menu_item_with_icon(
+                        &self.tokens,
+                        "lucide/pencil.svg",
+                        self.i18n.t("sessionManager.actions.edit"),
+                        false,
+                        false,
+                    ),
+                    false,
+                    false,
+                    has_background,
+                    move |this, _event, window, cx| {
+                        this.action(
+                            CatalogAction::Edit(SessionManagerOpenTarget::Container(
                                 edit_id.to_owned(),
                             )),
                             Some(window),
@@ -3293,6 +3392,10 @@ impl CatalogView {
                 id.clone(),
                 self.i18n.t("sessionManager.serial_profiles.delete"),
             )),
+            SessionManagerRowActionTarget::Container(id) => Some((
+                id.clone(),
+                self.i18n.t("sessionManager.container_profiles.delete"),
+            )),
             SessionManagerRowActionTarget::Ble(id) => Some((
                 id.clone(),
                 self.i18n.t("sessionManager.ble_profiles.delete"),
@@ -3401,6 +3504,13 @@ impl CatalogView {
                         ),
                         SessionManagerRowActionTarget::Serial(_) => this.action(
                             CatalogAction::Delete(SessionManagerRowActionTarget::Serial(
+                                delete_id.clone(),
+                            )),
+                            None,
+                            cx,
+                        ),
+                        SessionManagerRowActionTarget::Container(_) => this.action(
+                            CatalogAction::Delete(SessionManagerRowActionTarget::Container(
                                 delete_id.clone(),
                             )),
                             None,

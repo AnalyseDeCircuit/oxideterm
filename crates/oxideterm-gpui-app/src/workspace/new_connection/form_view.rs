@@ -72,4 +72,8 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn refresh_ble_adapters(&mut self, cx: &mut Context<Self>) {
         self.connections.refresh_ble_adapters(cx);
     }
+
+    pub(in crate::workspace) fn refresh_container_engines(&mut self, cx: &mut Context<Self>) {
+        self.connections.refresh_container_engines(cx);
+    }
 }

@@ -6,8 +6,9 @@ use std::collections::{BTreeMap, HashSet};
 use anyhow::{Context, Result, bail};
 use chrono::DateTime;
 use oxideterm_connections::{
-    ApplySavedConnectionsSyncOutcome, BleProfilesSyncSnapshot, ConnectionStore, ManagedSshKeyInfo,
-    MoshProfilesSyncSnapshot, RemoteDesktopProfilesSyncSnapshot, SavedConnectionsConflictStrategy,
+    ApplySavedConnectionsSyncOutcome, BleProfilesSyncSnapshot, ConnectionStore,
+    ContainerProfilesSyncSnapshot, ManagedSshKeyInfo, MoshProfilesSyncSnapshot,
+    RemoteDesktopProfilesSyncSnapshot, SavedConnectionsConflictStrategy,
     SavedConnectionsSyncSnapshot, SerialProfilesSyncSnapshot, StandaloneSftpProfilesSyncSnapshot,
     TelnetProfilesSyncSnapshot, oxide_file::EncryptedPluginSetting,
 };
@@ -37,6 +38,7 @@ pub struct CloudSyncLocalSnapshot {
     pub forwards_record_count: usize,
     pub quick_commands_record_count: usize,
     pub serial_profiles_record_count: usize,
+    pub container_profiles_record_count: usize,
     pub ble_profiles_record_count: usize,
     pub telnet_profiles_record_count: usize,
     pub mosh_profiles_record_count: usize,
@@ -51,6 +53,7 @@ pub struct CloudSyncApplyOutcome {
     pub forwards: Option<ApplySavedForwardsSyncSnapshotResult>,
     pub quick_commands_applied: usize,
     pub serial_profiles_applied: usize,
+    pub container_profiles_applied: usize,
     pub ble_profiles_applied: usize,
     pub telnet_profiles_applied: usize,
     pub mosh_profiles_applied: usize,
@@ -82,6 +85,7 @@ pub fn build_local_snapshot(
             .map_err(anyhow::Error::msg)
             .context("failed to decode quick commands snapshot")?;
     let serial_profiles_snapshot = connection_store.export_serial_profiles_snapshot()?;
+    let container_profiles_snapshot = connection_store.export_container_profiles_snapshot()?;
     let ble_profiles_snapshot = connection_store.export_ble_profiles_snapshot()?;
     let telnet_profiles_snapshot = connection_store.export_telnet_profiles_snapshot()?;
     let mosh_profiles_snapshot = connection_store.export_mosh_profiles_snapshot()?;
@@ -114,6 +118,7 @@ pub fn build_local_snapshot(
         saved_forwards_revision: Some(forwards_snapshot.revision.clone()),
         quick_commands_revision: Some(tauri_simple_stable_hash(&quick_commands_json)?),
         serial_profiles_revision: Some(serial_profiles_snapshot.revision.clone()),
+        container_profiles_revision: Some(container_profiles_snapshot.revision.clone()),
         ble_profiles_revision: Some(ble_profiles_snapshot.revision.clone()),
         telnet_profiles_revision: Some(telnet_profiles_snapshot.revision.clone()),
         mosh_profiles_revision: Some(mosh_profiles_snapshot.revision.clone()),
@@ -135,6 +140,7 @@ pub fn build_local_snapshot(
         forwards_record_count: forwards_snapshot.records.len(),
         quick_commands_record_count: quick_commands_snapshot.commands.len(),
         serial_profiles_record_count: serial_profiles_snapshot.records.len(),
+        container_profiles_record_count: container_profiles_snapshot.records.len(),
         ble_profiles_record_count: ble_profiles_snapshot.records.len(),
         telnet_profiles_record_count: telnet_profiles_snapshot.records.len(),
         mosh_profiles_record_count: mosh_profiles_snapshot.records.len(),
@@ -163,6 +169,7 @@ pub fn apply_structured_snapshots(
     forwards_snapshot: Option<SavedForwardsSyncSnapshot>,
     quick_commands_snapshot_json: Option<String>,
     serial_profiles_snapshot: Option<SerialProfilesSyncSnapshot>,
+    container_profiles_snapshot: Option<ContainerProfilesSyncSnapshot>,
     ble_profiles_snapshot: Option<BleProfilesSyncSnapshot>,
     telnet_profiles_snapshot: Option<TelnetProfilesSyncSnapshot>,
     mosh_profiles_snapshot: Option<MoshProfilesSyncSnapshot>,
@@ -180,6 +187,7 @@ pub fn apply_structured_snapshots(
         forwards_snapshot,
         quick_commands_snapshot_json,
         serial_profiles_snapshot,
+        container_profiles_snapshot,
         ble_profiles_snapshot,
         telnet_profiles_snapshot,
         mosh_profiles_snapshot,
@@ -200,6 +208,7 @@ pub(crate) fn apply_structured_snapshots_with_credentials(
     forwards_snapshot: Option<SavedForwardsSyncSnapshot>,
     quick_commands_snapshot_json: Option<String>,
     serial_profiles_snapshot: Option<SerialProfilesSyncSnapshot>,
+    container_profiles_snapshot: Option<ContainerProfilesSyncSnapshot>,
     ble_profiles_snapshot: Option<BleProfilesSyncSnapshot>,
     telnet_profiles_snapshot: Option<TelnetProfilesSyncSnapshot>,
     mosh_profiles_snapshot: Option<MoshProfilesSyncSnapshot>,
@@ -227,6 +236,9 @@ pub(crate) fn apply_structured_snapshots_with_credentials(
         serial_profiles_snapshot
             .as_ref()
             .map_or(0, |snapshot| snapshot.records.len())
+            + container_profiles_snapshot
+                .as_ref()
+                .map_or(0, |snapshot| snapshot.records.len())
             + ble_profiles_snapshot
                 .as_ref()
                 .map_or(0, |snapshot| snapshot.records.len())
@@ -264,6 +276,7 @@ pub(crate) fn apply_structured_snapshots_with_credentials(
                 forwards_snapshot.as_ref(),
                 quick_commands_snapshot_json.as_deref(),
                 serial_profiles_snapshot.as_ref(),
+                container_profiles_snapshot.as_ref(),
                 ble_profiles_snapshot.as_ref(),
                 telnet_profiles_snapshot.as_ref(),
                 mosh_profiles_snapshot.as_ref(),
@@ -378,6 +391,12 @@ pub(crate) fn apply_structured_snapshots_with_credentials(
                 } else {
                     0
                 };
+                let container_profiles_applied = if let Some(snapshot) = container_profiles_snapshot
+                {
+                    connection_store.apply_container_profiles_snapshot(snapshot)?
+                } else {
+                    0
+                };
                 let ble_profiles_applied = if let Some(snapshot) = ble_profiles_snapshot {
                     connection_store.apply_ble_profiles_snapshot(snapshot)?
                 } else {
@@ -446,6 +465,7 @@ pub(crate) fn apply_structured_snapshots_with_credentials(
                     forwards,
                     quick_commands_applied,
                     serial_profiles_applied,
+                    container_profiles_applied,
                     ble_profiles_applied,
                     telnet_profiles_applied,
                     mosh_profiles_applied,
@@ -567,7 +587,8 @@ pub(crate) fn apply_structured_snapshots_with_credentials(
             "mode=structured,connections_applied={},forwards_applied={},profiles_applied={},settings_applied={},plugins_applied={},credentials_applied={}",
             outcome.connections.as_ref().map_or(0, |connections| connections.result.applied),
             outcome.forwards.as_ref().map_or(0, |forwards| forwards.applied),
-            outcome.serial_profiles_applied + outcome.ble_profiles_applied
+            outcome.serial_profiles_applied + outcome.container_profiles_applied
+                + outcome.ble_profiles_applied
                 + outcome.telnet_profiles_applied
                 + outcome.mosh_profiles_applied + standalone_sftp_applied
                 + outcome.remote_desktop_profiles_applied,
@@ -595,6 +616,7 @@ pub(crate) fn apply_structured_snapshots_with_credentials(
                         .map_or(0, |forwards| forwards.applied)
                     + outcome.quick_commands_applied
                     + outcome.serial_profiles_applied
+                    + outcome.container_profiles_applied
                     + outcome.ble_profiles_applied
                     + outcome.telnet_profiles_applied
                     + outcome.mosh_profiles_applied
@@ -714,6 +736,7 @@ fn preflight_structured_snapshots(
     forwards_snapshot: Option<&SavedForwardsSyncSnapshot>,
     quick_commands_snapshot_json: Option<&str>,
     serial_profiles_snapshot: Option<&SerialProfilesSyncSnapshot>,
+    container_profiles_snapshot: Option<&ContainerProfilesSyncSnapshot>,
     ble_profiles_snapshot: Option<&BleProfilesSyncSnapshot>,
     telnet_profiles_snapshot: Option<&TelnetProfilesSyncSnapshot>,
     mosh_profiles_snapshot: Option<&MoshProfilesSyncSnapshot>,
@@ -731,6 +754,12 @@ fn preflight_structured_snapshots(
             .context("failed to decode quick commands snapshot")?;
     }
     for profile in serial_profiles_snapshot
+        .into_iter()
+        .flat_map(|snapshot| &snapshot.records)
+    {
+        profile.validate()?;
+    }
+    for profile in container_profiles_snapshot
         .into_iter()
         .flat_map(|snapshot| &snapshot.records)
     {
@@ -1072,6 +1101,7 @@ mod tests {
             None,
             None,
             None,
+            None,
             Some(incoming),
             BTreeMap::new(),
             Vec::new(),
@@ -1102,6 +1132,7 @@ mod tests {
             None,
             quick_commands_snapshot_json,
             serial_profiles_snapshot,
+            None,
             None,
             None,
             None,
@@ -1178,6 +1209,7 @@ mod tests {
             Some(connections_snapshot),
             None,
             Some("{".to_string()),
+            None,
             None,
             None,
             None,

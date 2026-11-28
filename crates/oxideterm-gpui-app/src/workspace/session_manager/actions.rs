@@ -146,6 +146,97 @@ impl WorkspaceApp {
         self.open_saved_console_profile(DirectConsoleProfileKind::Telnet, id, window, cx);
     }
 
+    /// Opens a saved container profile. Container ids are volatile, so the
+    /// current container is resolved by name through the engine listing
+    /// before the terminal pane mounts.
+    pub(in crate::workspace) fn open_saved_container_profile(
+        &mut self,
+        id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(profile) = self.connection_store.get_container_profile(id).cloned() else {
+            return;
+        };
+        let title = profile.name.clone();
+        let terminal_options = profile.terminal.clone();
+        // Mirror the BLE revive: a released row for this profile is rebound to
+        // the new attempt instead of stacking a second active-session row.
+        let attempt_id = self
+            .standalone_connections
+            .released_saved_container_record(id)
+            .and_then(|record_id| self.begin_standalone_reconnect(&record_id, cx))
+            .unwrap_or_else(|| {
+                self.standalone_connections.insert_pending(
+                    crate::workspace::standalone_connections::StandaloneConnectionKind::Container,
+                    title.clone(),
+                    crate::workspace::standalone_connections::StandaloneConnectionLaunch::SavedContainer {
+                        profile_id: id.to_owned(),
+                        config:
+                            crate::workspace::standalone_connections::container_launch_config_from_profile(
+                                &profile,
+                            ),
+                        terminal_options: terminal_options.clone(),
+                    },
+                )
+            });
+        let profile_id = id.to_owned();
+        // bollard requires a Tokio context; the engine listing must run on the
+        // workspace task runtime, not the GPUI background executor.
+        let task_runtime = self.workspace_runtime.read(cx).task_runtime();
+        cx.spawn_in(window, async move |workspace, cx| {
+            let resolved = task_runtime
+                .spawn(async move {
+                    crate::workspace::standalone_connections::resolve_saved_container_launch(
+                        profile,
+                    )
+                    .await
+                })
+                .await
+                .unwrap_or_else(|join_error| {
+                    Err(crate::workspace::standalone_connections::SavedContainerResolveError::Engine(
+                        oxideterm_docker::ContainerError::Engine(join_error.to_string()),
+                    ))
+                });
+            let _ = workspace.update_in(cx, |this, window, cx| {
+                match resolved {
+                    Ok(config) => {
+                        let opened = this.create_container_terminal_tab_for_connection(
+                            config,
+                            terminal_options,
+                            title,
+                            Some(attempt_id.clone()),
+                            window,
+                            cx,
+                        );
+                        if opened.is_ok() && matches!(
+                            this.connection_store.mark_container_profile_used(&profile_id),
+                            Ok(true)
+                        ) {
+                            this.queue_cloud_sync_dirty_refresh(cx);
+                        }
+                    }
+                    Err(error) => {
+                        this.standalone_connections.mark_attempt_error(&attempt_id);
+                        this.connections.session_manager.update(cx, |state, cx| {
+                            state.set_status(
+                                Some(
+                                    crate::workspace::standalone_connections::saved_container_error_label(
+                                        error,
+                                        &this.i18n,
+                                    ),
+                                ),
+                                cx,
+                            );
+                        });
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     fn open_saved_console_profile(
         &mut self,
         kind: DirectConsoleProfileKind,
@@ -296,6 +387,8 @@ impl WorkspaceApp {
         match target {
             SessionManagerOpenTarget::Serial(_) => self.refresh_serial_ports(cx),
             SessionManagerOpenTarget::Ble(_) => self.refresh_ble_adapters(cx),
+            // The backfill needs the engine list to pre-select the saved engine.
+            SessionManagerOpenTarget::Container(_) => self.refresh_container_engines(cx),
             _ => {}
         }
         cx.notify();

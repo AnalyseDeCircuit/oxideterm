@@ -434,16 +434,27 @@ impl Workspace {
             use PortableConnectionFormEvent::*;
             match event {
                 RequestBleScan => {
-                    let Some(draft) = form_entity.read(cx).form(cx) else { return };
-                    if draft.transport != NewConnectionTransport::Ble || draft.ble.scanning { return; }
-                    let selection = crate::ble::pair_and_inspect(draft.ble.selected_service_uuid, None);
+                    let Some(draft) = form_entity.read(cx).form(cx) else {
+                        return;
+                    };
+                    if draft.transport != NewConnectionTransport::Ble || draft.ble.scanning {
+                        return;
+                    }
+                    let selection =
+                        crate::ble::pair_and_inspect(draft.ble.selected_service_uuid, None);
                     form_entity.update(cx, |v, cx| v.set_web_ble_scanning(true, None, cx));
                     let form_weak = form_entity.downgrade();
                     h.ble_scan = Some(cx.spawn(async move |owner, cx| {
                         let result = selection.await;
                         let _ = owner.update(cx, |h, cx| {
-                            let Some(form) = form_weak.upgrade() else { return };
-                            if !form.read(cx).form(cx).is_some_and(|f| f.transport == NewConnectionTransport::Ble) {
+                            let Some(form) = form_weak.upgrade() else {
+                                return;
+                            };
+                            if !form
+                                .read(cx)
+                                .form(cx)
+                                .is_some_and(|f| f.transport == NewConnectionTransport::Ble)
+                            {
                                 form.update(cx, |v, cx| v.set_web_ble_scanning(false, None, cx));
                                 return;
                             }
@@ -457,7 +468,9 @@ impl Workspace {
                                         v.set_web_ble_device(id, name, services, cx);
                                     });
                                 }
-                                Ok(None) => form.update(cx, |v,cx| v.set_web_ble_scanning(false, None, cx)),
+                                Ok(None) => {
+                                    form.update(cx, |v, cx| v.set_web_ble_scanning(false, None, cx))
+                                }
                                 Err(err) => {
                                     form.update(cx, |v, cx| {
                                         v.set_web_ble_scanning(false, Some(h.i18n.t(err)), cx);
@@ -480,9 +493,10 @@ impl Workspace {
                         write_without_response,
                     } = &d.protocol
                     {
-                        let id = d.profile_id.clone().unwrap_or_else(|| {
-                            format!("ble:{}", uuid::Uuid::new_v4())
-                        });
+                        let id = d
+                            .profile_id
+                            .clone()
+                            .unwrap_or_else(|| format!("ble:{}", uuid::Uuid::new_v4()));
                         let fallback_name = if !device_name.trim().is_empty() {
                             device_name.trim().to_owned()
                         } else {
@@ -541,9 +555,10 @@ impl Workspace {
                             return;
                         }
                     };
-                    let id = d.profile_id.clone().unwrap_or_else(|| {
-                        format!("profile-{}", uuid::Uuid::new_v4())
-                    });
+                    let id = d
+                        .profile_id
+                        .clone()
+                        .unwrap_or_else(|| format!("profile-{}", uuid::Uuid::new_v4()));
                     if !matches!(event, Connect(_)) {
                         let target = if let Some(p) = &profile {
                             let Some(files) = &mut h.files else {

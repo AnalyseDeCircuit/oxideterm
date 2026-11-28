@@ -1225,7 +1225,6 @@ mod remote_load_state_tests {
         assert!(sftp.remote_load_inflight);
     }
 
-
     #[test]
     fn sftp_ready_event_preserves_pending_terminal_cwd() {
         let mut sftp = SftpWorkspaceEntity::default();
@@ -1412,7 +1411,6 @@ mod tests {
         assert_eq!(request.path, "/manual");
         assert!(request.audit_request.is_none());
     }
-
 
     #[gpui::test]
     fn accepted_root_listing_clears_tree_state(cx: &mut gpui::TestAppContext) {

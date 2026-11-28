@@ -113,7 +113,11 @@ impl Snapshot {
         Ok(Self {
             groups: data.groups.iter().cloned().collect(),
             profiles,
-            recent: data.items.iter().filter_map(|row| Some((row.id().to_owned(), row.last_used.clone()?))).collect(),
+            recent: data
+                .items
+                .iter()
+                .filter_map(|row| Some((row.id().to_owned(), row.last_used.clone()?)))
+                .collect(),
         })
     }
 

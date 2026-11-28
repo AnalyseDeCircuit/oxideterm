@@ -177,6 +177,46 @@ pub fn form_from_serial_profile(
 }
 
 #[cfg(not(target_family = "wasm"))]
+pub fn form_from_container_profile(
+    profile: &oxideterm_connections::ContainerProfile,
+    ungrouped_label: String,
+) -> NewConnectionForm {
+    // The edit form re-selects engine and container asynchronously from the
+    // stored profile; pending_* fields carry the match keys into the listing
+    // callbacks.
+    let mut form = NewConnectionForm::default();
+    form.transport = NewConnectionTransport::Container;
+    form.serial_profile_name = profile.name.clone();
+    form.group = profile.group.clone().unwrap_or(ungrouped_label);
+    form.notes = profile.notes.clone().unwrap_or_default();
+    form.icon = profile.icon.clone().unwrap_or_default();
+    form.color = profile.color.clone().unwrap_or_default();
+    form.icon_background_color = profile.icon_background_color.clone().unwrap_or_default();
+    form.terminal = profile.terminal.clone();
+    form.container.profile_id = Some(profile.id.clone());
+    form.container.pending_engine = Some(profile.engine.clone());
+    form.container.pending_container_name = Some(profile.container_name.clone());
+    form.container.pending_pod_container = profile.pod_container.clone();
+    // The container branch renders the profile name via SerialProfileName,
+    // the same field submit_container reads back.
+    form.focused_field = NewConnectionField::SerialProfileName;
+    match &profile.launch {
+        oxideterm_docker::ContainerLaunchMode::Shell { shell } => {
+            form.container.launch_mode = ContainerFormLaunchMode::Shell;
+            form.container.shell = shell.clone().unwrap_or_default();
+        }
+        oxideterm_docker::ContainerLaunchMode::Command { command } => {
+            form.container.launch_mode = ContainerFormLaunchMode::Command;
+            form.container.custom_command = command.clone();
+        }
+        oxideterm_docker::ContainerLaunchMode::Attach => {
+            form.container.launch_mode = ContainerFormLaunchMode::Attach;
+        }
+    }
+    form
+}
+
+#[cfg(not(target_family = "wasm"))]
 pub fn apply_saved_upstream_proxy_to_form(
     form: &mut NewConnectionForm,
     policy: &oxideterm_connections::SavedUpstreamProxyPolicy,

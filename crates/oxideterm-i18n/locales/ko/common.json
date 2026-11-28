@@ -521,7 +521,8 @@
         "github_oauth_client_id": "GitHub OAuth Client ID",
         "microsoft_oauth_client_id": "Microsoft OAuth 클라이언트 ID",
         "microsoft_access_token": "Microsoft 액세스 토큰",
-        "google_oauth_client_id": "Google OAuth 클라이언트 ID"
+        "google_oauth_client_id": "Google OAuth 클라이언트 ID",
+        "sync_container_profiles": "컨테이너 프로필 동기화"
       },
       "auth": {
         "bearer": "Bearer",
@@ -561,7 +562,8 @@
         "plugin_settings_selected_detail": "선택한 플러그인: {{plugins}}",
         "plugin_settings_disabled_detail": "현재 동기화 범위에서 플러그인 설정이 제외됩니다.",
         "sensitive_credentials_enabled_detail": "암호화된 민감한 자격 증명 객체가 포함됩니다.",
-        "sensitive_credentials_disabled_detail": "연결 비밀번호, 키 암호, 관리형 개인 키, AI 키, 권한 상승 자격 증명은 민감한 자격 증명 동기화를 켤 때까지 제외됩니다."
+        "sensitive_credentials_disabled_detail": "연결 비밀번호, 키 암호, 관리형 개인 키, AI 키, 권한 상승 자격 증명은 민감한 자격 증명 동기화를 켤 때까지 제외됩니다.",
+        "container_profiles_detail": "컨테이너 연결 프로필이 포함됩니다."
       },
       "notes": {
         "upload_only": "자동 동기화는 업로드만 수행합니다. 원격 업데이트는 항상 사용자 확인이 필요합니다.",
@@ -775,7 +777,9 @@
         "sensitive_summary_title": "민감한 자격 증명",
         "profile_credential_actions": "{{name}}: 저장된 자격 증명 {{stored}}개, 삭제 요청 {{cleared}}개.",
         "sensitive_remote_summary": "원격 암호화 자격 증명에는 연결 레코드 {{connections}}개와 휴대용 비밀 {{portableSecrets}}개가 포함됩니다. 값은 항상 숨겨집니다.",
-        "sensitive_upload_summary": "비밀번호 {{passwords}}개, 키 암호문 {{keyPassphrases}}개, 관리 키 {{managedKeys}}개, 관리 키 암호문 {{managedKeyPassphrases}}개, 휴대용 비밀 {{portableSecrets}}개를 업로드합니다."
+        "sensitive_upload_summary": "비밀번호 {{passwords}}개, 키 암호문 {{keyPassphrases}}개, 관리 키 {{managedKeys}}개, 관리 키 암호문 {{managedKeyPassphrases}}개, 휴대용 비밀 {{portableSecrets}}개를 업로드합니다.",
+        "container_profiles_label": "컨테이너 프로필",
+        "toggle_container_profiles": "컨테이너 프로필 가져오기 ({{count}})"
       },
       "confirm": {
         "import_title": "원격 스냅샷을 가져올까요?",
@@ -940,7 +944,10 @@
         "tls_mode": "TLS 모드",
         "tls_verification": "TLS 검증",
         "tls_server_name": "TLS 서버 이름",
-        "setting_field": "설정 필드"
+        "setting_field": "설정 필드",
+        "container_name": "컨테이너 이름",
+        "engine": "엔진",
+        "launch_mode": "시작 모드"
       },
       "tabs": {
         "overview": "개요",

@@ -574,7 +574,11 @@ impl FileManagerView {
             )
             .child(
                 self.workspace_toolbar_action_button(
-                    self.i18n.t(if cfg!(target_family = "wasm") { HOST_FILE_ACTION.1 } else { "fileManager.open" }),
+                    self.i18n.t(if cfg!(target_family = "wasm") {
+                        HOST_FILE_ACTION.1
+                    } else {
+                        "fileManager.open"
+                    }),
                     Some(Self::render_lucide_icon(
                         HOST_FILE_ACTION.0,
                         FILE_MANAGER_ICON_MD,

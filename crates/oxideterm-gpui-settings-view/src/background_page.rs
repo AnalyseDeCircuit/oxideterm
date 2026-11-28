@@ -22,7 +22,8 @@ use std::{
 };
 
 use crate::{
-    appearance::background_tab_icon, appearance_page::AppearancePage, entity::SettingsWorkspaceEntity, surface::nav::render_icon, *,
+    appearance::background_tab_icon, appearance_page::AppearancePage,
+    entity::SettingsWorkspaceEntity, surface::nav::render_icon, *,
 };
 
 const SETTINGS_PERCENT_SCALE: f64 = 100.0;
@@ -45,7 +46,6 @@ fn background_scope_index(scope: BackgroundScope) -> usize {
         .position(|(option, _)| *option == scope)
         .unwrap_or(0)
 }
-
 
 #[derive(Clone)]
 pub enum BackgroundRequest {

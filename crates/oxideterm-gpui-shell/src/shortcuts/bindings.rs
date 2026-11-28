@@ -415,8 +415,11 @@ fn normalize_key_from_keystroke(keystroke: &Keystroke) -> Option<String> {
     if let Some(key_char) = keystroke.key_char.as_deref()
         && !key_char.trim().is_empty()
         && key_char.chars().count() == 1
-        && !keystroke.modifiers.control
-        && !keystroke.modifiers.platform
+        // A layout-produced symbol is the binding key even with Ctrl or Cmd;
+        // normalize_combo removes the Shift/Alt used to produce it.
+        && ((!keystroke.modifiers.control && !keystroke.modifiers.platform)
+            || printable_symbol_encodes_shift(key_char)
+            || layout_symbol_may_include_alt(key_char))
     {
         return Some(key_char.to_lowercase());
     }

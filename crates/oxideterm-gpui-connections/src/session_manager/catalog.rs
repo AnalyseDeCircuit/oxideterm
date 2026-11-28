@@ -49,6 +49,7 @@ impl CatalogRow {
             Connection(_) | Discovery(_) => LucideIcon::Server,
             SshConfig(_) => LucideIcon::FileTerminal,
             Serial(_) => LucideIcon::Radio,
+            Container(_) => LucideIcon::Docker,
             Ble(_) => LucideIcon::Bluetooth,
             LocalTerminal(_) | Telnet(_) => LucideIcon::Terminal,
             Ftp(_) | StandaloneSftp(_) => LucideIcon::FolderSync,
@@ -85,9 +86,9 @@ impl CatalogRow {
     pub fn id(&self) -> &str {
         use SessionManagerOpenTarget::*;
         match &self.target {
-            Tunnel(id) | Plugin(id) | Connection(id) | SshConfig(id) | Serial(id) | Ble(id)
-            | LocalTerminal(id) | Telnet(id) | Ftp(id) | Mosh(id) | StandaloneSftp(id)
-            | RemoteDesktop(id) => id,
+            Tunnel(id) | Plugin(id) | Connection(id) | SshConfig(id) | Serial(id)
+            | Container(id) | Ble(id) | LocalTerminal(id) | Telnet(id) | Ftp(id) | Mosh(id)
+            | StandaloneSftp(id) | RemoteDesktop(id) => id,
             Discovery(_) => &self.discovery_row_id,
         }
     }
@@ -101,6 +102,7 @@ impl CatalogRow {
             Open::SshConfig(id) => Row::SshConfig(id.clone()),
             Open::Discovery(key) => Row::Discovery(key.clone()),
             Open::Serial(id) => Row::Serial(id.clone()),
+            Open::Container(id) => Row::Container(id.clone()),
             Open::Ble(id) => Row::Ble(id.clone()),
             Open::LocalTerminal(id) => Row::LocalTerminal(id.clone()),
             Open::Telnet(id) => Row::Telnet(id.clone()),

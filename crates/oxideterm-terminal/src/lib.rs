@@ -51,10 +51,6 @@ pub use tmux::{
 
 pub use activity::TerminalActivityReceiver;
 pub use alacritty_terminal::term::TermMode;
-pub use oxideterm_terminal_encoding::command_sender::{
-    TerminalSenderFrame, TerminalSenderInputMode, TerminalSenderPacing, TerminalSenderPlan,
-    TerminalSenderPlanError, build_terminal_sender_plan,
-};
 pub use editor_integration::{
     EMACS_FREE_TYPE_INTEGRATION_SOURCE, TerminalEditorApplication, TerminalEditorCapabilities,
     TerminalEditorClipboardEvent, TerminalEditorClipboardOperation, TerminalEditorIntegrationEvent,
@@ -80,6 +76,10 @@ pub use oxideterm_terminal_emulator::{
     TerminalImageSnapshot, TerminalLogicalContext, TerminalLogicalContextRow,
     TerminalLogicalMember, TerminalRow, TerminalSearchMatch, TerminalSearchRange, TerminalSnapshot,
     TerminalStyleOrigin, TerminalUnderlineStyle,
+};
+pub use oxideterm_terminal_encoding::command_sender::{
+    TerminalSenderFrame, TerminalSenderInputMode, TerminalSenderPacing, TerminalSenderPlan,
+    TerminalSenderPlanError, build_terminal_sender_plan,
 };
 pub use oxideterm_terminal_encoding::{
     EncodingMismatchDetector, TERMINAL_ENCODINGS, TerminalEncoding,
@@ -110,13 +110,13 @@ pub use session::{
 pub use session::{
     BleConnectionStatus, BleGattCharacteristicInfo, BleGattError, BleGattHandle,
     BleGattServiceInfo, BleResolveError, BleResolveStage, BleResolvedLink, BleSessionConfig,
-    MoshConnectionStatus, MoshPredictionDisplay, MoshTerminalConfig, SerialControlLine,
-    SerialControlState, SerialDisplayMode, SerialError, SerialErrorCode, SerialFlowControl,
-    SerialLineEnding, SerialParity, SerialPortInfo, SerialRuntimeOptions, SerialSendMode,
-    SerialSessionConfig, SshPtySession, SshSessionConfig, TelnetControlCommand, TelnetLineEndings,
-    TelnetLoginCredentials, TelnetSessionConfig, TerminalDrainBudget, TerminalDrainReport,
-    TerminalMagicKind, TerminalOutputProcessor, TerminalResize, TerminalSession,
-    TerminalSessionBackend, TerminalSessionKind, TerminalSessionStatus,
+    DockerExecSessionConfig, MoshConnectionStatus, MoshPredictionDisplay, MoshTerminalConfig,
+    SerialControlLine, SerialControlState, SerialDisplayMode, SerialError, SerialErrorCode,
+    SerialFlowControl, SerialLineEnding, SerialParity, SerialPortInfo, SerialRuntimeOptions,
+    SerialSendMode, SerialSessionConfig, SshPtySession, SshSessionConfig, TelnetControlCommand,
+    TelnetLineEndings, TelnetLoginCredentials, TelnetSessionConfig, TerminalDrainBudget,
+    TerminalDrainReport, TerminalMagicKind, TerminalOutputProcessor, TerminalResize,
+    TerminalSession, TerminalSessionBackend, TerminalSessionKind, TerminalSessionStatus,
     ble_device_reservation_label, ble_resolve_profile_to_session, serial_list_ports,
 };
 pub use shell_completion::{

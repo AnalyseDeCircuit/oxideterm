@@ -160,6 +160,7 @@ pub enum SessionManagerDisplayItem {
     SshConfig(SessionManagerSshConfigDisplayItem),
     Discovery(oxideterm_discovery::CatalogEntry),
     Serial(SerialProfile),
+    Container(oxideterm_connections::ContainerProfile),
     Ble(BleProfile),
     LocalTerminal(LocalTerminalProfile),
     Telnet(TelnetProfile),
@@ -178,8 +179,8 @@ pub fn saved_catalog_profile_form(
         ble::form_from_ble_profile,
         configuration::form_from_standalone_sftp_profile,
         form_state::{
-            form_from_mosh_profile, form_from_remote_desktop_profile, form_from_serial_profile,
-            form_from_telnet_profile,
+            form_from_container_profile, form_from_mosh_profile, form_from_remote_desktop_profile,
+            form_from_serial_profile, form_from_telnet_profile,
         },
     };
     use SessionManagerOpenTarget as Open;
@@ -187,6 +188,10 @@ pub fn saved_catalog_profile_form(
     Some(match target {
         Open::Serial(id) => form_from_serial_profile(
             store.serial_profiles().iter().find(|p| p.id == *id)?,
+            ungrouped(),
+        ),
+        Open::Container(id) => form_from_container_profile(
+            store.container_profiles().iter().find(|p| p.id == *id)?,
             ungrouped(),
         ),
         Open::Ble(id) => form_from_ble_profile(
@@ -296,6 +301,7 @@ impl SessionManagerDisplayItem {
             Self::SshConfig(host) => &host.alias,
             Self::Discovery(host) => &host.row_id,
             Self::Serial(profile) => &profile.id,
+            Self::Container(profile) => &profile.id,
             Self::Ble(profile) => &profile.id,
             Self::LocalTerminal(profile) => &profile.id,
             Self::Plugin(profile) => &profile.id,
@@ -321,6 +327,9 @@ impl SessionManagerDisplayItem {
             )),
             Self::Serial(profile) => {
                 Some(SessionManagerSelectionTarget::Serial(profile.id.clone()))
+            }
+            Self::Container(profile) => {
+                Some(SessionManagerSelectionTarget::Container(profile.id.clone()))
             }
             Self::Ble(profile) => Some(SessionManagerSelectionTarget::Ble(profile.id.clone())),
             Self::LocalTerminal(profile) => Some(SessionManagerSelectionTarget::LocalTerminal(
@@ -356,6 +365,9 @@ impl SessionManagerDisplayItem {
             Self::Serial(profile) => {
                 Some(SessionManagerRowActionTarget::Serial(profile.id.clone()))
             }
+            Self::Container(profile) => {
+                Some(SessionManagerRowActionTarget::Container(profile.id.clone()))
+            }
             Self::Ble(profile) => Some(SessionManagerRowActionTarget::Ble(profile.id.clone())),
             Self::LocalTerminal(profile) => Some(SessionManagerRowActionTarget::LocalTerminal(
                 profile.id.clone(),
@@ -388,6 +400,7 @@ impl SessionManagerDisplayItem {
             Self::SshConfig(host) => SessionManagerOpenTarget::SshConfig(host.alias.clone()),
             Self::Discovery(host) => SessionManagerOpenTarget::Discovery(host.key()),
             Self::Serial(profile) => SessionManagerOpenTarget::Serial(profile.id.clone()),
+            Self::Container(profile) => SessionManagerOpenTarget::Container(profile.id.clone()),
             Self::Ble(profile) => SessionManagerOpenTarget::Ble(profile.id.clone()),
             Self::LocalTerminal(profile) => {
                 SessionManagerOpenTarget::LocalTerminal(profile.id.clone())
@@ -412,6 +425,7 @@ impl SessionManagerDisplayItem {
             Self::SshConfig(host) => &host.alias,
             Self::Discovery(host) => &host.label,
             Self::Serial(profile) => &profile.name,
+            Self::Container(profile) => &profile.name,
             Self::Ble(profile) => &profile.name,
             Self::LocalTerminal(profile) => &profile.name,
             Self::Telnet(profile) => &profile.name,
@@ -430,6 +444,7 @@ impl SessionManagerDisplayItem {
             Self::SshConfig(_) => None,
             Self::Discovery(_) => None,
             Self::Serial(profile) => profile.group.as_deref(),
+            Self::Container(profile) => profile.group.as_deref(),
             Self::Ble(profile) => profile.group.as_deref(),
             Self::LocalTerminal(profile) => profile.group.as_deref(),
             Self::Telnet(profile) => profile.group.as_deref(),
@@ -448,6 +463,7 @@ impl SessionManagerDisplayItem {
             Self::SshConfig(_) => None,
             Self::Discovery(_) => None,
             Self::Serial(profile) => profile.last_used_at.map(|time| time.to_rfc3339()),
+            Self::Container(profile) => profile.last_used_at.map(|time| time.to_rfc3339()),
             Self::Ble(profile) => profile.last_used_at.map(|time| time.to_rfc3339()),
             Self::LocalTerminal(profile) => profile.last_used_at.map(|time| time.to_rfc3339()),
             Self::Telnet(profile) => profile.last_used_at.map(|time| time.to_rfc3339()),
@@ -466,6 +482,7 @@ impl SessionManagerDisplayItem {
             Self::SshConfig(host) => host.hostname.as_deref().unwrap_or(&host.alias),
             Self::Discovery(host) => host.scope.as_deref().unwrap_or_default(),
             Self::Serial(profile) => &profile.port_path,
+            Self::Container(profile) => &profile.container_name,
             Self::Ble(profile) => profile
                 .device_name
                 .as_deref()
@@ -488,6 +505,7 @@ impl SessionManagerDisplayItem {
             Self::SshConfig(host) => u32::from(host.port.unwrap_or(22)),
             Self::Discovery(_) => 0,
             Self::Serial(profile) => profile.baud_rate,
+            Self::Container(_) => 0,
             Self::Ble(_) => 0,
             Self::LocalTerminal(_) => 0,
             Self::Telnet(profile) => u32::from(profile.port),
@@ -505,7 +523,7 @@ impl SessionManagerDisplayItem {
             Self::Connection(connection) => &connection.username,
             Self::SshConfig(host) => host.user.as_deref().unwrap_or_default(),
             Self::Discovery(_) => "",
-            Self::Serial(_) | Self::Ble(_) | Self::Telnet(_) => "",
+            Self::Serial(_) | Self::Container(_) | Self::Ble(_) | Self::Telnet(_) => "",
             Self::LocalTerminal(_) => "",
             Self::Ftp(profile) => &profile.username,
             Self::Mosh(profile) => &profile.username,
@@ -522,6 +540,7 @@ impl SessionManagerDisplayItem {
             Self::SshConfig(_) => "ssh config".to_string(),
             Self::Discovery(host) => host.source_name.clone(),
             Self::Serial(_) => "serial".to_string(),
+            Self::Container(_) => "container".to_string(),
             Self::Ble(_) => "ble".to_string(),
             Self::LocalTerminal(_) => "local".to_string(),
             Self::Telnet(_) => "telnet".to_string(),
@@ -572,6 +591,19 @@ impl SessionManagerDisplayItem {
                 None => host.subtitle(),
             },
             Self::Serial(profile) => format!("{} · {}", profile.port_path, profile.baud_rate),
+            Self::Container(profile) => format!(
+                "{} · {}",
+                profile.container_name,
+                match &profile.engine {
+                    oxideterm_docker::EngineTarget::DockerSocket { .. } => "docker".to_string(),
+                    oxideterm_docker::EngineTarget::Kube { context, namespace } => {
+                        match context {
+                            Some(context) => format!("kube:{context}:{namespace}"),
+                            None => format!("kube:{namespace}"),
+                        }
+                    }
+                },
+            ),
             Self::Ble(profile) => format!(
                 "{} · {}",
                 profile
@@ -628,6 +660,21 @@ impl SessionManagerDisplayItem {
                 profile.name,
                 profile.port_path,
                 profile.baud_rate,
+                profile.group.as_deref().unwrap_or_default()
+            ),
+            Self::Container(profile) => format!(
+                "{}\n{}\n{}\n{}",
+                profile.name,
+                profile.container_name,
+                match &profile.engine {
+                    oxideterm_docker::EngineTarget::DockerSocket { .. } => "docker".to_string(),
+                    oxideterm_docker::EngineTarget::Kube { context, namespace } => {
+                        match context {
+                            Some(context) => format!("kube:{context}:{namespace}"),
+                            None => format!("kube:{namespace}"),
+                        }
+                    }
+                },
                 profile.group.as_deref().unwrap_or_default()
             ),
             Self::Ble(profile) => format!(
@@ -700,6 +747,10 @@ impl SessionManagerDisplayItem {
             Self::Discovery(_) => LucideIcon::Server.into(),
             Self::Serial(profile) => session_icons::session_icon_from_id(profile.icon.as_deref())
                 .unwrap_or(LucideIcon::Radio.into()),
+            Self::Container(profile) => {
+                session_icons::session_icon_from_id(profile.icon.as_deref())
+                    .unwrap_or(LucideIcon::Docker.into())
+            }
             Self::Ble(profile) => session_icons::session_icon_from_id(profile.icon.as_deref())
                 .unwrap_or(LucideIcon::Bluetooth.into()),
             Self::LocalTerminal(profile) => {
@@ -729,6 +780,7 @@ impl SessionManagerDisplayItem {
             Self::Plugin(_) => None,
             Self::Connection(connection) => connection.color.as_deref(),
             Self::Serial(profile) => profile.color.as_deref(),
+            Self::Container(profile) => profile.color.as_deref(),
             Self::Ble(profile) => profile.color.as_deref(),
             Self::LocalTerminal(profile) => profile.color.as_deref(),
             Self::Telnet(profile) => profile.color.as_deref(),
@@ -747,6 +799,7 @@ impl SessionManagerDisplayItem {
             Self::Plugin(_) => None,
             Self::Connection(connection) => connection.icon_background_color.as_deref(),
             Self::Serial(profile) => profile.icon_background_color.as_deref(),
+            Self::Container(profile) => profile.icon_background_color.as_deref(),
             Self::Ble(profile) => profile.icon_background_color.as_deref(),
             Self::LocalTerminal(profile) => profile.icon_background_color.as_deref(),
             Self::Telnet(profile) => profile.icon_background_color.as_deref(),
@@ -793,6 +846,13 @@ pub fn saved_session_manager_items(
                 .iter()
                 .cloned()
                 .map(SessionManagerDisplayItem::Serial),
+        )
+        .chain(
+            store
+                .container_profiles()
+                .iter()
+                .cloned()
+                .map(SessionManagerDisplayItem::Container),
         )
         .chain(
             store

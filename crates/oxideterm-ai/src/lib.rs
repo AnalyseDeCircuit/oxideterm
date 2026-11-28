@@ -48,12 +48,12 @@ mod provider_embeddings;
 mod providers;
 #[cfg(not(target_family = "wasm"))]
 mod rag;
-#[path = "rag/model.rs"]
-mod rag_model;
 #[path = "rag/chunker.rs"]
 mod rag_chunker;
 #[path = "rag/keyword.rs"]
 pub mod rag_keyword;
+#[path = "rag/model.rs"]
+mod rag_model;
 mod reasoning;
 mod references;
 mod responses_state;

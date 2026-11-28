@@ -76,7 +76,8 @@ impl Palette {
                         let selected_index =
                             resolve_command_palette_selected_index(&ranked_items, selected);
                         let preview_selected = selected_index.is_some_and(|idx| {
-                            m.content() == PaletteContent::Commands && ranked_items[idx].item.section == PaletteSection::Connections
+                            m.content() == PaletteContent::Commands
+                                && ranked_items[idx].item.section == PaletteSection::Connections
                         });
                         PaletteFrame {
                             tokens: h.tokens,
@@ -85,7 +86,13 @@ impl Palette {
                             selected,
                             preview_selected,
                             titlebar_height: h.tokens.metrics.titlebar_height,
-                            scope_counts: (m.content() == PaletteContent::TabScopes).then(|| format!("{}/{}", h.layout.main_tabs().count(), h.layout.unfiltered_main_tabs().count())),
+                            scope_counts: (m.content() == PaletteContent::TabScopes).then(|| {
+                                format!(
+                                    "{}/{}",
+                                    h.layout.main_tabs().count(),
+                                    h.layout.unfiltered_main_tabs().count()
+                                )
+                            }),
                             input: query_input(
                                 &h.tokens,
                                 &h.i18n,
@@ -118,23 +125,48 @@ impl Palette {
         }
     }
 
-    pub(super) fn supports_shortcut(&self, def: &oxideterm_gpui_shell::shortcuts::bindings::ActionDefinition, demo: bool) -> bool {
+    pub(super) fn supports_shortcut(
+        &self,
+        def: &oxideterm_gpui_shell::shortcuts::bindings::ActionDefinition,
+        demo: bool,
+    ) -> bool {
         use oxideterm_gpui_editor::EditorShortcut;
         use oxideterm_gpui_shell::shortcuts::bindings::ActionScope;
         use oxideterm_gpui_terminal_view::input::TerminalShortcut;
         let id = def.id.as_ref();
-        if id == "app.commandPalette" || id.strip_prefix("app.goToTab").and_then(|s|s.parse::<u8>().ok()).is_some_and(|n|(1..=9).contains(&n)) {
+        if id == "app.commandPalette"
+            || id
+                .strip_prefix("app.goToTab")
+                .and_then(|s| s.parse::<u8>().ok())
+                .is_some_and(|n| (1..=9).contains(&n))
+        {
             return true;
         }
-        if let Some(spec) = self.commands.iter().chain(&self.help).find(|s| s.shortcut_action == Some(id)) {
+        if let Some(spec) = self
+            .commands
+            .iter()
+            .chain(&self.help)
+            .find(|s| s.shortcut_action == Some(id))
+        {
             return demo || !matches!(spec.action, PaletteAction::Command(Action::NewConnection));
         }
         match def.scope {
             ActionScope::Sftp => demo,
-            ActionScope::FileManager | ActionScope::Preview => demo || crate::files::can_pick_directory(),
-            ActionScope::Editor => EditorShortcut::BINDINGS.iter().any(|&(key,_)| key == id),
-            ActionScope::Terminal => TerminalShortcut::BINDINGS.iter().any(|&(key,action)| key == id
-                && (action.scroll_action().is_some() || matches!(action, TerminalShortcut::Copy | TerminalShortcut::Paste | TerminalShortcut::WordBackward | TerminalShortcut::WordForward))),
+            ActionScope::FileManager | ActionScope::Preview => {
+                demo || crate::files::can_pick_directory()
+            }
+            ActionScope::Editor => EditorShortcut::BINDINGS.iter().any(|&(key, _)| key == id),
+            ActionScope::Terminal => TerminalShortcut::BINDINGS.iter().any(|&(key, action)| {
+                key == id
+                    && (action.scroll_action().is_some()
+                        || matches!(
+                            action,
+                            TerminalShortcut::Copy
+                                | TerminalShortcut::Paste
+                                | TerminalShortcut::WordBackward
+                                | TerminalShortcut::WordForward
+                        ))
+            }),
             _ => false,
         }
     }
@@ -567,8 +599,15 @@ impl Workspace {
         }
     }
 
-    fn quick_connect_item(&self, launch: &oxideterm_ssh_launch::TemporarySshLaunch) -> PaletteItem<PaletteAction> {
-        let target = oxideterm_ssh_launch::format_user_host_port_target(&launch.username, &launch.host, launch.port);
+    fn quick_connect_item(
+        &self,
+        launch: &oxideterm_ssh_launch::TemporarySshLaunch,
+    ) -> PaletteItem<PaletteAction> {
+        let target = oxideterm_ssh_launch::format_user_host_port_target(
+            &launch.username,
+            &launch.host,
+            launch.port,
+        );
         let needs_auth = !self.demo && launch.password.is_some();
         PaletteItem {
             id: "quick_connect".to_string(),
@@ -589,12 +628,16 @@ impl Workspace {
         let model = self.palette.model.read(cx);
         let raw_query = model.query();
         if model.content() == PaletteContent::TabScopes {
-            return self.scope_choices(raw_query,cx);
+            return self.scope_choices(raw_query, cx);
         }
         let launch = oxideterm_ssh_launch::parse_quick_ssh_launch(raw_query.trim_start());
         if let Some(launch) = launch.as_ref().filter(|l| l.password.is_some()) {
             // Credentials belong to the form, never the matcher, MRU, or an action payload.
-            return vec![RankedItem { item: self.quick_connect_item(launch), score: 4.0, highlights: Vec::new() }];
+            return vec![RankedItem {
+                item: self.quick_connect_item(launch),
+                score: 4.0,
+                highlights: Vec::new(),
+            }];
         }
         let (mode, query) = parse_command_palette_query(raw_query);
         let active_tab_id = self.layout.active_tab_id();
@@ -752,8 +795,8 @@ impl Workspace {
     ) {
         match action {
             PaletteAction::Command(a) => self.action(a, w, cx),
-            PaletteAction::SelectScope(scope) => self.select_scope(scope,w,cx),
-            PaletteAction::OpenDeviceFolder => self.pick_device_project(w,cx),
+            PaletteAction::SelectScope(scope) => self.select_scope(scope, w, cx),
+            PaletteAction::OpenDeviceFolder => self.pick_device_project(w, cx),
             PaletteAction::ToggleFullscreen => w.toggle_fullscreen(),
             PaletteAction::TabHistory(forward) => {
                 let visible = self.layout.main_tabs().map(|(_, t)| t.id).collect();
@@ -804,7 +847,11 @@ impl Workspace {
                 self.connect_catalog_item(&node_id, w, cx);
             }
             PaletteAction::QuickConnect => {
-                let Some(launch) = oxideterm_ssh_launch::parse_quick_ssh_launch(self.palette.model.read(cx).query().trim_start()) else { return };
+                let Some(launch) = oxideterm_ssh_launch::parse_quick_ssh_launch(
+                    self.palette.model.read(cx).query().trim_start(),
+                ) else {
+                    return;
+                };
                 self.palette_request(ShellPaletteRequest::Close, w, cx);
                 self.open_quick_ssh(launch, w, cx);
             }
@@ -882,7 +929,9 @@ impl Workspace {
             ShellPaletteRequest::Close => {
                 let delay = exit_settle_duration(&self.tokens, MotionDuration::Control);
                 self.palette.model.update(cx, |m, cx| {
-                    if m.query().split_once('@').is_some_and(|(user_info, _)| user_info.trim_start_matches("ssh://").contains(':')) {
+                    if m.query().split_once('@').is_some_and(|(user_info, _)| {
+                        user_info.trim_start_matches("ssh://").contains(':')
+                    }) {
                         use zeroize::Zeroize;
                         m.take_query().zeroize();
                     }

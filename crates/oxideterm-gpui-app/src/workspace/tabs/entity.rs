@@ -427,6 +427,33 @@ impl WorkspaceTabHostEntity {
         &self.panes
     }
 
+    /// Finds the live terminal session whose container-exec launch identity
+    /// matches `config`, so reopening the same target can focus it instead of
+    /// stacking a duplicate tab and active-session row.
+    pub(in crate::workspace) fn container_session_id_matching(
+        &self,
+        config: &oxideterm_docker::ContainerConnectionConfig,
+        cx: &App,
+    ) -> Option<TerminalSessionId> {
+        self.terminal_locations
+            .iter()
+            .find_map(|(session_id, location)| {
+                let pane = self.panes.get(&location.pane_id)?;
+                // An exited shell must not absorb a reopen: the user expects a
+                // fresh terminal, mirroring the SSH reuse readiness gate.
+                if !pane.read(cx).lifecycle().is_running() {
+                    return None;
+                }
+                let matches = pane
+                    .read(cx)
+                    .shared_session()
+                    .lock()
+                    .container_connection()
+                    .is_some_and(|existing| existing.launch_identity() == config.launch_identity());
+                matches.then_some(*session_id)
+            })
+    }
+
     pub(in crate::workspace) fn sync_terminal_render_caches(&self, unlocked: bool, cx: &mut App) {
         let mut visible = Vec::new();
         if unlocked {

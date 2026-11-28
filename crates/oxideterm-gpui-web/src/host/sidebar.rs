@@ -31,7 +31,10 @@ const SESSION_TREE_ITEM_HEIGHT: f32 = 26.0;
 const SESSION_ROW_SELECTED_BG_ALPHA: u32 = 0x26;
 const MONITOR_EMERALD: u32 = 0x34d399;
 
-use oxideterm_gpui_host_tools::rail::{self, MONITORING_TOOL_COUNT, TOOLS as CONTEXT_TOOLS, overflow_tools, tool_stack_height, visible_tool_count};
+use oxideterm_gpui_host_tools::rail::{
+    self, MONITORING_TOOL_COUNT, TOOLS as CONTEXT_TOOLS, overflow_tools, tool_stack_height,
+    visible_tool_count,
+};
 
 fn mix_rgb(a: u32, b: u32, t: f32) -> u32 {
     let t = t.clamp(0.0, 1.0);
@@ -50,7 +53,6 @@ fn session_item_surface(theme: AppUiColors, selected: bool) -> Div {
         div().hover(move |style| style.bg(rgb(theme.bg_hover)))
     }
 }
-
 
 struct ActiveNodeGroup {
     node_id: String,
@@ -71,16 +73,25 @@ enum SessionActionVariant {
 
 impl Workspace {
     pub(crate) fn files_navigator_visible(&self, cx: &App) -> bool {
-        matches!(self.rails.section, SidebarSection::Sessions | SidebarSection::Connections)
-            && !self.rails.left.collapsed()
+        matches!(
+            self.rails.section,
+            SidebarSection::Sessions | SidebarSection::Connections
+        ) && !self.rails.left.collapsed()
             && !self.settings.read(cx).settings(cx).sidebar_ui.zen_mode
     }
     pub(crate) fn show_files_navigator(&mut self, cx: &mut Context<Self>) {
-        if !matches!(self.rails.section, SidebarSection::Sessions | SidebarSection::Connections)
-            && let Some(generation) = self.rails.select_section(SidebarSection::Sessions,&self.tokens) {
+        if !matches!(
+            self.rails.section,
+            SidebarSection::Sessions | SidebarSection::Connections
+        ) && let Some(generation) = self
+            .rails
+            .select_section(SidebarSection::Sessions, &self.tokens)
+        {
             self.rails.finish_section_transition(generation);
         }
-        if self.rails.left.collapsed() { self.collapse(RailSide::Left, false, cx); }
+        if self.rails.left.collapsed() {
+            self.collapse(RailSide::Left, false, cx);
+        }
     }
     pub(super) fn collapse(&mut self, side: RailSide, close: bool, cx: &mut Context<Self>) {
         let rail = self.rails.rail_mut(side);
@@ -288,13 +299,15 @@ impl Workspace {
                     cx,
                     |h, w, cx| h.action(Action::Terminal, w, cx),
                 )),
-                Files if self.action_available(Action::Files,cx) => footer.child(self.page_button(
-                    Action::Files,
-                    icon,
-                    TabKind::FileManager,
-                    "sidebar.panels.files",
-                    cx,
-                )),
+                Files if self.action_available(Action::Files, cx) => {
+                    footer.child(self.page_button(
+                        Action::Files,
+                        icon,
+                        TabKind::FileManager,
+                        "sidebar.panels.files",
+                        cx,
+                    ))
+                }
                 Notifications => footer.child(self.page_button(
                     Action::Notifications,
                     icon,
@@ -328,7 +341,11 @@ impl Workspace {
 
     fn context_tools_top(&self) -> f32 {
         let metrics = self.tokens.metrics;
-        let title = if self.onboarding_locked() { 0.0 } else { metrics.titlebar_height };
+        let title = if self.onboarding_locked() {
+            0.0
+        } else {
+            metrics.titlebar_height
+        };
         title + metrics.tabbar_height + PRIMARY_SIDEBAR_CONTENT_TOP_INSET
     }
 
@@ -636,10 +653,12 @@ impl Workspace {
         let t = self.tokens;
         let (panel_key, icon, key, content, toggle) = match self.rails.context_panel {
             ContextSidebarPanel::Assistant => {
-                let writable = self.active_session()
+                let writable = self
+                    .active_session()
                     .and_then(|id| self.sessions.get(&id))
                     .is_some_and(|s| s.writable(self.ready));
-                self.assistant.update(cx, |a, cx| a.panel(self.rails.right.width(), writable, cx));
+                self.assistant
+                    .update(cx, |a, cx| a.panel(self.rails.right.width(), writable, cx));
                 (
                     0usize,
                     LucideIcon::Sparkles,
@@ -1370,9 +1389,16 @@ impl Workspace {
         self.drawer(header, content, Some(footer))
     }
 
-    pub(crate) fn reveal_session_node(&mut self, node: &str, w: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn reveal_session_node(
+        &mut self,
+        node: &str,
+        w: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.session_search_open = false;
-        self.fields.view(Field::Sessions).update(cx, |v,cx| v.reset("",false,cx));
+        self.fields
+            .view(Field::Sessions)
+            .update(cx, |v, cx| v.reset("", false, cx));
         self.expanded_nodes.insert(node.into());
         if self.rails.section != SidebarSection::Sessions || self.rails.left.collapsed() {
             self.request(ShellRequest::Select(SidebarSection::Sessions), w, cx);
@@ -1466,14 +1492,26 @@ impl Workspace {
         let t = self.tokens;
         let theme = t.ui;
         let active_terminal = self.active_session();
-        let tool_node = self.focused_tab().and_then(|t| match t.kind {
-            TabKind::Forwards => self.tools.forwards.node(t.id),
-            TabKind::Ide => self.projects.project_node(t.id),
-            _ => None,
-        }).map(str::to_owned).or_else(|| {
-            let page = self.files.as_ref()?.sftp_pages.get(&self.focused_tab()?.id)?.read(cx);
-            page.target.profile.is_none().then(||page.target.id.clone())
-        });
+        let tool_node = self
+            .focused_tab()
+            .and_then(|t| match t.kind {
+                TabKind::Forwards => self.tools.forwards.node(t.id),
+                TabKind::Ide => self.projects.project_node(t.id),
+                _ => None,
+            })
+            .map(str::to_owned)
+            .or_else(|| {
+                let page = self
+                    .files
+                    .as_ref()?
+                    .sftp_pages
+                    .get(&self.focused_tab()?.id)?
+                    .read(cx);
+                page.target
+                    .profile
+                    .is_none()
+                    .then(|| page.target.id.clone())
+            });
 
         if groups.is_empty() {
             if filtering {
@@ -1528,11 +1566,7 @@ impl Workspace {
             let disc_key = format!("session-node:{}", group.node_id);
             let show_children = self.disclosure_motions.retained(&disc_key, expanded);
             let children = if show_children {
-                self.render_session_node_children(
-                    group,
-                    active_terminal,
-                    cx,
-                )
+                self.render_session_node_children(group, active_terminal, cx)
             } else {
                 Vec::new()
             };
@@ -1839,19 +1873,23 @@ impl Workspace {
                 ),
             );
             let forward_node = group.node_id.clone();
-            children.push(self.render_session_action_row(
-                &group.node_id,
-                "port-forwarding",
-                LucideIcon::ArrowLeftRight,
-                self.i18n.t("sessions.tree.actions.port_forwarding"),
-                SessionActionVariant::Primary,
-                self.focused_tab().and_then(|t|self.tools.forwards.node(t.id)) == Some(group.node_id.as_str()),
-                false,
-                cx.listener(move |h, _, _, cx| {
-                    h.open_node_forwards(&forward_node, cx);
-                    cx.stop_propagation();
-                }),
-            ));
+            children.push(
+                self.render_session_action_row(
+                    &group.node_id,
+                    "port-forwarding",
+                    LucideIcon::ArrowLeftRight,
+                    self.i18n.t("sessions.tree.actions.port_forwarding"),
+                    SessionActionVariant::Primary,
+                    self.focused_tab()
+                        .and_then(|t| self.tools.forwards.node(t.id))
+                        == Some(group.node_id.as_str()),
+                    false,
+                    cx.listener(move |h, _, _, cx| {
+                        h.open_node_forwards(&forward_node, cx);
+                        cx.stop_propagation();
+                    }),
+                ),
+            );
         }
 
         // Segment gap before destructive lifecycle action.

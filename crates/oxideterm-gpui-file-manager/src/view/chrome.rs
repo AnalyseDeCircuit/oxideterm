@@ -2,9 +2,7 @@ use super::*;
 use gpui::Div;
 #[cfg(not(target_family = "wasm"))]
 use oxideterm_gpui_ui::text_input::text_input_with_viewport;
-use oxideterm_gpui_ui::text_input::{
-    TextInputAnchorProbe, text_input_anchor_probe,
-};
+use oxideterm_gpui_ui::text_input::{TextInputAnchorProbe, text_input_anchor_probe};
 
 pub(super) mod browser_behavior {
     pub(in crate::view) use oxideterm_gpui_ui::confirm::{

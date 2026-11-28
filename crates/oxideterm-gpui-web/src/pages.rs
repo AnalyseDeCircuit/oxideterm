@@ -1,8 +1,8 @@
 //! Desktop-parity main workspace pages for Runtime/Dashboard, Plugin Manager,
 //! and Cloud Sync in OxideTerm Web.
 
-mod topology;
 mod catalog;
+mod topology;
 pub(crate) use catalog::Catalog;
 
 use crate::host::Workspace;
@@ -27,7 +27,8 @@ const MONITOR_RED: u32 = 0xef4444;
 
 const PLUGIN_MANAGER_TAB_BAR_WIDTH: f32 = 340.0;
 const CLOUD_SYNC_TAB_BAR_WIDTH: f32 = 396.0;
-const OFFICIAL_PLUGIN_MARKETPLACE_HOME: &str = "https://github.com/AnalyseDeCircuit/oxideterm-plugins";
+const OFFICIAL_PLUGIN_MARKETPLACE_HOME: &str =
+    "https://github.com/AnalyseDeCircuit/oxideterm-plugins";
 
 const PLUGIN_TAGS: &[(&str, &str)] = &[
     ("language", "plugin.marketplace_languages"),
@@ -128,7 +129,6 @@ impl CloudSyncConflictStrategy {
         }
     }
 }
-
 
 pub struct PagesState {
     pub(crate) graph_menu: Option<(topology::GraphTarget, Point<Pixels>)>,
@@ -355,9 +355,19 @@ impl Workspace {
 
         let (snapshot, targets) = self.workspace_topology(cx);
         let summaries = &snapshot.nodes;
-        let active = summaries.iter().filter(|n| n.status == oxideterm_topology::ConnectionTopologyStatus::Active).count();
-        let down = summaries.iter().filter(|n| n.status == oxideterm_topology::ConnectionTopologyStatus::LinkDown).count();
-        let ble_active = self.sessions.values().filter(|s| s.is_ble() && s.connected(self.ready)).count();
+        let active = summaries
+            .iter()
+            .filter(|n| n.status == oxideterm_topology::ConnectionTopologyStatus::Active)
+            .count();
+        let down = summaries
+            .iter()
+            .filter(|n| n.status == oxideterm_topology::ConnectionTopologyStatus::LinkDown)
+            .count();
+        let ble_active = self
+            .sessions
+            .values()
+            .filter(|s| s.is_ble() && s.connected(self.ready))
+            .count();
 
         let body = match active_section {
             RuntimeSection::Overview => {
@@ -571,12 +581,7 @@ impl Workspace {
                                     .flex()
                                     .items_center()
                                     .gap_3()
-                                    .child(
-                                        div()
-                                            .size(px(8.0))
-                                            .rounded_full()
-                                            .bg(rgb(color)),
-                                    )
+                                    .child(div().size(px(8.0)).rounded_full().bg(rgb(color)))
                                     .child(
                                         div()
                                             .flex()
@@ -733,7 +738,6 @@ impl Workspace {
             .on_mouse_down(MouseButton::Left, listener)
             .into_any_element()
     }
-
 
     // -------------------------------------------------------------------------
     // Cloud Sync (TabKind::CloudSync) — Desktop card-by-card parity

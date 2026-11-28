@@ -526,7 +526,46 @@
       "serial_invalid_baud_rate": "ボーレートは 0 より大きい必要があります",
       "serial_port_required": "シリアルポートパスを選択または入力してください",
       "ble_save_failed": "BLE 接続を保存できませんでした",
-      "ble_secondary_suffix": " · セカンダリ"
+      "ble_secondary_suffix": " · セカンダリ",
+      "transport_container": "コンテナ",
+      "container_description": "SSH を介さず、Docker・Podman・Kubernetes コンテナの対話ターミナルに直接接続します。",
+      "container_engine": "エンジン",
+      "container_pod_container": "Pod コンテナ",
+      "container_refresh_engines": "エンジンを更新",
+      "container_refresh_containers": "コンテナを更新",
+      "container_loading_engines": "エンジンを検出中…",
+      "container_no_engines": "コンテナエンジンが見つかりません",
+      "container_select_engine": "エンジンを選択",
+      "container_container": "コンテナ",
+      "container_pods": "Pods",
+      "container_running_filter": "実行中のみ",
+      "container_select_container": "コンテナを選択",
+      "container_loading_list": "コンテナを読み込み中…",
+      "container_no_containers": "コンテナや Pod はありません",
+      "container_no_running_containers": "実行中のコンテナや Pod はありません",
+      "container_select_required": "先にコンテナを選択してください",
+      "container_load_failed": "コンテナ一覧の取得に失敗しました",
+      "container_shell": "シェル",
+      "container_shell_placeholder": "/bin/bash（デフォルト）",
+      "container_launch_mode": "起動モード",
+      "container_launch_mode_shell": "シェル",
+      "container_launch_mode_command": "コマンド",
+      "container_launch_mode_attach": "アタッチ",
+      "container_command": "コマンド",
+      "container_command_placeholder": "例: top -d 1",
+      "container_command_required": "コマンドモードにはコマンドラインが必要です",
+      "container_attach_hint": "新しいシェルを起動せず、コンテナのメインプロセスの TTY にアタッチします。",
+      "container_details_title": "コンテナの詳細",
+      "container_details_loading": "コンテナの詳細を読み込み中…",
+      "container_details_none": "マウント・ポート・ネットワークの詳細はありません",
+      "container_details_mounts": "マウント",
+      "container_details_ports": "ポート",
+      "container_details_networks": "ネットワーク",
+      "container_details_pod_ip": "Pod IP",
+      "container_access_denied": "権限がありません：現在のユーザーはコンテナエンジンの socket にアクセスできません。Linux では `sudo usermod -aG docker $USER` を実行して再ログインするか、rootless エンジン（rootless Docker / Podman のユーザー socket）を使用してください。",
+      "container_save_failed": "コンテナプロファイルの保存に失敗しました",
+      "container_profile_name": "プロファイル名",
+      "container_profile_name_placeholder": "マイコンテナ"
     },
     "managed_key": {
       "selector": {
@@ -725,19 +764,6 @@
       "use_global": "グローバルを使用",
       "direct": "直接接続",
       "custom": "カスタム"
-    }
-  },
-  "local_shell": {
-    "background": {
-      "kill": "終了",
-      "lines": "行",
-      "resume": "再開",
-      "title": "バックグラウンドセッション"
-    },
-    "toast": {
-      "attached": "セッションを再開しました",
-      "detached": "セッションをバックグラウンドに移動しました",
-      "detached_desc": "{{shell}} はバックグラウンドで実行中です"
     }
   },
   "export": {

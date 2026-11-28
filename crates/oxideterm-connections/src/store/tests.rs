@@ -4826,6 +4826,254 @@ mod tests {
     }
 
     #[test]
+    fn container_profile_upsert_edits_in_place_and_survives_reload() {
+        // Guards the save path that backs the container form: a second upsert
+        // with the same id must replace the row, and engine/launch (the fields
+        // without a Default) must survive the storage round trip.
+        let path = temp_store_path("container-profile-edit");
+        let mut store = ConnectionStore::load(path.clone()).expect("store should load");
+        let engine = oxideterm_docker::EngineTarget::DockerSocket {
+            socket_path: "/var/run/docker.sock".to_string(),
+        };
+        let saved = store
+            .upsert_container_profile(SaveContainerProfileRequest {
+                id: None,
+                name: "Build box".to_string(),
+                group: Some("lab".to_string()),
+                notes: None,
+                icon: None,
+                color: None,
+                icon_background_color: None,
+                engine: engine.clone(),
+                container_name: "buildkit".to_string(),
+                namespace: None,
+                pod_container: None,
+                launch: oxideterm_docker::ContainerLaunchMode::Shell { shell: None },
+                terminal: ConnectionTerminalOptions::default(),
+            })
+            .unwrap();
+        assert_eq!(saved.container_name, "buildkit");
+        assert_eq!(
+            saved.launch,
+            oxideterm_docker::ContainerLaunchMode::Shell { shell: None }
+        );
+        assert_eq!(saved.group.as_deref(), Some("lab"));
+
+        let edited = store
+            .upsert_container_profile(SaveContainerProfileRequest {
+                id: Some(saved.id.clone()),
+                name: "Build box".to_string(),
+                group: None,
+                notes: None,
+                icon: None,
+                color: None,
+                icon_background_color: None,
+                engine: engine.clone(),
+                container_name: "buildkit-renamed".to_string(),
+                namespace: None,
+                pod_container: None,
+                launch: oxideterm_docker::ContainerLaunchMode::Attach,
+                terminal: ConnectionTerminalOptions::default(),
+            })
+            .unwrap();
+        assert_eq!(edited.id, saved.id);
+        assert_eq!(store.container_profiles().len(), 1);
+        let row = &store.container_profiles()[0];
+        assert_eq!(row.container_name, "buildkit-renamed");
+        assert_eq!(row.launch, oxideterm_docker::ContainerLaunchMode::Attach);
+        assert!(row.group.is_none());
+
+        let reloaded = ConnectionStore::load(path).unwrap();
+        let rows = reloaded.container_profiles();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, saved.id);
+        assert_eq!(rows[0].engine, engine);
+        assert_eq!(rows[0].container_name, "buildkit-renamed");
+        assert_eq!(rows[0].launch, oxideterm_docker::ContainerLaunchMode::Attach);
+    }
+
+    #[test]
+    fn container_profile_validation_requires_namespace_for_kube() {
+        // A kube pod without a namespace is ambiguous on open; the store must
+        // reject it before the profile can be saved.
+        let mut profile = ContainerProfile::new(
+            "Pod shell",
+            oxideterm_docker::EngineTarget::Kube {
+                context: None,
+                namespace: "default".to_string(),
+            },
+            "metrics-agent",
+            None,
+            None,
+            oxideterm_docker::ContainerLaunchMode::Shell { shell: None },
+        );
+        assert!(profile.validate().is_err());
+
+        profile.namespace = Some("default".to_string());
+        assert!(profile.validate().is_ok());
+
+        profile.engine = oxideterm_docker::EngineTarget::DockerSocket {
+            socket_path: "/var/run/docker.sock".to_string(),
+        };
+        profile.namespace = None;
+        assert!(profile.validate().is_ok());
+    }
+
+    #[test]
+    fn container_snapshots_propagate_deletions_without_resurrection() {
+        // Two stores simulate two devices. The exported snapshot must carry
+        // the deletion, a stale upload must not resurrect the deleted
+        // profile, and a re-created record with a newer timestamp must win.
+        let mut store_a = load_empty_store("container-tombstone-device-a");
+        let mut profile = ContainerProfile::new(
+            "Board",
+            oxideterm_docker::EngineTarget::DockerSocket {
+                socket_path: "/var/run/docker.sock".to_string(),
+            },
+            "buildkit",
+            None,
+            None,
+            oxideterm_docker::ContainerLaunchMode::Shell { shell: None },
+        );
+        let created = Utc::now() - Duration::seconds(5);
+        profile.created_at = created;
+        profile.updated_at = created;
+        let seed = |records: Vec<ContainerProfile>| ContainerProfilesSyncSnapshot {
+            revision: "seed".to_string(),
+            exported_at: Utc::now().to_rfc3339(),
+            records,
+            tombstones: Vec::new(),
+        };
+        store_a
+            .apply_container_profiles_snapshot(seed(vec![profile.clone()]))
+            .unwrap();
+        assert!(store_a.container_profiles().iter().any(|p| p.id == profile.id));
+
+        assert!(store_a.delete_container_profile(&profile.id).unwrap());
+        let export = store_a.export_container_profiles_snapshot().unwrap();
+        assert!(export.records.is_empty());
+        assert_eq!(
+            export
+                .tombstones
+                .iter()
+                .map(|t| t.id.as_str())
+                .collect::<Vec<_>>(),
+            [profile.id.as_str()]
+        );
+
+        let mut store_b = load_empty_store("container-tombstone-device-b");
+        let stale_upload = seed(vec![profile.clone()]);
+        store_b
+            .apply_container_profiles_snapshot(stale_upload.clone())
+            .unwrap();
+        store_b.apply_container_profiles_snapshot(export).unwrap();
+        assert!(!store_b.container_profiles().iter().any(|p| p.id == profile.id));
+        store_a
+            .apply_container_profiles_snapshot(stale_upload)
+            .unwrap();
+        assert!(!store_a.container_profiles().iter().any(|p| p.id == profile.id));
+
+        let mut reborn = profile;
+        reborn.updated_at = Utc::now() + Duration::seconds(5);
+        store_a
+            .apply_container_profiles_snapshot(seed(vec![reborn.clone()]))
+            .unwrap();
+        assert_eq!(
+            store_a
+                .container_profiles()
+                .iter()
+                .find(|p| p.id == reborn.id)
+                .unwrap()
+                .updated_at,
+            reborn.updated_at
+        );
+        store_b
+            .apply_container_profiles_snapshot(seed(vec![reborn.clone()]))
+            .unwrap();
+        assert!(store_b.container_profiles().iter().any(|p| p.id == reborn.id));
+    }
+
+    #[test]
+    fn resolved_configuration_tombstones_missing_container_profiles() {
+        // The resolved set is identity-complete: a profile missing from it was
+        // deleted on the publishing device. Without the tombstone here, the
+        // next snapshot export would resurrect the deleted profile.
+        let mut store = load_empty_store("container-resolved");
+        let docker_engine = || oxideterm_docker::EngineTarget::DockerSocket {
+            socket_path: "/var/run/docker.sock".to_string(),
+        };
+        let kept = ContainerProfile::new(
+            "Kept",
+            docker_engine(),
+            "buildkit",
+            None,
+            None,
+            oxideterm_docker::ContainerLaunchMode::Shell { shell: None },
+        );
+        let removed = ContainerProfile::new(
+            "Removed",
+            docker_engine(),
+            "old-runner",
+            None,
+            None,
+            oxideterm_docker::ContainerLaunchMode::Attach,
+        );
+        store
+            .apply_container_profiles_snapshot(ContainerProfilesSyncSnapshot {
+                revision: "seed".to_string(),
+                exported_at: Utc::now().to_rfc3339(),
+                records: vec![kept.clone(), removed.clone()],
+                tombstones: Vec::new(),
+            })
+            .unwrap();
+
+        let _ = store
+            .prepare_resolved_configuration(ResolvedConnectionConfiguration {
+                connections: SavedConnectionsSyncSnapshot {
+                    plugin_profiles: Vec::new(),
+                    plugin_tombstones: Vec::new(),
+                    totp_credentials: Vec::new(),
+                    revision: "resolved".to_string(),
+                    exported_at: Utc::now().to_rfc3339(),
+                    records: Vec::new(),
+                    local_terminal_profiles: Vec::new(),
+                    local_terminal_tombstones: Vec::new(),
+                },
+                serial: Vec::new(),
+                container: vec![kept.clone()],
+                ble: Vec::new(),
+                telnet: Vec::new(),
+                mosh: Vec::new(),
+                sftp: Vec::new(),
+                ftp: Vec::new(),
+                remote_desktop: Vec::new(),
+            })
+            .unwrap();
+        let export = store.export_container_profiles_snapshot().unwrap();
+        assert_eq!(
+            export.records.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(),
+            [kept.id.as_str()]
+        );
+        assert!(export.tombstones.iter().any(|t| t.id == removed.id));
+
+        let stale_upload = ContainerProfilesSyncSnapshot {
+            revision: "seed".to_string(),
+            exported_at: Utc::now().to_rfc3339(),
+            records: vec![kept, removed],
+            tombstones: Vec::new(),
+        };
+        store
+            .apply_container_profiles_snapshot(stale_upload)
+            .unwrap();
+        assert!(
+            !store
+                .container_profiles()
+                .iter()
+                .any(|p| p.container_name == "old-runner")
+        );
+    }
+
+    #[test]
     fn upsert_ble_profile_keeps_platform_identifier_through_reload() {
         let mut store = load_empty_store("ble-platform-identifier");
         let identifier = "1b4d2f6e-1234-4c5d-9e8f-aabbccddeeff";
