@@ -85,6 +85,7 @@ impl IdeSurface {
     }
 
     fn remove_editor(&mut self, tab_id: EditorTabId) {
+        self.pending_search_queries.remove(&tab_id);
         self.editors.remove(&tab_id);
         self.markdown_previews.remove(&tab_id);
     }
@@ -699,8 +700,8 @@ mod markdown_preview_tests {
             let location = surface.workspace.tabs()[0].location.clone();
             surface
                 .pending_search_queries
-                .insert("/repo/README.MD".into(), "Unsaved".into());
-            surface.apply_pending_search_query_for_location(&location, cx);
+                .insert(tab, ("Unsaved".into(), 1));
+            surface.apply_pending_search_query(tab, cx);
             assert!(!surface.is_markdown_preview());
             assert_eq!(
                 surface.active_editor().unwrap().read(cx).find_query(),

@@ -643,7 +643,7 @@
       "sftp": "SFTP",
       "convert": "Converti in IDE",
       "return": "Torna al terminale",
-      "confirm": "Conferma che il terminale sia al prompt senza input in sospeso. Comandi o agente usano utente, contenitore e directory correnti. L’input resta sospeso fino al ritorno dall’IDE.",
+      "confirm": "Sono supportate solo le shell Linux. Continua con la riga di comando vuota.",
       "failed": "Impossibile avviare l’accesso ai file. Verifica la shell e i requisiti dell’ambiente. Riconnetti il terminale se il ripristino non è riuscito.",
       "preparing": "Avvio del servizio file IDE; l’input del terminale è sospeso…",
       "ssh": "SSH",

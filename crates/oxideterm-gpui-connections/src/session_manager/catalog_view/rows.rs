@@ -2985,7 +2985,6 @@ impl CatalogView {
                 "settings_view.connections.ssh_config.import",
                 CatalogAction::ImportSshConfig(alias.clone()),
             )),
-            #[cfg(not(target_family = "wasm"))]
             _ => None,
         };
         if let Some((label, action)) = import {

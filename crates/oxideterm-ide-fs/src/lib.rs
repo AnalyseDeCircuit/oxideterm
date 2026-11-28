@@ -20,5 +20,6 @@ pub use agent::{
 };
 pub use local::LocalIdeFileSystem;
 pub use node_sftp::NodeSftpIdeFileSystem;
+pub use oxideterm_sftp::TransferDirection;
 
 mod text;

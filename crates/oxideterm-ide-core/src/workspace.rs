@@ -106,6 +106,10 @@ impl IdeWorkspace {
         self.active_tab
     }
 
+    pub fn project_root(&self) -> Option<&IdeLocation> {
+        self.project.as_ref().map(|project| &project.root)
+    }
+
     pub fn set_active_tab(&mut self, tab_id: EditorTabId) -> Result<(), WorkspaceError> {
         if self.tabs.iter().any(|tab| tab.id == tab_id) {
             self.active_tab = Some(tab_id);

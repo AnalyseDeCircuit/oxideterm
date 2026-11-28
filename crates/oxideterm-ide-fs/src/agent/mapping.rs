@@ -35,6 +35,7 @@ fn file_tree_entry_from_agent(node_id: &NodeId, entry: FileEntry) -> FileTreeEnt
     FileTreeEntry {
         location: IdeLocation::remote(node_id.0.clone(), entry.path),
         kind,
+        is_symlink: entry.is_symlink || entry.file_type == "symlink",
         name: entry.name,
         version: SavedFileVersion {
             size_bytes: Some(entry.size),

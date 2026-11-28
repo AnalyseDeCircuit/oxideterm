@@ -90,7 +90,7 @@ impl EntityInputHandler for TextEditorView {
     fn unmark_text(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         if let Some(marked) = self.marked_text.take() {
             self.cursor.set_selection(marked.original_selection);
-            self.secondary_selections = marked.original_secondary_selections;
+            self.secondary_cursors = marked.original_secondary_cursors;
             cx.notify();
         }
     }
@@ -109,7 +109,11 @@ impl EntityInputHandler for TextEditorView {
         let range = self
             .ime_replacement_range(range_utf16)
             .unwrap_or_else(|| self.cursor.selection().range());
-        self.replace_range_with_caret(range, text, cx);
+        if let Some(marked) = self.marked_text.take() {
+            self.cursor.set_selection(marked.original_selection);
+            self.secondary_cursors = marked.original_secondary_cursors;
+        }
+        self.replace_selection_ranges(range, text, cx);
     }
 
     fn replace_and_mark_text_in_range(
@@ -136,19 +140,16 @@ impl EntityInputHandler for TextEditorView {
         let selection_end = selection.end.min(text_len).max(selection_start);
         // Repeated preedit updates must retain the selection from before composition,
         // including its direction and secondary cursors, rather than the temporary caret.
-        let (original_selection, original_secondary_selections) = match self.marked_text.take() {
-            Some(marked) => (
-                marked.original_selection,
-                marked.original_secondary_selections,
-            ),
+        let (original_selection, original_secondary_cursors) = match self.marked_text.take() {
+            Some(marked) => (marked.original_selection, marked.original_secondary_cursors),
             None => (
                 self.cursor.selection(),
-                std::mem::take(&mut self.secondary_selections),
+                std::mem::take(&mut self.secondary_cursors),
             ),
         };
         if new_text.is_empty() {
             self.cursor.set_selection(original_selection);
-            self.secondary_selections = original_secondary_selections;
+            self.secondary_cursors = original_secondary_cursors;
             cx.notify();
             return;
         }
@@ -157,12 +158,12 @@ impl EntityInputHandler for TextEditorView {
             range,
             selection: selection_start..selection_end,
             original_selection,
-            original_secondary_selections,
+            original_secondary_cursors,
         });
         // The buffer cursor must stay on a real buffer boundary while the IME
         // owns a virtual selection inside the preedit text.
         self.cursor.set_selection(Selection::caret(range.start));
-        self.secondary_selections.clear();
+        self.secondary_cursors.clear();
         cx.notify();
     }
 
@@ -186,9 +187,7 @@ impl EntityInputHandler for TextEditorView {
                     window,
                 );
                 let prefix = &marked.text[..byte];
-                bounds.origin.x += self
-                    .shape_coordinate_line(prefix, window.text_system())
-                    .width();
+                bounds.origin.x += self.displayed_text_width(prefix, window);
                 return Some(bounds);
             }
         }
@@ -438,17 +437,17 @@ mod tests {
     }
 
     #[gpui::test]
-    fn ime_regression_cancel_restores_original_selections(cx: &mut gpui::TestAppContext) {
+    fn ime_regression_cancel_and_undo_restore_original_selections(cx: &mut gpui::TestAppContext) {
         let (editor, cx) = cx.add_window_view(|_, cx| {
             TextEditorView::new("abcdef", &oxideterm_theme::default_tokens(), cx)
         });
         cx.update(|window, app| {
             editor.update(app, |editor, cx| {
+                let original = Selection::new(BufferOffset(3), BufferOffset(1));
+                let secondary = Selection::caret(BufferOffset(5));
                 for empty_update in [false, true] {
-                    let original = Selection::new(BufferOffset(3), BufferOffset(1));
-                    let secondary = Selection::caret(BufferOffset(5));
                     editor.cursor.set_selection(original);
-                    editor.secondary_selections = vec![secondary];
+                    editor.secondary_cursors = vec![secondary.into()];
                     editor.replace_and_mark_text_in_range(None, "zh", Some(2..2), window, cx);
                     editor.replace_and_mark_text_in_range(None, "zhong", Some(5..5), window, cx);
                     if empty_update {
@@ -458,10 +457,37 @@ mod tests {
                     }
                     assert_eq!(editor.buffer.text(), "abcdef");
                     assert_eq!(editor.cursor.selection(), original);
-                    assert_eq!(editor.secondary_selections, vec![secondary]);
+                    assert_eq!(
+                        editor.selections_primary_first().collect::<Vec<_>>(),
+                        [original, secondary]
+                    );
+                }
+                for (range, committed) in [(0..2, "中cde中f"), (3..5, "abc中f")] {
+                    editor.replace_and_mark_text_in_range(Some(range), "zh", None, window, cx);
+                    editor.replace_text_in_range(None, "中", window, cx);
+                    assert_eq!(editor.buffer.text(), committed);
+                    editor.undo_external(cx);
+                    assert_eq!(editor.buffer.text(), "abcdef");
+                    assert_eq!(editor.cursor.selection(), original);
+                    assert_eq!(
+                        editor.selections_primary_first().collect::<Vec<_>>(),
+                        [original, secondary]
+                    );
                 }
                 editor.replace_text_in_range(None, "X", window, cx);
-                assert_eq!(editor.buffer.text(), "aXdef");
+                assert_eq!(editor.buffer.text(), "aXdeXf");
+                editor.replace_and_mark_text_in_range(None, "zh", None, window, cx);
+                editor.replace_text_in_range(None, "中", window, cx);
+                assert_eq!(editor.buffer.text(), "aX中deX中f");
+                editor.delete_backward(cx);
+                assert_eq!(editor.buffer.text(), "aXdeXf");
+                editor.insert_text("ab", cx);
+                assert_eq!(editor.buffer.text(), "aXabdeXabf");
+                editor.undo_external(cx);
+                assert_eq!(editor.buffer.text(), "aXdeXf");
+                editor.redo_external(cx);
+                editor.insert_text("!", cx);
+                assert_eq!(editor.buffer.text(), "aXab!deXab!f");
             });
         });
     }

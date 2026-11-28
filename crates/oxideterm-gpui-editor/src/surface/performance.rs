@@ -1,5 +1,5 @@
 use super::*;
-use gpui::{AvailableSpace, TestAppContext, size};
+use gpui::{AppContext, AvailableSpace, TestAppContext, size};
 use std::time::Instant;
 
 #[cfg(target_os = "macos")]

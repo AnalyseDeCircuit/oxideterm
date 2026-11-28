@@ -9,6 +9,7 @@
 //! or terminal panes. Upper layers provide file-system adapters and render the
 //! state however they need.
 
+mod file_index;
 mod filesystem;
 pub use oxideterm_editor_core::SharedText;
 mod model;
@@ -18,6 +19,7 @@ mod workspace;
 #[cfg(test)]
 mod workspace_tests;
 
+pub use file_index::ProjectFileIndex;
 pub use filesystem::{
     AsyncIdeFileSystem, FileStat, FileSystemCapabilities, IdeFileCheck, IdeFileData, IdeFileError,
     IdeFileErrorKind, IdeFileSystem, IdeFsFuture, IdePathStat, IdeProjectInfo, IdeSearchQuery,

@@ -39,6 +39,8 @@
     "search": "Tìm kiếm",
     "refresh": "Làm mới",
     "searching": "Đang tìm kiếm...",
+    "find_file_by_name": "Tìm tệp theo tên",
+    "file_search_partial": "Chỉ hiển thị tệp trong các thư mục đã quét",
     "search_placeholder": "Tìm kiếm nội dung tệp...",
     "search_hint": "Nhập từ khóa để tìm kiếm",
     "no_results": "Không tìm thấy kết quả",

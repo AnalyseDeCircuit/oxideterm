@@ -688,7 +688,7 @@ impl NodeAgentIdeFileSystem {
         let escaped_query = regex_escape_for_basic_grep(&query.pattern);
         let include_patterns = grep_include_patterns(&query.include_globs);
         let command = format!(
-            "cd {} && grep -rn -I {} --color=never -- -e '{}' . 2>/dev/null | head -{}",
+            "cd {} && grep -rn -I --exclude-dir=.git {} --color=never -e '{}' -- . 2>/dev/null | head -{}",
             shell_cd_arg(&query.root_path),
             include_patterns,
             shell_single_quote(&escaped_query),
@@ -1440,7 +1440,9 @@ impl NodeAgentIdeFileSystem {
                     continue;
                 }
                 if entry.kind == FileKind::Directory {
-                    if !matches!(entry.name.as_str(), "node_modules" | "target" | ".git") {
+                    if !entry.is_symlink
+                        && !matches!(entry.name.as_str(), "node_modules" | "target" | ".git")
+                    {
                         if let IdeLocation::Remote { path, .. } = entry.location {
                             directories.push(path);
                         }
@@ -1460,7 +1462,14 @@ impl NodeAgentIdeFileSystem {
                 }
                 let file = match self.sftp.read_file(&entry.location, None).await {
                     Ok(file) => file,
-                    Err(error) if error.kind == IdeFileErrorKind::Unsupported => continue,
+                    Err(error)
+                        if matches!(
+                            error.kind,
+                            IdeFileErrorKind::Binary | IdeFileErrorKind::Unsupported
+                        ) =>
+                    {
+                        continue;
+                    }
                     Err(error) => return Err(error),
                 };
                 let IdeLocation::Remote { path, .. } = entry.location else {

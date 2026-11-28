@@ -39,6 +39,8 @@
     "search": "검색",
     "refresh": "새로 고침",
     "searching": "검색 중...",
+    "find_file_by_name": "이름으로 파일 찾기",
+    "file_search_partial": "검색한 폴더의 파일만 표시됩니다",
     "search_placeholder": "파일 내용 검색...",
     "search_hint": "키워드를 입력하여 검색",
     "no_results": "결과 없음",

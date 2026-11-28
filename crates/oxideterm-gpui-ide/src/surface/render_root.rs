@@ -6,6 +6,7 @@ impl Render for IdeSurface {
             && matches!(self.load_state, IdeLoadState::Ready)
         {
             self.load_state = IdeLoadState::Disconnected;
+            self.reset_quick_open();
         }
         if self.has_modal() {
             // Floating menus and pointer drags belong to the covered surface, not the dialog.
@@ -19,6 +20,9 @@ impl Render for IdeSurface {
             self.tree_resize = None;
             self.tree_resize_activation = None;
             self.tab_drag = None;
+            self.reset_quick_open();
+        } else {
+            self.focus_quick_open_result_if_ready(_window, cx);
         }
         let theme = self.tokens.ui;
         let font_family = tauri_ui_font_family(self.tokens.metrics.font_family);
@@ -75,6 +79,22 @@ impl Render for IdeSurface {
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 if this.has_modal() {
                     this.handle_modal_key(event, window, cx);
+                    return;
+                }
+                let key = &event.keystroke;
+                if key.key.eq_ignore_ascii_case("p")
+                    && key.modifiers.secondary(cx)
+                    && key.modifiers.number_of_modifiers() == 1
+                    && this.remote_actions_ready()
+                {
+                    if this.quick_open.is_none() {
+                        this.open_quick_open(window, cx);
+                    }
+                    window.prevent_default();
+                    cx.stop_propagation();
+                    return;
+                }
+                if this.quick_open.is_some() {
                     return;
                 }
                 if event.keystroke.key == "escape" && this.file_format_menu.take().is_some() {
@@ -165,6 +185,9 @@ impl Render for IdeSurface {
         }
         if self.search.open {
             root = root.child(self.render_project_search_panel(cx));
+        }
+        if self.quick_open.is_some() {
+            root = root.child(self.render_quick_open(cx));
         }
         if let Some(menu) = self.tab_context_menu {
             root = root.child(self.render_tab_context_menu(menu, _window, cx));

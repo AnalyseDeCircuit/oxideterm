@@ -39,6 +39,8 @@
     "search": "Suche",
     "refresh": "Aktualisieren",
     "searching": "Suche läuft...",
+    "find_file_by_name": "Datei nach Namen suchen",
+    "file_search_partial": "Nur Dateien aus durchsuchten Ordnern werden angezeigt",
     "search_placeholder": "Dateiinhalte durchsuchen...",
     "search_hint": "Schlüsselwörter eingeben zum Suchen",
     "no_results": "Keine Ergebnisse gefunden",

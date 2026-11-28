@@ -643,7 +643,7 @@
       "sftp": "SFTP",
       "convert": "Convert to IDE",
       "return": "Return to terminal",
-      "confirm": "Confirm this terminal is at a shell prompt with no unfinished input. Choose commands or an agent to use its current user, container and directory. Terminal input pauses until you return from the IDE.",
+      "confirm": "Only Linux shells are supported. Continue at an empty shell prompt.",
       "failed": "Could not start file access. Check shell readiness and environment requirements. Reconnect if the terminal could not be restored.",
       "preparing": "Starting IDE file service; terminal input is paused…",
       "ssh": "SSH",

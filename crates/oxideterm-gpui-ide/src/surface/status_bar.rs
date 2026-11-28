@@ -19,6 +19,20 @@ impl IdeSurface {
         let project = div().flex().items_center().gap_2();
         #[cfg(not(target_family = "wasm"))]
         let project = project.child(self.render_agent_status_trigger(cx));
+        #[cfg(not(target_family = "wasm"))]
+        let project = project.when_some(self.desktop.transfer.as_ref(), |row, transfer| {
+            row.child(format!("{} {}%", transfer.label, transfer.percent))
+                .child(
+                    div()
+                        .id("ide-cancel-file-transfer")
+                        .cursor_pointer()
+                        .child(self.labels.cancel.clone())
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.cancel_tree_transfer();
+                            cx.notify();
+                        })),
+                )
+        });
         div()
             .flex_none()
             .h(px(oxideterm_gpui_ui::WORKSPACE_STATUS_BAR_HEIGHT))

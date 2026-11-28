@@ -535,7 +535,9 @@ impl TextEditorView {
     ) -> LineMeasure {
         self.buffer
             .with_line_text(line, |text| {
-                let shaped = self.shape_coordinate_line(text, system);
+                let displayed =
+                    super::coords::DisplayedLine::new(text, self.settings.highlight_special_chars);
+                let shaped = self.shape_coordinate_line(&displayed.text, system);
                 let ordered = shaped
                     .runs
                     .iter()
@@ -549,7 +551,7 @@ impl TextEditorView {
                 let mut runs: Vec<AdvanceRun> = Vec::new();
                 let mut previous_x = 0.0;
                 for (start, grapheme) in text.grapheme_indices(true) {
-                    let end = start + grapheme.len();
+                    let end = displayed.display_byte(start + grapheme.len());
                     let x = if ordered {
                         while glyphs.peek().is_some_and(|glyph| glyph.index < end) {
                             glyphs.next();

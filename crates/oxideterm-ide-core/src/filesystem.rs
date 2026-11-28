@@ -194,6 +194,7 @@ pub enum IdeFileErrorKind {
     InvalidEncoding,
     UnrepresentableText,
     Disconnected,
+    Cancelled,
     Timeout,
     PermissionDenied,
     NotFound,

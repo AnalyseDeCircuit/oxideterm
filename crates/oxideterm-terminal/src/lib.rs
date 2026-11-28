@@ -154,10 +154,7 @@ use oxideterm_terminal_emulator::search::append_grid_line_text;
 use oxideterm_terminal_emulator::search::search_logical_line_matches;
 pub(crate) use oxideterm_terminal_emulator::search::search_matches_from_term;
 use process::{ProcessState, TerminalSignal, signal_process_group};
-#[cfg(windows)]
-use process_lifecycle::WindowsTerminalJob;
-#[cfg(not(windows))]
-use process_lifecycle::cleanup_local_pty_process_tree;
+use process_lifecycle::LocalPtyProcessTree;
 
 fn desktop_graphics_state() -> TerminalGraphicsState {
     TerminalGraphicsState::with_error_reporter(

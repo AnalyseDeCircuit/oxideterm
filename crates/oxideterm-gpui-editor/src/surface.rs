@@ -4,15 +4,16 @@
 use std::{
     cell::RefCell,
     collections::{BTreeMap, HashMap},
+    ops::Range,
     sync::{Arc, OnceLock},
     time::Duration,
 };
 
 use gpui::{
-    AnyElement, App, Bounds, Context, DispatchPhase, Div, Element, ElementId, ElementInputHandler,
+    AnyElement, App, Bounds, Context, DispatchPhase, Element, ElementId, ElementInputHandler,
     Entity, FocusHandle, Focusable, GlobalElementId, InspectorElementId, IntoElement, LayoutId,
-    MouseButton, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, ScrollEvent,
-    SharedString, Task, TextRun, Window, div, point, prelude::*, px, rgb,
+    MouseButton, MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollEvent, SharedString, Task,
+    TextRun, Window, point, px, rgb,
 };
 use oxideterm_editor_core::{
     BufferOffset, Cursor, EditTransaction, FindMatches, LineCol, Selection, TextBuffer, TextEdit,
@@ -71,6 +72,27 @@ fn normalize_editor_text(text: String) -> String {
 
 const EDITOR_CARET_BLINK_INTERVAL: Duration = Duration::from_millis(530);
 const EDITOR_SELECTION_SCROLL_INTERVAL: Duration = Duration::from_millis(30);
+
+// Both edits and painted ranges are in source order. Rebase untouched ranges
+// in one pass while the authoritative syntax or search result is pending.
+fn rebase_painted_ranges(
+    edits: &[TextRange],
+    inserted: usize,
+) -> impl FnMut(&mut Range<usize>) -> bool {
+    let mut pos = 0;
+    let mut delta = 0isize;
+    move |range| {
+        while let Some(edit) = edits.get(pos).filter(|edit| edit.end.0 <= range.start) {
+            delta += inserted as isize - edit.len() as isize;
+            pos += 1;
+        }
+        if edits.get(pos).is_some_and(|edit| edit.start.0 < range.end) {
+            return false;
+        }
+        *range = range.start.saturating_add_signed(delta)..range.end.saturating_add_signed(delta);
+        true
+    }
+}
 
 /// Controls whether the editor owns a full document surface or sits inside an
 /// existing input row whose surrounding component already provides chrome.
@@ -232,7 +254,7 @@ struct MarkedText {
     range: TextRange,
     selection: std::ops::Range<usize>,
     original_selection: Selection,
-    original_secondary_selections: Vec<Selection>,
+    original_secondary_cursors: Vec<Cursor>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -465,7 +487,7 @@ pub struct TextEditorView {
     bracket_index: BracketIndex,
     content_bounds: Option<Bounds<Pixels>>,
     marked_text: Option<MarkedText>,
-    secondary_selections: Vec<Selection>,
+    secondary_cursors: Vec<Cursor>,
     settings: EditorSettings,
     find_query: String,
     find_regex: bool,
@@ -479,6 +501,7 @@ pub struct TextEditorView {
     folded_ranges: Vec<FoldRange>,
     fold_revision: u64,
     display_rows_cache: RefCell<Option<DisplayRowsCache>>,
+    interim_colors: Vec<(std::ops::Range<usize>, u32)>,
     highlight_chunk_cache: RefCell<HighlightChunkCache>,
     segment_cache: RefCell<segments::SegmentCache>,
     wrap_measurements: RefCell<wrap::WrapMeasurements>,
@@ -612,7 +635,7 @@ impl TextEditorView {
             bracket_index: BracketIndex::default(),
             content_bounds: None,
             marked_text: None,
-            secondary_selections: Vec::new(),
+            secondary_cursors: Vec::new(),
             settings,
             find_query: String::new(),
             find_regex: false,
@@ -626,6 +649,7 @@ impl TextEditorView {
             folded_ranges: Vec::new(),
             fold_revision: 0,
             display_rows_cache: RefCell::new(None),
+            interim_colors: Vec::new(),
             highlight_chunk_cache: RefCell::new(HighlightChunkCache::default()),
             segment_cache: RefCell::new(segments::SegmentCache::default()),
             wrap_measurements: RefCell::new(wrap::WrapMeasurements::default()),
@@ -745,7 +769,7 @@ impl TextEditorView {
             self.finish_selection_drag(cx);
             self.cursor
                 .set_selection(Selection::caret(BufferOffset::ZERO));
-            self.secondary_selections.clear();
+            self.secondary_cursors.clear();
             self.marked_text = None;
             self.save_status = EditorSaveStatus::Dirty;
             self.request_syntax(None, true, cx);
@@ -765,7 +789,7 @@ impl TextEditorView {
         // the inserted content instead of at the beginning of the document.
         self.cursor
             .set_selection(Selection::caret(BufferOffset(self.buffer.len())));
-        self.secondary_selections.clear();
+        self.secondary_cursors.clear();
         self.marked_text = None;
         cx.notify();
     }
@@ -839,6 +863,15 @@ impl TextEditorView {
 
     pub fn set_settings(&mut self, settings: EditorSettings, cx: &mut Context<Self>) {
         let tab_changed = self.settings.tab_size != settings.tab_size;
+        if self.settings.find_whole_word != settings.find_whole_word
+            || self.settings.find_case_sensitive != settings.find_case_sensitive
+        {
+            self.find_work.project_query = false;
+        }
+        if self.settings.highlight_special_chars != settings.highlight_special_chars {
+            self.display_rows_cache.borrow_mut().take();
+            *self.wrap_measurements.borrow_mut() = Default::default();
+        }
         self.settings = settings;
         if tab_changed {
             self.request_syntax(None, false, cx);
@@ -976,7 +1009,7 @@ impl TextEditorView {
         } else {
             normalize_editor_text(text)
         };
-        self.replace_all_selections_with_caret(text, cx);
+        self.replace_selection_ranges(self.cursor.selection().range(), text, cx);
     }
 
     /// Exposes undo to embedding surfaces without bypassing editor history bookkeeping.
@@ -1109,8 +1142,7 @@ impl TextEditorView {
             return;
         }
         let ranges = self
-            .all_selections()
-            .into_iter()
+            .selections_primary_first()
             .map(|selection| {
                 if selection.is_caret() {
                     TextRange::new(
@@ -1130,8 +1162,7 @@ impl TextEditorView {
             return;
         }
         let ranges = self
-            .all_selections()
-            .into_iter()
+            .selections_primary_first()
             .map(|selection| {
                 if selection.is_caret() {
                     TextRange::new(
@@ -1151,7 +1182,7 @@ impl TextEditorView {
             BufferOffset::ZERO,
             BufferOffset(self.buffer.len()),
         ));
-        self.secondary_selections.clear();
+        self.secondary_cursors.clear();
         cx.notify();
     }
 
@@ -1169,7 +1200,7 @@ impl TextEditorView {
             .line_col_to_offset(LineCol::new(line_index, byte_column))
         {
             self.cursor.set_selection(Selection::caret(offset));
-            self.secondary_selections.clear();
+            self.secondary_cursors.clear();
             self.marked_text = None;
         }
         let visual_column = visual_column_for_byte_column(&line_text, byte_column);
@@ -1187,14 +1218,15 @@ impl TextEditorView {
     }
 
     pub fn add_cursor_at(&mut self, offset: BufferOffset, cx: &mut Context<Self>) {
-        let selection = Selection::caret(offset);
         if self.buffer.offset_to_line_col(offset).is_ok()
-            && !self.secondary_selections.contains(&selection)
-            && self.cursor.selection() != selection
+            && !self.selections_primary_first().any(|selected| {
+                let range = selected.range();
+                range.start <= offset && offset <= range.end
+            })
         {
-            self.secondary_selections.push(selection);
-            self.secondary_selections.sort_by_key(|selection| {
-                let range = selection.range();
+            self.secondary_cursors.push(Cursor::new(offset));
+            self.secondary_cursors.sort_by_key(|cursor| {
+                let range = cursor.selection().range();
                 (range.start.0, range.end.0)
             });
             cx.notify();
@@ -1202,8 +1234,8 @@ impl TextEditorView {
     }
 
     pub fn clear_secondary_cursors(&mut self, cx: &mut Context<Self>) {
-        if !self.secondary_selections.is_empty() {
-            self.secondary_selections.clear();
+        if !self.secondary_cursors.is_empty() {
+            self.secondary_cursors.clear();
             cx.notify();
         }
     }
@@ -1230,14 +1262,15 @@ impl TextEditorView {
             .apply_transaction(EditTransaction::single(TextEdit::new(range, replacement)))
             .is_ok()
         {
+            self.retain_visible_colors(&[range], caret.0 - range.start.0);
             self.request_syntax(syntax_edit, false, cx);
             self.cursor.set_selection(Selection::caret(caret));
-            self.secondary_selections.clear();
+            self.secondary_cursors.clear();
             self.marked_text = None;
             self.save_status = EditorSaveStatus::Dirty;
             self.clear_folds_after_buffer_change();
             self.restore_rows_after_edit(row_edit);
-            self.refresh_find_matches(cx);
+            self.refresh_find_after_edit(&[range], caret.0 - range.start.0, cx);
             if self.render_cache_active {
                 self.viewport
                     .clamp(self.document_row_count(), self.metrics.line_height);
@@ -1246,15 +1279,18 @@ impl TextEditorView {
         }
     }
 
-    fn replace_all_selections_with_caret(
+    fn replace_selection_ranges(
         &mut self,
+        primary_range: TextRange,
         replacement: impl Into<String>,
         cx: &mut Context<Self>,
     ) {
-        let selections = self.all_selections();
-        let ranges = selections
-            .iter()
-            .map(|selection| selection.range())
+        let ranges = std::iter::once(primary_range)
+            .chain(
+                self.secondary_cursors
+                    .iter()
+                    .map(|cursor| cursor.selection().range()),
+            )
             .collect::<Vec<_>>();
         self.replace_ranges_with_caret(ranges, replacement, cx);
     }
@@ -1266,41 +1302,65 @@ impl TextEditorView {
         cx: &mut Context<Self>,
     ) {
         let replacement = replacement.into();
-        if ranges.len() <= 1 {
-            let range = ranges
-                .into_iter()
-                .next()
-                .unwrap_or_else(|| self.cursor.selection().range());
-            self.replace_range_with_caret(range, replacement, cx);
+        if let [range] = ranges.as_slice() {
+            self.replace_range_with_caret(*range, replacement, cx);
             return;
         }
-        let edits = ranges
+        // The first range belongs to the primary cursor, even if the platform
+        // supplied a replacement range different from its current selection.
+        let primary_range = ranges[0];
+        let mut ranges = ranges;
+        ranges.sort_by_key(|range| (range.start, range.end));
+        let mut merged: Vec<TextRange> = Vec::with_capacity(ranges.len());
+        for range in ranges {
+            if let Some(previous) = merged.last_mut()
+                && (previous.end > range.start
+                    || (previous.end == range.start && (previous.is_empty() || range.is_empty())))
+            {
+                previous.end = previous.end.max(range.end);
+            } else {
+                merged.push(range);
+            }
+        }
+        let primary_index = merged
             .iter()
-            .filter(|range| !(range.is_empty() && replacement.is_empty()))
-            .map(|range| TextEdit::new(*range, replacement.clone()))
-            .collect::<Vec<_>>();
+            .position(|range| range.start <= primary_range.start && primary_range.end <= range.end)
+            .expect("the primary edit belongs to a merged range");
+        let mut shift = 0isize;
+        let mut carets = Vec::with_capacity(merged.len());
+        let mut edits = Vec::with_capacity(merged.len());
+        for range in &merged {
+            let end = range.start.0.saturating_add_signed(shift) + replacement.len();
+            carets.push(Selection::caret(BufferOffset(end)));
+            shift += replacement.len() as isize - range.len() as isize;
+            if !range.is_empty() || !replacement.is_empty() {
+                edits.push(TextEdit::new(*range, replacement.clone()));
+            }
+        }
         if edits.is_empty() {
             return;
         }
+        let primary = carets.remove(primary_index);
+        carets.dedup();
+        carets.retain(|caret| *caret != primary);
+        carets.insert(0, primary);
+        let before = self.selections_primary_first().collect();
         if self
             .buffer
-            .apply_transaction(EditTransaction::new(edits))
+            .apply_transaction_with_selections(
+                EditTransaction::new(edits),
+                Some((before, carets.clone())),
+            )
             .is_ok()
         {
-            let last = ranges
-                .iter()
-                .copied()
-                .max_by_key(|range| range.start.0)
-                .unwrap_or_else(|| self.cursor.selection().range());
-            self.cursor.set_selection(Selection::caret(BufferOffset(
-                last.start.0 + replacement.len(),
-            )));
-            self.secondary_selections.clear();
+            self.cursor.set_selection(carets.remove(0));
+            self.secondary_cursors = carets.into_iter().map(Cursor::from).collect();
+            self.retain_visible_colors(&merged, replacement.len());
             self.marked_text = None;
             self.save_status = EditorSaveStatus::Dirty;
-            self.request_syntax(None, true, cx);
+            self.request_syntax(None, false, cx);
             self.clear_folds_after_buffer_change();
-            self.refresh_find_matches(cx);
+            self.refresh_find_after_edit(&merged, replacement.len(), cx);
             if self.render_cache_active {
                 self.viewport
                     .clamp(self.document_row_count(), self.metrics.line_height);
@@ -1336,17 +1396,10 @@ impl TextEditorView {
     }
 
     fn active_selections(&self) -> Vec<Selection> {
-        let primary = self.cursor.selection();
-        let mut selections = Vec::new();
-        if !primary.is_caret() {
-            selections.push(primary);
-        }
-        selections.extend(
-            self.secondary_selections
-                .iter()
-                .copied()
-                .filter(|selection| !selection.is_caret()),
-        );
+        let mut selections: Vec<_> = self
+            .selections_primary_first()
+            .filter(|selection| !selection.is_caret())
+            .collect();
         if selections.len() > 1 {
             selections.sort_by_key(|selection| {
                 let range = selection.range();
@@ -1491,6 +1544,15 @@ impl TextEditorView {
         point: Point<Pixels>,
         window: &mut Window,
     ) -> Option<BufferOffset> {
+        self.hit_test_text(point, window, false)
+    }
+
+    fn hit_test_text(
+        &self,
+        point: Point<Pixels>,
+        window: &mut Window,
+        select_glyph: bool,
+    ) -> Option<BufferOffset> {
         let display_row = self.display_row_for_window_y(point.y)?;
         if matches!(&*self.display_rows(), wrap::DisplayRows::Unwrapped(_))
             && let Some(segments) = self.line_segments(display_row.line)
@@ -1503,7 +1565,7 @@ impl TextEditorView {
             let origin = segments.starts[index];
             let text = self.segment_text(display_row.line, origin.byte, segments.end(index));
             let byte = origin.byte
-                + self.closest_grapheme_byte_for_x(&text, (x - origin.x).max(0.0), window);
+                + self.grapheme_byte_for_x(&text, (x - origin.x).max(0.0), window, select_glyph);
             return self
                 .buffer
                 .line_col_to_offset(LineCol::new(display_row.line, byte))
@@ -1522,7 +1584,7 @@ impl TextEditorView {
             - self.visible_content_padding_x()
             + self.viewport.scroll_x_px;
         let local_byte =
-            self.closest_grapheme_byte_for_x(segment_text, relative_x.max(0.0), window);
+            self.grapheme_byte_for_x(segment_text, relative_x.max(0.0), window, select_glyph);
         let byte_column = byte_start + local_byte;
         self.buffer
             .line_col_to_offset(LineCol::new(display_row.line, byte_column))
@@ -1559,7 +1621,7 @@ impl TextEditorView {
             position: None,
         });
         self.cursor.set_selection(Selection::new(anchor, head));
-        self.secondary_selections.clear();
+        self.secondary_cursors.clear();
         self.marked_text = None;
         cx.notify();
     }
@@ -1690,7 +1752,7 @@ impl TextEditorView {
         {
             self.cursor
                 .set_selection(Selection::caret(start.max(offset)));
-            self.secondary_selections.clear();
+            self.secondary_cursors.clear();
             self.marked_text = None;
             cx.notify();
         }
@@ -1726,11 +1788,7 @@ impl TextEditorView {
         {
             let origin = segments.starts[segments.at_byte(position.column)];
             let prefix = self.segment_text(position.line, origin.byte, position.column);
-            let x = origin.x
-                + f32::from(
-                    self.shape_coordinate_line(&prefix, window.text_system())
-                        .width(),
-                );
+            let x = origin.x + f32::from(self.displayed_text_width(&prefix, window));
             return Bounds {
                 origin: bounds.origin
                     + point(
@@ -1765,10 +1823,7 @@ impl TextEditorView {
         let segment_text = line_text
             .get(byte_start..position.column)
             .unwrap_or_default();
-        let caret_x = f32::from(
-            self.shape_coordinate_line(segment_text, window.text_system())
-                .width(),
-        );
+        let caret_x = f32::from(self.displayed_text_width(segment_text, window));
         Bounds {
             origin: bounds.origin
                 + point(
@@ -1782,6 +1837,12 @@ impl TextEditorView {
                 ),
             size: gpui::size(px(1.0), px(self.metrics.line_height)),
         }
+    }
+
+    fn displayed_text_width(&self, text: &str, window: &Window) -> Pixels {
+        let displayed = coords::DisplayedLine::new(text, self.settings.highlight_special_chars);
+        self.shape_coordinate_line(&displayed.text, window.text_system())
+            .width()
     }
 
     fn shape_coordinate_line(
@@ -1806,41 +1867,45 @@ impl TextEditorView {
         text_system.shape_line(text, px(self.metrics.font_size), &[run], None)
     }
 
-    fn closest_grapheme_byte_for_x(&self, text: &str, x: f32, window: &mut Window) -> usize {
+    fn grapheme_byte_for_x(
+        &self,
+        text: &str,
+        x: f32,
+        window: &mut Window,
+        select_glyph: bool,
+    ) -> usize {
         use unicode_segmentation::UnicodeSegmentation;
 
-        let shaped = self.shape_coordinate_line(text, window.text_system());
+        let displayed = coords::DisplayedLine::new(text, self.settings.highlight_special_chars);
+        let shaped = self.shape_coordinate_line(&displayed.text, window.text_system());
+        let x_for_byte = |byte| f32::from(shaped.x_for_index(displayed.display_byte(byte)));
+        if select_glyph {
+            return text
+                .grapheme_indices(true)
+                .find(|(start, glyph)| x_for_byte(start + glyph.len()) > x)
+                .map_or(text.len(), |(start, _)| start);
+        }
         // Font shaping is authoritative for pointer hit testing, but only
         // grapheme boundaries are legal caret positions.
         text.grapheme_indices(true)
             .map(|(index, _)| index)
             .chain(std::iter::once(text.len()))
             .min_by(|left, right| {
-                let left_distance = (f32::from(shaped.x_for_index(*left)) - x).abs();
-                let right_distance = (f32::from(shaped.x_for_index(*right)) - x).abs();
+                let left_distance = (x_for_byte(*left) - x).abs();
+                let right_distance = (x_for_byte(*right) - x).abs();
                 left_distance.total_cmp(&right_distance)
             })
             .unwrap_or_default()
     }
 
-    fn all_selections(&self) -> Vec<Selection> {
-        let mut selections = Vec::with_capacity(self.secondary_selections.len() + 1);
-        selections.push(self.cursor.selection());
-        selections.extend(self.secondary_selections.iter().copied());
-        selections.sort_by_key(|selection| {
-            let range = selection.range();
-            (range.start.0, range.end.0)
-        });
-        selections.dedup();
-        selections
+    fn selections_primary_first(&self) -> impl Iterator<Item = Selection> + '_ {
+        std::iter::once(self.cursor.selection())
+            .chain(self.secondary_cursors.iter().map(Cursor::selection))
     }
 
     fn has_primary_or_secondary_selection(&self) -> bool {
-        !self.cursor.selection().is_caret()
-            || self
-                .secondary_selections
-                .iter()
-                .any(|selection| !selection.is_caret())
+        self.selections_primary_first()
+            .any(|selection| !selection.is_caret())
     }
 
     fn matching_bracket_pair(&self) -> Option<BracketPair> {
@@ -1942,10 +2007,6 @@ fn prefixed_line_replacement(
     (line_start, line_end, replacement, adjusted_selection)
 }
 
-fn colored_text(text: &str, color: u32) -> Div {
-    div().text_color(rgb(color)).child(text.to_string())
-}
-
 #[cfg(test)]
 mod tests {
     use gpui::AppContext;
@@ -1955,6 +2016,60 @@ mod tests {
         HighlightChunkCache, HighlightChunkCacheKey, LineChunkSpec, prefixed_line_replacement,
     };
     use oxideterm_editor_core::{BufferOffset, Selection};
+
+    #[gpui::test]
+    fn touching_selections_edit_once_and_keep_the_primary_cursor(cx: &mut gpui::TestAppContext) {
+        let editor =
+            cx.new(|cx| super::TextEditorView::new("xaa", &oxideterm_theme::default_tokens(), cx));
+        editor.update(cx, |editor, cx| {
+            let first = Selection::new(BufferOffset(1), BufferOffset(2));
+            editor.cursor.set_selection(first);
+            editor.add_cursor_at(BufferOffset(1), cx);
+            editor.add_cursor_at(BufferOffset(2), cx);
+            editor.delete_backward(cx);
+            assert_eq!(editor.buffer.text(), "xa");
+
+            editor.undo(cx);
+            editor.cursor.set_selection(first);
+            editor.add_next_find_match_as_cursor(cx);
+            editor.insert_text("X", cx);
+            assert_eq!(editor.buffer.text(), "xXX");
+            editor.clear_secondary_cursors(cx);
+            editor.insert_text("!", cx);
+            assert_eq!(editor.buffer.text(), "xX!X");
+
+            editor.replace_text_external("ababaaba", cx);
+            editor
+                .cursor
+                .set_selection(Selection::new(BufferOffset(0), BufferOffset(3)));
+            editor.add_next_find_match_as_cursor(cx);
+            editor.add_next_find_match_as_cursor(cx);
+            editor.insert_text("X", cx);
+            assert_eq!(editor.buffer.text(), "XbaX");
+        });
+    }
+
+    #[gpui::test]
+    fn vertical_navigation_restores_each_caret_column_after_short_lines(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let (editor, cx) = cx.add_window_view(|window, cx| {
+            let mut editor = super::TextEditorView::new(
+                "abcd\nx\n12345\nabcdef\nx\n678901",
+                &oxideterm_theme::default_tokens(),
+                cx,
+            );
+            window.focus(&editor.focus_handle, cx);
+            editor.reveal_line_column(1, 4, cx);
+            editor.add_cursor_at(BufferOffset(18), cx);
+            editor
+        });
+        cx.simulate_keystrokes("down down");
+        cx.simulate_input("!");
+        editor.read_with(cx, |view, _| {
+            assert_eq!(view.buffer.text(), "abcd\nx\n123!45\nabcdef\nx\n67890!1")
+        });
+    }
 
     #[gpui::test]
     fn long_input_keeps_caret_visible_without_overriding_manual_horizontal_scroll(

@@ -69,6 +69,7 @@ impl PortableIdeHost for MemoryFs {
                 .into_iter()
                 .map(|(p, e)| FileTreeEntry {
                     location: IdeLocation::remote(node_id, p),
+                    is_symlink: false,
                     kind: if e.data.is_some() {
                         FileKind::File
                     } else {
@@ -200,7 +201,12 @@ impl PortableIdeHost for MemoryFs {
             return ready(Err(error(IdeFileErrorKind::Unsupported)));
         }
         for (p, e) in &self.files.borrow().entries {
-            if !Path::new(p).starts_with(&root) {
+            let path = Path::new(p);
+            if !path.starts_with(&root)
+                || path
+                    .parent()
+                    .is_some_and(|parent| parent.iter().any(|part| part == ".git"))
+            {
                 continue;
             }
             if let Some(s) = e.data.as_ref().and_then(|v| std::str::from_utf8(v).ok()) {

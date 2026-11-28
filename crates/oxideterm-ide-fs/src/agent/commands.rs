@@ -76,8 +76,10 @@ async fn read_payload_line(
 
 fn command_error(status: i32) -> AgentError {
     let (code, message) = match status {
+        43 => (-3, "Permission denied"),
         44 => (-32001, "File not found"),
         45 => (-4, "CONFLICT: File changed or already exists"),
+        46 => (-32602, "Expected a regular file"),
         69 => (-32601, "Linux GNU file utilities are required"),
         _ => (-32000, "File command failed"),
     };
@@ -106,6 +108,7 @@ struct CommandOperation {
 impl CommandOperation {
     fn new(method: &str, mut params: serde_json::Value) -> Result<Self, AgentError> {
         let script = match method {
+            method if method.starts_with("transfer/") => transfer_script(method, &params)?,
             "sys/cwd" => "pwd -P".into(),
             "fs/project" => format!(
                 "p={}; cd -- \"$p\" || exit 44; pwd -P",
@@ -116,7 +119,7 @@ impl CommandOperation {
                 quoted(param(&params, "path")?)?
             ),
             "fs/listDir" => format!(
-                "p={}; [ -d \"$p\" ] || exit 44; find \"$p\" -mindepth 1 -maxdepth 1 -printf '%f\\0%p\\0%y\\0%Y\\0%s\\0%T@\\0%m\\0%l\\0'",
+                "p={}; [ -d \"$p\" ] || exit 44; [ -r \"$p\" ] && [ -x \"$p\" ] || exit 43; find \"$p\" -mindepth 1 -maxdepth 1 -printf '%f\\0%p\\0%y\\0%Y\\0%s\\0%T@\\0%m\\0%l\\0'",
                 quoted(param(&params, "path")?)?
             ),
             "fs/readFilePrefix" => format!(
@@ -187,6 +190,19 @@ impl CommandOperation {
                 }
                 Ok(
                     json!({"exists":true,"file_type":fields[0],"size":fields[1].parse::<u64>().map_err(|_|AgentError::ChannelClosed)?,"mtime":fields[2].parse::<u64>().map_err(|_|AgentError::ChannelClosed)?,"permissions":fields[3]}),
+                )
+            }
+            "transfer/read" => {
+                let mut fields = bytes.splitn(2, |b| *b == 0);
+                let version = std::str::from_utf8(fields.next().ok_or(AgentError::ChannelClosed)?)
+                    .map_err(|_| AgentError::ChannelClosed)?;
+                let size = version
+                    .split_once(':')
+                    .and_then(|(size, _)| size.parse::<u64>().ok())
+                    .ok_or(AgentError::ChannelClosed)?;
+                let content = fields.next().ok_or(AgentError::ChannelClosed)?;
+                Ok(
+                    json!({"size":size, "version":version, "content":base64::engine::general_purpose::STANDARD.encode(content)}),
                 )
             }
             "fs/readFilePrefix" => Ok(json!(
@@ -270,7 +286,7 @@ search_dir=$(mktemp -d) || exit 1
 producer=''
 trap 'if [ -n "$producer" ]; then kill "$producer" 2>/dev/null || :; wait "$producer" 2>/dev/null || :; fi; rm -rf -- "$search_dir"' EXIT HUP INT TERM
 mkfifo "$search_dir/pipe"
-grep -r -H -n -Z -I -E --line-buffered {case} -- {pattern} {path} > "$search_dir/pipe" &
+grep -r -H -n -Z -I -E --exclude-dir=.git --line-buffered {case} -- {pattern} {path} > "$search_dir/pipe" &
 producer=$!
 limiter_status=0
 LC_ALL=C bash -c '
@@ -315,6 +331,87 @@ esac
         pattern = quoted(param(params, "pattern")?)?,
         path = quoted(param(params, "path")?)?,
     ))
+}
+
+fn transfer_script(method: &str, params: &serde_json::Value) -> Result<String, AgentError> {
+    let number = |key: &str| params[key].as_u64().ok_or_else(|| command_error(1));
+    if method == "transfer/read" {
+        let path = quoted(param(params, "path")?)?;
+        let offset = number("offset")?;
+        let chunk = super::transfer::CHUNK as u64;
+        // Ordinary downloads seek in complete blocks. Byte-sized blocks also
+        // support unaligned reads without requiring GNU dd extensions.
+        let block = if offset % chunk == 0 { chunk } else { 1 };
+        return Ok(format!(
+            r#"command -v dd >/dev/null || exit 69
+p={path}
+[ -e "$p" ] || exit 44
+[ -f "$p" ] || exit 46
+exec 3<"$p"
+version() {{ LC_ALL=C stat -Lc '%s:%f:%d:%i:%y:%z' - <&3; }}
+before=$(version)
+case "${{before#*:}}" in 8???:*) ;; *) exit 46 ;; esac
+printf '%s\0' "$before"
+dd bs={block} skip={skip} count={count} <&3 2>/dev/null
+[ "$(version)" = "$before" ] || exit 45"#,
+            skip = offset / block,
+            count = chunk / block,
+        ));
+    }
+    let id = param(params, "id")?;
+    if id.len() != 32 || !id.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(command_error(1));
+    }
+    let action = match method {
+        "transfer/begin" => {
+            let path = quoted(param(params, "path")?)?;
+            format!(
+                r#"p={path}; stage=$(mktemp -- "$(dirname -- "$p")/.oxideterm-XXXXXXXX") || exit 1
+ln -s -- "$stage" "$ref" || {{ rm -f -- "$stage"; exit 1; }}"#
+            )
+        }
+        "transfer/append" => {
+            let offset = number("offset")?;
+            let content = param(params, "content")?;
+            if content.len() > 43692 {
+                return Err(command_error(1));
+            }
+            let encoded = quoted(content)?;
+            format!(
+                r#"[ "$(stat -Lc %s -- "$ref")" = {offset} ] || exit 1
+printf '%s' {encoded} | base64 -d >> "$ref" "#
+            )
+        }
+        "transfer/commit" => {
+            let path = quoted(param(params, "path")?)?;
+            let size = number("size")?;
+            let install = if params["overwrite"].as_bool() == Some(true) {
+                r#"[ ! -L "$p" ] || exit 45
+if [ -e "$p" ]; then
+    [ -f "$p" ] || exit 45
+    owner=$(stat -c '%u:%g' -- "$p")
+    stage_owner=$(stat -c '%u:%g' -- "$stage")
+    if [ "$owner" != "$stage_owner" ]; then chown --reference="$p" -- "$stage" || exit 43; fi
+    chmod --reference="$p" -- "$stage"
+fi
+mv -T -- "$stage" "$p""#
+            } else {
+                r#"ln -T -- "$stage" "$p" || { if [ -e "$p" ] || [ -L "$p" ]; then exit 45; else exit 1; fi; }
+rm -f -- "$stage""#
+            };
+            format!(
+                r#"p={path}; stage=$(readlink -- "$ref") || exit 1
+[ "$(stat -Lc %s -- "$ref")" = {size} ] || exit 1
+{install}
+rm -f -- "$ref""#
+            )
+        }
+        "transfer/abort" => {
+            r#"stage=$(readlink -- "$ref") || exit 0; rm -f -- "$stage" "$ref""#.into()
+        }
+        _ => return Err(command_error(69)),
+    };
+    Ok(format!("ref=\"$oxide_dir/upload-{id}\"\n{action}"))
 }
 
 fn write_script(method: &str, params: &serde_json::Value) -> Result<String, AgentError> {
@@ -366,6 +463,7 @@ fn terminal_bootstrap(token: &str, pty: bool) -> String {
         token,
         &format!(
             r#"oxide_dir=$(mktemp -d) || exit 1
+export oxide_dir
 printf '\036{token}:0\n\n'
 while IFS= read -r request; do
  [ "$request" != '!quit' ] || exit 0
@@ -451,7 +549,7 @@ impl AgentTransport {
                 let mut stop = false;
                 let result = if method == "sys/info" {
                     Ok(
-                        serde_json::json!({"version":env!("CARGO_PKG_VERSION"),"compatibility_version":CURRENT_AGENT_COMPATIBILITY_VERSION,"os":"linux","arch":"commands","pid":0,"capabilities":["file-bytes"]}),
+                        serde_json::json!({"version":env!("CARGO_PKG_VERSION"),"compatibility_version":CURRENT_AGENT_COMPATIBILITY_VERSION,"os":"linux","arch":"commands","pid":0,"capabilities":["file-bytes","single-file-transfer"]}),
                     )
                 } else if method == "sys/ping" {
                     Ok(serde_json::json!({"ok":true}))
@@ -549,7 +647,7 @@ mod tests {
     fn shell_search_bounds_remote_output_and_preserves_complete_records() {
         let cases = [
             ("match", 2, true),
-            ("absent", 2, true),
+            ("only in git", 2, true),
             ("[", 2, false),
             ("match", 0, true),
         ];
@@ -560,7 +658,17 @@ mod tests {
             )
             .unwrap();
             let script = format!(
-                "root=$(mktemp -d)\ntrap 'rm -rf -- \"$root\"' EXIT\ncd -- \"$root\"\nprintf 'match one\\nmatch two\\nmatch three\\n' > 'a\nfile'\n(\n{}\n)",
+                r#"set -e
+root=$(mktemp -d)
+trap 'rm -rf -- "$root"' EXIT
+cd -- "$root"
+mkdir -p .git sub/.git
+printf 'match only in git\n' | tee .git/metadata sub/.git/metadata >/dev/null
+printf 'match one\nmatch two\nmatch three\n' > 'a
+file'
+(
+{}
+)"#,
                 &*op.script
             );
             let output = run_linux("/bin/sh", &[], script.as_bytes());
@@ -649,6 +757,30 @@ PATH="$root/bin:$PATH" timeout 3 /bin/sh "$root/request"
         assert!(quoted("bad\0name").is_err());
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn listing_a_directory_without_read_or_search_permission_reports_permission_denied() {
+        use std::os::unix::{
+            fs::{MetadataExt, PermissionsExt},
+            process::CommandExt,
+        };
+        let root = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+        let path = root.path().join("restricted");
+        std::fs::create_dir(&path).unwrap();
+        let operation = CommandOperation::new("fs/listDir", json!({ "path": path })).unwrap();
+        for mode in [0o111, 0o444] {
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)).unwrap();
+            let mut shell = std::process::Command::new("/bin/sh");
+            if root.path().metadata().unwrap().uid() == 0 {
+                shell.uid(65534);
+            }
+            let status = shell.arg("-c").arg(&*operation.script).status().unwrap();
+            let error = ide_error_from_agent_error(command_error(status.code().unwrap()));
+            assert_eq!(error.kind, IdeFileErrorKind::PermissionDenied, "{mode:o}");
+        }
+    }
+
     #[test]
     #[cfg_attr(
         not(target_os = "linux"),
@@ -666,6 +798,8 @@ PATH="$root/bin:$PATH" timeout 3 /bin/sh "$root/request"
         );
         let path = format!("{root}/a' $(touch injected)\nfile");
         let link = format!("{root}/link");
+        let transfer_id = "0123456789abcdef0123456789abcdef";
+        let long_path = format!("{root}/{}", "x".repeat(256));
         let expected = "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03";
         let cases = [
             ("fs/listDir", json!({"path":root}), 0),
@@ -705,9 +839,21 @@ PATH="$root/bin:$PATH" timeout 3 /bin/sh "$root/request"
                 json!({"path":format!("{root}/empty"),"recursive":false}),
                 0,
             ),
+            ("transfer/read", json!({"path":"/dev/null","offset":0}), 46),
+            (
+                "transfer/begin",
+                json!({"id":transfer_id,"path":long_path}),
+                0,
+            ),
+            (
+                "transfer/commit",
+                json!({"id":transfer_id,"path":long_path,"size":0,"overwrite":false}),
+                1,
+            ),
+            ("transfer/abort", json!({"id":transfer_id}), 0),
         ];
         let mut script = format!(
-            "mkdir -- {root} || exit 1\ntrap 'rm -rf -- {root} {root}.result' EXIT\ncd -- {root} || exit 1\nprintf 'hello\\n' > {}\nchmod 640 -- {}\nln -s -- {} {}\n",
+            "mkdir -- {root} || exit 1\ntrap 'rm -rf -- {root} {root}.result' EXIT\ncd -- {root} || exit 1\noxide_dir={root}\nprintf 'hello\\n' > {}\nchmod 640 -- {}\nln -s -- {} {}\n",
             quoted(&path).unwrap(),
             quoted(&path).unwrap(),
             quoted(&path).unwrap(),
@@ -845,18 +991,40 @@ print('original shell usable after every failed startup')
                 .as_nanos()
         );
         let path = format!("{root}/file");
+        let token = "0123456789abcdef0123456789abcdef";
         let operations = [
             CommandOperation::new("sys/cwd", json!({})).unwrap(),
             CommandOperation::new("fs/createFile", json!({"path":path,"content":"4oKsDQo="}))
                 .unwrap(),
             CommandOperation::new("fs/readFile", json!({"path":path})).unwrap(),
+            CommandOperation::new("transfer/begin", json!({"id":token,"path":path})).unwrap(),
+            CommandOperation::new(
+                "transfer/append",
+                json!({"id":token,"offset":0,"content":"AP8="}),
+            )
+            .unwrap(),
+            CommandOperation::new("transfer/abort", json!({"id":token})).unwrap(),
+            CommandOperation::new("transfer/read", json!({"path":"download-link","offset":0}))
+                .unwrap(),
+            CommandOperation::new("transfer/begin", json!({"id":token,"path":path})).unwrap(),
+            CommandOperation::new(
+                "transfer/append",
+                json!({"id":token,"offset":0,"content":"AP8="}),
+            )
+            .unwrap(),
+            CommandOperation::new(
+                "transfer/commit",
+                json!({"id":token,"size":2,"path":path,"overwrite":true}),
+            )
+            .unwrap(),
+            CommandOperation::new("transfer/read", json!({"path":path,"offset":1})).unwrap(),
         ];
-        let token = "0123456789abcdef0123456789abcdef";
         let input = json!({"root":root,"token":token,"bootstrap":terminal_bootstrap(token, true),"requests":operations.iter().map(|op| base64::engine::general_purpose::STANDARD.encode(op.script.as_bytes())).collect::<Vec<_>>()});
         let python = r#"
 import base64,json,os,pty,select,shutil,subprocess,sys,termios
 p=json.load(sys.stdin)
 os.mkdir(p['root'])
+os.symlink('file', os.path.join(p['root'], 'download-link'))
 master,slave=pty.openpty()
 baseline=termios.tcgetattr(master)
 process=subprocess.Popen(['/bin/sh','-c',p['bootstrap']],stdin=slave,stdout=slave,stderr=slave,cwd=p['root'])
@@ -879,12 +1047,20 @@ try:
  assert line()==('\x1e'+p['token']+':0').encode()
  assert line()==b''
  responses=[]
- for request in p['requests']:
+ for index,request in enumerate(p['requests']):
+  target=os.path.join(p['root'],'file')
+  if index==9:
+   if os.geteuid()==0: os.chown(target,1234,2345)
+   os.chmod(target,0o2750)
+   original=os.stat(target)
   encoded=request.encode()+b'\n'
   send(encoded[:7])
   send(encoded[7:])
   assert line()==('\x1e'+p['token']+':0').encode()
   responses.append(line().decode())
+  if index==9:
+   saved=os.stat(target)
+   assert (saved.st_uid,saved.st_gid,saved.st_mode)==(original.st_uid,original.st_gid,original.st_mode)
  send(b'!quit\n')
  marker=('\x1e'+p['token']+':RESTORED\x1f').encode()
  while marker not in buffer: receive()
@@ -918,5 +1094,9 @@ finally:
         assert_eq!(results[0], root);
         assert_eq!(results[1]["size"], 5);
         assert_eq!(results[2]["content"], "4oKsDQo=");
+        assert_eq!(results[6]["content"], "4oKsDQo=");
+        assert_eq!(results[6]["size"], 5);
+        assert_eq!(results[10]["content"], "/w==");
+        assert_ne!(results[6]["version"], results[10]["version"]);
     }
 }
