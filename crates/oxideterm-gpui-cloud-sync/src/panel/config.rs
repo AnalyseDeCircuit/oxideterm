@@ -110,6 +110,12 @@ impl CloudSyncPageRenderer {
                 cx,
             ),
             self.render_scope_bool_toggle(
+                "plugin.cloud_sync.settings.sync_container_profiles",
+                scope.sync_container_profiles,
+                |scope, next| scope.sync_container_profiles = Some(next),
+                cx,
+            ),
+            self.render_scope_bool_toggle(
                 "plugin.cloud_sync.settings.sync_ble_profiles",
                 scope.sync_ble_profiles,
                 |scope, next| scope.sync_ble_profiles = Some(next),

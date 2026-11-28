@@ -334,6 +334,13 @@
       "preset_aws_name": "Modèle prédéfini - AWS",
       "apply_blocked_issues": "Corrigez d'abord les problèmes listés",
       "templates_load_failed": "Impossible de lire les modèles enregistrés"
+    },
+    "container_profiles": {
+      "delete": "Supprimer",
+      "open_failed": "Échec de l'ouverture du profil de conteneur",
+      "container_not_found": "Aucun conteneur ne correspond au nom enregistré ; il a peut-être été supprimé ou renommé.",
+      "confirm_delete": "Supprimer le profil de conteneur « {{name}} » ?",
+      "delete_failed": "Échec de la suppression du profil de conteneur"
     }
   }
 }

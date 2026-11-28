@@ -111,13 +111,13 @@ pub use session::{
 pub use session::{
     BleConnectionStatus, BleGattCharacteristicInfo, BleGattError, BleGattHandle,
     BleGattServiceInfo, BleResolveError, BleResolveStage, BleResolvedLink, BleSessionConfig,
-    MoshConnectionStatus, MoshPredictionDisplay, MoshTerminalConfig, SerialControlLine,
-    SerialControlState, SerialDisplayMode, SerialError, SerialErrorCode, SerialFlowControl,
-    SerialLineEnding, SerialParity, SerialPortInfo, SerialRuntimeOptions, SerialSendMode,
-    SerialSessionConfig, SshPtySession, SshSessionConfig, TelnetControlCommand, TelnetLineEndings,
-    TelnetLoginCredentials, TelnetSessionConfig, TerminalDrainBudget, TerminalDrainReport,
-    TerminalMagicKind, TerminalOutputProcessor, TerminalResize, TerminalSession,
-    TerminalSessionBackend, TerminalSessionKind, TerminalSessionStatus,
+    DockerExecSessionConfig, MoshConnectionStatus, MoshPredictionDisplay, MoshTerminalConfig,
+    SerialControlLine, SerialControlState, SerialDisplayMode, SerialError, SerialErrorCode,
+    SerialFlowControl, SerialLineEnding, SerialParity, SerialPortInfo, SerialRuntimeOptions,
+    SerialSendMode, SerialSessionConfig, SshPtySession, SshSessionConfig, TelnetControlCommand,
+    TelnetLineEndings, TelnetLoginCredentials, TelnetSessionConfig, TerminalDrainBudget,
+    TerminalDrainReport, TerminalMagicKind, TerminalOutputProcessor, TerminalResize,
+    TerminalSession, TerminalSessionBackend, TerminalSessionKind, TerminalSessionStatus,
     ble_device_reservation_label, ble_resolve_profile_to_session, serial_list_ports,
 };
 pub use shell_completion::{

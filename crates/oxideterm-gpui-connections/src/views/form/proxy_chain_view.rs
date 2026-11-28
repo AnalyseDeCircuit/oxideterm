@@ -970,6 +970,143 @@ impl ConnectionFormView {
                     }
                 }
             }
+            NewConnectionSelect::ContainerEngine => {
+                let selected_index = self
+                    .connection_form_state(cx)
+                    .form
+                    .as_ref()
+                    .map(|form| form.container.selected_engine_index)
+                    .unwrap_or_default();
+                let engines = self
+                    .connection_form_state(cx)
+                    .form
+                    .as_ref()
+                    .map(|form| form.container.engines.clone())
+                    .unwrap_or_default();
+                if engines.is_empty() {
+                    let label = if self
+                        .connection_form_state(cx)
+                        .form
+                        .as_ref()
+                        .is_some_and(|form| form.container.engines_loading)
+                    {
+                        self.i18n
+                            .t("modals.new_connection.container_loading_engines")
+                    } else {
+                        self.i18n.t("modals.new_connection.container_no_engines")
+                    };
+                    popup = popup.child(select_option(&self.tokens, label, false));
+                } else {
+                    for (index, engine) in engines.iter().enumerate() {
+                        let selected = index == selected_index;
+                        popup = popup.child(select_option_action(
+                            select_option(&self.tokens, engine.label.clone(), selected),
+                            false,
+                            false,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.close_new_connection_select(cx);
+                                this.set_new_connection_container_engine(index, cx);
+                                cx.stop_propagation();
+                            }),
+                        ));
+                    }
+                }
+            }
+            NewConnectionSelect::ContainerPodContainer => {
+                // Options come from the selected pod's spec-order containers;
+                // the picker only opens for multi-container pods, so a missing
+                // selection falls back to the first entry. The rows mirror the
+                // container table (columns, scroll, overflow hints) so the two
+                // surfaces read as one component.
+                let form_state = self.connection_form_state(cx);
+                let entry = form_state.form.as_ref().and_then(|form| {
+                    form.container
+                        .selected_container_index
+                        .and_then(|index| form.container.containers.get(index))
+                });
+                let pod_containers = entry
+                    .map(|entry| entry.containers.clone())
+                    .unwrap_or_default();
+                let selected = form_state
+                    .form
+                    .as_ref()
+                    .and_then(|form| form.container.pod_container.clone());
+                // The popup width is known at build time (it tracks the
+                // anchor), so the overflow predicates need no probe frame.
+                let text_system = window.text_system();
+                let base_font = gpui::Font {
+                    weight: gpui::FontWeight::NORMAL,
+                    ..gpui::font(oxideterm_gpui_ui::tauri_ui_font_family(
+                        &self.environment.ui_font,
+                    ))
+                };
+                let fits = |text: &str, size: f32, available: Option<f32>| {
+                    available.is_none_or(|available| {
+                        oxideterm_gpui_ui::shaped_text_width(
+                            text,
+                            base_font.clone(),
+                            size,
+                            text_system,
+                        ) <= available
+                    })
+                };
+                // Same arithmetic as the inline container table minus its
+                // 1px-per-side border: the option chrome's horizontal padding
+                // (padding-x left + inset right) and the row's own right inset.
+                let row_content = width
+                    - self.tokens.metrics.ui_menu_item_padding_x
+                    - 2.0 * self.tokens.metrics.ui_menu_inset_padding_left;
+                let metrics = super::field_controls::ContainerCellMetrics {
+                    name: Some(row_content * 0.42),
+                    image: Some(row_content * (1.0 - 0.42 - 0.18) - 2.0 * self.tokens.spacing.two),
+                    namespace: None,
+                    state: Some(row_content * 0.18),
+                    base_size: self.tokens.metrics.ui_text_sm,
+                    small_size: self.tokens.metrics.ui_text_xs,
+                };
+                let rows = pod_containers.iter().enumerate().map(|(index, container)| {
+                    let is_selected = selected.as_deref() == Some(container.name.as_str());
+                    let running = container.state.eq_ignore_ascii_case("running");
+                    let container_name = container.name.clone();
+                    select_option_action(
+                        select_option_element(
+                            &self.tokens,
+                            super::field_controls::pod_container_table_row(
+                                &self.tokens,
+                                container,
+                                running,
+                                &metrics,
+                                &fits,
+                            ),
+                            is_selected,
+                        ),
+                        false,
+                        false,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.close_new_connection_select(cx);
+                            this.set_new_connection_pod_container(container_name.clone(), cx);
+                            cx.stop_propagation();
+                        }),
+                    )
+                    .id(("pod-container-row", index))
+                });
+                popup = popup
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_sm))
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(rgb(self.tokens.ui.text))
+                            .child(self.i18n.t("modals.new_connection.container_container")),
+                    )
+                    .child(
+                        div()
+                            .id("pod-container-popup-rows")
+                            .overflow_y_scroll()
+                            .on_scroll(|_, _, cx| cx.stop_propagation())
+                            .max_h(px(self.tokens.metrics.ui_control_height * 5.0))
+                            .children(rows),
+                    );
+            }
             NewConnectionSelect::SerialPort => {
                 let selected_port = self
                     .connection_form_state(cx)
@@ -1285,6 +1422,7 @@ impl ConnectionFormView {
                             NewConnectionTransport::LocalTerminal
                                 | NewConnectionTransport::Serial
                                 | NewConnectionTransport::Ble
+                                | NewConnectionTransport::Container
                         ) {
                             self.i18n.t("modals.new_connection.local_open")
                         } else if form.transport == NewConnectionTransport::StandaloneSftp {

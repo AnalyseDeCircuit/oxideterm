@@ -156,6 +156,34 @@ impl CloudSyncOperationService {
             );
         }
 
+        if local_snapshot.scope.sync_container_profiles {
+            let mut snapshot = connection_store.export_container_profiles_snapshot()?;
+            filter_container_profiles_snapshot(
+                &mut snapshot,
+                item_filter.container_profile_ids.as_ref(),
+            );
+            let bytes = serde_json::to_vec(&snapshot)?;
+            let path = container_profiles_object_path(&snapshot.revision);
+            manifest.sections.container_profiles = Some(crate::StructuredObjectEntry {
+                revision: snapshot.revision.clone(),
+                path: path.clone(),
+                record_count: Some(snapshot.records.len() + snapshot.tombstones.len()),
+                content_type: "application/json".to_string(),
+            });
+            objects.push(StructuredUploadObject {
+                path,
+                bytes,
+                content_type: "application/json".to_string(),
+            });
+            completed_exports += 1;
+            report_progress(
+                progress,
+                CloudSyncProgressStage::Exporting,
+                2 + completed_exports,
+                total,
+            );
+        }
+
         if local_snapshot.scope.sync_ble_profiles {
             let mut snapshot = connection_store.export_ble_profiles_snapshot()?;
             filter_ble_profiles_snapshot(&mut snapshot, item_filter.ble_profile_ids.as_ref());

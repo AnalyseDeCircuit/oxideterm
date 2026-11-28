@@ -522,7 +522,46 @@
       "serial_invalid_baud_rate": "전송 속도는 0보다 커야 합니다",
       "serial_port_required": "시리얼 포트 경로를 선택하거나 입력하세요",
       "ble_save_failed": "BLE 연결을 저장할 수 없습니다",
-      "ble_secondary_suffix": " · 보조"
+      "ble_secondary_suffix": " · 보조",
+      "transport_container": "컨테이너",
+      "container_description": "SSH 없이 Docker, Podman 또는 Kubernetes 컨테이너의 대화형 터미널에 직접 연결합니다.",
+      "container_engine": "엔진",
+      "container_pod_container": "Pod 컨테이너",
+      "container_refresh_engines": "엔진 새로 고침",
+      "container_refresh_containers": "컨테이너 새로 고침",
+      "container_loading_engines": "엔진 감지 중…",
+      "container_no_engines": "컨테이너 엔진을 찾을 수 없습니다",
+      "container_select_engine": "엔진 선택",
+      "container_container": "컨테이너",
+      "container_pods": "Pods",
+      "container_running_filter": "실행 중인 항목만",
+      "container_select_container": "컨테이너 선택",
+      "container_loading_list": "컨테이너 불러오는 중…",
+      "container_no_containers": "컨테이너나 Pod가 없습니다",
+      "container_no_running_containers": "실행 중인 컨테이너나 Pod가 없습니다",
+      "container_select_required": "먼저 컨테이너를 선택하세요",
+      "container_load_failed": "컨테이너 목록을 불러오지 못했습니다",
+      "container_shell": "셸",
+      "container_shell_placeholder": "/bin/bash (기본값)",
+      "container_launch_mode": "시작 모드",
+      "container_launch_mode_shell": "셸",
+      "container_launch_mode_command": "명령",
+      "container_launch_mode_attach": "연결(Attach)",
+      "container_command": "명령",
+      "container_command_placeholder": "예: top -d 1",
+      "container_command_required": "명령 모드에는 명령줄이 필요합니다",
+      "container_attach_hint": "새 셸을 시작하지 않고 컨테이너 메인 프로세스의 TTY에 연결합니다.",
+      "container_details_title": "컨테이너 세부 정보",
+      "container_details_loading": "컨테이너 세부 정보를 읽는 중…",
+      "container_details_none": "마운트, 포트 또는 네트워크 세부 정보가 없습니다",
+      "container_details_mounts": "마운트",
+      "container_details_ports": "포트",
+      "container_details_networks": "네트워크",
+      "container_details_pod_ip": "Pod IP",
+      "container_access_denied": "권한 거부: 현재 사용자가 컨테이너 엔진 소켓에 접근할 수 없습니다. Linux에서는 `sudo usermod -aG docker $USER` 실행 후 다시 로그인하거나, rootless 엔진(rootless Docker 또는 Podman 사용자 소켓)을 사용하세요.",
+      "container_save_failed": "컨테이너 프로필 저장 실패",
+      "container_profile_name": "프로필 이름",
+      "container_profile_name_placeholder": "내 컨테이너"
     },
     "managed_key": {
       "selector": {
@@ -721,19 +760,6 @@
       "use_global": "전역 사용",
       "direct": "직접 연결",
       "custom": "사용자 지정"
-    }
-  },
-  "local_shell": {
-    "background": {
-      "kill": "종료",
-      "lines": "행",
-      "resume": "재개",
-      "title": "백그라운드 세션"
-    },
-    "toast": {
-      "attached": "세션이 재개됨",
-      "detached": "세션이 백그라운드로 이동됨",
-      "detached_desc": "{{shell}}이(가) 백그라운드에서 실행 중입니다"
     }
   },
   "export": {

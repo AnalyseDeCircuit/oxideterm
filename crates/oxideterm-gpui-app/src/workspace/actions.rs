@@ -3052,6 +3052,7 @@ impl WorkspaceApp {
             TerminalSessionKind::Mosh => QuickCommandTargetProtocol::Mosh,
             TerminalSessionKind::Serial => QuickCommandTargetProtocol::Serial,
             TerminalSessionKind::Ble => QuickCommandTargetProtocol::Ble,
+            TerminalSessionKind::ContainerExec => QuickCommandTargetProtocol::Container,
         };
         if pane.is_tmux_control_mode() {
             protocol = QuickCommandTargetProtocol::Tmux;

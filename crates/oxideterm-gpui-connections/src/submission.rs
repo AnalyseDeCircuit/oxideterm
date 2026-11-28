@@ -8,10 +8,10 @@ use gpui::Context;
 use oxideterm_ble::BleAdapterGuard;
 use oxideterm_connections::{
     ConnectionStore, ConnectionTerminalOptions, FtpProfile, FtpSecurity, RemoteDesktopProfile,
-    SaveBleProfileRequest, SaveFtpProfileRequest, SaveMoshProfileRequest,
-    SaveRemoteDesktopProfileRequest, SaveSerialProfileRequest, SaveStandaloneSftpProfileRequest,
-    SaveTelnetProfileRequest, SavedProxyHop, SavedUpstreamProxyAuth, SavedUpstreamProxyPolicy,
-    SecretString, StandaloneSftpTransferMode,
+    SaveBleProfileRequest, SaveContainerProfileRequest, SaveFtpProfileRequest,
+    SaveMoshProfileRequest, SaveRemoteDesktopProfileRequest, SaveSerialProfileRequest,
+    SaveStandaloneSftpProfileRequest, SaveTelnetProfileRequest, SavedProxyHop,
+    SavedUpstreamProxyAuth, SavedUpstreamProxyPolicy, SecretString, StandaloneSftpTransferMode,
 };
 use oxideterm_i18n::I18n;
 use oxideterm_remote_desktop::{
@@ -36,8 +36,9 @@ use crate::{
     conversion::*,
     entity::ConnectionFlowEntity,
     form_state::{
-        NewConnectionForm, NewConnectionSubmitAction, SshAuthTab, identity_agent_from_form,
-        terminal_serial_line_ending_from_profile, terminal_serial_runtime_options_from_ble_form,
+        ContainerFormLaunchMode, NewConnectionForm, NewConnectionSubmitAction, SshAuthTab,
+        identity_agent_from_form, terminal_serial_line_ending_from_profile,
+        terminal_serial_runtime_options_from_ble_form,
         terminal_serial_runtime_options_from_profile,
     },
     launch::{MoshConnectionOptions, SshConnectionIntent, SshTerminalConnectionOptions},
@@ -419,6 +420,12 @@ pub struct TelnetFormOpen {
     pub edited_profile: Option<SaveTelnetProfileRequest>,
 }
 
+/// Launch payload for container exec opened from the connection form.
+pub struct ContainerOpenRequest {
+    pub config: oxideterm_docker::ContainerConnectionConfig,
+    pub terminal_options: ConnectionTerminalOptions,
+}
+
 pub struct DesktopFormOpen {
     pub profile: RemoteDesktopConnectionProfile,
     pub password: Option<SecretString>,
@@ -585,6 +592,185 @@ impl ConnectionFlowEntity {
             },
             cx,
         ))
+    }
+
+    /// Container profiles address the container by name, so they persist
+    /// safely; Connect keeps opening directly, Save/SaveAndConnect upsert the
+    /// profile first. Open-time resolution of the current container id happens
+    /// in the app layer.
+    fn submit_container(
+        &mut self,
+        store: &mut ConnectionStore,
+        i18n: &I18n,
+        action: NewConnectionSubmitAction,
+        cx: &mut Context<Self>,
+    ) -> Option<ConnectionSubmission> {
+        // Command mode runs through a shell, so an empty line would silently
+        // open an interactive shell under a launch identity the profile never
+        // recorded; block it instead of opening something else.
+        let command_required = {
+            let form = self.form.form.as_ref()?;
+            form.container.launch_mode == ContainerFormLaunchMode::Command
+                && form.container.custom_command.trim().is_empty()
+        };
+        if command_required {
+            self.form.form.as_mut()?.error =
+                Some(i18n.t("modals.new_connection.container_command_required"));
+            cx.notify();
+            return None;
+        }
+        let form = self.form.form.as_ref()?;
+        let shell = form.container.shell.trim();
+        let command = form.container.custom_command.trim();
+        let launch = match form.container.launch_mode {
+            ContainerFormLaunchMode::Shell => oxideterm_docker::ContainerLaunchMode::Shell {
+                shell: (!shell.is_empty()).then(|| shell.to_string()),
+            },
+            ContainerFormLaunchMode::Command => oxideterm_docker::ContainerLaunchMode::Command {
+                command: command.to_string(),
+            },
+            ContainerFormLaunchMode::Attach => oxideterm_docker::ContainerLaunchMode::Attach,
+        };
+        let pod_container = form.container.pod_container.clone();
+        // Owned copy of the selected row. It is the launch target, and a
+        // profile edit whose container vanished keeps its stored address while
+        // still saving the metadata.
+        let selection = form
+            .container
+            .selected_container_index
+            .and_then(|index| form.container.containers.get(index))
+            .map(|entry| {
+                // Tab title: "<engine> <namespace>/<pod>" gains the pod
+                // container name whenever the launch targets one explicitly, so
+                // multi-container pods stay distinguishable in the session list.
+                let mut label = format!("{} {}", entry.engine.label, entry.display_label());
+                if let Some(pod_container) = &pod_container {
+                    label.push_str(&format!(" ({pod_container})"));
+                }
+                (
+                    entry.launch_target(),
+                    entry.id.clone(),
+                    entry.name.clone(),
+                    entry.namespace.clone(),
+                    label,
+                )
+            });
+        let profile_id = form.container.profile_id.clone();
+        let requested_name = form.serial_profile_name.trim().to_string();
+        let group = serial_profile_group_from_form(&form.group, i18n);
+        let notes = saved_profile_notes(&form.notes);
+        let icon = asset_icon_from_form(&form.icon);
+        let color = asset_color_from_form(&form.color);
+        let icon_background_color = asset_color_from_form(&form.icon_background_color);
+        let terminal_options = form.terminal.clone();
+        // Only a live row can open a terminal; without one the form may still
+        // save metadata for an existing profile.
+        if selection.is_none() && action != NewConnectionSubmitAction::Save {
+            self.form.form.as_mut()?.error =
+                Some(i18n.t("modals.new_connection.container_select_required"));
+            cx.notify();
+            return None;
+        }
+        // Editing always updates the persisted asset; a fresh form persists
+        // only when the user explicitly chose Save or SaveAndConnect.
+        let should_save_profile =
+            profile_id.is_some() || action != NewConnectionSubmitAction::Connect;
+        // A direct Connect from a fresh form saves nothing; reporting it as
+        // persisted would trigger a pointless cloud-sync dirty refresh.
+        let mut saved = false;
+        if should_save_profile {
+            let (engine, container_name, namespace, stored_pod_container) = match &selection {
+                Some((engine, _, container_name, namespace, _)) => (
+                    engine.clone(),
+                    container_name.clone(),
+                    namespace.clone(),
+                    pod_container.clone(),
+                ),
+                None => {
+                    let id = profile_id.as_deref()?;
+                    let profile = store
+                        .container_profiles()
+                        .iter()
+                        .find(|profile| profile.id.as_str() == id)?;
+                    (
+                        profile.engine.clone(),
+                        profile.container_name.clone(),
+                        profile.namespace.clone(),
+                        profile.pod_container.clone(),
+                    )
+                }
+            };
+            let request = SaveContainerProfileRequest {
+                id: profile_id.clone(),
+                name: if requested_name.is_empty() {
+                    selection
+                        .as_ref()
+                        .map(|(_, _, _, _, label)| label.clone())
+                        .unwrap_or_else(|| container_name.clone())
+                } else {
+                    requested_name
+                },
+                group,
+                notes,
+                icon,
+                color,
+                icon_background_color,
+                engine,
+                container_name,
+                namespace,
+                pod_container: stored_pod_container,
+                launch: launch.clone(),
+                terminal: terminal_options.clone(),
+            };
+            match store.upsert_container_profile(request) {
+                Ok(profile) => {
+                    let saved_profile_id = profile.id;
+                    saved = true;
+                    self.form.form.as_mut()?.container.profile_id = Some(saved_profile_id);
+                }
+                Err(error) => {
+                    self.profile_error(
+                        i18n,
+                        "modals.new_connection.container_save_failed",
+                        error,
+                        cx,
+                    );
+                    return None;
+                }
+            }
+        }
+        if action == NewConnectionSubmitAction::Save {
+            self.clear_form_after_submit(cx);
+            return Some(ConnectionSubmission {
+                persisted: saved,
+                effect: None,
+            });
+        }
+        // The no-selection path returned above unless the action was Save,
+        // which has already cleared the form.
+        let Some((engine, container_id, _, namespace, label)) = selection else {
+            return None;
+        };
+        let open = ContainerOpenRequest {
+            config: oxideterm_docker::ContainerConnectionConfig {
+                engine,
+                container_id,
+                // Tab titles and the session list name the terminal as
+                // "<engine> <container>" so multiple engines stay unambiguous.
+                label,
+                namespace,
+                pod_container,
+                launch,
+            },
+            terminal_options,
+        };
+        self.clear_form_after_submit(cx);
+        Some(ConnectionSubmission {
+            persisted: saved,
+            effect: Some(crate::submission::ConnectionSubmissionEffect::Container(
+                open,
+            )),
+        })
     }
 
     fn submit_mosh(
@@ -961,6 +1147,7 @@ enum FormSubmission {
     LocalTerminal,
     Serial,
     Telnet,
+    Container,
     Ble,
     Mosh,
     StandaloneSftp,
@@ -1023,6 +1210,7 @@ fn plan_form_submission(
             NewConnectionTransport::LocalTerminal => Some(FormSubmission::LocalTerminal),
             NewConnectionTransport::Serial => Some(FormSubmission::Serial),
             NewConnectionTransport::Telnet => Some(FormSubmission::Telnet),
+            NewConnectionTransport::Container => Some(FormSubmission::Container),
             NewConnectionTransport::Ble => Some(FormSubmission::Ble),
             NewConnectionTransport::Mosh => Some(FormSubmission::Mosh),
             NewConnectionTransport::Rdp | NewConnectionTransport::Vnc => {

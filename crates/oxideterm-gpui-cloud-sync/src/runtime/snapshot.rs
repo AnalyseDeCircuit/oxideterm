@@ -195,6 +195,10 @@ impl CloudSyncSources<'_> {
                 .ok(),
             quick_commands,
             serial_profiles: self.connection_store.export_serial_profiles_snapshot().ok(),
+            container_profiles: self
+                .connection_store
+                .export_container_profiles_snapshot()
+                .ok(),
             ble_profiles: self.connection_store.export_ble_profiles_snapshot().ok(),
             standalone_sftp_profiles: self
                 .connection_store

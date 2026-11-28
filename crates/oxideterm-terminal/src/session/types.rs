@@ -6,6 +6,7 @@ pub enum TerminalSessionKind {
     Mosh,
     Serial,
     Ble,
+    ContainerExec,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -129,6 +130,12 @@ pub struct TerminalSessionStatus {
 
 pub trait TerminalSessionBackend: Send {
     fn kind(&self) -> TerminalSessionKind;
+    /// Launch identity of a container-exec session, used by the workspace to
+    /// focus an existing session instead of stacking duplicates. Other
+    /// backends have no container identity.
+    fn container_connection(&self) -> Option<&oxideterm_docker::ContainerConnectionConfig> {
+        None
+    }
     fn title(&self) -> Option<String>;
     fn lifecycle(&self) -> TerminalLifecycle;
     fn is_interactive(&self) -> bool {

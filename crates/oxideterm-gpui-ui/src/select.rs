@@ -233,6 +233,8 @@ pub enum SelectAnchorId {
     NewConnectionStandaloneSftpSecondaryUpstreamProxyAuth,
     NewConnectionLocalShell,
     NewConnectionSerialPort,
+    NewConnectionContainerEngine,
+    NewConnectionContainerPodContainer,
     NewConnectionBleAdapter,
     NewConnectionSerialDataBits,
     NewConnectionSerialStopBits,
@@ -384,6 +386,8 @@ impl SelectAnchorId {
                 | Self::NewConnectionStandaloneSftpSecondaryUpstreamProxyAuth
                 | Self::NewConnectionLocalShell
                 | Self::NewConnectionSerialPort
+                | Self::NewConnectionContainerEngine
+                | Self::NewConnectionContainerPodContainer
                 | Self::NewConnectionBleAdapter
                 | Self::NewConnectionSerialDataBits
                 | Self::NewConnectionSerialStopBits
@@ -792,7 +796,18 @@ pub fn select_panel_overlay_popup_with_max_height(
 }
 
 pub fn select_option(tokens: &ThemeTokens, label: impl Into<String>, selected: bool) -> Div {
-    select_item_with_state(tokens, label, selected, false, true).cursor_pointer()
+    select_item_with_state(tokens, label.into(), selected, false, true).cursor_pointer()
+}
+
+/// Same chrome as `select_option` for rows that carry more than one text
+/// column (for example container name + image + state); the element fills the
+/// row ahead of the trailing check slot.
+pub fn select_option_element(
+    tokens: &ThemeTokens,
+    content: impl IntoElement,
+    selected: bool,
+) -> Div {
+    select_item_with_state(tokens, content, selected, false, true).cursor_pointer()
 }
 
 pub fn select_option_highlighted(
@@ -804,7 +819,7 @@ pub fn select_option_highlighted(
     // Radix SelectItem keeps keyboard highlight separate from the selected
     // checkmark. Expose that state for portal/select popups that are not using
     // the inline select row primitive.
-    select_item_with_state(tokens, label, selected, highlighted, true).cursor_pointer()
+    select_item_with_state(tokens, label.into(), selected, highlighted, true).cursor_pointer()
 }
 
 pub fn select_option_is_actionable(disabled: bool, loading: bool) -> bool {
@@ -836,12 +851,12 @@ pub fn select_content(tokens: &ThemeTokens) -> Div {
 }
 
 pub fn select_item(tokens: &ThemeTokens, label: impl Into<String>, selected: bool) -> Div {
-    select_item_with_state(tokens, label, selected, false, false)
+    select_item_with_state(tokens, label.into(), selected, false, false)
 }
 
 fn select_item_with_state(
     tokens: &ThemeTokens,
-    label: impl Into<String>,
+    content: impl IntoElement,
     selected: bool,
     highlighted: bool,
     interactive: bool,
@@ -894,7 +909,7 @@ fn select_item_with_state(
                 )
             }),
     )
-    .child(label.into())
+    .child(content)
 }
 
 pub fn select_label(tokens: &ThemeTokens, label: impl Into<String>) -> Div {

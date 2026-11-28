@@ -334,6 +334,13 @@
       "preset_aws_name": "Modello predefinito - AWS",
       "apply_blocked_issues": "Correggi prima i problemi elencati",
       "templates_load_failed": "Impossibile leggere i modelli salvati"
+    },
+    "container_profiles": {
+      "delete": "Elimina",
+      "open_failed": "Apertura del profilo container fallita",
+      "container_not_found": "Nessun contenitore corrisponde al nome salvato; potrebbe essere stato rimosso o rinominato.",
+      "confirm_delete": "Eliminare il profilo container \"{{name}}\"?",
+      "delete_failed": "Eliminazione del profilo container fallita"
     }
   }
 }

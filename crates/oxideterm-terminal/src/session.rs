@@ -247,6 +247,7 @@ include!("session/mosh.rs");
 include!("session/raw_stream.rs");
 include!("session/serial.rs");
 include!("session/ble.rs");
+include!("session/docker_exec.rs");
 
 #[cfg(test)]
 mod tests {

@@ -213,6 +213,9 @@ impl ConfigurationView {
         for record in connections.export_serial_profiles_snapshot()?.records {
             view.insert(ResourceKind::Serial, &record.id, &record)?;
         }
+        for record in connections.export_container_profiles_snapshot()?.records {
+            view.insert(ResourceKind::Container, &record.id, &record)?;
+        }
         for record in connections.export_ble_profiles_snapshot()?.records {
             view.insert(ResourceKind::Ble, &record.id, &record)?;
         }
@@ -340,6 +343,9 @@ impl ConfigurationView {
                     }
                     ResourceKind::Serial => {
                         scope.sync_serial_profiles && within(&filter.serial_profile_ids)
+                    }
+                    ResourceKind::Container => {
+                        scope.sync_container_profiles && within(&filter.container_profile_ids)
                     }
                     ResourceKind::Ble => scope.sync_ble_profiles && within(&filter.ble_profile_ids),
                     ResourceKind::Telnet => {
@@ -501,6 +507,7 @@ impl ConfigurationView {
                 totp_credentials: self.records(ResourceKind::Totp, values)?,
             },
             serial: self.records(ResourceKind::Serial, values)?,
+            container: self.records(ResourceKind::Container, values)?,
             ble: self.records(ResourceKind::Ble, values)?,
             telnet: self.records(ResourceKind::Telnet, values)?,
             mosh: self.records(ResourceKind::Mosh, values)?,

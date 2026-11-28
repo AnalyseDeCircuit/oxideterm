@@ -334,6 +334,13 @@
       "preset_aws_name": "Modelo predefinido - AWS",
       "apply_blocked_issues": "Corrija os problemas listados antes de adicionar",
       "templates_load_failed": "Não foi possível ler os modelos salvos"
+    },
+    "container_profiles": {
+      "delete": "Excluir",
+      "open_failed": "Falha ao abrir o perfil de contêiner",
+      "container_not_found": "Nenhum contêiner corresponde ao nome salvo; ele pode ter sido removido ou renomeado.",
+      "confirm_delete": "Excluir o perfil de contêiner \"{{name}}\"?",
+      "delete_failed": "Falha ao excluir o perfil de contêiner"
     }
   }
 }

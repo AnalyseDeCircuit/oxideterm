@@ -15,15 +15,15 @@ use crate::{
     ConnectionFormState,
     form_state::{
         CONNECTION_NOTES_LINE_HEIGHT, CONNECTION_NOTES_MIN_HEIGHT,
-        CONNECTION_NOTES_VERTICAL_PADDING, ConnectionRouteTarget, NewConnectionField,
-        NewConnectionForm, NewConnectionFormMode, NewConnectionProxyHop, NewConnectionSelect,
-        NewConnectionSubmitAction, NewConnectionTransport, NewConnectionUpstreamProxyAuth,
-        NewConnectionUpstreamProxyPolicy, RDP_DEFAULT_PORT_TEXT, RemoteDesktopSessionFeature,
-        RemoteDesktopVncPreference, SSH_DEFAULT_PORT_TEXT, SavedConnectionPromptAction,
-        SshAuthFamily, SshAuthTab, SshKeyAuthSource, TELNET_DEFAULT_PORT_TEXT,
-        VNC_DEFAULT_PORT_TEXT, apply_remote_desktop_vnc_preference, apply_transport_default_port,
-        apply_transport_default_username, auth_family_from_tab, auth_tab_from_key_source,
-        backspace_current_connection_field, clear_connection_selection,
+        CONNECTION_NOTES_VERTICAL_PADDING, ConnectionRouteTarget, ContainerFormLaunchMode,
+        NewConnectionField, NewConnectionForm, NewConnectionFormMode, NewConnectionProxyHop,
+        NewConnectionSelect, NewConnectionSubmitAction, NewConnectionTransport,
+        NewConnectionUpstreamProxyAuth, NewConnectionUpstreamProxyPolicy, RDP_DEFAULT_PORT_TEXT,
+        RemoteDesktopSessionFeature, RemoteDesktopVncPreference, SSH_DEFAULT_PORT_TEXT,
+        SavedConnectionPromptAction, SshAuthFamily, SshAuthTab, SshKeyAuthSource,
+        TELNET_DEFAULT_PORT_TEXT, VNC_DEFAULT_PORT_TEXT, apply_remote_desktop_vnc_preference,
+        apply_transport_default_port, apply_transport_default_username, auth_family_from_tab,
+        auth_tab_from_key_source, backspace_current_connection_field, clear_connection_selection,
         clear_current_connection_field, connection_field_is_selected,
         connection_icon_field_visible, connection_secret_field_visible, current_connection_field,
         default_auth_tab_for_family, insert_text_into_current_connection_field,
@@ -52,16 +52,17 @@ use oxideterm_gpui_settings_view::{
 use oxideterm_gpui_ui::icons::LucideIcon;
 use oxideterm_gpui_ui::select::BrowserFocusOrigin;
 use oxideterm_gpui_ui::{
-    ButtonTone, SwitchOptions, TextInputView, button,
+    ButtonTone, CheckboxOptions, SwitchOptions, TextInputView, button,
     button::{
         ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, IconButtonOptions,
         ToolbarButtonOptions,
     },
-    checkbox, form_field,
+    checkbox, checkbox_with, form_field,
     modal::{dismissible_dialog_backdrop, popover_backdrop},
     modal_container, modal_footer, segmented_tab, segmented_tabs,
     select::{
-        SelectAnchorId, select_option, select_option_action, select_overlay_popup_with_max_height,
+        SelectAnchorId, select_option, select_option_action, select_option_element,
+        select_overlay_popup_with_max_height,
     },
     switch_with,
     text_input::{

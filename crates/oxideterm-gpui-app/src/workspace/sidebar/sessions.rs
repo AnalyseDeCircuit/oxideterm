@@ -67,6 +67,7 @@ impl standalone_connections::StandaloneConnectionKind {
             standalone_connections::StandaloneConnectionKind::Mosh => LucideIcon::Wifi,
             standalone_connections::StandaloneConnectionKind::Telnet => LucideIcon::Terminal,
             standalone_connections::StandaloneConnectionKind::Serial => LucideIcon::Cable,
+            standalone_connections::StandaloneConnectionKind::Container => LucideIcon::Package,
             standalone_connections::StandaloneConnectionKind::Ble => LucideIcon::Bluetooth,
             standalone_connections::StandaloneConnectionKind::Rdp
             | standalone_connections::StandaloneConnectionKind::Vnc => LucideIcon::Monitor,

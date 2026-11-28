@@ -242,6 +242,8 @@ pub enum NewConnectionField {
     SerialBaudRate,
     SerialProfileName,
     TelnetProfileName,
+    ContainerShell,
+    ContainerCommand,
     BleProfileName,
     BleMtu,
     MoshServerExecutable,
@@ -930,6 +932,7 @@ pub struct NewConnectionForm {
     pub serial_flow_control: form_model::SerialFlowControl,
     pub serial_profile_name: String,
     pub ble: BleFormState,
+    pub container: ContainerFormState,
     pub telnet_profile_name: String,
     pub mosh_server_executable: String,
     pub mosh_udp_host: String,
@@ -1092,6 +1095,120 @@ impl fmt::Debug for BleFormState {
                 "selected_service_uuid",
                 &self.selected_service_uuid.is_some(),
             )
+            .finish()
+    }
+}
+
+/// Form-side mirror of the backend launch modes; converted to the
+/// persistable `oxideterm_docker::ContainerLaunchMode` at submit time.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum ContainerFormLaunchMode {
+    #[default]
+    Shell,
+    Command,
+    Attach,
+}
+
+/// Container-exec draft state of the new-connection form. The listing state
+/// here is transient: saved profiles address containers by name, so volatile
+/// ids are re-resolved against the engine at open time.
+pub struct ContainerFormState {
+    /// Monotonic token: in-flight engine or container listings write back only
+    /// while the generation still matches, so stale results never reach a
+    /// switched engine or a replaced form.
+    pub generation: u64,
+    /// Discovery-only token. Engine replies guard on this instead of the
+    /// shared generation so a container list reload during discovery cannot
+    /// drop the reply and leave `engines_loading` set forever.
+    pub engines_generation: u64,
+    pub engines: Vec<oxideterm_docker::EngineInfo>,
+    pub engines_loading: bool,
+    pub selected_engine_index: usize,
+    pub containers: Vec<oxideterm_docker::ContainerEntry>,
+    pub containers_loading: bool,
+    pub selected_container_index: Option<usize>,
+    /// Kube only: container inside the selected multi-container pod the
+    /// launch targets. Reset whenever the selected pod changes.
+    pub pod_container: Option<String>,
+    /// Empty draft defers to the backend's POSIX shell candidate fallback.
+    pub shell: String,
+    pub launch_mode: ContainerFormLaunchMode,
+    /// Command line for the Command launch mode; run through the container
+    /// shell so quoting behaves like an interactive session.
+    pub custom_command: String,
+    /// Feature parameters (mounts/ports/networks) of the selected container,
+    /// refreshed asynchronously with its own generation guard.
+    pub details: Option<oxideterm_docker::ContainerDetails>,
+    pub details_loading: bool,
+    pub details_generation: u64,
+    /// When set, the inline container table hides entries that are not in the
+    /// running state; filtering is view-only and keeps list indexes stable.
+    pub running_only: bool,
+    /// Catalog profile being edited. Profiles address containers by name, so
+    /// they persist safely across container recreation; opening still resolves
+    /// the current container id at launch time.
+    pub profile_id: Option<String>,
+    /// Edit backfill: engine target to re-select once discovery returns.
+    pub pending_engine: Option<oxideterm_docker::EngineTarget>,
+    /// Edit backfill: container/pod name to pre-select once the list returns.
+    pub pending_container_name: Option<String>,
+    /// Edit backfill: pod container to pre-select once the pod returns.
+    pub pending_pod_container: Option<String>,
+}
+
+impl Default for ContainerFormState {
+    fn default() -> Self {
+        Self {
+            generation: 0,
+            engines_generation: 0,
+            engines: Vec::new(),
+            engines_loading: false,
+            selected_engine_index: 0,
+            containers: Vec::new(),
+            containers_loading: false,
+            selected_container_index: None,
+            pod_container: None,
+            shell: String::new(),
+            launch_mode: ContainerFormLaunchMode::Shell,
+            custom_command: String::new(),
+            details: None,
+            details_loading: false,
+            details_generation: 0,
+            running_only: false,
+            profile_id: None,
+            pending_engine: None,
+            pending_container_name: None,
+            pending_pod_container: None,
+        }
+    }
+}
+
+impl fmt::Debug for ContainerFormState {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ContainerFormState")
+            .field("generation", &self.generation)
+            .field("engines_generation", &self.engines_generation)
+            .field("engines", &self.engines)
+            .field("engines_loading", &self.engines_loading)
+            .field("selected_engine_index", &self.selected_engine_index)
+            .field("containers", &self.containers)
+            .field("containers_loading", &self.containers_loading)
+            .field("selected_container_index", &self.selected_container_index)
+            .field("pod_container", &self.pod_container)
+            .field("shell", &self.shell)
+            .field("launch_mode", &self.launch_mode)
+            .field("custom_command", &self.custom_command)
+            .field("profile_id", &self.profile_id)
+            .field("pending_engine", &self.pending_engine.is_some())
+            .field(
+                "pending_container_name",
+                &self.pending_container_name.is_some(),
+            )
+            .field("details", &self.details.is_some())
+            .field("details_loading", &self.details_loading)
+            .field("details_generation", &self.details_generation)
+            .field("running_only", &self.running_only)
             .finish()
     }
 }
@@ -1261,6 +1378,7 @@ impl fmt::Debug for NewConnectionForm {
             .field("serial_parity", &self.serial_parity)
             .field("serial_flow_control", &self.serial_flow_control)
             .field("serial_profile_name", &self.serial_profile_name)
+            .field("container", &self.container)
             .field("ble", &self.ble)
             .field("telnet_profile_name", &self.telnet_profile_name)
             .field("mosh_server_executable", &self.mosh_server_executable)
@@ -1411,6 +1529,7 @@ impl Default for NewConnectionForm {
             serial_flow_control: form_model::SerialFlowControl::None,
             serial_profile_name: String::new(),
             ble: BleFormState::default(),
+            container: ContainerFormState::default(),
             telnet_profile_name: String::new(),
             mosh_server_executable: "mosh-server".to_string(),
             mosh_udp_host: String::new(),

@@ -516,7 +516,8 @@
         "github_oauth_client_id": "GitHub OAuth Client ID",
         "microsoft_oauth_client_id": "ID khách OAuth Microsoft",
         "microsoft_access_token": "Token truy cập Microsoft",
-        "google_oauth_client_id": "ID khách OAuth Google"
+        "google_oauth_client_id": "ID khách OAuth Google",
+        "sync_container_profiles": "Đồng bộ hồ sơ container"
       },
       "auth": {
         "bearer": "Bearer",
@@ -556,7 +557,8 @@
         "plugin_settings_selected_detail": "Plugin đã chọn: {{plugins}}",
         "plugin_settings_disabled_detail": "Cài đặt plugin bị loại trừ khỏi phạm vi đồng bộ hiện tại.",
         "sensitive_credentials_enabled_detail": "Các đối tượng thông tin xác thực nhạy cảm đã mã hóa được đưa vào.",
-        "sensitive_credentials_disabled_detail": "Mật khẩu kết nối, cụm mật khẩu khóa, khóa riêng được quản lý, khóa AI và thông tin xác thực nâng quyền bị loại trừ cho đến khi bật đồng bộ thông tin xác thực nhạy cảm."
+        "sensitive_credentials_disabled_detail": "Mật khẩu kết nối, cụm mật khẩu khóa, khóa riêng được quản lý, khóa AI và thông tin xác thực nâng quyền bị loại trừ cho đến khi bật đồng bộ thông tin xác thực nhạy cảm.",
+        "container_profiles_detail": "Hồ sơ kết nối container được đưa vào."
       },
       "notes": {
         "upload_only": "Đồng bộ tự động chỉ tải lên. Các bản cập nhật từ xa luôn yêu cầu xác nhận của người dùng.",
@@ -770,7 +772,9 @@
         "sensitive_summary_title": "Thông tin xác thực nhạy cảm",
         "profile_credential_actions": "{{name}}: {{stored}} thông tin xác thực đã lưu, {{cleared}} yêu cầu xóa.",
         "sensitive_remote_summary": "Thông tin xác thực từ xa đã mã hóa gồm {{connections}} bản ghi kết nối và {{portableSecrets}} bí mật di động. Giá trị luôn được ẩn.",
-        "sensitive_upload_summary": "Sẽ tải lên {{passwords}} mật khẩu, {{keyPassphrases}} mật khẩu khóa, {{managedKeys}} khóa được quản lý, {{managedKeyPassphrases}} mật khẩu khóa được quản lý và {{portableSecrets}} bí mật di động."
+        "sensitive_upload_summary": "Sẽ tải lên {{passwords}} mật khẩu, {{keyPassphrases}} mật khẩu khóa, {{managedKeys}} khóa được quản lý, {{managedKeyPassphrases}} mật khẩu khóa được quản lý và {{portableSecrets}} bí mật di động.",
+        "container_profiles_label": "Hồ sơ container",
+        "toggle_container_profiles": "Nhập hồ sơ container ({{count}})"
       },
       "confirm": {
         "import_title": "Nhập ảnh chụp từ xa?",
@@ -934,7 +938,10 @@
         "tls_mode": "Chế độ TLS",
         "tls_verification": "Xác minh TLS",
         "tls_server_name": "Tên máy chủ TLS",
-        "setting_field": "Trường cài đặt"
+        "setting_field": "Trường cài đặt",
+        "container_name": "Tên container",
+        "engine": "Engine",
+        "launch_mode": "Chế độ khởi động"
       },
       "tabs": {
         "overview": "Tổng quan",

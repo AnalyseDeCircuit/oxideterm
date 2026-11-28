@@ -675,5 +675,18 @@
   },
   "workspace": {
     "new_local_terminal": "Nuevo terminal local"
+  },
+  "local_shell": {
+    "background": {
+      "kill": "Terminar",
+      "lines": "líneas",
+      "resume": "Reanudar",
+      "title": "Sesiones en segundo plano"
+    },
+    "toast": {
+      "attached": "Sesión reanudada",
+      "detached": "Sesión enviada al fondo",
+      "detached_desc": "{{shell}} se está ejecutando en el fondo"
+    }
   }
 }

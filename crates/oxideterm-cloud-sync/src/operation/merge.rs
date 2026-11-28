@@ -3,7 +3,7 @@
 
 use super::*;
 use oxideterm_connections::{
-    BleProfile, FtpProfile, MoshProfile, RemoteDesktopProfile, SerialProfile,
+    BleProfile, ContainerProfile, FtpProfile, MoshProfile, RemoteDesktopProfile, SerialProfile,
     StandaloneSftpProfile, TelnetProfile,
 };
 
@@ -110,6 +110,16 @@ pub(super) fn merge_structured_preview_fields(
         let local = connection_store.export_serial_profiles_snapshot()?;
         changed |=
             merge_serial_profile_records(remote, base, &local, conflict_strategy, Utc::now())?;
+    }
+    if selection.container_profiles
+        && let (Some(remote), Some(base)) = (
+            preview.container_profiles_snapshot.as_mut(),
+            preview.base_container_profiles_snapshot.as_ref(),
+        )
+    {
+        let local = connection_store.export_container_profiles_snapshot()?;
+        changed |=
+            merge_container_profile_records(remote, base, &local, conflict_strategy, Utc::now())?;
     }
     if selection.ble_profiles
         && let (Some(remote), Some(base)) = (
@@ -357,6 +367,15 @@ impl SyncProfileRecord for SerialProfile {
     }
 }
 
+impl SyncProfileRecord for ContainerProfile {
+    fn sync_record_id(&self) -> &str {
+        &self.id
+    }
+    fn sync_record_updated_at(&mut self) -> &mut chrono::DateTime<Utc> {
+        &mut self.updated_at
+    }
+}
+
 impl SyncProfileRecord for BleProfile {
     fn sync_record_id(&self) -> &str {
         &self.id
@@ -457,6 +476,22 @@ pub(super) fn merge_serial_profile_records(
     remote: &mut SerialProfilesSyncSnapshot,
     base: &SerialProfilesSyncSnapshot,
     local: &SerialProfilesSyncSnapshot,
+    conflict_strategy: &ConflictStrategy,
+    merged_at: chrono::DateTime<Utc>,
+) -> Result<bool> {
+    merge_profile_records(
+        &mut remote.records,
+        &base.records,
+        &local.records,
+        conflict_strategy,
+        merged_at,
+    )
+}
+
+pub(super) fn merge_container_profile_records(
+    remote: &mut ContainerProfilesSyncSnapshot,
+    base: &ContainerProfilesSyncSnapshot,
+    local: &ContainerProfilesSyncSnapshot,
     conflict_strategy: &ConflictStrategy,
     merged_at: chrono::DateTime<Utc>,
 ) -> Result<bool> {

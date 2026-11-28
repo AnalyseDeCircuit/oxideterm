@@ -3363,6 +3363,7 @@ impl TerminalPane {
             TerminalSessionKind::Mosh => "M",
             TerminalSessionKind::Serial => "SER",
             TerminalSessionKind::Ble => "BLE",
+            TerminalSessionKind::ContainerExec => "CT",
         };
         div()
             .absolute()

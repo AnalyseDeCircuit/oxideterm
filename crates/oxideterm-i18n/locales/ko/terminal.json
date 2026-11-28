@@ -675,5 +675,18 @@
   },
   "workspace": {
     "new_local_terminal": "새 로컬 터미널"
+  },
+  "local_shell": {
+    "background": {
+      "kill": "종료",
+      "lines": "행",
+      "resume": "재개",
+      "title": "백그라운드 세션"
+    },
+    "toast": {
+      "attached": "세션이 재개됨",
+      "detached": "세션이 백그라운드로 이동됨",
+      "detached_desc": "{{shell}}이(가) 백그라운드에서 실행 중입니다"
+    }
   }
 }

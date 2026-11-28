@@ -38,6 +38,7 @@ oxideterm-connection-monitor = { path = "../oxideterm-connection-monitor" }
 oxideterm-connections = { path = "../oxideterm-connections" }
 oxideterm-discovery = { path = "../oxideterm-discovery" }
 oxideterm-desktop-presence = { path = "../oxideterm-desktop-presence" }
+oxideterm-docker = { path = "../oxideterm-docker" }
 oxideterm-editor-core = { path = "../oxideterm-editor-core" }
 oxideterm-forwarding = { path = "../oxideterm-forwarding" }
 oxideterm-gpui-cloud-sync = { path = "../oxideterm-gpui-cloud-sync" }

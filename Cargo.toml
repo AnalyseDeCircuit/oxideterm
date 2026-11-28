@@ -2,6 +2,7 @@
 members = [
   "crates/oxideterm-image-decoder",
   "crates/oxideterm-background-media",
+  "crates/oxideterm-docker",
   "crates/oxideterm-gpui-background",
   "crates/fernomade/crypto",
   "crates/fernomade/predict",

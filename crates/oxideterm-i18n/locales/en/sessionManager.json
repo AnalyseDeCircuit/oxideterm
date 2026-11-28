@@ -334,6 +334,13 @@
       "preset_aws_name": "Preset template - AWS",
       "apply_blocked_issues": "Fix the listed issues before adding",
       "templates_load_failed": "Saved templates could not be read"
+    },
+    "container_profiles": {
+      "delete": "Delete",
+      "open_failed": "Failed to open container profile",
+      "container_not_found": "No container matches the saved name; it may have been removed or renamed.",
+      "confirm_delete": "Delete container profile \"{{name}}\"?",
+      "delete_failed": "Failed to delete container profile"
     }
   }
 }

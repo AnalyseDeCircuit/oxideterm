@@ -18,10 +18,10 @@ use crate::store::{
 };
 use crate::{
     AuthType, BleProfilesSyncSnapshot, CONFIG_VERSION, ConnectionOptions, ConnectionStore,
-    MoshProfilesSyncSnapshot, RemoteDesktopProfilesSyncSnapshot, SavedAuth, SavedConnection,
-    SavedPrivilegeCredential, SavedProxyHop, SavedUpstreamProxyAuth, SavedUpstreamProxyConfig,
-    SavedUpstreamProxyPolicy, SecretString, SerialProfilesSyncSnapshot, SshAlgorithmPreferences,
-    StandaloneSftpProfilesSyncSnapshot, TelnetProfilesSyncSnapshot,
+    ContainerProfilesSyncSnapshot, MoshProfilesSyncSnapshot, RemoteDesktopProfilesSyncSnapshot,
+    SavedAuth, SavedConnection, SavedPrivilegeCredential, SavedProxyHop, SavedUpstreamProxyAuth,
+    SavedUpstreamProxyConfig, SavedUpstreamProxyPolicy, SecretString, SerialProfilesSyncSnapshot,
+    SshAlgorithmPreferences, StandaloneSftpProfilesSyncSnapshot, TelnetProfilesSyncSnapshot,
 };
 
 use super::{
@@ -65,6 +65,7 @@ pub struct OxideExportOptions {
     pub app_settings_json: Option<String>,
     pub quick_commands_json: Option<String>,
     pub serial_profiles_json: Option<String>,
+    pub container_profiles_json: Option<String>,
     pub telnet_profiles_json: Option<String>,
     pub mosh_profiles_json: Option<String>,
     pub standalone_sftp_profiles_json: Option<String>,
@@ -87,6 +88,7 @@ impl Default for OxideExportOptions {
             app_settings_json: None,
             quick_commands_json: None,
             serial_profiles_json: None,
+            container_profiles_json: None,
             telnet_profiles_json: None,
             mosh_profiles_json: None,
             standalone_sftp_profiles_json: None,
@@ -106,6 +108,7 @@ pub struct OxideImportOptions {
     pub conflict_strategy: ImportConflictStrategy,
     pub import_forwards: bool,
     pub import_serial_profiles: bool,
+    pub import_container_profiles: bool,
     pub import_telnet_profiles: bool,
     pub import_mosh_profiles: bool,
     pub import_standalone_sftp_profiles: bool,
@@ -128,6 +131,7 @@ impl Default for OxideImportOptions {
             conflict_strategy: ImportConflictStrategy::Rename,
             import_forwards: true,
             import_serial_profiles: true,
+            import_container_profiles: true,
             import_telnet_profiles: true,
             import_mosh_profiles: true,
             import_standalone_sftp_profiles: true,
@@ -296,6 +300,10 @@ pub struct ImportResultEnvelope {
     pub serial_profiles_json: Option<String>,
     pub imported_serial_profiles: usize,
     pub skipped_serial_profiles: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub container_profiles_json: Option<String>,
+    pub imported_container_profiles: usize,
+    pub skipped_container_profiles: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub telnet_profiles_json: Option<String>,
     pub imported_telnet_profiles: usize,

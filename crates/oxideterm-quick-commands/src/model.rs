@@ -66,6 +66,7 @@ pub enum QuickCommandTargetProtocol {
     Telnet,
     Serial,
     Ble,
+    Container,
     Tmux,
 }
 

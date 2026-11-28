@@ -26,6 +26,8 @@ pub enum CloudSyncPreviewSelectionAction {
     ToggleQuickCommandItem(String),
     ToggleSerialProfiles,
     ToggleSerialProfileItem(String),
+    ToggleContainerProfiles,
+    ToggleContainerProfileItem(String),
     ToggleBleProfiles,
     ToggleBleProfileItem(String),
     ToggleTelnetProfiles,
@@ -90,6 +92,8 @@ pub struct CloudSyncPreviewSelection {
     pub selected_quick_command_ids: BTreeSet<String>,
     pub import_serial_profiles: bool,
     pub selected_serial_profile_ids: BTreeSet<String>,
+    pub import_container_profiles: bool,
+    pub selected_container_profile_ids: BTreeSet<String>,
     pub import_ble_profiles: bool,
     pub selected_ble_profile_ids: BTreeSet<String>,
     pub import_telnet_profiles: bool,
@@ -118,6 +122,8 @@ pub enum CloudSyncUploadSelectionAction {
     ToggleQuickCommandItem(String),
     ToggleSerialProfiles,
     ToggleSerialProfileItem(String),
+    ToggleContainerProfiles,
+    ToggleContainerProfileItem(String),
     ToggleBleProfiles,
     ToggleBleProfileItem(String),
     ToggleTelnetProfiles,
@@ -146,6 +152,9 @@ pub struct CloudSyncUploadSelection {
     pub sync_serial_profiles: bool,
     pub serial_profile_item_ids: BTreeSet<String>,
     pub selected_serial_profile_ids: Option<BTreeSet<String>>,
+    pub sync_container_profiles: bool,
+    pub container_profile_item_ids: BTreeSet<String>,
+    pub selected_container_profile_ids: Option<BTreeSet<String>>,
     pub sync_ble_profiles: bool,
     pub ble_profile_item_ids: BTreeSet<String>,
     pub selected_ble_profile_ids: Option<BTreeSet<String>>,
@@ -229,6 +238,25 @@ impl CloudSyncUploadSelection {
                 })
                 .collect(),
             selected_serial_profile_ids: None,
+            sync_container_profiles: scope.sync_container_profiles,
+            container_profile_item_ids: local
+                .container_profiles
+                .as_ref()
+                .into_iter()
+                .flat_map(|snapshot| {
+                    snapshot
+                        .records
+                        .iter()
+                        .map(|profile| profile.id.clone())
+                        .chain(
+                            snapshot
+                                .tombstones
+                                .iter()
+                                .map(|tombstone| tombstone.id.clone()),
+                        )
+                })
+                .collect(),
+            selected_container_profile_ids: None,
             sync_ble_profiles: scope.sync_ble_profiles,
             ble_profile_item_ids: local
                 .ble_profiles
@@ -318,6 +346,7 @@ impl CloudSyncUploadSelection {
         scope.sync_forwards = Some(self.sync_forwards);
         scope.sync_quick_commands = Some(self.sync_quick_commands);
         scope.sync_serial_profiles = Some(self.sync_serial_profiles);
+        scope.sync_container_profiles = Some(self.sync_container_profiles);
         scope.sync_ble_profiles = Some(self.sync_ble_profiles);
         scope.sync_telnet_profiles = Some(self.sync_telnet_profiles);
         scope.sync_mosh_profiles = Some(self.sync_mosh_profiles);
@@ -340,6 +369,7 @@ impl CloudSyncUploadSelection {
             forward_ids: self.selected_forward_ids.clone(),
             quick_command_ids: self.selected_quick_command_ids.clone(),
             serial_profile_ids: self.selected_serial_profile_ids.clone(),
+            container_profile_ids: self.selected_container_profile_ids.clone(),
             ble_profile_ids: self.selected_ble_profile_ids.clone(),
             telnet_profile_ids: self.selected_telnet_profile_ids.clone(),
             mosh_profile_ids: self.selected_mosh_profile_ids.clone(),
@@ -365,6 +395,10 @@ impl CloudSyncUploadSelection {
                 .selected_serial_profile_ids
                 .as_ref()
                 .is_none_or(|selected| selected.contains(id)),
+            CloudSyncUploadSelectionAction::ToggleContainerProfileItem(id) => self
+                .selected_container_profile_ids
+                .as_ref()
+                .is_none_or(|selected| selected.contains(id)),
             CloudSyncUploadSelectionAction::ToggleBleProfileItem(id) => self
                 .selected_ble_profile_ids
                 .as_ref()
@@ -388,6 +422,7 @@ impl CloudSyncUploadSelection {
             CloudSyncUploadSelectionAction::ToggleForwards => self.sync_forwards,
             CloudSyncUploadSelectionAction::ToggleQuickCommands => self.sync_quick_commands,
             CloudSyncUploadSelectionAction::ToggleSerialProfiles => self.sync_serial_profiles,
+            CloudSyncUploadSelectionAction::ToggleContainerProfiles => self.sync_container_profiles,
             CloudSyncUploadSelectionAction::ToggleBleProfiles => self.sync_ble_profiles,
             CloudSyncUploadSelectionAction::ToggleTelnetProfiles => self.sync_telnet_profiles,
             CloudSyncUploadSelectionAction::ToggleMoshProfiles => self.sync_mosh_profiles,
@@ -437,6 +472,16 @@ impl CloudSyncUploadSelection {
                 toggle_optional_set_value(
                     &mut self.selected_serial_profile_ids,
                     &self.serial_profile_item_ids,
+                    id,
+                );
+            }
+            CloudSyncUploadSelectionAction::ToggleContainerProfiles => {
+                self.sync_container_profiles = !self.sync_container_profiles;
+            }
+            CloudSyncUploadSelectionAction::ToggleContainerProfileItem(id) => {
+                toggle_optional_set_value(
+                    &mut self.selected_container_profile_ids,
+                    &self.container_profile_item_ids,
                     id,
                 );
             }
@@ -537,6 +582,7 @@ pub fn cloud_sync_legacy_import_options(
             ),
             import_forwards: selection.import_forwards,
             import_serial_profiles: selection.import_serial_profiles,
+            import_container_profiles: selection.import_container_profiles,
             import_telnet_profiles: selection.import_telnet_profiles,
             import_mosh_profiles: selection.import_mosh_profiles,
             import_standalone_sftp_profiles: selection.import_connections,
@@ -589,6 +635,12 @@ impl CloudSyncPreviewSelection {
                     selection.serial_profiles
                 }),
             selected_serial_profile_ids: preview_serial_profile_ids(preview),
+            import_container_profiles: structured_full_selection
+                .as_ref()
+                .map_or(summary.container_profiles > 0, |selection| {
+                    selection.container_profiles
+                }),
+            selected_container_profile_ids: preview_container_profile_ids(preview),
             import_ble_profiles: structured_full_selection
                 .as_ref()
                 .map_or(summary.ble_profiles > 0, |selection| selection.ble_profiles),
@@ -734,6 +786,14 @@ impl CloudSyncPreviewSelection {
                     !self.selected_serial_profile_ids.is_empty(),
                     preview
                         .serial_profiles_snapshot
+                        .as_ref()
+                        .map(|snapshot| snapshot.records.len()),
+                ),
+            container_profiles: self.import_container_profiles
+                && structured_record_section_selected(
+                    !self.selected_container_profile_ids.is_empty(),
+                    preview
+                        .container_profiles_snapshot
                         .as_ref()
                         .map(|snapshot| snapshot.records.len()),
                 ),
@@ -1034,6 +1094,19 @@ impl CloudSyncPreviewSelection {
                     }),
             );
         }
+        if summary.container_profiles > 0 {
+            rows.push(CloudSyncPreviewSelectionRow {
+                label: CloudSyncPreviewSelectionLabel::I18nCount {
+                    key: "plugin.cloud_sync.preview.toggle_container_profiles",
+                    count_name: "count",
+                    count: summary.container_profiles,
+                },
+                meta: None,
+                checked: self.import_container_profiles,
+                disabled: false,
+                action: CloudSyncPreviewSelectionAction::ToggleContainerProfiles,
+            });
+        }
         if summary.forwards > 0 {
             rows.push(CloudSyncPreviewSelectionRow {
                 label: CloudSyncPreviewSelectionLabel::I18nCount {
@@ -1076,6 +1149,12 @@ impl CloudSyncPreviewSelection {
             }
             CloudSyncPreviewSelectionAction::ToggleSerialProfileItem(profile_id) => {
                 toggle_set_value(&mut self.selected_serial_profile_ids, profile_id);
+            }
+            CloudSyncPreviewSelectionAction::ToggleContainerProfiles => {
+                self.import_container_profiles = !self.import_container_profiles;
+            }
+            CloudSyncPreviewSelectionAction::ToggleContainerProfileItem(profile_id) => {
+                toggle_set_value(&mut self.selected_container_profile_ids, profile_id);
             }
             CloudSyncPreviewSelectionAction::ToggleBleProfiles => {
                 self.import_ble_profiles = !self.import_ble_profiles;
@@ -1212,6 +1291,29 @@ fn preview_serial_profile_ids(preview: &CloudSyncPendingPreview) -> BTreeSet<Str
     match preview {
         CloudSyncPendingPreview::Structured(preview) => preview
             .serial_profiles_snapshot
+            .as_ref()
+            .into_iter()
+            .flat_map(|snapshot| {
+                snapshot
+                    .records
+                    .iter()
+                    .map(|profile| profile.id.clone())
+                    .chain(
+                        snapshot
+                            .tombstones
+                            .iter()
+                            .map(|tombstone| tombstone.id.clone()),
+                    )
+            })
+            .collect(),
+        CloudSyncPendingPreview::Legacy { .. } => BTreeSet::new(),
+    }
+}
+
+fn preview_container_profile_ids(preview: &CloudSyncPendingPreview) -> BTreeSet<String> {
+    match preview {
+        CloudSyncPendingPreview::Structured(preview) => preview
+            .container_profiles_snapshot
             .as_ref()
             .into_iter()
             .flat_map(|snapshot| {
@@ -1512,6 +1614,12 @@ pub fn history_summary_from_manifest(manifest: &StructuredManifest) -> CloudSync
             .as_ref()
             .and_then(|entry| entry.record_count)
             .unwrap_or(0),
+        container_profiles: manifest
+            .sections
+            .container_profiles
+            .as_ref()
+            .and_then(|entry| entry.record_count)
+            .unwrap_or(0),
         ble_profiles: manifest
             .sections
             .ble_profiles
@@ -1553,6 +1661,7 @@ pub fn history_summary_from_legacy_preview(preview: &LegacyPreview) -> CloudSync
         forwards: preview.preview.total_forwards,
         quick_commands: preview.metadata.quick_commands_count.unwrap_or(0),
         serial_profiles: preview.metadata.serial_profiles_count.unwrap_or(0),
+        container_profiles: preview.metadata.container_profiles_count.unwrap_or(0),
         ble_profiles: 0,
         telnet_profiles: preview.metadata.telnet_profiles_count.unwrap_or(0),
         mosh_profiles: preview.metadata.mosh_profiles_count.unwrap_or(0),
@@ -1573,6 +1682,7 @@ pub fn has_cloud_sync_structured_conflict(
             || dirty.forwards
             || dirty.quick_commands
             || dirty.serial_profiles
+            || dirty.container_profiles
             || dirty.ble_profiles
             || dirty.telnet_profiles
             || dirty.mosh_profiles
@@ -1591,6 +1701,9 @@ pub fn has_cloud_sync_structured_conflict(
         return true;
     }
     if dirty.serial_profiles && remote.serial_profiles != previous.serial_profiles {
+        return true;
+    }
+    if dirty.container_profiles && remote.container_profiles != previous.container_profiles {
         return true;
     }
     if dirty.ble_profiles && remote.ble_profiles != previous.ble_profiles {
@@ -1668,6 +1781,7 @@ mod tests {
             forwards_snapshot: None,
             quick_commands_snapshot_json: None,
             serial_profiles_snapshot: None,
+            container_profiles_snapshot: None,
             ble_profiles_snapshot: None,
             telnet_profiles_snapshot: None,
             mosh_profiles_snapshot: None,
@@ -1677,6 +1791,7 @@ mod tests {
             base_forwards_snapshot: None,
             base_quick_commands_snapshot_json: None,
             base_serial_profiles_snapshot: None,
+            base_container_profiles_snapshot: None,
             base_ble_profiles_snapshot: None,
             base_telnet_profiles_snapshot: None,
             base_mosh_profiles_snapshot: None,

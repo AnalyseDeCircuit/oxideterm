@@ -33,6 +33,7 @@ oxideterm-audit = { path = "../oxideterm-audit" }
 oxideterm-ble = { path = "../oxideterm-ble" }
 oxideterm-connections = { path = "../oxideterm-connections" }
 oxideterm-discovery = { path = "../oxideterm-discovery" }
+oxideterm-docker = { path = "../oxideterm-docker" }
 oxideterm-forwarding = { path = "../oxideterm-forwarding" }
 oxideterm-ftp = { path = "../oxideterm-ftp" }
 oxideterm-local-files = { path = "../oxideterm-local-files" }

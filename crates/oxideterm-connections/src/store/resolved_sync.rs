@@ -3,6 +3,7 @@
 pub struct ResolvedConnectionConfiguration {
     pub connections: SavedConnectionsSyncSnapshot,
     pub serial: Vec<SerialProfile>,
+    pub container: Vec<ContainerProfile>,
     pub ble: Vec<BleProfile>,
     pub telnet: Vec<TelnetProfile>,
     pub mosh: Vec<MoshProfile>,
@@ -160,6 +161,27 @@ impl ConnectionStore {
             }
         }
         next.serial_profiles = incoming.serial;
+        for profile in &incoming.container {
+            profile.validate()?;
+        }
+        let container_ids = incoming
+            .container
+            .iter()
+            .map(|p| p.id.clone())
+            .collect::<HashSet<_>>();
+        next.container_tombstones
+            .retain(|entry| !container_ids.contains(&entry.id));
+        for profile in &self.data.container_profiles {
+            if !container_ids.contains(&profile.id) {
+                next.container_tombstones
+                    .retain(|entry| entry.id != profile.id);
+                next.container_tombstones.push(DeletedConnectionTombstone {
+                    id: profile.id.clone(),
+                    deleted_at: now,
+                });
+            }
+        }
+        next.container_profiles = incoming.container;
         for profile in &incoming.ble {
             profile.validate()?;
         }

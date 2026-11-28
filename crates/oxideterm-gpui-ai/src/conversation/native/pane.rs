@@ -25,6 +25,9 @@ pub fn ai_terminal_environment(
             "Serial device (OS and command interface unverified)".to_string()
         }
         TerminalSessionKind::Ble => "BLE device (OS and command interface unverified)".to_string(),
+        TerminalSessionKind::ContainerExec => {
+            "Container exec (in-container shell, guest OS unverified)".to_string()
+        }
     }
 }
 
@@ -106,6 +109,9 @@ fn terminal_ai_inline_os_context(kind: oxideterm_terminal::TerminalSessionKind) 
         }
         oxideterm_terminal::TerminalSessionKind::Ble => {
             "BLE device (command interface unknown)".into()
+        }
+        oxideterm_terminal::TerminalSessionKind::ContainerExec => {
+            "Container exec shell (guest OS unknown)".into()
         }
     }
 }

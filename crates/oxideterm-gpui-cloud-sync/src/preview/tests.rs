@@ -184,6 +184,7 @@ fn structured_preview(
             serde_json::to_string(&remote_quick_commands).expect("remote quick commands"),
         ),
         serial_profiles_snapshot: None,
+        container_profiles_snapshot: None,
         ble_profiles_snapshot: None,
         telnet_profiles_snapshot: None,
         mosh_profiles_snapshot: None,
@@ -194,6 +195,7 @@ fn structured_preview(
         base_quick_commands_snapshot_json: base_quick_commands
             .map(|snapshot| serde_json::to_string(&snapshot).expect("base quick commands")),
         base_serial_profiles_snapshot: None,
+        base_container_profiles_snapshot: None,
         base_ble_profiles_snapshot: None,
         base_telnet_profiles_snapshot: None,
         base_mosh_profiles_snapshot: None,

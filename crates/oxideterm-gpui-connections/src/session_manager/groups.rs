@@ -75,6 +75,12 @@ pub(super) fn connection_counts_by_group(
                 .iter()
                 .filter_map(|p| p.group.as_deref()),
         )
+        .chain(
+            store
+                .container_profiles()
+                .iter()
+                .filter_map(|p| p.group.as_deref()),
+        )
         .chain(tunnels.iter().filter_map(|forward| {
             forward
                 .tunnel
@@ -153,6 +159,11 @@ pub fn session_group_tree(
         }
     }
     for profile in store.remote_desktop_profiles() {
+        if let Some(group) = profile.group.as_deref() {
+            add_group_path_segments(group, &mut paths);
+        }
+    }
+    for profile in store.container_profiles() {
         if let Some(group) = profile.group.as_deref() {
             add_group_path_segments(group, &mut paths);
         }
@@ -404,6 +415,7 @@ impl CatalogGroups<'_> {
         let mut remote_desktop_ids = Vec::new();
         let mut plugin_ids = Vec::new();
         let mut tunnel_ids = Vec::new();
+        let mut container_profile_ids = Vec::new();
         for target in targets.iter().filter(|target| {
             // Drop evaluation never writes metadata; only assets whose group changes reach storage.
             self.session_target_group(target)
@@ -414,6 +426,9 @@ impl CatalogGroups<'_> {
                 SessionManagerSelectionTarget::Plugin(id) => plugin_ids.push(id.clone()),
                 SessionManagerSelectionTarget::Connection(id) => connection_ids.push(id.clone()),
                 SessionManagerSelectionTarget::Serial(id) => serial_profile_ids.push(id.clone()),
+                SessionManagerSelectionTarget::Container(id) => {
+                    container_profile_ids.push(id.clone())
+                }
                 SessionManagerSelectionTarget::Ble(id) => ble_profile_ids.push(id.clone()),
                 SessionManagerSelectionTarget::LocalTerminal(id) => {
                     local_terminal_profile_ids.push(id.clone())
@@ -434,6 +449,7 @@ impl CatalogGroups<'_> {
             || !plugin_ids.is_empty()
             || !ftp_profile_ids.is_empty()
             || !serial_profile_ids.is_empty()
+            || !container_profile_ids.is_empty()
             || !ble_profile_ids.is_empty()
             || !local_terminal_profile_ids.is_empty()
             || !telnet_profile_ids.is_empty()
@@ -473,7 +489,20 @@ impl CatalogGroups<'_> {
             group,
         ) {
             Ok(count) => {
-                let count = count + tunnel_ids.len();
+                // Container profiles keep their own group-move save; a failure
+                // only rolls back the tunnel groups above and reports through
+                // the same error path.
+                let container_result = self
+                    .store
+                    .move_container_profiles_to_group(&container_profile_ids, group);
+                let Ok(container_count) = container_result else {
+                    let error = container_result.unwrap_err().to_string();
+                    self.manager.update(cx, |session_manager, cx| {
+                        session_manager.set_status(Some(error), cx)
+                    });
+                    return;
+                };
+                let count = count + container_count + tunnel_ids.len();
                 self.manager.update(cx, |session_manager, cx| {
                     match interaction {
                         SessionManagerMoveInteraction::BatchMenu => {
@@ -545,6 +574,12 @@ impl CatalogGroups<'_> {
             SessionManagerSelectionTarget::Serial(id) => self
                 .store
                 .serial_profiles()
+                .iter()
+                .find(|profile| profile.id == id.as_str())
+                .map(|profile| profile.group.as_deref()),
+            SessionManagerSelectionTarget::Container(id) => self
+                .store
+                .container_profiles()
                 .iter()
                 .find(|profile| profile.id == id.as_str())
                 .map(|profile| profile.group.as_deref()),

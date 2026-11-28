@@ -1268,6 +1268,9 @@ impl WorkspaceApp {
                     SessionManagerDisplayItem::Tunnel(_) => ("tunnel", LucideIcon::Network),
                     SessionManagerDisplayItem::Plugin(_) => ("plugin-profile", LucideIcon::Puzzle),
                     SessionManagerDisplayItem::Serial(_) => ("serial-profile", LucideIcon::Radio),
+                    SessionManagerDisplayItem::Container(_) => {
+                        ("container-profile", LucideIcon::Docker)
+                    }
                     SessionManagerDisplayItem::Ble(_) => ("ble-profile", LucideIcon::Bluetooth),
                     SessionManagerDisplayItem::Telnet(_) => {
                         ("telnet-profile", LucideIcon::Terminal)

@@ -516,7 +516,8 @@
         "github_oauth_client_id": "GitHub OAuth Client ID",
         "microsoft_oauth_client_id": "Microsoft OAuth Client ID",
         "microsoft_access_token": "Microsoft 存取權杖",
-        "google_oauth_client_id": "Google OAuth Client ID"
+        "google_oauth_client_id": "Google OAuth Client ID",
+        "sync_container_profiles": "同步容器設定檔"
       },
       "auth": {
         "bearer": "Bearer",
@@ -556,7 +557,8 @@
         "plugin_settings_selected_detail": "已選取外掛：{{plugins}}",
         "plugin_settings_disabled_detail": "目前同步範圍已排除外掛設定。",
         "sensitive_credentials_enabled_detail": "加密後的敏感憑據物件會參與同步。",
-        "sensitive_credentials_disabled_detail": "連線密碼、金鑰密碼、託管私鑰、AI 金鑰和提權憑據會被排除，直到啟用敏感憑據同步。"
+        "sensitive_credentials_disabled_detail": "連線密碼、金鑰密碼、託管私鑰、AI 金鑰和提權憑據會被排除，直到啟用敏感憑據同步。",
+        "container_profiles_detail": "包含容器連線設定檔。"
       },
       "notes": {
         "upload_only": "自動同步只會自動上傳。發現遠端更新後，仍然需要使用者明確確認。",
@@ -770,7 +772,9 @@
         "sensitive_summary_title": "敏感憑證",
         "profile_credential_actions": "{{name}}：{{stored}} 項已儲存憑證，{{cleared}} 項刪除請求。",
         "sensitive_remote_summary": "遠端加密憑證包含 {{connections}} 個連線記錄和 {{portableSecrets}} 個可攜密鑰。具體值一律隱藏。",
-        "sensitive_upload_summary": "將上傳 {{passwords}} 個密碼、{{keyPassphrases}} 個密鑰口令、{{managedKeys}} 個託管密鑰、{{managedKeyPassphrases}} 個託管密鑰口令和 {{portableSecrets}} 個可攜密鑰。"
+        "sensitive_upload_summary": "將上傳 {{passwords}} 個密碼、{{keyPassphrases}} 個密鑰口令、{{managedKeys}} 個託管密鑰、{{managedKeyPassphrases}} 個託管密鑰口令和 {{portableSecrets}} 個可攜密鑰。",
+        "container_profiles_label": "容器設定檔",
+        "toggle_container_profiles": "匯入容器設定檔（{{count}}）"
       },
       "confirm": {
         "import_title": "確認匯入遠端快照？",
@@ -934,7 +938,10 @@
         "tls_mode": "TLS 模式",
         "tls_verification": "TLS 驗證",
         "tls_server_name": "TLS 伺服器名稱",
-        "setting_field": "設定欄位"
+        "setting_field": "設定欄位",
+        "container_name": "容器名稱",
+        "engine": "引擎",
+        "launch_mode": "啟動方式"
       },
       "tabs": {
         "overview": "概覽",

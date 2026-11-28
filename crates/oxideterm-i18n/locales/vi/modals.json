@@ -522,7 +522,46 @@
       "serial_invalid_baud_rate": "Tốc độ baud phải lớn hơn 0",
       "serial_port_required": "Chọn hoặc nhập đường dẫn cổng serial",
       "ble_save_failed": "Không thể lưu kết nối BLE",
-      "ble_secondary_suffix": " · phụ"
+      "ble_secondary_suffix": " · phụ",
+      "transport_container": "Container",
+      "container_description": "Kết nối trực tiếp shell của container Docker, Podman hoặc Kubernetes mà không cần SSH.",
+      "container_engine": "Engine",
+      "container_pod_container": "Container của pod",
+      "container_refresh_engines": "Làm mới engine",
+      "container_refresh_containers": "Làm mới container",
+      "container_loading_engines": "Đang phát hiện engine…",
+      "container_no_engines": "Không tìm thấy container engine",
+      "container_select_engine": "Chọn engine",
+      "container_container": "Container",
+      "container_pods": "Pods",
+      "container_running_filter": "Chỉ đang chạy",
+      "container_select_container": "Chọn container",
+      "container_loading_list": "Đang tải container…",
+      "container_no_containers": "Không có container hoặc pod nào",
+      "container_no_running_containers": "Không có container hoặc pod nào đang chạy",
+      "container_select_required": "Hãy chọn một container trước",
+      "container_load_failed": "Không thể tải danh sách container",
+      "container_shell": "Shell",
+      "container_shell_placeholder": "/bin/bash (mặc định)",
+      "container_launch_mode": "Chế độ khởi động",
+      "container_launch_mode_shell": "Shell",
+      "container_launch_mode_command": "Lệnh",
+      "container_launch_mode_attach": "Gắn vào",
+      "container_command": "Lệnh",
+      "container_command_placeholder": "vd. top -d 1",
+      "container_command_required": "Chế độ lệnh cần một dòng lệnh",
+      "container_attach_hint": "Gắn vào TTY của tiến trình chính của container thay vì khởi động shell mới.",
+      "container_details_title": "Chi tiết container",
+      "container_details_loading": "Đang đọc chi tiết container…",
+      "container_details_none": "Không có chi tiết về điểm gắn kết, cổng hoặc mạng",
+      "container_details_mounts": "Điểm gắn kết",
+      "container_details_ports": "Cổng",
+      "container_details_networks": "Mạng",
+      "container_details_pod_ip": "IP của pod",
+      "container_access_denied": "Không có quyền: người dùng hiện tại không thể truy cập socket của container engine. Trên Linux hãy chạy `sudo usermod -aG docker $USER` rồi đăng nhập lại, hoặc dùng engine rootless (Docker rootless hoặc socket người dùng của Podman).",
+      "container_save_failed": "Lưu hồ sơ container thất bại",
+      "container_profile_name": "Tên hồ sơ",
+      "container_profile_name_placeholder": "Container của tôi"
     },
     "managed_key": {
       "selector": {
@@ -721,19 +760,6 @@
       "use_global": "Dùng toàn cục",
       "direct": "Trực tiếp",
       "custom": "Tùy chỉnh"
-    }
-  },
-  "local_shell": {
-    "background": {
-      "kill": "Kết thúc",
-      "lines": "dòng",
-      "resume": "Tiếp tục",
-      "title": "Phiên nền"
-    },
-    "toast": {
-      "attached": "Phiên đã được tiếp tục",
-      "detached": "Phiên đã chuyển vào nền",
-      "detached_desc": "{{shell}} đang chạy trong nền"
     }
   },
   "export": {

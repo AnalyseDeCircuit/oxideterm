@@ -392,6 +392,31 @@ impl TerminalSession {
         }
     }
 
+    pub fn container_exec_with_graphics_and_encoding(
+        config: DockerExecSessionConfig,
+        cols: usize,
+        rows: usize,
+        graphics_options: GraphicsOptions,
+        encoding: TerminalEncoding,
+        scrollback_lines: usize,
+    ) -> Self {
+        let kitty_file_transmission = Some(graphics_options.kitty_file_transmission.clone());
+        let audit = terminal_audit_context("container-exec", &config.endpoint_label());
+        Self {
+            audit: audit.clone(),
+            backend: Box::new(DockerExecSession::new_with_encoding(
+                config,
+                audit,
+                cols,
+                rows,
+                graphics_options,
+                encoding,
+                scrollback_lines,
+            )),
+            kitty_file_transmission,
+        }
+    }
+
     pub fn audit_context(&self) -> Option<oxideterm_audit::AuditContext> {
         if let Some(mut context) = self.backend.audit_context() {
             // The connection owns the transport identity; the terminal keeps
@@ -408,6 +433,10 @@ impl TerminalSession {
 
     pub fn kind(&self) -> TerminalSessionKind {
         self.backend.kind()
+    }
+
+    pub fn container_connection(&self) -> Option<&oxideterm_docker::ContainerConnectionConfig> {
+        self.backend.container_connection()
     }
 
     pub fn kitty_file_transmission_control(&self) -> Option<KittyFileTransmissionControl> {

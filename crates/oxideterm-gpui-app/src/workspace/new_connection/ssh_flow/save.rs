@@ -155,6 +155,23 @@ impl WorkspaceApp {
                 self.start_ble_open_flow(open, cx);
                 cx.notify();
             }
+            Some(Effect::Container(open)) => {
+                self.close_new_connection_form(window, cx);
+                // config.label already carries "<engine> <container>" so the
+                // tab and the active-session list share one name.
+                let title = open.config.label.clone();
+                // Pane initialization failures surface inside the pane like the
+                // other local transports; nothing extra to roll back here.
+                let _ = self.create_container_terminal_tab_for_connection(
+                    open.config,
+                    open.terminal_options,
+                    title,
+                    None,
+                    window,
+                    cx,
+                );
+                cx.notify();
+            }
             Some(Effect::Mosh(mut open, reconnect_id)) => {
                 if let Some(id) = reconnect_id {
                     let Some(attempt) = self.begin_standalone_reconnect(&id, cx) else {

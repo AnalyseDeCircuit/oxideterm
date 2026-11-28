@@ -95,6 +95,9 @@ pub fn session_manager_row_menu_selection_target(
         SessionManagerRowActionTarget::Serial(id) => {
             Some(SessionManagerSelectionTarget::Serial(id.clone()))
         }
+        SessionManagerRowActionTarget::Container(id) => {
+            Some(SessionManagerSelectionTarget::Container(id.clone()))
+        }
         SessionManagerRowActionTarget::Ble(id) => {
             Some(SessionManagerSelectionTarget::Ble(id.clone()))
         }

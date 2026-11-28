@@ -358,6 +358,9 @@ impl CloudSyncPageRenderer {
             "plugin.cloud_sync.settings.sync_serial_profiles" => Some(
                 CloudSyncPreviewSelectionAction::ToggleSerialProfileItem(item.item_key.clone()),
             ),
+            "plugin.cloud_sync.settings.sync_container_profiles" => Some(
+                CloudSyncPreviewSelectionAction::ToggleContainerProfileItem(item.item_key.clone()),
+            ),
             "plugin.cloud_sync.settings.sync_ble_profiles" => Some(
                 CloudSyncPreviewSelectionAction::ToggleBleProfileItem(item.item_key.clone()),
             ),
@@ -396,6 +399,9 @@ impl CloudSyncPageRenderer {
             }
             CloudSyncPreviewSelectionAction::ToggleSerialProfileItem(id) => {
                 selection.selected_serial_profile_ids.contains(id)
+            }
+            CloudSyncPreviewSelectionAction::ToggleContainerProfileItem(id) => {
+                selection.selected_container_profile_ids.contains(id)
             }
             CloudSyncPreviewSelectionAction::ToggleBleProfileItem(id) => {
                 selection.selected_ble_profile_ids.contains(id)
@@ -485,6 +491,9 @@ impl CloudSyncPageRenderer {
             ),
             "plugin.cloud_sync.settings.sync_serial_profiles" => Some(
                 CloudSyncUploadSelectionAction::ToggleSerialProfileItem(item.item_key.clone()),
+            ),
+            "plugin.cloud_sync.settings.sync_container_profiles" => Some(
+                CloudSyncUploadSelectionAction::ToggleContainerProfileItem(item.item_key.clone()),
             ),
             "plugin.cloud_sync.settings.sync_ble_profiles" => Some(
                 CloudSyncUploadSelectionAction::ToggleBleProfileItem(item.item_key.clone()),

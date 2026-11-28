@@ -516,7 +516,8 @@
         "github_oauth_client_id": "GitHub OAuth Client ID",
         "microsoft_oauth_client_id": "Microsoft OAuth-Client-ID",
         "microsoft_access_token": "Microsoft-Zugriffstoken",
-        "google_oauth_client_id": "Google OAuth-Client-ID"
+        "google_oauth_client_id": "Google OAuth-Client-ID",
+        "sync_container_profiles": "Container-Profile synchronisieren"
       },
       "auth": {
         "bearer": "Bearer",
@@ -556,7 +557,8 @@
         "plugin_settings_selected_detail": "Ausgewählte Plugins: {{plugins}}",
         "plugin_settings_disabled_detail": "Plugin-Einstellungen sind im aktuellen Synchronisierungsumfang ausgeschlossen.",
         "sensitive_credentials_enabled_detail": "Verschlüsselte Objekte mit sensiblen Anmeldedaten sind enthalten.",
-        "sensitive_credentials_disabled_detail": "Verbindungspasswörter, Schlüssel-Passphrasen, verwaltete private Schlüssel, KI-Schlüssel und Berechtigungsdaten sind ausgeschlossen, bis die Synchronisierung sensibler Anmeldedaten aktiviert ist."
+        "sensitive_credentials_disabled_detail": "Verbindungspasswörter, Schlüssel-Passphrasen, verwaltete private Schlüssel, KI-Schlüssel und Berechtigungsdaten sind ausgeschlossen, bis die Synchronisierung sensibler Anmeldedaten aktiviert ist.",
+        "container_profiles_detail": "Container-Verbindungsprofile sind enthalten."
       },
       "notes": {
         "upload_only": "Automatische Synchronisierung lädt nur hoch. Remote-Aktualisierungen erfordern immer eine Benutzerbestätigung.",
@@ -770,7 +772,9 @@
         "sensitive_summary_title": "Sensible Anmeldedaten",
         "profile_credential_actions": "{{name}}: {{stored}} gespeicherte Zugangsdaten, {{cleared}} Löschanforderungen.",
         "sensitive_remote_summary": "Die verschlüsselten Remote-Anmeldedaten enthalten {{connections}} Verbindungsdatensatz/-sätze und {{portableSecrets}} portable Geheimnis(se). Werte bleiben verborgen.",
-        "sensitive_upload_summary": "Es werden {{passwords}} Passwort/Passwörter, {{keyPassphrases}} Schlüssel-Passphrase(n), {{managedKeys}} verwaltete Schlüssel, {{managedKeyPassphrases}} Passphrase(n) für verwaltete Schlüssel und {{portableSecrets}} portable Geheimnis(se) hochgeladen."
+        "sensitive_upload_summary": "Es werden {{passwords}} Passwort/Passwörter, {{keyPassphrases}} Schlüssel-Passphrase(n), {{managedKeys}} verwaltete Schlüssel, {{managedKeyPassphrases}} Passphrase(n) für verwaltete Schlüssel und {{portableSecrets}} portable Geheimnis(se) hochgeladen.",
+        "container_profiles_label": "Container-Profile",
+        "toggle_container_profiles": "Container-Profile importieren ({{count}})"
       },
       "confirm": {
         "import_title": "Remote-Snapshot importieren?",
@@ -934,7 +938,10 @@
         "tls_mode": "TLS-Modus",
         "tls_verification": "TLS-Prüfung",
         "tls_server_name": "TLS-Servername",
-        "setting_field": "Einstellungsfeld"
+        "setting_field": "Einstellungsfeld",
+        "container_name": "Containername",
+        "engine": "Engine",
+        "launch_mode": "Startmodus"
       },
       "tabs": {
         "overview": "Übersicht",

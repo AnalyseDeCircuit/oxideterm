@@ -22,6 +22,7 @@ pub enum ConnectionTransport {
     Rdp,
     Vnc,
     WslGraphics,
+    Container,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -42,7 +43,8 @@ pub fn transport_default_port(transport: ConnectionTransport) -> Option<&'static
         ConnectionTransport::Vnc => Some(VNC_DEFAULT_PORT_TEXT),
         ConnectionTransport::Serial
         | ConnectionTransport::Ble
-        | ConnectionTransport::WslGraphics => None,
+        | ConnectionTransport::WslGraphics
+        | ConnectionTransport::Container => None,
     }
 }
 
@@ -107,10 +109,13 @@ pub fn transport_username_transition(
 }
 
 pub fn transport_is_persistable(transport: ConnectionTransport) -> bool {
-    // WSL graphics and BLE discovery is a launch surface without saved connection metadata.
+    // WSL graphics, BLE discovery and container exec are launch surfaces without
+    // saved connection metadata.
     !matches!(
         transport,
-        ConnectionTransport::WslGraphics | ConnectionTransport::Ble
+        ConnectionTransport::WslGraphics
+            | ConnectionTransport::Ble
+            | ConnectionTransport::Container
     )
 }
 
@@ -169,9 +174,12 @@ mod tests {
             Some(TransportUsernameTransition::Clear)
         );
         assert!(transport_is_persistable(ConnectionTransport::LocalTerminal));
+        // Container launches keep their config in the standalone record only.
+        assert!(!transport_is_persistable(ConnectionTransport::Container));
         assert_eq!(
             transport_default_port(ConnectionTransport::LocalTerminal),
             None
         );
+        assert_eq!(transport_default_port(ConnectionTransport::Container), None);
     }
 }

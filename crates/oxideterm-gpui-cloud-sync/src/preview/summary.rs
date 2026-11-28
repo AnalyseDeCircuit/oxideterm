@@ -184,6 +184,13 @@ pub fn cloud_sync_coverage_model(raw_scope: &RawSyncScope) -> Vec<CloudSyncCover
             ),
         },
         CloudSyncCoverageItem {
+            label_key: "plugin.cloud_sync.settings.sync_container_profiles",
+            status: coverage_status_from_bool(scope.sync_container_profiles),
+            detail: CloudSyncCoverageDetail::Static(
+                "plugin.cloud_sync.coverage.container_profiles_detail",
+            ),
+        },
+        CloudSyncCoverageItem {
             label_key: "plugin.cloud_sync.settings.sync_ble_profiles",
             status: coverage_status_from_bool(scope.sync_ble_profiles),
             detail: CloudSyncCoverageDetail::Static(
@@ -263,6 +270,12 @@ pub fn cloud_sync_preview_impact_items(
         "plugin.cloud_sync.preview.serial_profiles_label",
         summary.serial_profiles,
         selection.import_serial_profiles,
+    );
+    push_preview_impact(
+        &mut items,
+        "plugin.cloud_sync.preview.container_profiles_label",
+        summary.container_profiles,
+        selection.import_container_profiles,
     );
     push_preview_impact(
         &mut items,
@@ -379,6 +392,16 @@ pub fn cloud_sync_upload_diff_items(
     );
     push_section_diff(
         &mut items,
+        CloudSyncDiffLabel::Key("plugin.cloud_sync.settings.sync_container_profiles"),
+        scope.sync_container_profiles,
+        current.container_profiles.as_deref(),
+        baseline.and_then(|state| state.container_profiles.as_deref()),
+        remote.and_then(|sections| sections.container_profiles.as_deref()),
+        remote_known,
+        Some(snapshot.container_profiles_record_count),
+    );
+    push_section_diff(
+        &mut items,
         CloudSyncDiffLabel::Key("plugin.cloud_sync.settings.sync_ble_profiles"),
         scope.sync_ble_profiles,
         current.ble_profiles.as_deref(),
@@ -468,6 +491,21 @@ pub fn cloud_sync_apply_diff_items(
         Some(
             preview
                 .serial_profiles_snapshot
+                .as_ref()
+                .map_or(0, |snapshot| {
+                    snapshot.records.len() + snapshot.tombstones.len()
+                }),
+        ),
+    );
+    push_apply_section_diff(
+        &mut items,
+        CloudSyncDiffLabel::Key("plugin.cloud_sync.settings.sync_container_profiles"),
+        selection.import_container_profiles,
+        remote.container_profiles.as_deref(),
+        local.container_profiles.as_deref(),
+        Some(
+            preview
+                .container_profiles_snapshot
                 .as_ref()
                 .map_or(0, |snapshot| {
                     snapshot.records.len() + snapshot.tombstones.len()
@@ -618,6 +656,17 @@ pub fn cloud_sync_apply_field_diff_items(
             &selection.conflict_strategy,
         );
     }
+    if selection.import_container_profiles
+        && let Some(remote) = preview.container_profiles_snapshot.as_ref()
+    {
+        push_container_profile_field_diffs(
+            &mut items,
+            remote,
+            preview.base_container_profiles_snapshot.as_ref(),
+            local.container_profiles.as_ref(),
+            &selection.conflict_strategy,
+        );
+    }
     if selection.import_ble_profiles
         && let Some(remote) = preview.ble_profiles_snapshot.as_ref()
     {
@@ -635,6 +684,14 @@ pub fn cloud_sync_apply_field_diff_items(
             preview.serial_profiles_snapshot.as_ref(),
             local.serial_profiles.as_ref(),
             "plugin.cloud_sync.settings.sync_serial_profiles"
+        );
+    }
+    if selection.import_container_profiles {
+        profile_deletions!(
+            &mut items,
+            preview.container_profiles_snapshot.as_ref(),
+            local.container_profiles.as_ref(),
+            "plugin.cloud_sync.settings.sync_container_profiles"
         );
     }
     if selection.import_ble_profiles {
@@ -733,6 +790,15 @@ pub fn cloud_sync_upload_field_diff_items(
             local,
         );
     }
+    if scope.sync_container_profiles
+        && let Some(local) = local.container_profiles.as_ref()
+    {
+        push_upload_container_profile_field_diffs(
+            &mut items,
+            remote_preview.container_profiles_snapshot.as_ref(),
+            local,
+        );
+    }
     if scope.sync_ble_profiles
         && let Some(local) = local.ble_profiles.as_ref()
     {
@@ -748,6 +814,14 @@ pub fn cloud_sync_upload_field_diff_items(
             local.serial_profiles.as_ref(),
             remote_preview.serial_profiles_snapshot.as_ref(),
             "plugin.cloud_sync.settings.sync_serial_profiles"
+        );
+    }
+    if scope.sync_container_profiles {
+        profile_deletions!(
+            &mut items,
+            local.container_profiles.as_ref(),
+            remote_preview.container_profiles_snapshot.as_ref(),
+            "plugin.cloud_sync.settings.sync_container_profiles"
         );
     }
     if scope.sync_ble_profiles {

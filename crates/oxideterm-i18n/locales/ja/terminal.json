@@ -675,5 +675,18 @@
   },
   "workspace": {
     "new_local_terminal": "新しいローカルターミナル"
+  },
+  "local_shell": {
+    "background": {
+      "kill": "終了",
+      "lines": "行",
+      "resume": "再開",
+      "title": "バックグラウンドセッション"
+    },
+    "toast": {
+      "attached": "セッションを再開しました",
+      "detached": "セッションをバックグラウンドに移動しました",
+      "detached_desc": "{{shell}} はバックグラウンドで実行中です"
+    }
   }
 }

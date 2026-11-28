@@ -522,7 +522,46 @@
       "serial_invalid_baud_rate": "波特率必須大於 0",
       "serial_port_required": "請選擇或輸入序列埠路徑",
       "ble_save_failed": "無法儲存 BLE 連線",
-      "ble_secondary_suffix": " · 次要"
+      "ble_secondary_suffix": " · 次要",
+      "transport_container": "容器",
+      "container_description": "無需 SSH，直接連線 Docker、Podman 或 Kubernetes 容器的互動終端。",
+      "container_engine": "引擎",
+      "container_pod_container": "Pod 容器",
+      "container_refresh_engines": "重新整理引擎",
+      "container_refresh_containers": "重新整理容器",
+      "container_loading_engines": "正在偵測引擎…",
+      "container_no_engines": "未發現容器引擎",
+      "container_select_engine": "選擇引擎",
+      "container_container": "容器",
+      "container_pods": "Pods",
+      "container_running_filter": "僅執行中",
+      "container_select_container": "選擇容器",
+      "container_loading_list": "正在載入容器…",
+      "container_no_containers": "沒有容器或 Pod",
+      "container_no_running_containers": "沒有執行中的容器或 Pod",
+      "container_select_required": "請先選擇一個容器",
+      "container_load_failed": "載入容器清單失敗",
+      "container_shell": "Shell",
+      "container_shell_placeholder": "/bin/bash（預設）",
+      "container_launch_mode": "啟動方式",
+      "container_launch_mode_shell": "Shell",
+      "container_launch_mode_command": "命令",
+      "container_launch_mode_attach": "附加",
+      "container_command": "命令",
+      "container_command_placeholder": "例如 top -d 1",
+      "container_command_required": "命令模式需要填寫命令列",
+      "container_attach_hint": "附加到容器主程序的 TTY，而不是啟動新的 shell。",
+      "container_details_title": "容器詳情",
+      "container_details_loading": "正在讀取容器詳情…",
+      "container_details_none": "暫無掛載、連接埠或網路資訊",
+      "container_details_mounts": "掛載",
+      "container_details_ports": "連接埠",
+      "container_details_networks": "網路",
+      "container_details_pod_ip": "Pod IP",
+      "container_access_denied": "權限不足：目前使用者無法存取容器引擎 socket。Linux 上執行 `sudo usermod -aG docker $USER` 並重新登入，或改用 rootless 引擎（rootless Docker / Podman 使用者級 socket）。",
+      "container_save_failed": "儲存容器設定檔失敗",
+      "container_profile_name": "設定檔名稱",
+      "container_profile_name_placeholder": "我的容器"
     },
     "managed_key": {
       "selector": {
@@ -721,19 +760,6 @@
       "use_global": "使用全域",
       "direct": "直連",
       "custom": "自訂"
-    }
-  },
-  "local_shell": {
-    "background": {
-      "kill": "終止",
-      "lines": "行",
-      "resume": "恢復",
-      "title": "背景工作階段"
-    },
-    "toast": {
-      "attached": "工作階段已恢復",
-      "detached": "工作階段已移至背景",
-      "detached_desc": "{{shell}} 正在背景執行"
     }
   },
   "export": {

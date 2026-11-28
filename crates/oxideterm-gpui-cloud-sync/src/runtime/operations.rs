@@ -1392,6 +1392,7 @@ impl CloudSyncRuntime<'_> {
             forwards: self.forwarding_registry.list_all_saved_forwards().len(),
             quick_commands: 0,
             serial_profiles: self.connection_store.serial_profiles().len(),
+            container_profiles: self.connection_store.container_profiles().len(),
             ble_profiles: self.connection_store.ble_profiles().len(),
             telnet_profiles: self.connection_store.telnet_profiles().len(),
             mosh_profiles: self.connection_store.mosh_profiles().len(),

@@ -410,6 +410,11 @@ impl ConnectionsViews {
             .update(cx, |view, cx| view.refresh_ble_adapters(cx));
     }
 
+    pub fn refresh_container_engines(&self, cx: &mut App) {
+        self.form_body
+            .update(cx, |view, cx| view.refresh_container_engines(true, cx));
+    }
+
     pub fn finish_jump_form(&self, commit: bool, tokens: &ThemeTokens, cx: &mut App) {
         let delay = oxideterm_gpui_ui::motion::duration(
             tokens,

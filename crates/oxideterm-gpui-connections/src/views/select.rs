@@ -39,6 +39,8 @@ pub enum NewConnectionSelect {
     TerminalDeleteSequence,
     TelnetInputLineEnding,
     TelnetOutputLineEnding,
+    ContainerEngine,
+    ContainerPodContainer,
     BleInputLineEnding,
     BleOutputLineEnding,
     BleSendMode,
@@ -112,6 +114,10 @@ pub fn select_anchor_id(select_id: NewConnectionSelect) -> SelectAnchorId {
         }
         NewConnectionSelect::LocalShell => SelectAnchorId::NewConnectionLocalShell,
         NewConnectionSelect::SerialPort => SelectAnchorId::NewConnectionSerialPort,
+        NewConnectionSelect::ContainerEngine => SelectAnchorId::NewConnectionContainerEngine,
+        NewConnectionSelect::ContainerPodContainer => {
+            SelectAnchorId::NewConnectionContainerPodContainer
+        }
         NewConnectionSelect::BleAdapter => SelectAnchorId::NewConnectionBleAdapter,
         NewConnectionSelect::SerialDataBits => SelectAnchorId::NewConnectionSerialDataBits,
         NewConnectionSelect::SerialStopBits => SelectAnchorId::NewConnectionSerialStopBits,

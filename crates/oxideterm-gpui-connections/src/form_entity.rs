@@ -30,6 +30,9 @@ pub struct ConnectionFormState {
     /// overflow-tooltip predicates for flexible cells need the previous
     /// frame's real geometry, which no render-time arithmetic reproduces.
     pub ble_scan_table_width: Option<f32>,
+    /// Same probe contract as `ble_scan_table_width`, for the inline
+    /// container table in the form's container branch.
+    pub container_table_width: Option<f32>,
 }
 
 impl ConnectionFormState {
@@ -49,6 +52,7 @@ impl ConnectionFormState {
             open_select: None,
             select_focus_origin: None,
             ble_scan_table_width: None,
+            container_table_width: None,
         }
     }
 
@@ -92,6 +96,7 @@ impl ConnectionFormState {
         self.jump_server_exit_commits = false;
         self.jump_server_presence.reopen();
         self.ble_scan_table_width = None;
+        self.container_table_width = None;
     }
 
     pub fn close_select(&mut self) {

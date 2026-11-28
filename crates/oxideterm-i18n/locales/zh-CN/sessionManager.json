@@ -334,6 +334,13 @@
       "preset_aws_name": "预设模板-aws",
       "apply_blocked_issues": "请先修正列出的问题再添加",
       "templates_load_failed": "无法读取已保存的模板"
+    },
+    "container_profiles": {
+      "delete": "删除",
+      "open_failed": "打开容器配置失败",
+      "container_not_found": "没有与已保存名称匹配的容器，可能已被移除或重命名。",
+      "confirm_delete": "删除容器配置“{{name}}”？",
+      "delete_failed": "删除容器配置失败"
     }
   }
 }

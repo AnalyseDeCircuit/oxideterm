@@ -599,6 +599,7 @@ pub enum PublicSyncSection {
     Forwards,
     QuickCommands,
     SerialProfiles,
+    ContainerProfiles,
     BleProfiles,
     TelnetProfiles,
     MoshProfiles,

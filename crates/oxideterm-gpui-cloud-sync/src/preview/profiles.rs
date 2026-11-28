@@ -312,3 +312,144 @@ pub(super) fn serial_profile_summary_fields(value: &SerialProfile) -> Vec<CloudS
         ),
     ]
 }
+
+/// Renders the engine target as the user-facing launch surface: a Docker
+/// engine identifies itself by its socket, kube by profile namespace.
+fn container_engine_label(engine: &oxideterm_docker::EngineTarget) -> String {
+    match engine {
+        oxideterm_docker::EngineTarget::DockerSocket { socket_path } => socket_path.clone(),
+        oxideterm_docker::EngineTarget::Kube { context, namespace } => match context {
+            Some(context) => format!("kube:{context}:{namespace}"),
+            None => format!("kube:{namespace}"),
+        },
+    }
+}
+
+fn container_launch_label(launch: &oxideterm_docker::ContainerLaunchMode) -> String {
+    match launch {
+        oxideterm_docker::ContainerLaunchMode::Shell { shell } => match shell {
+            Some(shell) => format!("shell:{shell}"),
+            None => "shell".to_string(),
+        },
+        oxideterm_docker::ContainerLaunchMode::Command { command } => {
+            format!("command:{command}")
+        }
+        oxideterm_docker::ContainerLaunchMode::Attach => "attach".to_string(),
+    }
+}
+
+pub(super) fn container_profile_summary_fields(
+    value: &ContainerProfile,
+) -> Vec<CloudSyncFieldDiffField> {
+    vec![
+        field(
+            "plugin.cloud_sync.diff_fields.container_name",
+            None,
+            Some(value.container_name.clone()),
+        ),
+        field(
+            "plugin.cloud_sync.diff_fields.engine",
+            None,
+            Some(container_engine_label(&value.engine)),
+        ),
+        field(
+            "plugin.cloud_sync.diff_fields.launch_mode",
+            None,
+            Some(container_launch_label(&value.launch)),
+        ),
+    ]
+}
+
+pub(super) fn container_profile_changed_fields(
+    before: &ContainerProfile,
+    after: &ContainerProfile,
+) -> Vec<CloudSyncFieldDiffField> {
+    let mut fields = Vec::new();
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.name",
+        Some(before.name.clone()),
+        Some(after.name.clone()),
+    );
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.group",
+        before.group.clone(),
+        after.group.clone(),
+    );
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.engine",
+        Some(container_engine_label(&before.engine)),
+        Some(container_engine_label(&after.engine)),
+    );
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.container_name",
+        Some(before.container_name.clone()),
+        Some(after.container_name.clone()),
+    );
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.launch_mode",
+        Some(container_launch_label(&before.launch)),
+        Some(container_launch_label(&after.launch)),
+    );
+    fields
+}
+
+pub(super) fn container_profile_merge_fields(
+    base: &ContainerProfile,
+    local: &ContainerProfile,
+    remote: &ContainerProfile,
+    effective: &ContainerProfile,
+    conflict_strategy: &ConflictStrategy,
+) -> Vec<CloudSyncFieldDiffField> {
+    let mut fields = Vec::new();
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.name",
+        Some(base.name.clone()),
+        Some(local.name.clone()),
+        Some(remote.name.clone()),
+        Some(effective.name.clone()),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.group",
+        base.group.clone(),
+        local.group.clone(),
+        remote.group.clone(),
+        effective.group.clone(),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.engine",
+        Some(container_engine_label(&base.engine)),
+        Some(container_engine_label(&local.engine)),
+        Some(container_engine_label(&remote.engine)),
+        Some(container_engine_label(&effective.engine)),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.container_name",
+        Some(base.container_name.clone()),
+        Some(local.container_name.clone()),
+        Some(remote.container_name.clone()),
+        Some(effective.container_name.clone()),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.launch_mode",
+        Some(container_launch_label(&base.launch)),
+        Some(container_launch_label(&local.launch)),
+        Some(container_launch_label(&remote.launch)),
+        Some(container_launch_label(&effective.launch)),
+        conflict_strategy,
+    );
+    fields
+}

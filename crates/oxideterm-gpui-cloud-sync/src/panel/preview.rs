@@ -574,6 +574,10 @@ impl CloudSyncPageRenderer {
                 CloudSyncUploadSelectionAction::ToggleSerialProfiles,
             ),
             (
+                "plugin.cloud_sync.settings.sync_container_profiles",
+                CloudSyncUploadSelectionAction::ToggleContainerProfiles,
+            ),
+            (
                 "plugin.cloud_sync.settings.sync_ble_profiles",
                 CloudSyncUploadSelectionAction::ToggleBleProfiles,
             ),
@@ -633,6 +637,10 @@ impl CloudSyncPageRenderer {
             }
             CloudSyncUploadSelectionAction::ToggleSerialProfiles => {
                 selection.sync_serial_profiles || !selection.serial_profile_item_ids.is_empty()
+            }
+            CloudSyncUploadSelectionAction::ToggleContainerProfiles => {
+                selection.sync_container_profiles
+                    || !selection.container_profile_item_ids.is_empty()
             }
             CloudSyncUploadSelectionAction::ToggleBleProfiles => {
                 selection.sync_ble_profiles || !selection.ble_profile_item_ids.is_empty()

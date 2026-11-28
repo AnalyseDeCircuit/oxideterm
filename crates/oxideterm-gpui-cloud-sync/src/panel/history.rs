@@ -508,6 +508,9 @@ fn render_rollback_backup_row(
             forwards,
             quick_commands,
             serial_profiles,
+            // Container profiles postdate the backup summary line's published
+            // placeholder set; their count is intentionally not rendered there.
+            container_profiles: _,
             ble_profiles,
             telnet_profiles,
             sensitive_credentials,

@@ -17,6 +17,7 @@ pub enum ConnectionSubmissionEffect {
     LocalTerminal(LocalFormSubmission),
     Console(ConsoleFormOpen),
     Ble(BleOpenRequest),
+    Container(crate::submission::ContainerOpenRequest),
     Mosh(Box<PreparedMoshConnect>, Option<String>),
     Desktop(DesktopFormOpen),
     WslGraphics,
@@ -225,6 +226,7 @@ impl ConnectionFlowEntity {
                 .submit_telnet(store, i18n, action, cx)?
                 .into_effect(|open| Console(ConsoleFormOpen::Telnet(open))),
             FormSubmission::Ble => self.submit_ble(store, i18n, action, cx)?.into_effect(Ble),
+            FormSubmission::Container => self.submit_container(store, i18n, action, cx)?,
             FormSubmission::Mosh => self
                 .submit_mosh(store, i18n, action, cx)?
                 .into_effect(|open| Mosh(Box::new(open), self.reconnect_id().map(str::to_owned))),

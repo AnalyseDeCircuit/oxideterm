@@ -47,6 +47,8 @@ pub struct CloudSyncHistorySummary {
     #[serde(default)]
     pub serial_profiles: usize,
     #[serde(default)]
+    pub container_profiles: usize,
+    #[serde(default)]
     pub ble_profiles: usize,
     #[serde(default)]
     pub telnet_profiles: usize,
@@ -85,6 +87,8 @@ pub struct CloudSyncRollbackBackupMetadata {
     pub quick_commands: usize,
     #[serde(default)]
     pub serial_profiles: usize,
+    #[serde(default)]
+    pub container_profiles: usize,
     #[serde(default)]
     pub ble_profiles: usize,
     #[serde(default)]

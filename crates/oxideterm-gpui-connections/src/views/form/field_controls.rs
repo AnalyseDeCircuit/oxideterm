@@ -133,11 +133,231 @@ fn default_icon_for_transport(transport: NewConnectionTransport) -> LucideIcon {
             LucideIcon::Terminal
         }
         NewConnectionTransport::Serial => LucideIcon::Radio,
+        NewConnectionTransport::Container => LucideIcon::Package,
         NewConnectionTransport::Ble => LucideIcon::Bluetooth,
         NewConnectionTransport::Rdp
         | NewConnectionTransport::Vnc
         | NewConnectionTransport::WslGraphics => LucideIcon::Monitor,
     }
+}
+
+/// Maps a discovered engine onto the listing target. Kube listing scopes to
+/// the context's declared namespace like kubectl (empty means "default"),
+/// while docker-compatible engines address their exact socket.
+fn container_listing_target(
+    engine: &oxideterm_docker::EngineInfo,
+) -> oxideterm_docker::EngineTarget {
+    match engine.kind {
+        oxideterm_docker::EngineKind::Kube => oxideterm_docker::EngineTarget::Kube {
+            context: engine.kube_context.clone(),
+            // A context-declared namespace scopes the listing like kubectl;
+            // empty resolves to the "default" namespace in the list call.
+            namespace: engine.kube_context_namespace.clone().unwrap_or_default(),
+        },
+        _ => oxideterm_docker::EngineTarget::DockerSocket {
+            socket_path: engine.socket_path.clone().unwrap_or_default(),
+        },
+    }
+}
+
+/// Render-time inputs for the container table overflow hints: the available
+/// width per column, derived from the bounds probe's previous-frame table
+/// width, plus the two text sizes the cells render with. `None` widths (first
+/// frame, before the probe reports) keep tooltips off, the safe default.
+pub(in crate::views) struct ContainerCellMetrics {
+    pub(in crate::views) name: Option<f32>,
+    pub(in crate::views) image: Option<f32>,
+    pub(in crate::views) namespace: Option<f32>,
+    pub(in crate::views) state: Option<f32>,
+    /// Inherited window text size of the name cell.
+    pub(in crate::views) base_size: f32,
+    /// Explicit `ui_text_xs` size of the image, namespace and state cells.
+    pub(in crate::views) small_size: f32,
+}
+
+/// One clipped table cell of the container table. The tooltip is attached
+/// only when the render-time measurement says the text overflows its column,
+/// so cells whose text fits stay hint-free.
+pub(in crate::views) fn container_table_cell(
+    tokens: ThemeTokens,
+    id: &'static str,
+    text: &str,
+    color: u32,
+    small: bool,
+    fits: bool,
+) -> gpui::Stateful<Div> {
+    let mut cell = div().truncate().text_color(rgb(color));
+    if small {
+        cell = cell.text_size(px(tokens.metrics.ui_text_xs));
+    }
+    let cell = cell.child(text.to_string()).id(id);
+    if fits {
+        // Only overflowing cells need their own copy for the hint; most
+        // cells fit and would pay an allocation per frame otherwise.
+        return cell;
+    }
+    let tooltip_text = text.to_string();
+    cell.tooltip(move |_, cx| {
+        oxideterm_gpui_ui::tooltip::tooltip_view(tokens, tooltip_text.clone(), None, cx)
+    })
+}
+
+/// Relative column tracks of the inline container table. The row layout and
+/// the overflow measurements both derive from these, so a track can never drift
+/// between the two surfaces.
+const CONTAINER_NAME_TRACK_DOCKER: f32 = 0.42;
+const CONTAINER_NAME_TRACK_KUBE: f32 = 0.30;
+const CONTAINER_NAMESPACE_TRACK: f32 = 0.16;
+const CONTAINER_STATE_TRACK_DOCKER: f32 = 0.18;
+const CONTAINER_STATE_TRACK_KUBE: f32 = 0.16;
+
+/// One table row of the inline container table: name, image, state, and (for
+/// kube pods) the namespace side by side. Full width plus fixed relative
+/// column tracks keep the columns aligned across rows; the right padding
+/// keeps the trailing check slot clear.
+fn container_table_row(
+    tokens: &ThemeTokens,
+    entry: &oxideterm_docker::ContainerEntry,
+    running: bool,
+    show_namespace: bool,
+    metrics: &ContainerCellMetrics,
+    fits: &impl Fn(&str, f32, Option<f32>) -> bool,
+) -> AnyElement {
+    let state_color = if running {
+        tokens.ui.success
+    } else {
+        tokens.ui.text_muted
+    };
+    // Namespace squeezes the other tracks so five columns still align; the
+    // name keeps the widest share because it feeds the saved profile. The
+    // tracks come from the shared module constants, which
+    // `render_container_list_field` also measures against.
+    let (name_track, state_track) = if show_namespace {
+        (CONTAINER_NAME_TRACK_KUBE, CONTAINER_STATE_TRACK_KUBE)
+    } else {
+        (CONTAINER_NAME_TRACK_DOCKER, CONTAINER_STATE_TRACK_DOCKER)
+    };
+    let mut row = div()
+        .flex()
+        .flex_row()
+        .w_full()
+        .items_center()
+        .gap(px(tokens.spacing.two))
+        .pr(px(tokens.metrics.ui_menu_inset_padding_left))
+        .child(
+            container_table_cell(
+                *tokens,
+                "container-name",
+                &entry.name,
+                tokens.ui.text,
+                false,
+                fits(&entry.name, metrics.base_size, metrics.name),
+            )
+            .w(gpui::relative(name_track))
+            .flex_none(),
+        )
+        .child(
+            container_table_cell(
+                *tokens,
+                "container-image",
+                &entry.image,
+                tokens.ui.text_muted,
+                true,
+                fits(&entry.image, metrics.small_size, metrics.image),
+            )
+            .min_w_0()
+            .flex_1(),
+        );
+    if show_namespace {
+        let namespace = entry.namespace.as_deref().unwrap_or("—");
+        row = row.child(
+            container_table_cell(
+                *tokens,
+                "container-namespace",
+                namespace,
+                tokens.ui.text_muted,
+                true,
+                fits(namespace, metrics.small_size, metrics.namespace),
+            )
+            .w(gpui::relative(CONTAINER_NAMESPACE_TRACK))
+            .flex_none(),
+        );
+    }
+    row.child(
+        container_table_cell(
+            *tokens,
+            "container-state",
+            &entry.state,
+            state_color,
+            true,
+            fits(&entry.state, metrics.small_size, metrics.state),
+        )
+        .w(gpui::relative(state_track))
+        .flex_none(),
+    )
+    .into_any_element()
+}
+
+/// One row of the pod-container picker popup: the docker table layout (name,
+/// image, state) over the pod's spec-order containers. Shares the cell chrome
+/// and overflow hints with [`container_table_row`] so both tables behave
+/// identically; cell ids differ so popups and inline tables never collide.
+pub(in crate::views) fn pod_container_table_row(
+    tokens: &ThemeTokens,
+    container: &oxideterm_docker::PodContainerInfo,
+    running: bool,
+    metrics: &ContainerCellMetrics,
+    fits: &impl Fn(&str, f32, Option<f32>) -> bool,
+) -> AnyElement {
+    let state_color = if running {
+        tokens.ui.success
+    } else {
+        tokens.ui.text_muted
+    };
+    div()
+        .flex()
+        .flex_row()
+        .w_full()
+        .items_center()
+        .gap(px(tokens.spacing.two))
+        .pr(px(tokens.metrics.ui_menu_inset_padding_left))
+        .child(
+            container_table_cell(
+                *tokens,
+                "pod-container-name",
+                &container.name,
+                tokens.ui.text,
+                false,
+                fits(&container.name, metrics.base_size, metrics.name),
+            )
+            .w(gpui::relative(0.42))
+            .flex_none(),
+        )
+        .child(
+            container_table_cell(
+                *tokens,
+                "pod-container-image",
+                &container.image,
+                tokens.ui.text_muted,
+                true,
+                fits(&container.image, metrics.small_size, metrics.image),
+            )
+            .min_w_0()
+            .flex_1(),
+        )
+        .child(
+            container_table_cell(
+                *tokens,
+                "pod-container-state",
+                &container.state,
+                state_color,
+                true,
+                fits(&container.state, metrics.small_size, metrics.state),
+            )
+            .w(gpui::relative(0.18))
+            .flex_none(),
+        )
+        .into_any_element()
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1133,6 +1353,8 @@ impl ConnectionFormView {
                     | NewConnectionSelect::StandaloneSftpSecondaryUpstreamProxyAuth
                     | NewConnectionSelect::LocalShell
                     | NewConnectionSelect::SerialPort
+                    | NewConnectionSelect::ContainerEngine
+                    | NewConnectionSelect::ContainerPodContainer
                     | NewConnectionSelect::BleAdapter
                     | NewConnectionSelect::SerialDataBits
                     | NewConnectionSelect::SerialStopBits
@@ -4403,6 +4625,1328 @@ impl ConnectionFormView {
             .into_any_element()
     }
 
+    /// Lists reachable container engines. Socket probing is filesystem-only
+    /// but still touches `/var/run`, and kubeconfig inference awaits config
+    /// loading, so both run on the background runtime like BLE discovery.
+    pub(in crate::views) fn refresh_container_engines(
+        &mut self,
+        reset_selection: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let Some((engines_generation, previous_target)) =
+            self.update_connection_form_state(cx, |state| {
+                state.form.as_mut().and_then(|form| {
+                    // A discovery already in flight returns the same fresh
+                    // list; starting another would cancel the pending reply
+                    // together with the catalog backfill (engine and container
+                    // name) it carries.
+                    if !reset_selection && form.container.engines_loading {
+                        return None;
+                    }
+                    // Discovery guards on its own token: a container list
+                    // reload during discovery bumps only the shared
+                    // generation, and dropping the engine reply on it would
+                    // leave `engines_loading` set forever.
+                    form.container.engines_generation += 1;
+                    form.container.engines_loading = true;
+                    if reset_selection {
+                        // A reset replaces the selection, so it invalidates any
+                        // in-flight container list too. Popup rediscovery keeps
+                        // the selection and must not cancel that list: a dropped
+                        // reply would leave `containers_loading` set forever.
+                        form.container.generation += 1;
+                        form.container.containers.clear();
+                        form.container.containers_loading = false;
+                        form.container.selected_container_index = None;
+                        form.container.pod_container = None;
+                        // An in-flight inspect describes the previous engine's
+                        // container; drop its reply instead of letting it land
+                        // on the next selection.
+                        form.container.details_generation += 1;
+                        form.container.details = None;
+                        form.container.details_loading = false;
+                        form.container.selected_engine_index = 0;
+                    }
+                    form.error = None;
+                    let previous_target = form
+                        .container
+                        .engines
+                        .get(form.container.selected_engine_index)
+                        .map(container_listing_target);
+                    Some((form.container.engines_generation, previous_target))
+                })
+            })
+        else {
+            return;
+        };
+        cx.notify();
+
+        let Some(runtime) = self.runtime.clone() else {
+            return;
+        };
+        cx.spawn(async move |weak, cx| {
+            let engines = runtime
+                .spawn(async {
+                    let mut engines = oxideterm_docker::discover_engines();
+                    // One kube entry per kubeconfig context so multi-cluster
+                    // setups can pick their target; discovery is config-only.
+                    engines.extend(oxideterm_docker::discover_kube_engines());
+                    engines
+                })
+                .await
+                .unwrap_or_default();
+            let _ = weak.update(cx, |this, cx| {
+                let mut listing_target = None;
+                this.update_connection_form_state(cx, |state| {
+                    let Some(form) = state.form.as_mut() else {
+                        return;
+                    };
+                    if form.container.engines_generation != engines_generation {
+                        return;
+                    }
+                    form.container.engines_loading = false;
+                    form.container.engines = engines;
+                    if reset_selection {
+                        // Catalog edit backfill: re-select the profile's engine
+                        // once discovery returns; fall back to the first entry.
+                        if let Some(pending_engine) = form.container.pending_engine.take() {
+                            let matched = form
+                                .container
+                                .engines
+                                .iter()
+                                .position(|engine| {
+                                    // Kube profiles persist the pod namespace in
+                                    // the target, so identity compares the
+                                    // transport only (socket path or context).
+                                    let target = container_listing_target(engine);
+                                    match (&target, &pending_engine) {
+                                        (
+                                            oxideterm_docker::EngineTarget::DockerSocket {
+                                                socket_path: listed,
+                                            },
+                                            oxideterm_docker::EngineTarget::DockerSocket {
+                                                socket_path: pending,
+                                            },
+                                        ) => listed == pending,
+                                        (
+                                            oxideterm_docker::EngineTarget::Kube {
+                                                context: listed,
+                                                ..
+                                            },
+                                            oxideterm_docker::EngineTarget::Kube {
+                                                context: pending,
+                                                ..
+                                            },
+                                        ) => listed == pending,
+                                        _ => false,
+                                    }
+                                })
+                                .unwrap_or(0);
+                            form.container.selected_engine_index = matched;
+                        } else {
+                            form.container.selected_engine_index = 0;
+                        }
+                        if let Some(engine) = form
+                            .container
+                            .engines
+                            .get(form.container.selected_engine_index)
+                        {
+                            listing_target = Some(container_listing_target(engine));
+                        }
+                    } else {
+                        // Popup-triggered rediscovery keeps the user's engine
+                        // selection; only a vanished engine falls back to the
+                        // first entry and reloads its container list.
+                        let selected_target = form
+                            .container
+                            .engines
+                            .get(form.container.selected_engine_index)
+                            .map(container_listing_target);
+                        if selected_target.as_ref() != previous_target.as_ref() {
+                            let kept = previous_target.as_ref().and_then(|target| {
+                                form.container
+                                    .engines
+                                    .iter()
+                                    .position(|engine| &container_listing_target(engine) == target)
+                            });
+                            match kept {
+                                Some(index) => form.container.selected_engine_index = index,
+                                None => {
+                                    form.container.selected_engine_index = 0;
+                                    if let Some(engine) = form.container.engines.first() {
+                                        listing_target = Some(container_listing_target(engine));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+                if let Some(target) = listing_target {
+                    this.load_container_list(target, true, cx);
+                } else {
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// Reloads the container list for the selected engine; the engine-row
+    /// refresh button uses this instead of a full rediscovery.
+    pub(super) fn refresh_selected_engine_container_list(&mut self, cx: &mut Context<Self>) {
+        let Some(target) = self.update_connection_form_state(cx, |state| {
+            state.form.as_mut().and_then(|form| {
+                if form.container.containers_loading {
+                    return None;
+                }
+                form.container
+                    .engines
+                    .get(form.container.selected_engine_index)
+                    .map(container_listing_target)
+            })
+        }) else {
+            return;
+        };
+        self.load_container_list(target, false, cx);
+    }
+
+    /// Loads the container/pod list for one engine. An engine switch resets
+    /// the selection; a list refresh keeps the old rows mounted until the
+    /// reply arrives so the table does not collapse and jump mid-reload.
+    pub(super) fn load_container_list(
+        &mut self,
+        target: oxideterm_docker::EngineTarget,
+        reset: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(generation) = self.update_connection_form_state(cx, |state| {
+            state.form.as_mut().map(|form| {
+                form.container.generation += 1;
+                if reset {
+                    form.container.containers.clear();
+                    form.container.selected_container_index = None;
+                }
+                form.container.containers_loading = true;
+                form.container.generation
+            })
+        }) else {
+            return;
+        };
+        cx.notify();
+
+        let Some(runtime) = self.runtime.clone() else {
+            return;
+        };
+        cx.spawn(async move |weak, cx| {
+            let result = runtime
+                .spawn(async move { oxideterm_docker::list_containers(&target).await })
+                .await
+                .unwrap_or_else(|error| {
+                    Err(oxideterm_docker::ContainerError::Engine(error.to_string()))
+                });
+            let _ = weak.update(cx, |this, cx| {
+                // Only a reply that actually landed on the form repaints it;
+                // a generation-guarded stale reply changed nothing.
+                let mut hydrate = false;
+                let applied = this.update_connection_form_state(cx, |state| {
+                    let Some(form) = state.form.as_mut() else {
+                        return false;
+                    };
+                    if form.container.generation != generation {
+                        return false;
+                    }
+                    form.container.containers_loading = false;
+                    match result {
+                        Ok(containers) => {
+                            if reset {
+                                // A reset always dropped the selection at
+                                // request time, so any details on screen belong
+                                // to the previous engine or container and must
+                                // not show under the new selection.
+                                form.container.details = None;
+                                // Catalog edit backfill: pre-select the profile's
+                                // container by name once the list returns.
+                                let pending_name = form.container.pending_container_name.take();
+                                let pending_pod_container =
+                                    form.container.pending_pod_container.take();
+                                let pending_index = pending_name.as_deref().and_then(|name| {
+                                    containers.iter().position(|entry| entry.name == name)
+                                });
+                                if containers.is_empty() {
+                                    form.container.selected_container_index = None;
+                                    form.container.pod_container = None;
+                                    form.container.details = None;
+                                } else if let Some(index) = pending_index {
+                                    form.container.selected_container_index = Some(index);
+                                    // The saved name may reference a container
+                                    // renamed or removed since the profile was
+                                    // written; the normalized pin keeps this
+                                    // backfill equal to both the open-time
+                                    // resolve and a fresh row selection.
+                                    form.container.pod_container = containers[index]
+                                        .normalize_pod_container(pending_pod_container.as_deref());
+                                } else if containers.len() == 1 {
+                                    form.container.selected_container_index = Some(0);
+                                    // Same normalization as a row click: a
+                                    // multi-container pod is pinned to its
+                                    // first container so the picker and the
+                                    // details describe one container, while
+                                    // docker rows and single-container pods stay
+                                    // unpinned.
+                                    form.container.pod_container =
+                                        containers[0].normalize_pod_container(None);
+                                }
+                                form.container.containers = containers;
+                                hydrate = form.container.selected_container_index.is_some();
+                            } else {
+                                // Refresh-in-place: swap the rows and keep the
+                                // selection only when the same container still
+                                // exists; stale details follow the selection.
+                                let previous_id = form
+                                    .container
+                                    .selected_container_index
+                                    .and_then(|index| form.container.containers.get(index))
+                                    .map(|entry| entry.id.clone());
+                                form.container.containers = containers;
+                                let selected = previous_id.as_deref().and_then(|id| {
+                                    form.container
+                                        .containers
+                                        .iter()
+                                        .position(|entry| entry.id == id)
+                                });
+                                form.container.selected_container_index = selected;
+                                // Re-validate the pin against the refreshed
+                                // pod: a renamed or removed container must not
+                                // stay pinned, or the next exec has no target.
+                                let previous_pin = form.container.pod_container.take();
+                                form.container.pod_container = selected
+                                    .and_then(|index| form.container.containers.get(index))
+                                    .and_then(|entry| {
+                                        entry.normalize_pod_container(previous_pin.as_deref())
+                                    });
+                                if selected.is_none() {
+                                    form.container.details = None;
+                                }
+                                // Details only need a refetch when the target
+                                // actually moved. A surviving selection with
+                                // an unchanged pin already shows the right
+                                // data, and refetching would cost an inspect
+                                // round trip on every refresh; a pin that
+                                // fell back to another container describes a
+                                // different container, so it invalidates them.
+                                let pin_changed = form.container.pod_container != previous_pin;
+                                hydrate = selected.is_some()
+                                    && (form.container.details.is_none() || pin_changed);
+                            }
+                        }
+                        Err(oxideterm_docker::ContainerError::AccessDenied) => {
+                            form.error =
+                                Some(this.i18n.t("modals.new_connection.container_access_denied"));
+                        }
+                        Err(error) => {
+                            form.error = Some(format!(
+                                "{}: {error}",
+                                this.i18n.t("modals.new_connection.container_load_failed")
+                            ));
+                        }
+                    }
+                    true
+                });
+                if applied {
+                    cx.notify();
+                    // Backfill and the single-container auto-select restore a
+                    // selection without a row click, so hydrate the details
+                    // here instead of waiting for the user to re-pick the row.
+                    if hydrate {
+                        this.refresh_container_details(cx);
+                    }
+                }
+            });
+        })
+        .detach();
+    }
+
+    pub(super) fn set_new_connection_container_engine(
+        &mut self,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(target) = self.update_connection_form_state(cx, |state| {
+            let form = state.form.as_mut()?;
+            if index >= form.container.engines.len() {
+                return None;
+            }
+            // Popup-triggered rediscovery reflows indexes, so identity is the
+            // listing target, not the row position; re-picking the current
+            // engine must not re-pay a container list round trip.
+            let target = container_listing_target(&form.container.engines[index]);
+            if form
+                .container
+                .engines
+                .get(form.container.selected_engine_index)
+                .map(container_listing_target)
+                .as_ref()
+                == Some(&target)
+            {
+                return None;
+            }
+            form.container.selected_engine_index = index;
+            form.container.selected_container_index = None;
+            form.container.pod_container = None;
+            // Invalidate any in-flight inspect: its reply describes the
+            // previous engine's container and must not land on this list.
+            form.container.details_generation += 1;
+            form.container.details = None;
+            form.container.details_loading = false;
+            // An explicit engine switch abandons the catalog backfill; leaving
+            // these set would let a dropped edit-open reply apply the saved
+            // name to this engine's list later.
+            form.container.pending_engine = None;
+            form.container.pending_container_name = None;
+            form.container.pending_pod_container = None;
+            form.field_focused = false;
+            clear_connection_selection(form);
+            form.error = None;
+            Some(target)
+        }) else {
+            return;
+        };
+        self.load_container_list(target, true, cx);
+    }
+
+    pub(super) fn set_new_connection_container(&mut self, index: usize, cx: &mut Context<Self>) {
+        let refetch_details = self.update_connection_form_state(cx, |state| {
+            let Some(form) = state.form.as_mut() else {
+                return false;
+            };
+            if index >= form.container.containers.len() {
+                return false;
+            }
+            // A different pod invalidates the pin and the details of the
+            // previous one; re-clicking the selected row keeps the pin the
+            // picker chose instead of snapping back to the first container.
+            // The normalized rule keeps multi-container pods pinned and
+            // single-container pods unpinned, matching the saved-profile
+            // resolve.
+            let same_entry = form.container.selected_container_index == Some(index);
+            let pin = if same_entry {
+                form.container.pod_container.clone()
+            } else {
+                None
+            };
+            let pod_container =
+                form.container.containers[index].normalize_pod_container(pin.as_deref());
+            // Re-clicking the selected row with details on screen shows the
+            // same data; only a failed or absent fetch retries, so a stray
+            // click costs no inspect round trip.
+            let refetch = !same_entry || form.container.details.is_none();
+            if !same_entry {
+                form.container.details = None;
+            }
+            form.container.selected_container_index = Some(index);
+            form.container.pod_container = pod_container;
+            form.field_focused = false;
+            clear_connection_selection(form);
+            form.error = None;
+            refetch
+        });
+        if refetch_details {
+            self.refresh_container_details(cx);
+        } else {
+            cx.notify();
+        }
+    }
+
+    pub(super) fn set_new_connection_pod_container(
+        &mut self,
+        name: String,
+        cx: &mut Context<Self>,
+    ) {
+        let refetch_details = self.update_connection_form_state(cx, |state| {
+            let Some(form) = state.form.as_mut() else {
+                return false;
+            };
+            // Details are pin-scoped, so switching to another container of
+            // the same pod must refetch instead of reusing the previous
+            // container's mounts and ports; re-picking the same container
+            // only retries a failed or absent fetch.
+            let changed = form.container.pod_container.as_deref() != Some(name.as_str());
+            if changed {
+                form.container.details = None;
+            }
+            form.container.pod_container = Some(name);
+            form.field_focused = false;
+            changed || form.container.details.is_none()
+        });
+        if refetch_details {
+            self.refresh_container_details(cx);
+        } else {
+            cx.notify();
+        }
+    }
+
+    pub(super) fn set_new_connection_container_launch_mode(
+        &mut self,
+        mode: crate::form_state::ContainerFormLaunchMode,
+        cx: &mut Context<Self>,
+    ) {
+        self.update_connection_form_state(cx, |state| {
+            if let Some(form) = state.form.as_mut() {
+                form.container.launch_mode = mode;
+            }
+        });
+        cx.notify();
+    }
+
+    /// Fetches the selected container's feature parameters on the background
+    /// runtime; the generation guard keeps a slow reply from reaching a
+    /// replaced selection or engine.
+    pub(super) fn refresh_container_details(&mut self, cx: &mut Context<Self>) {
+        let Some((generation, target, container_id, pod_container)) = self
+            .update_connection_form_state(cx, |state| {
+                let form = state.form.as_mut()?;
+                let index = form.container.selected_container_index?;
+                let entry = form.container.containers.get(index)?;
+                // Keep the previous details on screen while loading so the
+                // section never collapses into a placeholder and jitters.
+                form.container.details_loading = true;
+                form.container.details_generation += 1;
+                let target = entry.launch_target();
+                Some((
+                    form.container.details_generation,
+                    target,
+                    entry.id.clone(),
+                    form.container.pod_container.clone(),
+                ))
+            })
+        else {
+            return;
+        };
+        cx.notify();
+
+        let Some(runtime) = self.runtime.clone() else {
+            return;
+        };
+        cx.spawn(async move |weak, cx| {
+            let result = runtime
+                .spawn(async move {
+                    oxideterm_docker::inspect_container(
+                        &target,
+                        &container_id,
+                        pod_container.as_deref(),
+                    )
+                    .await
+                })
+                .await
+                .unwrap_or_else(|error| {
+                    Err(oxideterm_docker::ContainerError::Engine(error.to_string()))
+                });
+            let _ = weak.update(cx, |this, cx| {
+                // A generation-guarded stale reply changed nothing; only an
+                // applied details swap repaints the form.
+                let applied = this.update_connection_form_state(cx, |state| {
+                    let Some(form) = state.form.as_mut() else {
+                        return false;
+                    };
+                    if form.container.details_generation != generation {
+                        return false;
+                    }
+                    form.container.details_loading = false;
+                    match result {
+                        Ok(details) => form.container.details = Some(details),
+                        Err(_) => {
+                            // Detail failures never block opening a terminal;
+                            // the section shows the empty state instead.
+                            form.container.details = None;
+                        }
+                    }
+                    true
+                });
+                if applied {
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    pub(super) fn render_container_form_branch(
+        &self,
+        active_drawer: Option<crate::form_state::ConnectionFormDrawer>,
+        layout: super::composer::StudioLayoutMetrics,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some((
+            profile_name,
+            group,
+            engines,
+            engines_loading,
+            selected_engine_index,
+            containers,
+            containers_loading,
+            selected_container_index,
+            running_only,
+            shell,
+            launch_mode,
+            custom_command,
+            details,
+            details_loading,
+            is_kube,
+            notes,
+        )) = self.connection_form_state(cx).form.as_ref().map(|form| {
+            (
+                form.serial_profile_name.clone(),
+                form.group.clone(),
+                form.container.engines.clone(),
+                form.container.engines_loading,
+                form.container.selected_engine_index,
+                form.container.containers.clone(),
+                form.container.containers_loading,
+                form.container.selected_container_index,
+                form.container.running_only,
+                form.container.shell.clone(),
+                form.container.launch_mode,
+                form.container.custom_command.clone(),
+                form.container.details.clone(),
+                form.container.details_loading,
+                form.container
+                    .selected_container_index
+                    .and_then(|index| form.container.containers.get(index))
+                    .map(|entry| entry.engine.kind == oxideterm_docker::EngineKind::Kube)
+                    .unwrap_or(false),
+                form.notes.clone(),
+            )
+        })
+        else {
+            return div().into_any_element();
+        };
+        let engine_field = self.render_container_engine_field(
+            &engines,
+            engines_loading,
+            selected_engine_index,
+            cx,
+        );
+        // The title follows the selected engine (not the rows): an empty or
+        // loading kube list must already say "Pods", and switching engines
+        // flips the label with the next render.
+        let engine_is_kube = engines
+            .get(selected_engine_index)
+            .map(|engine| engine.kind == oxideterm_docker::EngineKind::Kube)
+            .unwrap_or(false);
+        let container_field = self.render_container_list_field(
+            &containers,
+            containers_loading,
+            running_only,
+            selected_container_index,
+            engine_is_kube,
+            engines_loading && engines.is_empty(),
+            window,
+            cx,
+        );
+        // Multi-container pods must name the exec/attach target; a
+        // single-container pod keeps the API default and no picker shows.
+        let pod_container_field = self.render_container_pod_container_field(cx);
+        let mut parameters = div()
+            .flex()
+            .flex_col()
+            .gap(px(self.tokens.metrics.modal_section_gap))
+            .child(engine_field)
+            .child(container_field)
+            .when_some(pod_container_field, |section, field| section.child(field))
+            .child(self.render_container_launch_mode_field(launch_mode, cx));
+        parameters = match launch_mode {
+            crate::form_state::ContainerFormLaunchMode::Shell => parameters.child(
+                self.render_connection_field(
+                    self.i18n.t("modals.new_connection.container_shell"),
+                    &shell,
+                    self.i18n
+                        .t("modals.new_connection.container_shell_placeholder"),
+                    NewConnectionField::ContainerShell,
+                    false,
+                    cx,
+                ),
+            ),
+            crate::form_state::ContainerFormLaunchMode::Command => parameters.child(
+                self.render_connection_field(
+                    self.i18n.t("modals.new_connection.container_command"),
+                    &custom_command,
+                    self.i18n
+                        .t("modals.new_connection.container_command_placeholder"),
+                    NewConnectionField::ContainerCommand,
+                    false,
+                    cx,
+                ),
+            ),
+            crate::form_state::ContainerFormLaunchMode::Attach => {
+                parameters.child(self.render_connection_hint(
+                    self.i18n.t("modals.new_connection.container_attach_hint"),
+                ))
+            }
+        };
+        let parameters = parameters
+            .when_some(selected_container_index, |section, _| {
+                section.child(self.render_container_details_field(
+                    is_kube,
+                    details,
+                    details_loading,
+                ))
+            })
+            .into_any_element();
+        // Name and group reuse the BLE profile row: one flex row with a
+        // flex-1 name input and a fixed-width group select, so every
+        // profile-backed transport presents identity metadata identically.
+        let basic = div()
+            .flex()
+            .flex_col()
+            .gap(px(self.tokens.metrics.modal_section_gap))
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .gap(px(12.0))
+                    .child(
+                        div().flex_1().min_w_0().child(
+                            self.render_connection_field(
+                                self.i18n.t("modals.new_connection.container_profile_name"),
+                                &profile_name,
+                                self.i18n
+                                    .t("modals.new_connection.container_profile_name_placeholder"),
+                                NewConnectionField::SerialProfileName,
+                                false,
+                                cx,
+                            ),
+                        ),
+                    )
+                    .child(div().w(px(196.0)).flex_none().child(
+                        self.render_connection_group_select(
+                            self.i18n.t("ssh.form.group"),
+                            &group,
+                            cx,
+                        ),
+                    )),
+            );
+        use crate::form_state::ConnectionFormDrawer;
+        match active_drawer {
+            Some(ConnectionFormDrawer::Terminal) => div()
+                .flex()
+                .flex_col()
+                .gap(px(self.tokens.metrics.modal_section_gap))
+                .child(self.render_connection_terminal_options(layout.narrow_content, cx))
+                .child(self.render_connection_pre_connect_command(cx))
+                .into_any_element(),
+            Some(ConnectionFormDrawer::Notes) => div()
+                .flex()
+                .flex_col()
+                .gap(px(self.tokens.metrics.modal_section_gap))
+                .child(self.render_connection_appearance_options(cx))
+                .child(div().h(px(1.0)).bg(rgb(self.tokens.ui.border)))
+                .child(self.render_connection_notes_fields(&notes, cx))
+                .into_any_element(),
+            _ => div()
+                .flex()
+                .flex_col()
+                .gap(px(self.tokens.metrics.modal_section_gap))
+                .child(basic)
+                .child(div().h(px(1.0)).bg(rgb(self.tokens.ui.border)))
+                .child(parameters)
+                .into_any_element(),
+        }
+    }
+
+    /// Launch mode selector reusing the segmented tab primitives; the static
+    /// selected fill is enough for three options, so no motion indicator is
+    /// wired here.
+    fn render_container_launch_mode_field(
+        &self,
+        active_mode: crate::form_state::ContainerFormLaunchMode,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let choices = [
+            (
+                crate::form_state::ContainerFormLaunchMode::Shell,
+                "modals.new_connection.container_launch_mode_shell",
+            ),
+            (
+                crate::form_state::ContainerFormLaunchMode::Command,
+                "modals.new_connection.container_launch_mode_command",
+            ),
+            (
+                crate::form_state::ContainerFormLaunchMode::Attach,
+                "modals.new_connection.container_launch_mode_attach",
+            ),
+        ];
+        let mut row = segmented_tabs(&self.tokens);
+        for (mode, label_key) in choices {
+            row = row.child(
+                segmented_tab(&self.tokens, self.i18n.t(label_key), mode == active_mode)
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.set_new_connection_container_launch_mode(mode, cx);
+                            cx.stop_propagation();
+                        }),
+                    ),
+            );
+        }
+        form_field(
+            &self.tokens,
+            self.i18n.t("modals.new_connection.container_launch_mode"),
+            row,
+        )
+        .into_any_element()
+    }
+
+    /// Feature parameters of the selected container (mounts, ports, networks,
+    /// pod IP) laid out as compact label/value rows.
+    fn render_container_details_field(
+        &self,
+        is_kube: bool,
+        details: Option<oxideterm_docker::ContainerDetails>,
+        loading: bool,
+    ) -> AnyElement {
+        let dash = "—";
+        // Rows are grouped: each category shows its label only on the first
+        // row of that group while the fixed label column keeps every value
+        // column aligned. Order: networks (with the kube pod IP) → ports →
+        // mounts.
+        let mut rows: Vec<(String, String)> = Vec::new();
+        if let Some(details) = details.as_ref() {
+            let networks_label = self
+                .i18n
+                .t("modals.new_connection.container_details_networks");
+            for (index, network) in details.networks.iter().enumerate() {
+                rows.push((
+                    if index == 0 {
+                        networks_label.clone()
+                    } else {
+                        String::new()
+                    },
+                    match &network.ip {
+                        Some(ip) => format!("{} ({ip})", network.name),
+                        None => network.name.clone(),
+                    },
+                ));
+            }
+            if is_kube {
+                let pod_ip = details.main_ip.clone().unwrap_or_else(|| dash.to_string());
+                rows.push((
+                    if rows.is_empty() {
+                        self.i18n
+                            .t("modals.new_connection.container_details_pod_ip")
+                    } else {
+                        String::new()
+                    },
+                    pod_ip,
+                ));
+            }
+            let ports_label = self.i18n.t("modals.new_connection.container_details_ports");
+            for (index, port) in details.ports.iter().enumerate() {
+                let host = match (&port.host_ip, &port.host_port) {
+                    (Some(host_ip), Some(host_port)) => format!("{host_ip}:{host_port}"),
+                    // A kube hostPort may omit the host IP; a bare ":8080"
+                    // would read like a typo.
+                    (None, Some(host_port)) => host_port.clone(),
+                    (Some(host_ip), None) => host_ip.clone(),
+                    (None, None) => dash.to_string(),
+                };
+                rows.push((
+                    if index == 0 {
+                        ports_label.clone()
+                    } else {
+                        String::new()
+                    },
+                    format!("{} → {}/{}", host, port.container_port, port.protocol),
+                ));
+            }
+            let mounts_label = self
+                .i18n
+                .t("modals.new_connection.container_details_mounts");
+            for (index, mount) in details.mounts.iter().enumerate() {
+                rows.push((
+                    if index == 0 {
+                        mounts_label.clone()
+                    } else {
+                        String::new()
+                    },
+                    format!("{} → {}", mount.source, mount.destination),
+                ));
+            }
+        }
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(self.tokens.spacing.two))
+            .child(
+                div()
+                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                    .font_weight(gpui::FontWeight::MEDIUM)
+                    .text_color(rgb(self.tokens.ui.text))
+                    .child(self.i18n.t("modals.new_connection.container_details_title")),
+            )
+            // Existing rows stay visible during a refresh; the loading hint
+            // only fills the section while there is nothing to keep stable.
+            .child(if !rows.is_empty() {
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(self.tokens.spacing.one))
+                    .children(rows.into_iter().map(|(label, value)| {
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(self.tokens.spacing.two))
+                            .text_size(px(self.tokens.metrics.ui_text_sm))
+                            .child(
+                                div()
+                                    .w(px(72.0))
+                                    .flex_none()
+                                    .truncate()
+                                    .text_color(rgb(self.tokens.ui.text_muted))
+                                    .child(label),
+                            )
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .flex_1()
+                                    .truncate()
+                                    .text_color(rgb(self.tokens.ui.text))
+                                    .child(value),
+                            )
+                    }))
+                    .into_any_element()
+            } else if loading {
+                self.render_connection_hint(
+                    self.i18n
+                        .t("modals.new_connection.container_details_loading"),
+                )
+            } else {
+                self.render_connection_hint(
+                    self.i18n.t("modals.new_connection.container_details_none"),
+                )
+            })
+            .into_any_element()
+    }
+
+    fn render_container_refresh_button(
+        &self,
+        label: String,
+        loading: bool,
+        loading_key: &'static str,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        self.workspace_toolbar_action_button(
+            label,
+            Some(if loading {
+                self.render_loading_icon(loading_key, 14.0, rgb(self.tokens.ui.text))
+            } else {
+                Self::render_lucide_icon(LucideIcon::RefreshCw, 14.0, rgb(self.tokens.ui.text))
+            }),
+            ToolbarButtonOptions {
+                button: ButtonOptions {
+                    variant: ButtonVariant::Outline,
+                    size: ButtonSize::Sm,
+                    disabled: loading,
+                    ..ButtonOptions::default()
+                },
+                ..ToolbarButtonOptions::default()
+            },
+            cx.listener(|this, _event, _window, cx| {
+                this.refresh_selected_engine_container_list(cx);
+                cx.stop_propagation();
+            }),
+        )
+    }
+
+    /// Engine row: a narrowed select next to the container-list refresh
+    /// button. Opening the select re-runs engine discovery, so the only
+    /// purpose of a dedicated refresh is reloading containers.
+    fn render_container_engine_field(
+        &self,
+        engines: &[oxideterm_docker::EngineInfo],
+        loading: bool,
+        selected_index: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let selector = if engines.is_empty() {
+            div()
+                .flex()
+                .flex_1()
+                .items_center()
+                .justify_between()
+                .gap(px(self.tokens.spacing.two))
+                .child(self.render_connection_hint(if loading {
+                    self.i18n
+                        .t("modals.new_connection.container_loading_engines")
+                } else {
+                    self.i18n.t("modals.new_connection.container_no_engines")
+                }))
+                // With no dropdown to reopen, rediscovery needs its own
+                // affordance; keep the engine-refresh button for this edge.
+                .child(
+                    self.workspace_toolbar_action_button(
+                        self.i18n
+                            .t("modals.new_connection.container_refresh_engines"),
+                        Some(if loading {
+                            self.render_loading_icon(
+                                "container-engines-loading",
+                                14.0,
+                                rgb(self.tokens.ui.text),
+                            )
+                        } else {
+                            Self::render_lucide_icon(
+                                LucideIcon::RefreshCw,
+                                14.0,
+                                rgb(self.tokens.ui.text),
+                            )
+                        }),
+                        ToolbarButtonOptions {
+                            button: ButtonOptions {
+                                variant: ButtonVariant::Outline,
+                                size: ButtonSize::Sm,
+                                disabled: loading,
+                                ..ButtonOptions::default()
+                            },
+                            ..ToolbarButtonOptions::default()
+                        },
+                        cx.listener(|this, _event, _window, cx| {
+                            this.refresh_container_engines(false, cx);
+                            cx.stop_propagation();
+                        }),
+                    ),
+                )
+                .into_any_element()
+        } else {
+            let selected_label = engines
+                .get(selected_index)
+                .map(|engine| engine.label.clone())
+                .unwrap_or_else(|| self.i18n.t("modals.new_connection.container_select_engine"));
+            div()
+                .flex()
+                .items_center()
+                .gap(px(self.tokens.spacing.two))
+                // The select absorbs the free row width; the refresh button
+                // stays pinned to the right edge. Opening the picker re-runs
+                // the cheap filesystem discovery via the shared trigger hook;
+                // containers reload only when a different engine is picked.
+                .child(
+                    div()
+                        .min_w_0()
+                        .flex_1()
+                        .child(self.render_new_connection_select_control(
+                            NewConnectionSelect::ContainerEngine,
+                            selected_label,
+                            false,
+                            false,
+                            cx,
+                        )),
+                )
+                .child(
+                    self.render_container_refresh_button(
+                        self.i18n
+                            .t("modals.new_connection.container_refresh_containers"),
+                        self.containers_loading_state(cx),
+                        "container-list-loading",
+                        cx,
+                    ),
+                )
+                .into_any_element()
+        };
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(self.tokens.spacing.two))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(self.tokens.spacing.three))
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_sm))
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(rgb(self.tokens.ui.text))
+                            .child(self.i18n.t("modals.new_connection.container_engine")),
+                    ),
+            )
+            .child(selector)
+            .into_any_element()
+    }
+
+    /// Pod container picker shown only for multi-container pods. The value
+    /// mirrors the form state that submission forwards into the launch config.
+    fn render_container_pod_container_field(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let form = self.connection_form_state(cx).form.as_ref()?;
+        let entry = form
+            .container
+            .selected_container_index
+            .and_then(|index| form.container.containers.get(index))?;
+        if entry.containers.len() <= 1 {
+            return None;
+        }
+        // The pin is normalized whenever a container of a multi-container pod
+        // is selected, so the state value is the only source for this label.
+        let value = form.container.pod_container.clone().unwrap_or_default();
+        Some(
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(self.tokens.spacing.two))
+                .child(
+                    div()
+                        .text_size(px(self.tokens.metrics.ui_text_sm))
+                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .text_color(rgb(self.tokens.ui.text))
+                        .child(self.i18n.t("modals.new_connection.container_pod_container")),
+                )
+                .child(self.render_new_connection_select_control(
+                    NewConnectionSelect::ContainerPodContainer,
+                    value,
+                    false,
+                    false,
+                    cx,
+                ))
+                .into_any_element(),
+        )
+    }
+
+    fn containers_loading_state(&self, cx: &mut Context<Self>) -> bool {
+        self.connection_form_state(cx)
+            .form
+            .as_ref()
+            .is_some_and(|form| form.container.containers_loading)
+    }
+
+    /// Container selection is an inline table instead of a dropdown: the rows
+    /// reuse the select-option chrome (hover, selected check) while staying
+    /// visible in the form, sized to five rows so reloads never jump. The
+    /// running-only checkbox filters the view without touching list indexes.
+    fn render_container_list_field(
+        &self,
+        containers: &[oxideterm_docker::ContainerEntry],
+        loading: bool,
+        running_only: bool,
+        selected_index: Option<usize>,
+        engine_is_kube: bool,
+        discovery_pending: bool,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let visible: Vec<(usize, &oxideterm_docker::ContainerEntry)> = containers
+            .iter()
+            .enumerate()
+            // Filtering keeps the original index so row clicks and the
+            // selected-row highlight address the full list.
+            .filter(|(_, entry)| !running_only || entry.state.eq_ignore_ascii_case("running"))
+            .collect();
+        // Kube listings carry a namespace per pod; docker entries never do.
+        // The flag is per table so docker and kube columns stay aligned.
+        let show_namespace = containers.iter().any(|entry| entry.namespace.is_some());
+        // The window text system measures shaped text so the cell tooltips
+        // only attach to values wider than their real column widths below.
+        let text_system = window.text_system();
+        // Cells are plain divs without weight or family overrides, so the
+        // painted glyphs come from the app UI font at regular weight; the
+        // measurement must match that instead of the ambient style stack.
+        let base_font = gpui::Font {
+            weight: gpui::FontWeight::NORMAL,
+            ..gpui::font(oxideterm_gpui_ui::tauri_ui_font_family(
+                &self.environment.ui_font,
+            ))
+        };
+        let fits = |text: &str, size: f32, available: Option<f32>| {
+            available.is_none_or(|available| {
+                oxideterm_gpui_ui::shaped_text_width(text, base_font.clone(), size, text_system)
+                    <= available
+            })
+        };
+        // Derive each column's content width from the probe-reported
+        // border-box table width: 1px border per side, then the select option
+        // chrome's horizontal padding (padding-x left + inset right), then the
+        // inner row's own right inset padding. Only what remains is the box
+        // the relative tracks resolve against, and the flex image column
+        // absorbs the rest after the gaps. The tracks come from the shared
+        // module constants and the paddings must match the
+        // `select_option_element` chrome.
+        let (name_track, namespace_track, state_track, gaps) = if show_namespace {
+            (
+                CONTAINER_NAME_TRACK_KUBE,
+                CONTAINER_NAMESPACE_TRACK,
+                CONTAINER_STATE_TRACK_KUBE,
+                3.0,
+            )
+        } else {
+            (
+                CONTAINER_NAME_TRACK_DOCKER,
+                0.0,
+                CONTAINER_STATE_TRACK_DOCKER,
+                2.0,
+            )
+        };
+        let row_content = self
+            .connection_form_state(cx)
+            .container_table_width
+            .map(|width| {
+                width
+                    - 2.0
+                    - self.tokens.metrics.ui_menu_item_padding_x
+                    - 2.0 * self.tokens.metrics.ui_menu_inset_padding_left
+            });
+        let metrics = ContainerCellMetrics {
+            name: row_content.map(|content| content * name_track),
+            image: row_content.map(|content| {
+                content * (1.0 - name_track - namespace_track - state_track)
+                    - gaps * self.tokens.spacing.two
+            }),
+            namespace: row_content.map(|content| content * namespace_track),
+            state: row_content.map(|content| content * state_track),
+            // The select option chrome sets ui_text_sm for every row, so the
+            // name cell paints at that size, not the window base size.
+            base_size: self.tokens.metrics.ui_text_sm,
+            small_size: self.tokens.metrics.ui_text_xs,
+        };
+        let body: AnyElement = if visible.is_empty() {
+            self.render_connection_hint(if loading {
+                self.i18n.t("modals.new_connection.container_loading_list")
+            } else if discovery_pending {
+                // No engine has been found yet, so the empty list says
+                // nothing about the environment; mirror the engine field
+                // instead of claiming there are no containers.
+                self.i18n
+                    .t("modals.new_connection.container_loading_engines")
+            } else if running_only {
+                self.i18n
+                    .t("modals.new_connection.container_no_running_containers")
+            } else {
+                self.i18n.t("modals.new_connection.container_no_containers")
+            })
+        } else {
+            // The probe reports the frame's laid-out width every frame so the
+            // overflow predicates above stay exact after resizes, at the cost
+            // of a one-frame delay.
+            let workspace = cx.entity();
+            oxideterm_gpui_ui::BoundsProbe::new(
+                div()
+                    .id("container-select-table")
+                    .rounded(px(self.tokens.radii.md))
+                    .border_1()
+                    .border_color(rgb(self.tokens.ui.border))
+                    .overflow_hidden()
+                    .overflow_y_scroll()
+                    // Keep wheel input local to the table; without this the
+                    // scrollable form canvas behind it scrolls in lockstep.
+                    .on_scroll(|_, _, cx| cx.stop_propagation())
+                    // Five visible rows keep the table height stable while the
+                    // scrollbar absorbs longer lists.
+                    .max_h(px(self.tokens.metrics.ui_control_height * 5.0))
+                    .children(visible.into_iter().map(|(index, entry)| {
+                        let selected = Some(index) == selected_index;
+                        let running = entry.state.eq_ignore_ascii_case("running");
+                        // The row id scopes the per-cell ids below so the
+                        // stateful cells stay unique across sibling rows.
+                        select_option_element(
+                            &self.tokens,
+                            container_table_row(
+                                &self.tokens,
+                                entry,
+                                running,
+                                show_namespace,
+                                &metrics,
+                                &fits,
+                            ),
+                            selected,
+                        )
+                        .id(("container-row", index))
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.set_new_connection_container(index, cx);
+                                cx.stop_propagation();
+                            }),
+                        )
+                    })),
+                move |bounds, _window, cx| {
+                    let width = f32::from(bounds.size.width);
+                    // The probe fires every frame; only real geometry changes
+                    // may notify, or rendering would loop.
+                    let _ = workspace.update(cx, |this, cx| {
+                        let changed = {
+                            let FormOwner::Desktop(flow) = &this.flow else {
+                                return;
+                            };
+                            flow.update(cx, |flow, _flow_cx| {
+                                if flow.form.container_table_width != Some(width) {
+                                    flow.form.container_table_width = Some(width);
+                                    true
+                                } else {
+                                    false
+                                }
+                            })
+                        };
+                        if changed {
+                            cx.notify();
+                        }
+                    });
+                },
+            )
+            .into_any_element()
+        };
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(self.tokens.spacing.two))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap(px(self.tokens.spacing.three))
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_sm))
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(rgb(self.tokens.ui.text))
+                            .child(self.i18n.t(if engine_is_kube {
+                                // Kube listings are pods; the label follows the
+                                // selected engine so it updates on switch and
+                                // on the first engine auto-selection.
+                                "modals.new_connection.container_pods"
+                            } else {
+                                "modals.new_connection.container_container"
+                            })),
+                    )
+                    .child(
+                        // The filter is a plain toggle: it re-renders the rows
+                        // in place and never resets the selection.
+                        div()
+                            .cursor_pointer()
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _event, _window, cx| {
+                                    this.update_connection_form_state(cx, |state| {
+                                        if let Some(form) = state.form.as_mut() {
+                                            form.container.running_only =
+                                                !form.container.running_only;
+                                        }
+                                    });
+                                    cx.stop_propagation();
+                                    cx.notify();
+                                }),
+                            )
+                            .child(checkbox_with(
+                                &self.tokens,
+                                "container-running-filter",
+                                self.i18n
+                                    .t("modals.new_connection.container_running_filter"),
+                                running_only,
+                                CheckboxOptions::default(),
+                            )),
+                    ),
+            )
+            .child(body)
+            .into_any_element()
+    }
+
     pub(super) fn render_new_connection_select_control(
         &self,
         select_id: NewConnectionSelect,
@@ -4424,6 +5968,12 @@ impl ConnectionFormView {
                             }
                         });
                         this.request(FormAction::ClearComposition, None, cx);
+                        // Opening the engine picker re-runs the cheap
+                        // filesystem discovery; the popup rows re-render from
+                        // the refreshed list while it stays open.
+                        if matches!(select_id, NewConnectionSelect::ContainerEngine) {
+                            this.refresh_container_engines(false, cx);
+                        }
                         this.open_new_connection_select_from_pointer(select_id, cx);
                         this.request(FormAction::FocusForm, Some(window), cx);
                         cx.stop_propagation();

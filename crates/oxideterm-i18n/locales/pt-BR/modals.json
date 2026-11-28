@@ -522,7 +522,46 @@
       "serial_invalid_baud_rate": "A taxa de bauds deve ser maior que zero",
       "serial_port_required": "Selecione ou insira um caminho de porta serial",
       "ble_save_failed": "Falha ao salvar a conexão BLE",
-      "ble_secondary_suffix": " · secundário"
+      "ble_secondary_suffix": " · secundário",
+      "transport_container": "Contêiner",
+      "container_description": "Conecte-se diretamente ao shell de um contêiner Docker, Podman ou Kubernetes sem SSH.",
+      "container_engine": "Motor",
+      "container_pod_container": "Contêiner do pod",
+      "container_refresh_engines": "Atualizar motores",
+      "container_refresh_containers": "Atualizar contêineres",
+      "container_loading_engines": "Detectando motores…",
+      "container_no_engines": "Nenhum motor de contêineres encontrado",
+      "container_select_engine": "Selecionar motor",
+      "container_container": "Contêiner",
+      "container_pods": "Pods",
+      "container_running_filter": "Somente em execução",
+      "container_select_container": "Selecionar contêiner",
+      "container_loading_list": "Carregando contêineres…",
+      "container_no_containers": "Nenhum contêiner ou pod",
+      "container_no_running_containers": "Nenhum contêiner ou pod em execução",
+      "container_select_required": "Selecione um contêiner primeiro",
+      "container_load_failed": "Falha ao carregar a lista de contêineres",
+      "container_shell": "Shell",
+      "container_shell_placeholder": "/bin/bash (padrão)",
+      "container_launch_mode": "Modo de inicialização",
+      "container_launch_mode_shell": "Shell",
+      "container_launch_mode_command": "Comando",
+      "container_launch_mode_attach": "Anexar",
+      "container_command": "Comando",
+      "container_command_placeholder": "ex.: top -d 1",
+      "container_command_required": "O modo comando exige uma linha de comando",
+      "container_attach_hint": "Anexa ao TTY do processo principal do contêiner em vez de iniciar um novo shell.",
+      "container_details_title": "Detalhes do contêiner",
+      "container_details_loading": "Lendo detalhes do contêiner…",
+      "container_details_none": "Sem detalhes de montagens, portas ou redes",
+      "container_details_mounts": "Montagens",
+      "container_details_ports": "Portas",
+      "container_details_networks": "Redes",
+      "container_details_pod_ip": "IP do pod",
+      "container_access_denied": "Permissão negada: seu usuário não pode acessar o socket do motor de contêineres. No Linux execute `sudo usermod -aG docker $USER` e faça login novamente, ou use um motor rootless (Docker rootless ou socket de usuário do Podman).",
+      "container_save_failed": "Falha ao salvar perfil de contêiner",
+      "container_profile_name": "Nome do perfil",
+      "container_profile_name_placeholder": "Meu contêiner"
     },
     "managed_key": {
       "selector": {
@@ -721,19 +760,6 @@
       "use_global": "Usar global",
       "direct": "Direto",
       "custom": "Personalizado"
-    }
-  },
-  "local_shell": {
-    "background": {
-      "kill": "Encerrar",
-      "lines": "linhas",
-      "resume": "Retomar",
-      "title": "Sessões em segundo plano"
-    },
-    "toast": {
-      "attached": "Sessão retomada",
-      "detached": "Sessão enviada para segundo plano",
-      "detached_desc": "{{shell}} está em execução em segundo plano"
     }
   },
   "export": {

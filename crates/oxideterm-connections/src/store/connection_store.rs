@@ -82,6 +82,17 @@ impl ConnectionStore {
         &self.data.serial_profiles
     }
 
+    pub fn container_profiles(&self) -> &[ContainerProfile] {
+        &self.data.container_profiles
+    }
+
+    pub fn get_container_profile(&self, id: &str) -> Option<&ContainerProfile> {
+        self.data
+            .container_profiles
+            .iter()
+            .find(|profile| profile.id == id)
+    }
+
     pub fn ble_profiles(&self) -> &[BleProfile] {
         &self.data.ble_profiles
     }
@@ -980,6 +991,55 @@ impl ConnectionStore {
         self.move_session_assets_to_group(ids, &[], &[], &[], &[], &[], &[], &[], &[], &[], group)
     }
 
+    /// Moves container profile group assignments in one metadata save. Kept
+    /// separate from move_session_assets_to_group so that call site keeps its
+    /// published arity while container profiles join batch group moves.
+    pub fn move_container_profiles_to_group(
+        &mut self,
+        container_profile_ids: &[String],
+        group: Option<&str>,
+    ) -> Result<usize> {
+        let original_groups = self.data.groups.clone();
+        let audit = oxideterm_audit::AuditOperation::begin(
+            oxideterm_audit::AuditCategory::Configuration,
+            "configuration_save",
+            None,
+            Some("group_assignment"),
+        );
+        let audit_result = (|| {
+            let group = normalize_optional_group_name(group)?;
+            let id_set = container_profile_ids.iter().collect::<HashSet<_>>();
+            let now = Utc::now();
+            let mut updated = 0;
+            for profile in &mut self.data.container_profiles {
+                if id_set.contains(&profile.id) && profile.group != group {
+                    profile.group = group.clone();
+                    profile.updated_at = now;
+                    updated += 1;
+                }
+            }
+            if updated > 0 {
+                self.normalize();
+                self.save()?;
+            }
+            Ok(updated)
+        })();
+        if audit_result.is_err() {
+            self.data.groups = original_groups;
+        }
+        audit.finish(
+            match &audit_result {
+                Ok(0) => oxideterm_audit::AuditOutcome::Unchanged,
+                Ok(_) => oxideterm_audit::AuditOutcome::Succeeded,
+                Err(_) => oxideterm_audit::AuditOutcome::Failed,
+            },
+            oxideterm_audit::AuditEvidence::Protocol,
+            None,
+            None,
+        );
+        audit_result
+    }
+
     /// Moves all saved Session Manager asset types in one metadata save.
     pub fn move_session_assets_to_group(
         &mut self,
@@ -1389,6 +1449,124 @@ impl ConnectionStore {
         let Some(profile) = self
             .data
             .serial_profiles
+            .iter_mut()
+            .find(|profile| profile.id == id)
+        else {
+            return Ok(false);
+        };
+        let now = Utc::now();
+        profile.last_used_at = Some(now);
+        profile.updated_at = now;
+        self.save()?;
+        Ok(true)
+    }
+
+    pub fn upsert_container_profile(
+        &mut self,
+        request: SaveContainerProfileRequest,
+    ) -> Result<ContainerProfile> {
+        let audit = oxideterm_audit::AuditOperation::begin(
+            oxideterm_audit::AuditCategory::Configuration,
+            "configuration_save",
+            request.id.as_deref(),
+            Some(&request.name),
+        );
+        let audit_result = (|| {
+            let group = normalize_optional_group_name(request.group.as_deref())?;
+            let now = Utc::now();
+            let id = request.id.unwrap_or_else(|| Uuid::new_v4().to_string());
+            let mut profile = self
+                .data
+                .container_profiles
+                .iter()
+                .find(|profile| profile.id == id)
+                .cloned()
+                .unwrap_or_else(|| {
+                    ContainerProfile::new(
+                        request.name.trim(),
+                        request.engine.clone(),
+                        request.container_name.trim(),
+                        request.namespace.clone(),
+                        request.pod_container.clone(),
+                        request.launch.clone(),
+                    )
+                });
+            profile.id = id.clone();
+            profile.name = request.name.trim().to_string();
+            profile.group = group;
+            profile.notes = normalize_optional_text(request.notes);
+            profile.icon = normalize_optional_text(request.icon);
+            profile.color = normalize_optional_text(request.color);
+            profile.icon_background_color = normalize_optional_text(request.icon_background_color);
+            profile.engine = request.engine;
+            profile.container_name = request.container_name.trim().to_string();
+            profile.namespace = request.namespace;
+            profile.pod_container = request.pod_container;
+            profile.launch = request.launch;
+            profile.terminal = request.terminal;
+            if !self
+                .data
+                .container_profiles
+                .iter()
+                .any(|existing| existing.id == id)
+            {
+                profile.created_at = now;
+            }
+            profile.updated_at = now;
+            profile.validate()?;
+
+            if let Some(existing) = self
+                .data
+                .container_profiles
+                .iter_mut()
+                .find(|existing| existing.id == id)
+            {
+                *existing = profile.clone();
+            } else {
+                self.data.container_profiles.push(profile.clone());
+            }
+            self.data
+                .container_tombstones
+                .retain(|t| t.id != profile.id);
+            self.normalize();
+            self.save()?;
+            Ok(profile)
+        })();
+        audit.result(&audit_result);
+        audit_result
+    }
+
+    pub fn delete_container_profile(&mut self, id: &str) -> Result<bool> {
+        let audit = oxideterm_audit::AuditOperation::begin(
+            oxideterm_audit::AuditCategory::Configuration,
+            "configuration_delete",
+            Some(id),
+            None,
+        );
+        let audit_result = (|| {
+            let before = self.data.container_profiles.len();
+            self.data.container_profiles.retain(|profile| profile.id != id);
+            let deleted = self.data.container_profiles.len() != before;
+            if deleted {
+                self.data.container_tombstones =
+                    active_connection_tombstones(&self.data.container_tombstones);
+                self.data.container_tombstones.retain(|t| t.id != id);
+                self.data.container_tombstones.push(DeletedConnectionTombstone {
+                    id: id.to_owned(),
+                    deleted_at: Utc::now(),
+                });
+                self.save()?;
+            }
+            Ok(deleted)
+        })();
+        audit.changed(&audit_result);
+        audit_result
+    }
+
+    pub fn mark_container_profile_used(&mut self, id: &str) -> Result<bool> {
+        let Some(profile) = self
+            .data
+            .container_profiles
             .iter_mut()
             .find(|profile| profile.id == id)
         else {
@@ -4607,6 +4785,12 @@ impl ConnectionStore {
             .serial_profiles
             .iter()
             .filter_map(|profile| profile.group.clone())
+            .chain(
+                self.data
+                    .container_profiles
+                    .iter()
+                    .filter_map(|profile| profile.group.clone()),
+            )
             .chain(self.data.ftp_profiles.iter().filter_map(|profile|profile.group.clone()))
             .chain(
                 self.data
