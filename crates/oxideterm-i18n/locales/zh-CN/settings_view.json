@@ -1,5 +1,32 @@
 {
   "settings_view": {
+    "discovery": {
+      "install_provider_hint": "要添加来源，请先安装或启用动态发现插件。",
+      "toggle_failed": "未能更改来源的启用状态。",
+      "edit_source": "编辑来源",
+      "confirm_ssh_form": "连接前再次确认连接表单",
+      "separate_session": "另开会话",
+      "identity_changed": "提供方无法确认与原会话的访问身份一致。要另开会话吗？",
+      "reopen": "重新打开目标",
+      "refresh": "刷新列表",
+      "refreshing": "正在刷新目标列表…",
+      "refreshed": "列表已刷新 · {time} · 目标数：{count}",
+      "refresh_failed": "刷新失败：{reason}",
+      "title": "动态发现",
+      "description": "管理临时连接的发现来源。",
+      "interval": "刷新间隔（分钟）",
+      "scheduled_refresh": "定时刷新",
+      "add": "添加来源",
+      "save_before_action": "请先保存并启用此来源，再使用当前配置执行此操作。",
+      "unavailable": "来源不可用",
+      "permission_denied": "无权访问",
+      "stale_target": "目标已变化，请刷新来源。",
+      "invalid_response": "提供方返回的数据无效",
+      "no_targets": "暂无可用目标",
+      "source_in_use": "请关闭各窗口中此来源的会话，并在活动会话中断开空闲节点，再删除来源。",
+      "cleanup_pending": "来源已保存。再次保存可重试清理旧凭据。",
+      "removal_pending": "来源尚未删除完成，可再次点击“删除”。"
+    },
     "known_hosts": {
       "title": "已信任主机",
       "description": "管理已保存的 SSH 主机密钥。",

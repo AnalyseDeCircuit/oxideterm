@@ -51,6 +51,35 @@ mod tests {
     }
 
     #[test]
+    fn saved_ssh_identity_rejects_stale_edits_after_a_gateway_change() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("connections.json");
+        let mut editor = ConnectionStore::load(&path).unwrap();
+        editor.upsert(request("gateway", SavedAuth::Agent)).unwrap();
+        editor.upsert(request("target", SavedAuth::Agent)).unwrap();
+        let mut target = editor.get("target").unwrap().clone();
+        target.options.jump_host = Some("gateway".into());
+        editor.upsert_imported_connection(target).unwrap();
+        let original = editor.saved_ssh_identity("target").unwrap();
+        let mut other = ConnectionStore::load(&path).unwrap();
+        let mut gateway = request("gateway", SavedAuth::Agent);
+        gateway.host = "replacement.example".into();
+        other.upsert(gateway).unwrap();
+
+        let mut stale = request("target", SavedAuth::Agent);
+        stale.host = "stale.example".into();
+        assert!(editor.upsert_confirmed_profile_edit(stale, Some(original)).is_err());
+        assert!(editor.with_confirmed_ssh_identity::<()>("target", original, |_| {
+            panic!("stale SSH identity reached the credential writer");
+        }).is_err());
+        let persisted = ConnectionStore::load_read_only(&path).unwrap();
+        let actual = persisted.get("target").unwrap();
+        assert_eq!(actual.host, "192.168.1.2");
+        assert_eq!(actual.options.jump_host.as_deref(), Some("gateway"));
+        assert_eq!(editor.get("gateway").unwrap().host, "replacement.example");
+    }
+
+    #[test]
     fn explicit_empty_password_survives_sync_without_credentials() {
         let mut source = load_empty_store("empty-password-sync-source");
         let mut target = load_empty_store("empty-password-sync-target");
@@ -866,6 +895,29 @@ mod tests {
 
         let decoded: ConnectionOptions = serde_json::from_value(serialized).unwrap();
         assert_eq!(decoded.x11_forwarding, options.x11_forwarding);
+    }
+
+    #[test]
+    fn duplicate_store_notifications_allow_group_edits_but_stale_windows_cannot_overwrite() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("connections.json");
+        let mut first = ConnectionStore::load(&path).unwrap();
+        first.create_group("Original".into()).unwrap();
+        let mut second = ConnectionStore::load(&path).unwrap();
+
+        // An external writer bypasses both windows' in-process writer gate.
+        fs::write(&path, br#"{"groups":["External"]}"#).unwrap();
+        first = first.reload_after_external_change().unwrap();
+        assert!(second.create_group("Stale".into()).is_err());
+        second = second.reload_after_external_change().unwrap();
+
+        first.create_group("First".into()).unwrap();
+        first = first.reload_after_external_change().unwrap();
+        second = second.reload_after_external_change().unwrap();
+        first.create_group("Second".into()).unwrap();
+        assert!(second.create_group("Would overwrite".into()).is_err());
+        let persisted = ConnectionStore::load_read_only(&path).unwrap();
+        assert_eq!(persisted.groups(), ["External", "First", "Second"]);
     }
 
     #[test]

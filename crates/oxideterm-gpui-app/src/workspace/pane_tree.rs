@@ -83,26 +83,24 @@ struct TerminalInputBroadcastRoute {
     terminal: gpui::WeakEntity<WorkspaceTerminalEntity>,
 }
 
-impl TerminalInputBroadcastRoute {
-    fn broadcaster(self) -> TerminalInputBroadcaster {
-        Rc::new(move |kind, bytes, cx| self.deliver(kind, bytes, cx))
+#[derive(Default)]
+struct LinePasteTargets(Vec<(PaneId, gpui::EntityId, u64)>);
+
+impl LinePasteTargets {
+    fn remaining(&mut self, live: Self) -> Vec<PaneId> {
+        let live: HashSet<_> = live.0.into_iter().collect();
+        // A batch can lose recipients, but never acquire one, even if a pane ID is reused.
+        self.0.retain(|target| live.contains(target));
+        self.0.iter().map(|(id, _, _)| *id).collect()
     }
+}
 
-    fn deliver(&self, kind: TerminalBroadcastInputKind, bytes: &[u8], cx: &mut App) {
-        if let Some(runtime) = self.ai_runtime.upgrade() {
-            if let Some(key) = runtime.read(cx).terminal_resource_key(self.session_id) {
-                if self.agent_resources.has_owner(&key) {
-                    self.agent_resources.invalidate(&key);
-                }
-            }
-        }
-        let Some(tab_host) = self.tab_host.upgrade() else {
-            return;
+impl TerminalInputBroadcastRoute {
+    fn targets(&self, cx: &mut App) -> Vec<PaneId> {
+        let (Some(tab_host), Some(terminal)) = (self.tab_host.upgrade(), self.terminal.upgrade())
+        else {
+            return Vec::new();
         };
-        let Some(terminal) = self.terminal.upgrade() else {
-            return;
-        };
-
         let (live_panes, mut candidates) = {
             let tab_host = tab_host.read(cx);
             let live_panes = tab_host.panes().keys().copied().collect::<HashSet<_>>();
@@ -117,15 +115,64 @@ impl TerminalInputBroadcastRoute {
         candidates
             .retain(|pane_id| *pane_id != self.source_pane_id && live_panes.contains(pane_id));
 
-        let targets = terminal.update(cx, |terminal, _cx| {
+        terminal.update(cx, |terminal, _cx| {
             terminal.retain_live_broadcast_targets(&live_panes);
             terminal.filter_broadcast_targets(self.source_pane_id, candidates)
-        });
-        if targets.is_empty() {
-            return;
+        })
+    }
+
+    fn line_targets(&self, cx: &mut App) -> LinePasteTargets {
+        let ids = self.targets(cx);
+        let Some(host) = self.tab_host.upgrade() else {
+            return LinePasteTargets::default();
+        };
+        LinePasteTargets(
+            ids.into_iter()
+                .filter_map(|id| {
+                    let pane = host.read(cx).panes().get(&id)?;
+                    Some((
+                        id,
+                        pane.entity_id(),
+                        pane.read(cx).ssh_reconnect_generation(),
+                    ))
+                })
+                .collect(),
+        )
+    }
+
+    fn capture_line_paste(&self, cx: &mut App) -> oxideterm_gpui_terminal::LinePasteBroadcast {
+        let route = self.clone();
+        let mut recipients = self.line_targets(cx);
+        Box::new(move |bytes, cx| {
+            let ids = recipients.remaining(route.line_targets(cx));
+            route.deliver(TerminalBroadcastInputKind::PasteLine, bytes, ids, cx)
+        })
+    }
+
+    fn deliver(
+        &self,
+        kind: TerminalBroadcastInputKind,
+        bytes: &[u8],
+        targets: Vec<PaneId>,
+        cx: &mut App,
+    ) -> bool {
+        if let Some(runtime) = self.ai_runtime.upgrade() {
+            if let Some(key) = runtime.read(cx).terminal_resource_key(self.session_id) {
+                if self.agent_resources.has_owner(&key) {
+                    self.agent_resources.invalidate(&key);
+                }
+            }
         }
-        let explicit_send = matches!(kind, TerminalBroadcastInputKind::Paste)
-            || bytes.contains(&b'\r')
+        if targets.is_empty() {
+            return true;
+        }
+        let Some(tab_host) = self.tab_host.upgrade() else {
+            return false;
+        };
+        let explicit_send = matches!(
+            kind,
+            TerminalBroadcastInputKind::Paste | TerminalBroadcastInputKind::PasteLine
+        ) || bytes.contains(&b'\r')
             || bytes.contains(&b'\n');
         let mut batch = explicit_send.then(|| {
             let mut context = oxideterm_audit::AuditContext::current_request()
@@ -190,6 +237,7 @@ impl TerminalInputBroadcastRoute {
                 None,
             );
         }
+        sent_count == target_count
     }
 }
 
@@ -204,19 +252,24 @@ impl WorkspaceApp {
     ) {
         let window_handle = window.window_handle();
         let terminal_label = pane.read(cx).title().to_string();
-        let broadcaster = TerminalInputBroadcastRoute {
+        let route = TerminalInputBroadcastRoute {
             source_pane_id: pane_id,
             session_id,
             ai_runtime: self.ai.authority.downgrade(),
             agent_resources: self.ai.state.read(cx).agents.services.resources.clone(),
             tab_host: self.tab_host.downgrade(),
             terminal: self.terminal.downgrade(),
-        }
-        .broadcaster();
+        };
+        let live_route = route.clone();
+        let broadcaster: TerminalInputBroadcaster = Rc::new(move |kind, bytes, cx| {
+            let targets = live_route.targets(cx);
+            live_route.deliver(kind, bytes, targets, cx);
+        });
         pane.update(cx, |pane, _cx| {
             // Weak routing endpoints follow pane remounts without taking
             // ownership of the pane, its SSH channel, or the physical node.
             pane.set_input_broadcaster(Some(broadcaster));
+            pane.set_line_paste_broadcast_factory(Rc::new(move |cx| route.capture_line_paste(cx)));
             // Plugin input hooks attribute keystrokes to this session id.
             pane.set_plugin_session_id(Some(session_id.0.to_string()));
         });
@@ -260,6 +313,13 @@ impl WorkspaceApp {
                 let Some(pane) = self.tab_host.read(cx).panes().get(&pane_id).cloned() else {
                     return;
                 };
+                if self
+                    .plugin_entity
+                    .read(cx)
+                    .discovery_terminal(&pane.read(cx).shared_session())
+                {
+                    return;
+                }
                 let history = self
                     .local_terminal_histories
                     .entry(file)
@@ -279,6 +339,20 @@ impl WorkspaceApp {
                 oxideterm_gpui_background::note_input_activity(window_handle.window_id(), cx);
             }
             TerminalPaneEvent::Exited { .. } => {
+                let Some(terminal) = self
+                    .tab_host
+                    .read(cx)
+                    .terminal_pane_for_target(pane_id, session_id)
+                    .map(|pane| pane.read(cx).shared_session())
+                else {
+                    return;
+                };
+                if self
+                    .plugin_entity
+                    .update(cx, |entity, _| entity.finish_discovery_terminal(&terminal))
+                {
+                    return;
+                }
                 self.queue_auto_close_terminal_session(session_id, cx);
             }
             // TabHost consumes this signal before ordinary pane delivery.
@@ -626,7 +700,14 @@ impl WorkspaceApp {
         }
     }
 
-    pub(super) fn remove_terminal_pane(
+    pub(super) fn close_terminal_pane(&mut self, pane_id: &PaneId, cx: &mut Context<Self>) {
+        if let Some(pane) = self.unmount_terminal_pane(pane_id, cx) {
+            self.close_plugin_connection_terminal(&pane.read(cx).shared_session(), cx);
+            pane.update(cx, |pane, _| pane.shutdown());
+        }
+    }
+
+    pub(super) fn unmount_terminal_pane(
         &mut self,
         pane_id: &PaneId,
         cx: &mut Context<Self>,
@@ -640,15 +721,6 @@ impl WorkspaceApp {
             .terminal_session_id_for_pane(*pane_id);
         self.release_shell_ide_for_pane(*pane_id, cx);
         self.clear_workspace_tooltip(&format!("terminal-timestamp-{}", pane_id.0), cx);
-        if let Some(terminal) = self
-            .tab_host
-            .read(cx)
-            .panes()
-            .get(pane_id)
-            .map(|pane| pane.read(cx).shared_session())
-        {
-            self.close_plugin_connection_terminal(&terminal, cx);
-        }
         // Drop the BLE GATT registry entry with the pane. Notification pumps
         // observe the session worker's drop and tear down their routes
         // themselves, so no explicit cancellation is needed here.
@@ -773,7 +845,18 @@ impl WorkspaceApp {
             return None;
         }
         let source = match kind {
-            oxideterm_terminal::TerminalSessionKind::LocalPty => TerminalSplitSource::Local,
+            oxideterm_terminal::TerminalSessionKind::LocalPty => {
+                let pane = self.tab_host.read(cx).panes().get(&active_pane_id)?;
+                // Discovery PTYs need a new provider authorization for every launch.
+                if self
+                    .plugin_entity
+                    .read(cx)
+                    .discovery_terminal(&pane.read(cx).shared_session())
+                {
+                    return None;
+                }
+                TerminalSplitSource::Local
+            }
             oxideterm_terminal::TerminalSessionKind::SshPty => {
                 let node = self.active_ssh_terminal_node_id(cx)?;
                 if !self.node_is_ready_for_terminal(&node) {
@@ -927,9 +1010,7 @@ impl WorkspaceApp {
         self.terminal_saved_connection_refs.remove(&session_id);
         self.clear_terminal_trigger_session_overrides(session_id);
         self.unregister_ssh_terminal_session(session_id, cx);
-        if let Some(pane) = self.remove_terminal_pane(&pane_id, cx) {
-            let _ = pane.update(cx, |pane, _cx| pane.shutdown());
-        }
+        self.close_terminal_pane(&pane_id, cx);
     }
 
     pub(super) fn close_active_pane(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -996,9 +1077,7 @@ impl WorkspaceApp {
         }
         self.sync_session_retention(cx);
 
-        if let Some(pane) = self.remove_terminal_pane(&active_pane_id, cx) {
-            let _ = pane.update(cx, |pane, _cx| pane.shutdown());
-        }
+        self.close_terminal_pane(&active_pane_id, cx);
 
         if self
             .tab_host
@@ -1395,6 +1474,29 @@ fn x11_forwarding_notice(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn line_paste_never_sends_a_suffix_to_a_new_or_reconnected_receiver() {
+        let target = |pane, entity: u64, generation| {
+            (PaneId(pane), gpui::EntityId::from(entity), generation)
+        };
+        let a = target(1, 11, 0);
+        let b = target(2, 22, 0);
+        let c = target(3, 33, 0);
+        let d = target(4, 44, 0);
+        let mut batch = LinePasteTargets(vec![a, b, c, d]);
+        let live = LinePasteTargets(vec![
+            a,
+            target(3, 33, 1),
+            target(4, 45, 0),
+            target(5, 55, 0),
+        ]);
+        assert_eq!(batch.remaining(live), [PaneId(1)]);
+        assert_eq!(
+            batch.remaining(LinePasteTargets(vec![a, b, c, d])),
+            [PaneId(1)]
+        );
+    }
 
     #[test]
     fn x11_notices_distinguish_acceptance_and_optional_forwarding_failures() {

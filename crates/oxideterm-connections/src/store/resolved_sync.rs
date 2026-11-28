@@ -18,6 +18,9 @@ impl ConnectionStore {
         &mut self,
         mut incoming: ResolvedConnectionConfiguration,
     ) -> Result<PreparedSavedConnectionsSync> {
+        let gate = self.revision.gate.clone();
+        let generation = gate.lock();
+        self.refresh_for_write(generation.get())?;
         let checkpoint = self.create_checkpoint()?;
         let old_references = self.credential_reference_ids();
         let mut next = self.data.clone();
@@ -62,6 +65,7 @@ impl ConnectionStore {
         next.connection_tombstones
             .retain(|entry| !ids.contains(&entry.id));
         for id in &deleted_connection_ids {
+            next.ssh_identity_generations.remove(id);
             next.connection_tombstones.retain(|entry| entry.id != *id);
             next.connection_tombstones.push(DeletedConnectionTombstone {
                 id: id.clone(),

@@ -103,6 +103,9 @@
     "paste": {
       "edit_title": "Vor dem Einfügen bearbeiten",
       "clipboard_read_failed": "Die Zwischenablage konnte nicht gelesen werden. Verwende zum Einfügen das Tastenkürzel.",
+      "send_by_line": "Zeilenweise senden",
+      "stop_sending": "Senden stoppen",
+      "interrupted": "{{sent}} Zeilen vollständig gesendet. Versand in Zeile {{line}} gestoppt.",
       "strip_fence": "Codeblock-Markierungen entfernen",
       "undo": "Rückgängig",
       "redo": "Wiederholen",

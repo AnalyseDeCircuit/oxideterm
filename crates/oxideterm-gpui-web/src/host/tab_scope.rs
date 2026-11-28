@@ -249,7 +249,7 @@ impl Workspace {
                 let selected = choices.iter().position(|i| i.item.active).unwrap_or(0);
                 self.palette.model.update(cx, |m, cx| {
                     m.open_content(PaletteContent::TabScopes, cx);
-                    m.set_selected_index(selected, cx);
+                    m.set_selected_index(Some(selected), cx);
                     m.reveal_selection(&choices);
                     m.focus.enter(&self.focus, w, cx);
                 });

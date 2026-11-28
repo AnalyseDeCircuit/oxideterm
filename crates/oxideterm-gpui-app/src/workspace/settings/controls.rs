@@ -70,6 +70,7 @@ impl WorkspaceApp {
                     app.edit_settings(move |settings| oxideterm_gpui_settings_view::ai::subagents::set_agent_concurrency(settings, limit), cx);
                     app.ai.state.read(cx).agents.services.runtime.set_concurrency(limit);
                 }
+                SettingsWindowRequest::OpenPluginManager => app.open_plugin_manager_tab(window, cx),
                 SettingsWindowRequest::ConfirmAiEnable => {
                     if !app.settings_store.settings().ai.enabled_confirmed {
                         app.open_ai_settings_confirm(
@@ -200,6 +201,13 @@ impl WorkspaceApp {
             let _ = owner.update(cx, |app, cx| match request {
                 SelectMenuRequest::Close => {
                     app.close_settings_select();
+                    cx.notify();
+                }
+                SelectMenuRequest::AddDiscoverySource(source) => {
+                    app.close_settings_select();
+                    app.settings_workspace.update(cx, |state, cx| {
+                        state.edit_discovery_source(*source, &app.connection_store, &app.i18n, cx);
+                    });
                     cx.notify();
                 }
                 SelectMenuRequest::Blur => app.blur_text_inputs(cx),

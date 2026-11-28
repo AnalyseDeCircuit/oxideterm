@@ -1024,6 +1024,13 @@ pub(crate) fn runtime_declarative_ui_schema(
 pub fn validate_native_plugin_declarative_ui_schema(
     schema: &NativePluginDeclarativeUiSchema,
 ) -> Result<(), String> {
+    validate_declarative_form(schema, false)
+}
+
+pub(crate) fn validate_declarative_form(
+    schema: &NativePluginDeclarativeUiSchema,
+    allow_empty: bool,
+) -> Result<(), String> {
     let encoded_size = serde_json::to_vec(schema)
         .map_err(|error| format!("Runtime declarative UI schema cannot be encoded: {error}"))?
         .len();
@@ -1042,7 +1049,7 @@ pub fn validate_native_plugin_declarative_ui_schema(
         &schema.kind,
         &[NATIVE_PLUGIN_DECLARATIVE_UI_FORM_KIND],
     )?;
-    if schema.sections.is_empty() && schema.controls.is_empty() {
+    if !allow_empty && schema.sections.is_empty() && schema.controls.is_empty() {
         return Err("Runtime declarative UI schema requires sections or controls".to_string());
     }
     let mut section_ids = HashSet::new();

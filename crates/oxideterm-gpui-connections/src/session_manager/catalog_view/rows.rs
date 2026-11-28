@@ -413,6 +413,14 @@ impl CatalogView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if event.click_count == 1
+            && let SessionManagerOpenTarget::Discovery(key) = &open_target
+        {
+            self.session_manager.update(cx, |manager, cx| {
+                manager.focus_discovery_target(key.clone(), cx)
+            });
+            return;
+        }
         match session_manager_item_pointer_action(
             event.click_count,
             selection_target.is_some(),
@@ -457,12 +465,15 @@ impl CatalogView {
         let selection_target = item.selection_target();
         let open_button_target = item.target.clone();
         let last_used = format_last_used(item.last_used().as_deref(), &self.i18n);
-        let is_selected = selection_target.as_ref().is_some_and(|target| {
-            self.session_manager
-                .read(cx)
-                .selected_items
-                .contains(target)
-        });
+        let manager = self.session_manager.read(cx);
+        let is_selected = match &open_target {
+            SessionManagerOpenTarget::Discovery(key) => {
+                manager.focused_discovery.as_ref() == Some(key)
+            }
+            _ => selection_target
+                .as_ref()
+                .is_some_and(|target| manager.selected_items.contains(target)),
+        };
         self.session_manager_card_surface(self.tokens.radii.md, has_background)
             .min_w(px(MANAGER_RECENT_ITEM_MIN_WIDTH))
             .flex_basis(px(MANAGER_RECENT_ITEM_BASIS))
@@ -591,12 +602,15 @@ impl CatalogView {
             item.subtitle()
         };
         // Keep the selected connection name aligned with the checkbox's accent treatment.
-        let is_selected = selection_target.as_ref().is_some_and(|target| {
-            self.session_manager
-                .read(cx)
-                .selected_items
-                .contains(target)
-        });
+        let manager = self.session_manager.read(cx);
+        let is_selected = match &open_target {
+            SessionManagerOpenTarget::Discovery(key) => {
+                manager.focused_discovery.as_ref() == Some(key)
+            }
+            _ => selection_target
+                .as_ref()
+                .is_some_and(|target| manager.selected_items.contains(target)),
+        };
         self.session_manager_card_surface(self.tokens.radii.lg, has_background)
             .when(is_selected, |card| {
                 card.bg(rgba((theme.accent << 8) | 0x12))
@@ -781,19 +795,15 @@ impl CatalogView {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let (roots, children) = self.session_group_tree();
-        let (expanded_groups, search_active) = {
-            let manager = self.session_manager.read(cx);
-            (
-                manager.expanded_groups.clone(),
-                !manager.search_query.trim().is_empty(),
-            )
-        };
-        let rows = Arc::<[SessionManagerTreeRow]>::from(session_manager_tree_rows(
+        let manager = self.session_manager.read(cx);
+        let rows = Arc::<[SessionManagerTreeRow]>::from(session_manager_tree_with_sources(
             &items,
             &roots,
             &children,
-            &expanded_groups,
-            search_active,
+            &manager.expanded_groups,
+            &manager.discovery_groups,
+            &manager.expanded_discovery,
+            manager.search_active(),
         ));
         let has_rows = !rows.is_empty();
         self.set_session_manager_visible_selection_targets(
@@ -807,7 +817,10 @@ impl CatalogView {
                 SessionManagerTreeRow::Item { item_index, .. } => {
                     items[*item_index].selection_target().as_ref() == Some(target)
                 }
-                SessionManagerTreeRow::Group { .. } => false,
+                SessionManagerTreeRow::Group { .. }
+                | SessionManagerTreeRow::DiscoveryGroup { .. }
+                | SessionManagerTreeRow::DiscoverySubgroup { .. }
+                | SessionManagerTreeRow::DiscoveryStatus(_) => false,
             })
         });
         let workspace = cx.entity();
@@ -819,6 +832,7 @@ impl CatalogView {
                 workspace.update(cx, |this, cx| {
                     this.render_session_manager_tree_row(
                         rows.get(index),
+                        index,
                         &items,
                         has_background,
                         false,
@@ -1029,7 +1043,8 @@ impl CatalogView {
         let Some(row) = rows.get(index) else {
             return div().into_any_element();
         };
-        let row_element = self.render_session_manager_tree_row(Some(row), items, false, true, cx);
+        let row_element =
+            self.render_session_manager_tree_row(Some(row), index, items, false, true, cx);
         let (ancestor_rails, is_last) = session_manager_tree_row_rails(rows, index);
         let depth = row.depth();
         let guided = if depth == 0 {
@@ -1043,12 +1058,126 @@ impl CatalogView {
     pub(super) fn render_session_manager_tree_row(
         &self,
         row: Option<&SessionManagerTreeRow>,
+        row_index: usize,
         items: &[CatalogRow],
         has_background: bool,
         sidebar: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         match row {
+            Some(SessionManagerTreeRow::DiscoverySubgroup {
+                key,
+                label,
+                expanded,
+                count,
+            }) => {
+                let key = key.clone();
+                self.tree_folder_row(
+                    format!("discovery-group-chevron-{key:?}"),
+                    label.clone(),
+                    key.len() - 1,
+                    *expanded,
+                    *count,
+                    has_background,
+                    sidebar,
+                    cx,
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _, _, cx| {
+                        this.session_manager.update(cx, |manager, cx| {
+                            if manager.search_active() {
+                                return;
+                            }
+                            if !manager.expanded_discovery.remove(&key) {
+                                manager.expanded_discovery.insert(key.clone());
+                            }
+                            cx.notify();
+                        });
+                        cx.stop_propagation();
+                    }),
+                )
+                .into_any_element()
+            }
+            Some(SessionManagerTreeRow::DiscoveryStatus(message)) => div()
+                .w_full()
+                .px_2()
+                .text_xs()
+                .text_color(rgb(self.tokens.ui.text_muted))
+                .child(message.clone())
+                .into_any_element(),
+            Some(SessionManagerTreeRow::DiscoveryGroup {
+                group,
+                expanded,
+                count,
+            }) => {
+                let id = group.id.clone();
+                let context_target = SessionManagerRowActionTarget::DiscoverySource(id.clone());
+                let button_target = context_target.clone();
+                self.tree_folder_row(
+                    format!("discovery-source-chevron-{id}"),
+                    group.name.clone(),
+                    0,
+                    *expanded,
+                    *count,
+                    has_background,
+                    sidebar,
+                    cx,
+                )
+                .when(!sidebar, |row| {
+                    row.child(self.render_row_icon_button(
+                        LucideIcon::MoreVertical,
+                        MANAGER_ROW_ACTION_BUTTON,
+                        MANAGER_ROW_ACTION_ICON_SIZE,
+                        rgb(self.tokens.ui.text),
+                        has_background,
+                        move |this, event, _, cx| {
+                            this.open_session_manager_row_action_menu(
+                                button_target.clone(),
+                                f32::from(event.position.x),
+                                f32::from(event.position.y),
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        },
+                        cx,
+                    ))
+                })
+                .on_mouse_down(
+                    MouseButton::Right,
+                    cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                        this.open_session_manager_context_menu(
+                            context_target.clone(),
+                            f32::from(event.position.x),
+                            f32::from(event.position.y),
+                            cx,
+                        );
+                        cx.stop_propagation();
+                    }),
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _, _, cx| {
+                        let expanded = this.session_manager.update(cx, |manager, cx| {
+                            if manager.search_active() {
+                                return false;
+                            }
+                            let key = vec![id.clone()];
+                            let expanded = manager.expanded_discovery.insert(key.clone());
+                            if !expanded {
+                                manager.expanded_discovery.remove(&key);
+                            }
+                            cx.notify();
+                            expanded
+                        });
+                        if expanded {
+                            this.action(CatalogAction::LoadDiscovery(id.clone()), None, cx);
+                        }
+                        cx.stop_propagation();
+                    }),
+                )
+                .into_any_element()
+            }
             Some(SessionManagerTreeRow::Group {
                 path,
                 depth,
@@ -1081,28 +1210,30 @@ impl CatalogView {
                             sidebar,
                             cx,
                         )
-                        .drag_over::<SessionManagerDrag>(move |row, _drag, _window, _cx| {
-                            // Every visible child row participates in its nearest folder's drop area.
-                            let row = if sidebar {
-                                row.rounded(px(radius))
-                            } else {
-                                row
-                            };
-                            row.border_1()
-                                .border_color(rgb(theme.accent))
-                                .bg(rgba((theme.accent << 8) | MANAGER_DRAG_GROUP_BG_ALPHA))
+                        .when(item.discovery_source().is_none(), |row| {
+                            row.drag_over::<SessionManagerDrag>(move |row, _drag, _window, _cx| {
+                                // Every visible child row participates in its nearest folder's drop area.
+                                let row = if sidebar {
+                                    row.rounded(px(radius))
+                                } else {
+                                    row
+                                };
+                                row.border_1()
+                                    .border_color(rgb(theme.accent))
+                                    .bg(rgba((theme.accent << 8) | MANAGER_DRAG_GROUP_BG_ALPHA))
+                            })
+                            .can_drop(|drag, _window, _cx| drag.is::<SessionManagerDrag>())
+                            .on_drop(cx.listener(
+                                move |this, drag: &SessionManagerDrag, _window, cx| {
+                                    this.move_dragged_sessions_to_group(
+                                        &drag.targets,
+                                        drop_group.as_deref(),
+                                        cx,
+                                    );
+                                    cx.stop_propagation();
+                                },
+                            ))
                         })
-                        .can_drop(|drag, _window, _cx| drag.is::<SessionManagerDrag>())
-                        .on_drop(cx.listener(
-                            move |this, drag: &SessionManagerDrag, _window, cx| {
-                                this.move_dragged_sessions_to_group(
-                                    &drag.targets,
-                                    drop_group.as_deref(),
-                                    cx,
-                                );
-                                cx.stop_propagation();
-                            },
-                        ))
                         .on_mouse_down(
                             MouseButton::Right,
                             cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
@@ -1115,6 +1246,13 @@ impl CatalogView {
                                 cx.stop_propagation();
                             }),
                         );
+                    if item.group_paths.len() > 1 {
+                        // Separate pointer state for simultaneous placements of the same asset.
+                        return div()
+                            .id(("discovery-tree-placement", row_index))
+                            .child(row)
+                            .into_any_element();
+                    }
                     if !sidebar {
                         return row.into_any_element();
                     }
@@ -1155,35 +1293,21 @@ impl CatalogView {
         }
     }
 
-    pub(super) fn render_session_manager_tree_group_row(
+    fn tree_folder_row(
         &self,
-        group: &str,
+        chevron_id: String,
+        label: String,
         depth: usize,
         expanded: bool,
-        has_children: bool,
+        count: usize,
         has_background: bool,
         sidebar: bool,
-        cx: &mut Context<Self>,
+        cx: &Context<Self>,
     ) -> Div {
         let theme = self.tokens.ui;
-        let group_name = group.rsplit('/').next().unwrap_or(group).to_string();
-        let group_id = group.to_string();
-        let context_group = group.to_string();
-        let menu_group = group.to_string();
-        let drop_group = group.to_string();
-        let subgroup_parent = group.to_string();
-        let subgroup_tooltip = format!(
-            "{} — {group}",
-            self.i18n.t("sessionManager.folder_tree.new_subgroup")
-        );
-        let group_count = self.connection_count_for_group(group).to_string();
-        let workspace = cx.entity();
         let radius = self.tokens.radii.sm;
         let chevron = self.render_animated_chevron(
-            (
-                gpui::SharedString::from(format!("session-group-chevron-{group}")),
-                expanded as usize,
-            ),
+            (gpui::SharedString::from(chevron_id), expanded as usize),
             expanded,
             if sidebar { 12.0 } else { 16.0 },
             rgb(theme.text_muted),
@@ -1220,45 +1344,6 @@ impl CatalogView {
             })
             .flex()
             .items_center()
-            .drag_over::<SessionManagerDrag>(move |row, _drag, _window, _cx| {
-                let row = if sidebar {
-                    row.rounded(px(radius))
-                } else {
-                    row
-                };
-                row.border_1()
-                    .border_color(rgb(theme.accent))
-                    .bg(rgba((theme.accent << 8) | MANAGER_DRAG_GROUP_BG_ALPHA))
-            })
-            .can_drop(|drag, _window, _cx| drag.is::<SessionManagerDrag>())
-            .on_drop(
-                cx.listener(move |this, drag: &SessionManagerDrag, _window, cx| {
-                    this.move_dragged_sessions_to_group(&drag.targets, Some(&drop_group), cx);
-                    cx.stop_propagation();
-                }),
-            )
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
-                    if has_children && !this.session_manager.read(cx).search_active() {
-                        this.toggle_session_group_expanded(&group_id, cx);
-                        cx.notify();
-                    }
-                    cx.stop_propagation();
-                }),
-            )
-            .on_mouse_down(
-                MouseButton::Right,
-                cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
-                    this.open_session_manager_context_menu(
-                        SessionManagerRowActionTarget::Group(context_group.clone()),
-                        f32::from(event.position.x),
-                        f32::from(event.position.y),
-                        cx,
-                    );
-                    cx.stop_propagation();
-                }),
-            )
             .child(if sidebar {
                 div()
                     .w(px(12.0))
@@ -1296,14 +1381,14 @@ impl CatalogView {
                     }))
                     .font_weight(gpui::FontWeight::MEDIUM)
                     .text_color(rgb(theme.text))
-                    .child(group_name),
+                    .child(label),
             )
             .child(if sidebar {
                 div()
                     .flex_none()
                     .text_size(px(self.tokens.metrics.ui_text_2xs))
                     .text_color(rgb(theme.text_muted))
-                    .child(group_count)
+                    .child(count.to_string())
             } else {
                 div()
                     .rounded(px(self.tokens.radii.sm))
@@ -1312,53 +1397,125 @@ impl CatalogView {
                     .py(px(1.0))
                     .text_size(px(MANAGER_ROW_META_TEXT_SIZE))
                     .text_color(rgb(theme.text_muted))
-                    .child(group_count)
+                    .child(count.to_string())
             })
-            // The sidebar keeps group rows clean; the right-click menu already
-            // exposes subgroup creation and the same action list.
-            .when(!sidebar, |row| {
-                row.child(self.workspace_tooltip_icon_button(
-                    LucideIcon::FolderPlus,
-                    MANAGER_ROW_ACTION_ICON_SIZE,
-                    rgb(theme.text),
-                    IconButtonOptions {
-                        has_background,
-                        ..IconButtonOptions::opaque_toolbar(
-                            MANAGER_ROW_ACTION_BUTTON,
-                            ButtonRadius::Sm,
-                        )
-                    },
-                    subgroup_tooltip,
-                    "session-manager-new-subgroup",
-                    true,
-                    cx.listener(move |this, _event, _window, cx| {
-                        this.action(
-                            CatalogAction::NewSubgroup(subgroup_parent.clone()),
-                            None,
-                            cx,
-                        );
-                        cx.stop_propagation();
-                    }),
-                    workspace,
-                ))
-                .child(self.render_row_icon_button(
-                    LucideIcon::MoreVertical,
-                    MANAGER_ROW_ACTION_BUTTON,
-                    MANAGER_ROW_ACTION_ICON_SIZE,
-                    rgb(theme.text),
-                    has_background,
-                    move |this, event, _window, cx| {
-                        this.open_session_manager_row_action_menu(
-                            SessionManagerRowActionTarget::Group(menu_group.clone()),
-                            f32::from(event.position.x),
-                            f32::from(event.position.y),
-                            cx,
-                        );
-                        cx.stop_propagation();
-                    },
+    }
+
+    pub(super) fn render_session_manager_tree_group_row(
+        &self,
+        group: &str,
+        depth: usize,
+        expanded: bool,
+        has_children: bool,
+        has_background: bool,
+        sidebar: bool,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let theme = self.tokens.ui;
+        let group_name = group.rsplit('/').next().unwrap_or(group).to_string();
+        let group_id = group.to_string();
+        let context_group = group.to_string();
+        let menu_group = group.to_string();
+        let drop_group = group.to_string();
+        let subgroup_parent = group.to_string();
+        let subgroup_tooltip = format!(
+            "{} — {group}",
+            self.i18n.t("sessionManager.folder_tree.new_subgroup")
+        );
+        let group_count = self.connection_count_for_group(group);
+        let workspace = cx.entity();
+        let radius = self.tokens.radii.sm;
+        self.tree_folder_row(
+            format!("session-group-chevron-{group}"),
+            group_name,
+            depth,
+            expanded,
+            group_count,
+            has_background,
+            sidebar,
+            cx,
+        )
+        .drag_over::<SessionManagerDrag>(move |row, _drag, _window, _cx| {
+            let row = if sidebar {
+                row.rounded(px(radius))
+            } else {
+                row
+            };
+            row.border_1()
+                .border_color(rgb(theme.accent))
+                .bg(rgba((theme.accent << 8) | MANAGER_DRAG_GROUP_BG_ALPHA))
+        })
+        .can_drop(|drag, _window, _cx| drag.is::<SessionManagerDrag>())
+        .on_drop(
+            cx.listener(move |this, drag: &SessionManagerDrag, _window, cx| {
+                this.move_dragged_sessions_to_group(&drag.targets, Some(&drop_group), cx);
+                cx.stop_propagation();
+            }),
+        )
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, _event, _window, cx| {
+                if has_children && !this.session_manager.read(cx).search_active() {
+                    this.toggle_session_group_expanded(&group_id, cx);
+                    cx.notify();
+                }
+                cx.stop_propagation();
+            }),
+        )
+        .on_mouse_down(
+            MouseButton::Right,
+            cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
+                this.open_session_manager_context_menu(
+                    SessionManagerRowActionTarget::Group(context_group.clone()),
+                    f32::from(event.position.x),
+                    f32::from(event.position.y),
                     cx,
-                ))
-            })
+                );
+                cx.stop_propagation();
+            }),
+        )
+        // The sidebar keeps group rows clean; the right-click menu already
+        // exposes subgroup creation and the same action list.
+        .when(!sidebar, |row| {
+            row.child(self.workspace_tooltip_icon_button(
+                LucideIcon::FolderPlus,
+                MANAGER_ROW_ACTION_ICON_SIZE,
+                rgb(theme.text),
+                IconButtonOptions {
+                    has_background,
+                    ..IconButtonOptions::opaque_toolbar(MANAGER_ROW_ACTION_BUTTON, ButtonRadius::Sm)
+                },
+                subgroup_tooltip,
+                "session-manager-new-subgroup",
+                true,
+                cx.listener(move |this, _event, _window, cx| {
+                    this.action(
+                        CatalogAction::NewSubgroup(subgroup_parent.clone()),
+                        None,
+                        cx,
+                    );
+                    cx.stop_propagation();
+                }),
+                workspace,
+            ))
+            .child(self.render_row_icon_button(
+                LucideIcon::MoreVertical,
+                MANAGER_ROW_ACTION_BUTTON,
+                MANAGER_ROW_ACTION_ICON_SIZE,
+                rgb(theme.text),
+                has_background,
+                move |this, event, _window, cx| {
+                    this.open_session_manager_row_action_menu(
+                        SessionManagerRowActionTarget::Group(menu_group.clone()),
+                        f32::from(event.position.x),
+                        f32::from(event.position.y),
+                        cx,
+                    );
+                    cx.stop_propagation();
+                },
+                cx,
+            ))
+        })
     }
 
     pub(super) fn render_session_manager_display_item_row(
@@ -1384,12 +1541,15 @@ impl CatalogView {
             item.subtitle()
         };
         // List rows mirror the card view so selection feedback is consistent.
-        let is_selected = selection_target.as_ref().is_some_and(|target| {
-            self.session_manager
-                .read(cx)
-                .selected_items
-                .contains(target)
-        });
+        let manager = self.session_manager.read(cx);
+        let is_selected = match &open_target {
+            SessionManagerOpenTarget::Discovery(key) => {
+                manager.focused_discovery.as_ref() == Some(key)
+            }
+            _ => selection_target
+                .as_ref()
+                .is_some_and(|target| manager.selected_items.contains(target)),
+        };
         // The whole row is the drag source. The payload is computed from the
         // selection at render time: a selected row drags the full selection,
         // an unselected row drags only itself. Single-click selection is
@@ -1422,6 +1582,10 @@ impl CatalogView {
             } else {
                 None
             };
+        let focus_target = match &open_target {
+            SessionManagerOpenTarget::Discovery(key) => Some(key.clone()),
+            _ => None,
+        };
         let drag_workspace = cx.entity();
         let row = div()
             .id(SharedString::from(format!(
@@ -1500,6 +1664,14 @@ impl CatalogView {
                     let gpui::ClickEvent::Mouse(click) = event else {
                         return;
                     };
+                    if click.down.click_count == 1
+                        && let Some(key) = &focus_target
+                    {
+                        this.session_manager.update(cx, |manager, cx| {
+                            manager.focus_discovery_target(key.clone(), cx)
+                        });
+                        return;
+                    }
                     match session_manager_item_pointer_action(
                         click.down.click_count,
                         selection_target.is_some(),
@@ -1603,6 +1775,7 @@ impl CatalogView {
                         // any selection change made while pressing is
                         // reconciled to the exact payload at drag start.
                         if session_manager.selected_items != dragged_targets {
+                            session_manager.focused_discovery = None;
                             session_manager.selected_items = dragged_targets;
                             cx.notify();
                         }
@@ -1637,6 +1810,7 @@ impl CatalogView {
         let semantic_color = match &item.target {
             SessionManagerOpenTarget::Connection(_)
             | SessionManagerOpenTarget::Tunnel(_)
+            | SessionManagerOpenTarget::Discovery(_)
             | SessionManagerOpenTarget::RemoteDesktop(_) => ui.info,
             SessionManagerOpenTarget::SshConfig(_) | SessionManagerOpenTarget::Plugin(_) => {
                 ui.accent_secondary
@@ -1674,7 +1848,11 @@ impl CatalogView {
             .bg(bg)
             .child(item.icon.render(glyph_size, fg, true))
             .when(
-                matches!(&item.target, SessionManagerOpenTarget::Connection(_)),
+                matches!(
+                    &item.target,
+                    SessionManagerOpenTarget::Connection(_)
+                        | SessionManagerOpenTarget::Discovery(_)
+                ),
                 |icon| icon.border_1().border_color(rgba((text << 8) | 0x1a)),
             )
     }
@@ -1897,9 +2075,14 @@ impl CatalogView {
                         cx,
                     ))
             }
-            SessionManagerOpenTarget::SshConfig(id) => {
-                let open_alias = id.clone();
-                let import_alias = id.clone();
+            SessionManagerOpenTarget::SshConfig(_) | SessionManagerOpenTarget::Discovery(_) => {
+                let open_target = item.target.clone();
+                let import = match &item.target {
+                    SessionManagerOpenTarget::SshConfig(alias) => {
+                        Some(CatalogAction::ImportSshConfig(alias.clone()))
+                    }
+                    _ => None,
+                };
                 div()
                     .w(px(MANAGER_ROW_ACTIONS_WIDTH))
                     .flex_none()
@@ -1916,7 +2099,7 @@ impl CatalogView {
                         move |this, _event, window, cx| {
                             this.action(
                                 CatalogAction::Open {
-                                    target: SessionManagerOpenTarget::SshConfig(open_alias.clone()),
+                                    target: open_target.clone(),
                                     open_sftp: false,
                                 },
                                 Some(window),
@@ -1926,22 +2109,20 @@ impl CatalogView {
                         },
                         cx,
                     ))
-                    .child(self.render_row_icon_button(
-                        LucideIcon::Download,
-                        MANAGER_ROW_ACTION_BUTTON,
-                        MANAGER_ROW_ACTION_ICON_SIZE,
-                        rgb(self.tokens.ui.text),
-                        has_background,
-                        move |this, _event, _window, cx| {
-                            this.action(
-                                CatalogAction::ImportSshConfig(import_alias.clone()),
-                                None,
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        },
-                        cx,
-                    ))
+                    .when_some(import, |row, action| {
+                        row.child(self.render_row_icon_button(
+                            LucideIcon::Download,
+                            MANAGER_ROW_ACTION_BUTTON,
+                            MANAGER_ROW_ACTION_ICON_SIZE,
+                            rgb(self.tokens.ui.text),
+                            has_background,
+                            move |this, _event, _window, cx| {
+                                this.action(action.clone(), None, cx);
+                                cx.stop_propagation();
+                            },
+                            cx,
+                        ))
+                    })
             }
             SessionManagerOpenTarget::Serial(id) => {
                 let open_id = id.clone();
@@ -2450,6 +2631,21 @@ impl CatalogView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let viewport = window.viewport_size();
+        let source_actions =
+            if let SessionManagerRowActionTarget::DiscoverySource(id) = &menu.target {
+                let Some(group) = self
+                    .session_manager
+                    .read(cx)
+                    .discovery_groups
+                    .iter()
+                    .find(|group| &group.id == id)
+                else {
+                    return div().into_any_element();
+                };
+                group.menu_actions()
+            } else {
+                Vec::new()
+            };
         let menu_height = match &menu.target {
             SessionManagerRowActionTarget::Connection(_) => {
                 MANAGER_ROW_ACTION_MENU_CONNECTION_HEIGHT
@@ -2466,8 +2662,12 @@ impl CatalogView {
             | SessionManagerRowActionTarget::RemoteDesktop(_) => {
                 MANAGER_ROW_ACTION_MENU_EDITABLE_PROFILE_HEIGHT
             }
-            SessionManagerRowActionTarget::SshConfig(_) => {
+            SessionManagerRowActionTarget::SshConfig(_)
+            | SessionManagerRowActionTarget::Discovery(_) => {
                 MANAGER_ROW_ACTION_MENU_SSH_CONFIG_HEIGHT
+            }
+            SessionManagerRowActionTarget::DiscoverySource(_) => {
+                MANAGER_ROW_ACTION_MENU_GROUP_HEIGHT
             }
             SessionManagerRowActionTarget::GroupRoot => MANAGER_ROW_ACTION_MENU_PROFILE_HEIGHT,
             SessionManagerRowActionTarget::Group(_) => MANAGER_ROW_ACTION_MENU_GROUP_HEIGHT,
@@ -2475,6 +2675,13 @@ impl CatalogView {
         let menu_width = {
             let mut labels: Vec<String> = Vec::new();
             match &menu.target {
+                SessionManagerRowActionTarget::DiscoverySource(_) => {
+                    labels.extend(
+                        source_actions
+                            .iter()
+                            .map(|(label, _, _)| self.i18n.t(label)),
+                    );
+                }
                 SessionManagerRowActionTarget::GroupRoot => {
                     labels.push(self.i18n.t("sessionManager.folder_tree.new_group"));
                 }
@@ -2487,6 +2694,9 @@ impl CatalogView {
                 SessionManagerRowActionTarget::SshConfig(_) => {
                     labels.push(self.i18n.t("sessionManager.actions.connect"));
                     labels.push(self.i18n.t("settings_view.connections.ssh_config.import"));
+                }
+                SessionManagerRowActionTarget::Discovery(_) => {
+                    labels.push(self.i18n.t("sessionManager.actions.connect"));
                 }
                 SessionManagerRowActionTarget::Tunnel(_) => {
                     labels.push(self.i18n.t("sessionManager.actions.start_tunnel"));
@@ -2536,6 +2746,25 @@ impl CatalogView {
         let mut popup =
             context_menu_event_boundary(dropdown_menu_content(&self.tokens).w(px(menu_width)));
 
+        for (label, icon, action) in source_actions {
+            popup = popup.child(self.render_session_manager_menu_action(
+                oxideterm_gpui_ui::dropdown_menu::dropdown_menu_item_with_icon(
+                    &self.tokens,
+                    icon,
+                    self.i18n.t(label),
+                    false,
+                    false,
+                ),
+                false,
+                false,
+                has_background,
+                move |this, _, window, cx| {
+                    this.action(action.clone(), Some(window), cx);
+                    cx.stop_propagation();
+                },
+                cx,
+            ));
+        }
         // Opening is the primary row action now that the sidebar hides inline buttons.
         if let Some(open_target) = menu.target.open_target() {
             let tunnel_id = match &menu.target {
@@ -2756,13 +2985,19 @@ impl CatalogView {
                 .child(dropdown_menu_separator(&self.tokens));
         }
 
-        if let SessionManagerRowActionTarget::SshConfig(alias) = &menu.target {
-            let import_alias = alias.clone();
+        let import = match &menu.target {
+            SessionManagerRowActionTarget::SshConfig(alias) => Some((
+                "settings_view.connections.ssh_config.import",
+                CatalogAction::ImportSshConfig(alias.clone()),
+            )),
+            _ => None,
+        };
+        if let Some((label, action)) = import {
             popup = popup.child(self.render_session_manager_menu_action(
                 oxideterm_gpui_ui::dropdown_menu::dropdown_menu_item_with_icon(
                     &self.tokens,
                     "lucide/download.svg",
-                    self.i18n.t("settings_view.connections.ssh_config.import"),
+                    self.i18n.t(label),
                     false,
                     false,
                 ),
@@ -2770,11 +3005,7 @@ impl CatalogView {
                 false,
                 has_background,
                 move |this, _event, _window, cx| {
-                    this.action(
-                        CatalogAction::ImportSshConfig(import_alias.clone()),
-                        None,
-                        cx,
-                    );
+                    this.action(action.clone(), None, cx);
                     cx.stop_propagation();
                 },
                 cx,
@@ -3091,8 +3322,9 @@ impl CatalogView {
                 group.clone(),
                 self.i18n.t("sessionManager.folder_tree.delete_group"),
             )),
-            // SSH config discoveries are transient; there is nothing to delete.
             SessionManagerRowActionTarget::SshConfig(_)
+            | SessionManagerRowActionTarget::Discovery(_)
+            | SessionManagerRowActionTarget::DiscoverySource(_)
             | SessionManagerRowActionTarget::GroupRoot => None,
         };
         // Right-clicking a row that is part of the active multi-selection
@@ -3224,7 +3456,9 @@ impl CatalogView {
                             cx,
                         ),
                         SessionManagerRowActionTarget::GroupRoot
-                        | SessionManagerRowActionTarget::SshConfig(_) => {}
+                        | SessionManagerRowActionTarget::DiscoverySource(_)
+                        | SessionManagerRowActionTarget::SshConfig(_)
+                        | SessionManagerRowActionTarget::Discovery(_) => {}
                     }
                     cx.stop_propagation();
                 },
@@ -3310,18 +3544,15 @@ impl CatalogView {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let (roots, children) = self.session_group_tree();
-        let (expanded_groups, has_search_query) = {
-            let manager = self.session_manager.read(cx);
-            (
-                manager.expanded_groups.clone(),
-                !manager.search_query.trim().is_empty(),
-            )
-        };
-        let rows = Arc::<[SessionManagerTreeRow]>::from(session_manager_tree_rows(
+        let manager = self.session_manager.read(cx);
+        let has_search_query = manager.search_active();
+        let rows = Arc::<[SessionManagerTreeRow]>::from(session_manager_tree_with_sources(
             &items,
             &roots,
             &children,
-            &expanded_groups,
+            &manager.expanded_groups,
+            &manager.discovery_groups,
+            &manager.expanded_discovery,
             has_search_query,
         ));
         let has_rows = !rows.is_empty();

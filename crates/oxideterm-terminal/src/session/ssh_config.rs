@@ -13,7 +13,8 @@ pub(super) enum SshSessionConnection {
 
 pub struct SshSessionConfig {
     connection: Option<SshSessionConnection>,
-    route_lease: Option<oxideterm_ssh::ConnectionConsumerLease>,
+    route_lease: Option<oxideterm_ssh::TerminalRouteAdmission>,
+    pending_route: Option<String>,
     host: String,
     port: u16,
     username: String,
@@ -76,6 +77,7 @@ impl SshSessionConfig {
             registry: None,
             consumer: None,
             route_lease: None,
+            pending_route: None,
             prompt_handler: None,
             managed_key_resolver: None,
             trzsz_policy: None,
@@ -105,6 +107,7 @@ impl SshSessionConfig {
             registry: None,
             consumer: None,
             route_lease: None,
+            pending_route: None,
             prompt_handler: None,
             managed_key_resolver: None,
             trzsz_policy: None,
@@ -126,9 +129,13 @@ impl SshSessionConfig {
         &self.username
     }
 
-    pub fn with_route_lease(mut self, lease: oxideterm_ssh::ConnectionConsumerLease) -> Self {
-        // The pane needs its logical route during deferred startup and dedicated channel use.
-        self.route_lease = Some(lease);
+    pub fn with_terminal_route(
+        mut self,
+        connection_id: String,
+        admission: Option<oxideterm_ssh::TerminalRouteAdmission>,
+    ) -> Self {
+        self.pending_route = Some(connection_id);
+        self.route_lease = admission;
         self
     }
 
@@ -218,6 +225,7 @@ impl From<oxideterm_ssh::SshConfig> for SshSessionConfig {
             registry: None,
             consumer: None,
             route_lease: None,
+            pending_route: None,
             prompt_handler: None,
             managed_key_resolver: None,
             trzsz_policy: None,

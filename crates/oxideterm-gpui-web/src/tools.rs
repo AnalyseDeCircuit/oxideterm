@@ -467,13 +467,13 @@ impl Workspace {
         Some(QuickCommandTargetContext {
             target_id: id.0.to_string(),
             label: s.title.clone(),
-            protocol: if s.is_ble() {
+            protocol: Some(if s.is_ble() {
                 QuickCommandTargetProtocol::Ble
             } else if s.node == "local" {
                 QuickCommandTargetProtocol::Local
             } else {
                 QuickCommandTargetProtocol::Ssh
-            },
+            }),
             values: oxideterm_quick_commands::QuickCommandContextValues {
                 host: row.and_then(|r| text(&r.host)),
                 username: row.and_then(|r| text(&r.username)),

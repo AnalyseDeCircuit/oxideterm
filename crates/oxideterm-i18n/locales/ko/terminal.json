@@ -103,6 +103,9 @@
     "paste": {
       "edit_title": "붙여넣기 전에 편집",
       "clipboard_read_failed": "클립보드를 읽을 수 없습니다. 키보드 단축키로 붙여넣으세요.",
+      "send_by_line": "한 줄씩 보내기",
+      "stop_sending": "전송 중지",
+      "interrupted": "{{sent}}개 줄을 모두 보냈습니다. {{line}}번째 줄에서 전송이 중단되었습니다.",
       "strip_fence": "코드 블록 구분자 제거",
       "undo": "실행 취소",
       "redo": "다시 실행",

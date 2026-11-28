@@ -111,6 +111,8 @@ pub type SharedTerminalSession = Arc<Mutex<TerminalSession>>;
 pub type TerminalInputInterceptor =
     Arc<dyn Fn(&[u8], Option<&str>) -> TerminalInputInterceptorResult + Send + Sync>;
 pub type TerminalInputBroadcaster = Rc<dyn Fn(TerminalBroadcastInputKind, &[u8], &mut App)>;
+pub type LinePasteBroadcast = Box<dyn FnMut(&[u8], &mut App) -> bool>;
+pub type LinePasteBroadcastFactory = Rc<dyn Fn(&mut App) -> LinePasteBroadcast>;
 const PRIVILEGE_PROMPT_DEBUG_ENV: &str = "OXIDETERM_PRIVILEGE_DEBUG";
 const TERMINAL_ANIMATION_INTERVAL: Duration = Duration::from_millis(16);
 const SMOOTH_SCROLL_ANIMATION_DURATION: Duration = Duration::from_millis(165);
@@ -190,6 +192,7 @@ pub enum TerminalBroadcastInputKind {
     Protocol,
     Text,
     Paste,
+    PasteLine,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -516,6 +519,8 @@ pub struct TerminalPane {
     metrics_scale_factor_bits: u32,
     selection: Option<TerminalSelection>,
     paste_editor: Option<paste::PasteEditor>,
+    line_paste_task: Option<gpui::Task<()>>,
+    line_paste_submitted: usize,
     // The pane observes only its session's capability and never stores the sandbox path.
     kitty_file_transmission: Option<KittyFileTransmissionControl>,
     kitty_file_transmission_prompt: Option<KittyFileTransmissionPrompt>,
@@ -539,6 +544,7 @@ pub struct TerminalPane {
     plugin_session_id: Option<String>,
     win32_pressed_keys: HashSet<String>,
     input_broadcaster: Option<TerminalInputBroadcaster>,
+    line_paste_broadcast_factory: Option<LinePasteBroadcastFactory>,
     #[cfg(test)]
     test_accepts_input: bool,
     input_locked: bool,
@@ -611,6 +617,7 @@ pub struct TerminalPane {
     terminal_exited: bool,
     crt_power_off_started_at: Option<Instant>,
     ssh_reconnect_state: SshReconnectState,
+    discovery_reopen_label: Option<String>,
     scroll_input_remainder_px: Pixels,
     smooth_scroll_offset_px: Pixels,
     smooth_scroll_animation: Option<SmoothScrollAnimation>,
@@ -1344,6 +1351,8 @@ impl TerminalPane {
             metrics_scale_factor_bits,
             selection: None,
             paste_editor: None,
+            line_paste_task: None,
+            line_paste_submitted: 0,
             kitty_file_transmission,
             kitty_file_transmission_prompt: None,
             tmux_prompt: None,
@@ -1360,6 +1369,7 @@ impl TerminalPane {
             plugin_session_id: None,
             win32_pressed_keys: HashSet::new(),
             input_broadcaster: None,
+            line_paste_broadcast_factory: None,
             #[cfg(test)]
             test_accepts_input: false,
             input_locked: false,
@@ -1434,6 +1444,7 @@ impl TerminalPane {
             terminal_exited: false,
             crt_power_off_started_at: None,
             ssh_reconnect_state: SshReconnectState::Idle,
+            discovery_reopen_label: None,
             scroll_input_remainder_px: px(0.0),
             smooth_scroll_offset_px: px(0.0),
             smooth_scroll_animation: None,
@@ -2516,6 +2527,7 @@ impl TerminalPane {
     }
 
     pub fn shutdown(&mut self) {
+        self.stop_line_paste();
         let mut terminal = self.terminal.lock();
         // A shell IDE owns this exact PTY until its agent has restored the shell.
         // Removing the pane relinquishes its Arc; it must not cancel the IDE lease.
@@ -2528,8 +2540,13 @@ impl TerminalPane {
         self.terminal.lock().lifecycle()
     }
 
+    pub fn set_discovery_reopen_label(&mut self, label: String, cx: &mut Context<Self>) {
+        self.discovery_reopen_label = Some(label);
+        cx.notify();
+    }
+
     pub fn can_reconnect_ssh(&self) -> bool {
-        self.session_kind == TerminalSessionKind::SshPty
+        (self.session_kind == TerminalSessionKind::SshPty || self.discovery_reopen_label.is_some())
             && self.terminal_exited
             && self.ssh_reconnect_state == SshReconnectState::Idle
     }
@@ -2566,6 +2583,7 @@ impl TerminalPane {
         config: SshSessionConfig,
         cx: &mut Context<Self>,
     ) -> Result<()> {
+        self.stop_line_paste();
         self.terminal.lock().reconnect_ssh(config)?;
         self.ssh_reconnect_generation = self.ssh_reconnect_generation.wrapping_add(1);
         self.ssh_reconnect_state = SshReconnectState::StartingShell;
@@ -2920,6 +2938,13 @@ impl TerminalPane {
         cx.notify();
     }
 
+    pub fn can_open_shell_ide(&self) -> bool {
+        self.session_kind == TerminalSessionKind::SshPty
+            && self
+                .ssh_connection_handle()
+                .is_none_or(|connection| connection.allows_additional_channels())
+    }
+
     pub fn ssh_connection_handle(&self) -> Option<SshConnectionHandle> {
         self.terminal.lock().ssh_connection_handle()
     }
@@ -3119,19 +3144,25 @@ impl TerminalPane {
     }
 
     pub fn paste_text(&mut self, text: &str, cx: &mut Context<Self>) {
+        self.stop_line_paste();
         let secret_entry = self.input_answers_privilege_prompt(text.as_bytes());
-        if self.paste_text_without_broadcast(text, cx) && !secret_entry {
+        if self.paste_text_without_broadcast(text, false, cx) && !secret_entry {
             self.broadcast_user_input(TerminalBroadcastInputKind::Paste, text.as_bytes(), cx);
         }
     }
 
     /// Pastes text into this pane only, without broadcasting to synced panes.
     pub fn paste_text_to_self(&mut self, text: &str, cx: &mut Context<Self>) -> bool {
-        self.paste_text_without_broadcast(text, cx)
+        self.paste_text_without_broadcast(text, false, cx)
     }
 
-    fn paste_text_without_broadcast(&mut self, text: &str, cx: &mut Context<Self>) -> bool {
-        if !self.terminal_accepts_input() {
+    fn paste_text_without_broadcast(
+        &mut self,
+        text: &str,
+        submit_line_ending: bool,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.terminal_accepts_input() || (submit_line_ending && self.ai_waiting_for_secret()) {
             return false;
         }
         let Some(bytes) = self.apply_plugin_input_interceptor(text.as_bytes(), cx) else {
@@ -3150,6 +3181,7 @@ impl TerminalPane {
         // Preserve bracketed paste encoding when hook output is still text;
         // binary hook output falls back to raw protocol bytes.
         let result = match std::str::from_utf8(&bytes) {
+            Ok(text) if submit_line_ending => self.terminal.lock().paste_line(text),
             Ok(text) => self.terminal.lock().paste_text(text),
             Err(_) => self.terminal.lock().write_protocol_bytes(&bytes),
         };
@@ -3593,6 +3625,11 @@ impl TerminalPane {
 
     pub fn set_input_broadcaster(&mut self, broadcaster: Option<TerminalInputBroadcaster>) {
         self.input_broadcaster = broadcaster;
+        self.line_paste_broadcast_factory = None;
+    }
+
+    pub fn set_line_paste_broadcast_factory(&mut self, factory: LinePasteBroadcastFactory) {
+        self.line_paste_broadcast_factory = Some(factory);
     }
 
     pub fn send_broadcast_input(
@@ -3621,8 +3658,15 @@ impl TerminalPane {
             }
             TerminalBroadcastInputKind::Text => std::str::from_utf8(bytes)
                 .is_ok_and(|text| self.commit_text_without_broadcast(text, cx)),
-            TerminalBroadcastInputKind::Paste => std::str::from_utf8(bytes)
-                .is_ok_and(|text| self.paste_text_without_broadcast(text, cx)),
+            TerminalBroadcastInputKind::Paste | TerminalBroadcastInputKind::PasteLine => {
+                std::str::from_utf8(bytes).is_ok_and(|text| {
+                    self.paste_text_without_broadcast(
+                        text,
+                        kind == TerminalBroadcastInputKind::PasteLine,
+                        cx,
+                    )
+                })
+            }
         };
         let command_id = self.last_broadcast_mark_id.take();
         self.broadcast_parent_id = None;
@@ -3655,6 +3699,9 @@ impl TerminalPane {
             self.shell_ide_progress = None;
         }
         if self.shell_ide_preparing != preparing {
+            if preparing {
+                self.stop_line_paste();
+            }
             self.shell_ide_preparing = preparing;
             cx.notify();
         }
@@ -3667,6 +3714,9 @@ impl TerminalPane {
         // Tauri TerminalView drops user input while a node is link-down or
         // reconnecting. Keep that readiness gate before plugin hooks so plugins
         // cannot accidentally send input into a standby SSH transport.
+        if locked {
+            self.stop_line_paste();
+        }
         self.input_locked = locked;
         cx.notify();
     }
@@ -4301,6 +4351,7 @@ impl TerminalPane {
                 self.win32_pressed_keys.clear();
                 self.tmux_prompt = None;
                 self.paste_editor = None;
+                self.stop_line_paste();
                 self.marked_text = None;
                 self.marked_text_caret_utf16 = None;
                 self.selection = None;
@@ -4323,6 +4374,7 @@ impl TerminalPane {
                 self.cancel_pending_tmux_mouse();
                 self.notify_trzsz_connection_lost_if_active();
                 self.notify_modem_connection_lost_if_active();
+                self.stop_line_paste();
                 self.terminal_exited = true;
                 self.emit_trzsz_notice(
                     self.preferences.processing_failed_message.clone(),
@@ -4342,6 +4394,7 @@ impl TerminalPane {
                 self.cancel_pending_tmux_mouse();
                 self.notify_trzsz_connection_lost_if_active();
                 self.notify_modem_connection_lost_if_active();
+                self.stop_line_paste();
                 self.terminal_exited = true;
                 TerminalEventEffect::notify()
             }
@@ -4353,6 +4406,7 @@ impl TerminalPane {
                 self.notify_trzsz_connection_lost_if_active();
                 self.notify_modem_connection_lost_if_active();
                 let should_emit_exit = !self.terminal_exited;
+                self.stop_line_paste();
                 self.terminal_exited = true;
                 self.title = match code {
                     Some(code) => format!("Process exited ({code})").into(),

@@ -508,7 +508,7 @@ fn run_worker(shared: &Shared, wake_rx: TerminalActivityReceiver, runtime: tokio
 fn finish_worker(shared: &Shared) {
     // Release the render lock before waiting for network/startup cleanup. The
     // retained handle keeps the terminal lease alive throughout those waits.
-    let (mut handle, connect_task, runtime) = {
+    let (mut handle, connect_task, runtime, route_lease) = {
         let mut core = shared.core.lock();
         if let Some(handle) = &mut core.handle {
             handle.output_rx.close();
@@ -535,7 +535,12 @@ fn finish_worker(shared: &Shared) {
             shared.event_bytes.store(0, Ordering::Release);
         }
         publish(shared, &mut core);
-        (handle, core.connect_task.take(), core.runtime.take())
+        (
+            handle,
+            core.connect_task.take(),
+            core.runtime.take(),
+            core.config.route_lease.take(),
+        )
     };
     shared
         .report
@@ -574,6 +579,8 @@ fn finish_worker(shared: &Shared) {
         }
     }
     drop(handle);
+    // A closed pane may retain its render state after the channel has finished.
+    drop(route_lease);
     shared
         .controls
         .lock()
@@ -756,7 +763,7 @@ impl TerminalSessionBackend for SshPtySession {
         let (tx, rx) = tokio::sync::oneshot::channel();
         let owner = Arc::downgrade(&self.shared);
         self.enqueue(0, move |core| {
-            let mut result = core.parser_state.acquire_shell_channel();
+            let mut result = core.acquire_ide_shell_channel();
             if let Ok(channel) = &mut result {
                 if let Some(shared) = owner.upgrade() {
                     // Input gating and startup completion observe the same exact lease release.
@@ -819,6 +826,12 @@ impl TerminalSessionBackend for SshPtySession {
         let text = Zeroizing::new(text.to_string());
         let cost = text.len();
         self.enqueue_input(cost, move |core| core.paste_text(&text))
+    }
+
+    fn paste_line(&mut self, text: &str) -> Result<()> {
+        // Admit the body and Enter together so queue pressure cannot reject just the Enter.
+        let text = Zeroizing::new(text.to_owned());
+        self.enqueue_input(text.len(), move |core| core.paste_line(&text))
     }
 
     fn set_encoding(&mut self, encoding: TerminalEncoding) {

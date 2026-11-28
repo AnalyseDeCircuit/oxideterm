@@ -15,6 +15,9 @@ use zeroize::Zeroizing;
 pub struct TerminalPasteLabels {
     pub edit_title: String,
     pub strip_fence: String,
+    pub send_by_line: String,
+    pub stop_sending: String,
+    pub interrupted: String,
     pub undo: String,
     pub redo: String,
     pub editor_menu: crate::EditorContextMenuLabels,
@@ -27,6 +30,9 @@ impl Default for TerminalPasteLabels {
         Self {
             edit_title: "Edit before pasting".into(),
             strip_fence: "Remove code block markers".into(),
+            send_by_line: "Send line by line".into(),
+            stop_sending: "Stop sending".into(),
+            interrupted: "Complete lines submitted: {{sent}}. Stopped at line {{line}}.".into(),
             undo: "Undo".into(),
             redo: "Redo".into(),
             editor_menu: crate::EditorContextMenuLabels::default(),
@@ -39,6 +45,7 @@ impl Default for TerminalPasteLabels {
 pub struct PasteDraft {
     original: Zeroizing<String>,
     pub editor: Entity<TextEditorView>,
+    pub submit_focus: FocusHandle,
     _observation: Subscription,
 }
 
@@ -65,6 +72,7 @@ impl PasteDraft {
         let subscription = cx.observe(&editor, |_, _, cx| cx.notify());
         Self {
             original: text,
+            submit_focus: cx.focus_handle(),
             editor,
             _observation: subscription,
         }
@@ -91,6 +99,7 @@ impl PasteDraft {
         labels: &TerminalPasteLabels,
         window: &Window,
         finish: fn(&mut T, bool, &mut Window, &mut Context<T>),
+        send_by_line: Option<fn(&mut T, &mut Window, &mut Context<T>)>,
         cx: &Context<T>,
     ) -> AnyElement {
         let width = (f32::from(window.viewport_size().width) - 32.0)
@@ -200,6 +209,24 @@ impl PasteDraft {
                         .debug_selector(|| "paste-cancel".into())
                         .on_click(cx.listener(move |owner, _, w, cx| finish(owner, false, w, cx))),
                     )
+                    .when_some(
+                        send_by_line.filter(|_| text.contains(['\r', '\n'])),
+                        |footer, send| {
+                            footer.child(
+                                button_with(
+                                    &tokens,
+                                    labels.send_by_line.clone(),
+                                    ButtonOptions {
+                                        variant: ButtonVariant::Secondary,
+                                        ..options
+                                    },
+                                )
+                                .id("paste-send-by-line")
+                                .debug_selector(|| "paste-send-by-line".into())
+                                .on_click(cx.listener(move |owner, _, w, cx| send(owner, w, cx))),
+                            )
+                        },
+                    )
                     .child(
                         button_with(
                             &tokens,
@@ -211,6 +238,10 @@ impl PasteDraft {
                             },
                         )
                         .id("paste-submit")
+                        .role(Role::Button)
+                        .aria_label(labels.paste.clone())
+                        .track_focus(&self.submit_focus)
+                        .focus_visible(move |style| style.border_color(rgb(tokens.ui.accent)))
                         .debug_selector(|| "paste-submit".into())
                         .on_click(cx.listener(
                             move |owner, _, window, cx| {
@@ -226,6 +257,12 @@ impl PasteDraft {
                 .on_key_down(cx.listener(move |owner, event: &KeyDownEvent, window, cx| {
                     if event.keystroke.key == "escape" {
                         finish(owner, false, window, cx);
+                        window.prevent_default();
+                    } else if event.keystroke.key == "tab"
+                        && !event.keystroke.modifiers.modified()
+                        && !focus.contains_focused(window, cx)
+                    {
+                        window.focus(&focus, cx);
                         window.prevent_default();
                     } else if focus.contains_focused(window, cx)
                         && !event.keystroke.modifiers.control

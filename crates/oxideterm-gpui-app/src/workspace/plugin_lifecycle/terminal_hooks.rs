@@ -213,7 +213,7 @@ pub(super) fn native_plugin_apply_input_interceptors(
     bytes: &[u8],
     session_id: Option<&str>,
     hooks: &[NativePluginRuntimeTerminalHookContribution],
-    runtime_host: Arc<tokio::sync::Mutex<plugin_runtime::NativePluginRuntimeHost>>,
+    runtime_hosts: &plugin_runtime::NativePluginRuntimeHosts,
     runtime: Arc<tokio::runtime::Runtime>,
     host_api_resolver: plugin_runtime::NativeHostApiResolver,
 ) -> TerminalInputInterceptorResult {
@@ -222,7 +222,8 @@ pub(super) fn native_plugin_apply_input_interceptors(
         // transport error, or malformed response falls through to fail-open.
         let dispatch = runtime.block_on(async {
             tokio::time::timeout(NATIVE_PLUGIN_TERMINAL_HOOK_TIMEOUT, async {
-                let mut host = runtime_host.lock().await;
+                let host = runtime_hosts.for_plugin(&hook.plugin_id);
+                let mut host = host.lock().await;
                 host.set_host_api_resolver(host_api_resolver.clone());
                 host.dispatch_command(
                     &hook.plugin_id,
@@ -247,7 +248,7 @@ pub(super) fn native_plugin_apply_input_interceptors(
 pub(super) fn native_plugin_apply_output_processors(
     bytes: &[u8],
     hooks: &[NativePluginRuntimeTerminalHookContribution],
-    runtime_host: Arc<tokio::sync::Mutex<plugin_runtime::NativePluginRuntimeHost>>,
+    runtime_hosts: &plugin_runtime::NativePluginRuntimeHosts,
     runtime: Arc<tokio::runtime::Runtime>,
     host_api_resolver: plugin_runtime::NativeHostApiResolver,
 ) -> Vec<u8> {
@@ -257,7 +258,8 @@ pub(super) fn native_plugin_apply_output_processors(
         // corruption.
         let dispatch = runtime.block_on(async {
             tokio::time::timeout(NATIVE_PLUGIN_TERMINAL_HOOK_TIMEOUT, async {
-                let mut host = runtime_host.lock().await;
+                let host = runtime_hosts.for_plugin(&hook.plugin_id);
+                let mut host = host.lock().await;
                 host.set_host_api_resolver(host_api_resolver.clone());
                 host.dispatch_command(
                     &hook.plugin_id,

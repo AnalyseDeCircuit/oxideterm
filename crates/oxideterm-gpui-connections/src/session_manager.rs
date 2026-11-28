@@ -37,10 +37,10 @@ mod state;
 pub use batch_state::*;
 #[cfg(not(target_family = "wasm"))]
 pub use batch_templates::*;
-use catalog::CatalogEntry;
+use catalog::{CatalogEntry, session_manager_tree_with_sources};
 pub use catalog::{
-    CatalogRow, SessionManagerGridRow, SessionManagerItemPointerAction, SessionManagerTreeRow,
-    TunnelDisplayStatus, collect_session_group_paths, group_display_name,
+    CatalogRow, DiscoveryCatalogGroup, SessionManagerGridRow, SessionManagerItemPointerAction,
+    SessionManagerTreeRow, TunnelDisplayStatus, collect_session_group_paths, group_display_name,
     session_manager_item_pointer_action, session_manager_tree_row_rails,
 };
 #[cfg(not(target_family = "wasm"))]

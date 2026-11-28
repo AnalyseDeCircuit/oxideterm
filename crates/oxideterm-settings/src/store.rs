@@ -13,13 +13,18 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
-    model::{PersistedSettings, SETTINGS_SCHEMA_VERSION},
+    model::{DiscoverySource, PersistedSettings, SETTINGS_SCHEMA_VERSION},
     normalize::sanitize_settings_value,
 };
+
+mod discovery_secrets;
+pub use discovery_secrets::{DiscoverySaveOutcome, DiscoverySecretBinding};
 
 pub const SETTINGS_FILENAME: &str = "settings.json";
 const MAX_SETTINGS_FILE_BYTES: u64 = 2 * 1024 * 1024;
 const BOOTSTRAP_FILENAME: &str = "bootstrap.json";
+// Serialize read-modify-write operations from independent windows and background writers.
+static SETTINGS_WRITE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[cfg(test)]
 thread_local! {
@@ -276,6 +281,16 @@ pub fn save_settings_to_path(
     path: &Path,
     settings: PersistedSettings,
 ) -> Result<SettingsSaveResult> {
+    write_settings(path, SettingsUpdate::Preferences(&settings))
+}
+
+enum SettingsUpdate<'a> {
+    Preferences(&'a PersistedSettings),
+    DiscoverySources(&'a [DiscoverySource]),
+    DiscoveryEnabled(&'a str, bool),
+}
+
+fn write_settings(path: &Path, update: SettingsUpdate<'_>) -> Result<SettingsSaveResult> {
     let mut audit = if oxideterm_audit::AuditContext::current_request()
         .as_ref()
         .is_some_and(|context| context.protocol.as_deref() == Some("cloud_sync_apply"))
@@ -296,9 +311,50 @@ pub fn save_settings_to_path(
         )
     };
     let audit_result = (|| {
-        // Non-GPUI writers share the same sanitize-and-envelope path as SettingsStore::save.
-        let sanitized = sanitize_settings_value(settings.to_value())?;
-        let previous = read_envelope(path).ok().flatten().map(|(value, _)| value);
+        let _guard = SETTINGS_WRITE_LOCK
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        let previous = read_envelope(path)?.map(|(value, _)| value);
+        let proposed = match update {
+            SettingsUpdate::Preferences(settings) => {
+                let mut proposed = settings.to_value();
+                // An ordinary save may have started before a different window deleted a source.
+                if let Some(sources) = previous
+                    .as_ref()
+                    .and_then(|raw| raw.get("discoverySources"))
+                {
+                    proposed["discoverySources"] = sources.clone();
+                } else if let Some(fields) = proposed.as_object_mut() {
+                    fields.remove("discoverySources");
+                }
+                proposed
+            }
+            SettingsUpdate::DiscoveryEnabled(id, enabled) => {
+                let mut proposed = previous
+                    .clone()
+                    .context("Discovery source no longer exists")?;
+                let source = proposed["discoverySources"]
+                    .as_array_mut()
+                    .and_then(|sources| {
+                        sources
+                            .iter_mut()
+                            .find(|source| source["id"].as_str() == Some(id))
+                    })
+                    .context("Discovery source no longer exists")?;
+                anyhow::ensure!(
+                    source["removalPending"] != true,
+                    "Discovery source is being removed"
+                );
+                source["enabled"] = Value::Bool(enabled);
+                proposed
+            }
+            SettingsUpdate::DiscoverySources(sources) => {
+                let mut proposed = previous.clone().unwrap_or_else(|| serde_json::json!({}));
+                proposed["discoverySources"] = serde_json::to_value(sources)?;
+                proposed
+            }
+        };
+        let sanitized = sanitize_settings_value(proposed)?;
         let changed_sections = changed_settings_sections(previous.as_ref(), &sanitized.settings);
         audit.summary(&changed_sections.join(","));
         let updated_at = now_ms();
@@ -558,25 +614,36 @@ impl SettingsStore {
     }
 
     pub fn save(&mut self) -> Result<SettingsSaveResult> {
-        if self.writes_blocked {
-            return Err(anyhow!(
-                "refusing to overwrite an unreadable or newer settings file"
-            ));
-        }
-        let saved = save_settings_to_path(&self.path, self.settings.clone())?;
-        self.settings = saved.settings.clone();
-        self.updated_at = saved.updated_at;
-        Ok(saved)
+        self.replace_and_save(self.settings.clone())
     }
 
     pub fn replace_and_save(&mut self, settings: PersistedSettings) -> Result<SettingsSaveResult> {
+        self.persist(SettingsUpdate::Preferences(&settings))
+    }
+
+    pub fn set_discovery_source_enabled(
+        &mut self,
+        id: &str,
+        enabled: bool,
+    ) -> Result<SettingsSaveResult> {
+        self.persist(SettingsUpdate::DiscoveryEnabled(id, enabled))
+    }
+
+    pub fn replace_discovery_sources(
+        &mut self,
+        sources: Vec<DiscoverySource>,
+    ) -> Result<SettingsSaveResult> {
+        self.persist(SettingsUpdate::DiscoverySources(&sources))
+    }
+
+    fn persist(&mut self, update: SettingsUpdate<'_>) -> Result<SettingsSaveResult> {
         if self.writes_blocked {
             return Err(anyhow!(
                 "refusing to overwrite an unreadable or newer settings file"
             ));
         }
         // Commit the in-memory replacement only after the durable file swap succeeds.
-        let saved = save_settings_to_path(&self.path, settings)?;
+        let saved = write_settings(&self.path, update)?;
         self.settings = saved.settings.clone();
         self.updated_at = saved.updated_at;
         Ok(saved)
@@ -588,6 +655,10 @@ pub fn load_settings_from_path(path: &Path) -> Result<SettingsLoadResult> {
     let mut migration_warnings = Vec::new();
     let mut validation_warnings = Vec::new();
 
+    // Loading can also persist a normalized envelope.
+    let _guard = SETTINGS_WRITE_LOCK
+        .lock()
+        .unwrap_or_else(|err| err.into_inner());
     let (raw, updated_at, should_persist) = match read_envelope(path) {
         Ok(Some((raw, updated_at))) => (raw, updated_at, true),
         Ok(None) => {

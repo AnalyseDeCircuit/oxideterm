@@ -38,8 +38,7 @@ use oxideterm_theme::ThemeTokens;
 use super::catalog::{
     session_manager_display_item_signature, session_manager_grid_row_signature,
     session_manager_grid_rows, session_manager_grid_visible_targets,
-    session_manager_tree_row_signature, session_manager_tree_rows,
-    session_manager_tree_visible_targets,
+    session_manager_tree_row_signature, session_manager_tree_visible_targets,
 };
 use super::*;
 use crate::views::{ConnectionImeFrame, ConnectionsEnvironmentSource};
@@ -122,6 +121,9 @@ pub enum CatalogAction {
     Test(String),
     ImportSshConfig(String),
     OpenSshConfigImporter,
+    LoadDiscovery(String),
+    RefreshDiscovery(String),
+    EditDiscoverySource(String),
     OpenImporters,
     NewConnectionInGroup(String),
     NewGroup,

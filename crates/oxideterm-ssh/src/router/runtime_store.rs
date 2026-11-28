@@ -394,6 +394,10 @@ impl NodeRuntimeStore {
             .iter()
             .filter_map(|entry| {
                 let route = entry.value();
+                // A discovered node has a live authorization that cannot be restored from disk.
+                if route.config.discovery_origin.is_some() {
+                    return None;
+                }
                 let config = if route.origin.saved_connection_id().is_some() {
                     None
                 } else if route.config.has_runtime_auth_secret() {
@@ -540,6 +544,13 @@ impl NodeRuntimeStore {
     }
 
     /// Returns the non-secret projection used by UI and plugin readers.
+    pub fn discovery_origin(
+        &self,
+        node_id: &NodeId,
+    ) -> Option<oxideterm_discovery::DiscoveryOrigin> {
+        self.nodes.get(node_id)?.config.discovery_origin.clone()
+    }
+
     pub fn metadata_snapshot(&self, node_id: &NodeId) -> Option<NodeMetadataSnapshot> {
         let route = self.nodes.get(node_id)?;
         Some(node_metadata_snapshot(node_id.clone(), &route))
@@ -882,11 +893,36 @@ impl NodeRuntimeStore {
         node_id: &NodeId,
         connection_id: String,
         connection: &ConnectionInfo,
+        replacement: Option<&SshConfig>,
     ) -> Result<NodeStateEvent, RouteError> {
         let mut route = self
             .nodes
             .get_mut(node_id)
             .ok_or_else(|| RouteError::NodeNotFound(node_id.0.clone()))?;
+        if let Some(config) = replacement {
+            // Commit the authenticated instance and transport under the same node lock.
+            let matches = route
+                .config
+                .discovery_origin
+                .as_ref()
+                .zip(config.discovery_origin.as_ref())
+                .is_some_and(|(previous, next)| {
+                    next.reconnect_from.as_ref().is_some_and(|(id, instance)| {
+                        id == &node_id.0 && instance == &previous.instance_id
+                    }) && previous.same_access_identity(next) == Some(true)
+                        && next.consumer_authority_current()
+                });
+            if !matches
+                || route.state.readiness == NodeReadiness::Ready
+                || route.connection_id.is_some()
+            {
+                return Err(RouteError::NotConnected(node_id.0.clone()));
+            }
+            let mut accepted = config.clone();
+            accepted.discovery_origin.as_mut().unwrap().reconnect_from = None;
+            accepted.pre_connect_completed = false;
+            route.config = accepted;
+        }
         if let Some(previous_id) = route.connection_id.as_ref()
             && previous_id != &connection_id
         {

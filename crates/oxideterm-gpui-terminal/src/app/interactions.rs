@@ -86,6 +86,13 @@ impl TerminalPane {
         let key = event.keystroke.key.as_str();
         let modifiers = event.keystroke.modifiers;
 
+        if self.stop_line_paste() {
+            cx.notify();
+            if key == "escape" {
+                return true;
+            }
+        }
+
         if self.tmux_prompt.is_some() {
             match key {
                 "enter" if !modifiers.platform && !modifiers.control && !modifiers.alt => {

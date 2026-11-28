@@ -248,7 +248,9 @@ impl ConnectionFlowEntity {
                                 });
                             }
                         };
-                        self.clear_form_after_submit(cx);
+                        if self.preflight_owns_form(config.discovery_origin.as_ref()) {
+                            self.clear_form_after_submit(cx);
+                        }
                         Some(ReadyProxyTerminal {
                             node_id: target_node_id,
                             config,

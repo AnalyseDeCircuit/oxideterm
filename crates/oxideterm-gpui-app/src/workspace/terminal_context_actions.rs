@@ -9,12 +9,21 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn request_ssh_terminal_reconnect(
         &mut self,
         pane_id: PaneId,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let Some(pane) = self.tab_host.read(cx).panes().get(&pane_id).cloned() else {
             return;
         };
         if !pane.read(cx).can_reconnect_ssh() {
+            return;
+        }
+        if let Some((source, target)) = self
+            .plugin_entity
+            .read(cx)
+            .discovery_terminal_target(&pane.read(cx).shared_session())
+        {
+            self.reopen_discovery_target(&source, target, window, cx);
             return;
         }
         let Some(session_id) = self
@@ -31,8 +40,21 @@ impl WorkspaceApp {
         else {
             return;
         };
+        if !self.node_is_ready_for_terminal(&node_id)
+            && self
+                .node_router
+                .runtime_store()
+                .discovery_origin(&node_id)
+                .is_some()
+        {
+            self.reconnect_discovered_node(&node_id, window, cx);
+            return;
+        }
         if self.node_is_ready_for_terminal(&node_id) {
-            self.reconnect_ssh_terminal_session(session_id, &node_id, cx);
+            if !self.allow_discovery_channel_request(&node_id, window, cx) {
+                return;
+            }
+            self.reconnect_ssh_terminal_session(session_id, &node_id, false, cx);
             return;
         }
         let already_connecting = self
@@ -67,6 +89,7 @@ impl WorkspaceApp {
         &mut self,
         session_id: TerminalSessionId,
         node_id: &NodeId,
+        initial_discovery_channel: bool,
         cx: &mut Context<Self>,
     ) -> bool {
         if !self
@@ -107,7 +130,14 @@ impl WorkspaceApp {
             return false;
         }
         let result = self
-            .ssh_terminal_session_config(node_id, session_id, reuse_connection_id, None, true, cx)
+            .ssh_terminal_session_config(
+                node_id,
+                session_id,
+                reuse_connection_id,
+                None,
+                !initial_discovery_channel,
+                cx,
+            )
             .and_then(|config| pane.update(cx, |pane, cx| pane.reconnect_ssh(config, cx)));
         if let Err(error) = result {
             pane.update(cx, |pane, cx| pane.set_ssh_reconnect_pending(false, cx));
@@ -119,6 +149,12 @@ impl WorkspaceApp {
             );
             return false;
         }
+        self.register_terminal_endpoint_session(
+            node_id,
+            session_id,
+            pane.read(cx).shared_session(),
+            cx,
+        );
         self.terminal.update(cx, |terminal, _| {
             terminal
                 .sync_groups_mut()
@@ -148,7 +184,7 @@ impl WorkspaceApp {
                 true
             }
             TerminalContextAction::Reconnect => {
-                self.request_ssh_terminal_reconnect(pane_id, cx);
+                self.request_ssh_terminal_reconnect(pane_id, window, cx);
                 true
             }
             TerminalContextAction::PluginTextTool => {

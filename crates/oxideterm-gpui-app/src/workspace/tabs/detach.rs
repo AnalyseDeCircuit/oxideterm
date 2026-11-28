@@ -1480,7 +1480,13 @@ impl WorkspaceApp {
         let active = self.active_terminal_session_id(cx);
         let mut terminals = Vec::new();
         if let Some(ssh) = self.ssh_node_menu_for_tab(id, cx) {
-            actions.extend([NewTerminal, Sftp, Ide, Forwards, DrillIn, Disconnect]);
+            actions.extend([NewTerminal, Disconnect]);
+            if self.node_allows_session_tools(&ssh.node_id) {
+                actions.extend([Sftp, Ide, Forwards]);
+            }
+            if self.node_allows_drill_down(&ssh.node_id) {
+                actions.push(DrillIn);
+            }
             terminals = ssh
                 .terminals
                 .into_iter()
@@ -2587,6 +2593,7 @@ mod tests {
                         local_session,
                         local_sessions::LocalTerminalInstance {
                             profile_id: Some(local_profile.id.clone()),
+                            discovery: None,
                             title: "Dev Shell".to_string(),
                             shell: None,
                             cwd: None,

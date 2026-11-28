@@ -20,10 +20,16 @@ fn build_process_command(executable: &Path) -> Result<tokio::process::Command, P
 }
 
 pub struct NativeProcessPluginRuntime {
+    pub(super) discovery_resources: super::discovery_resources::DiscoveryResources,
+    pub(super) discovery_invalidation_sink: Option<Arc<dyn Fn(PluginEvent) + Send + Sync>>,
+    pub(super) discovery_providers:
+        Vec<oxideterm_plugin_manifest::discovery::NativePluginDiscoveryProviderDef>,
+    pub(super) next_discovery_request: u64,
     plugin_dir: PathBuf,
     entry: String,
     pub(super) supervisor: PluginRuntimeSupervisorState,
     pub(super) generation: u64,
+    pub(super) last_completed_discovery_request: u64,
     pub(super) child: Option<Child>,
     stdin: Option<ChildStdin>,
     output: Option<mpsc::Receiver<Result<Zeroizing<String>, PluginError>>>,
@@ -60,9 +66,14 @@ impl NativeProcessPluginRuntime {
     ) -> Self {
         Self {
             plugin_dir: plugin_dir.into(),
+            discovery_resources: Default::default(),
+            discovery_invalidation_sink: None,
+            discovery_providers: Vec::new(),
+            next_discovery_request: 0,
             entry: entry.into(),
             supervisor: PluginRuntimeSupervisorState::new(plugin_id, lifecycle_timeout),
             generation: 0,
+            last_completed_discovery_request: 0,
             child: None,
             stdin: None,
             output: None,
@@ -212,8 +223,16 @@ impl NativeProcessPluginRuntime {
             };
             match decode_process_output_frame(&frame)? {
                 PluginProcessFrame::Outbound(message) => self.accept_outbound(message).await?,
-                PluginProcessFrame::Response { response, .. } => {
+                PluginProcessFrame::Response {
+                    envelope_request_id,
+                    response,
+                } => {
+                    let duplicate = self
+                        .is_completed_discovery_ready(envelope_request_id.as_deref(), &response);
                     let _owner = PluginHostResponseOwner(response);
+                    if duplicate {
+                        continue;
+                    }
                     return Err(PluginError::protocol(
                         "process_response_request_mismatch",
                         "Unexpected native plugin response while idle",
@@ -355,7 +374,14 @@ impl NativeProcessPluginRuntime {
                     if envelope_request_id.as_deref() != Some(request_id)
                         || response.request_id != request_id
                     {
+                        let duplicate = self.is_completed_discovery_ready(
+                            envelope_request_id.as_deref(),
+                            &response,
+                        );
                         let _owner = PluginHostResponseOwner(response);
+                        if duplicate {
+                            continue;
+                        }
                         return Err(PluginError::protocol(
                             "process_response_request_mismatch",
                             format!(
@@ -372,7 +398,41 @@ impl NativeProcessPluginRuntime {
         }
     }
 
+    fn is_completed_discovery_ready(
+        &self,
+        envelope_id: Option<&str>,
+        response: &PluginResponse,
+    ) -> bool {
+        if envelope_id != Some(response.request_id.as_str())
+            || !matches!(&response.result, PluginResponseResult::Ok { value } if value.get("kind").and_then(Value::as_str) == Some("ready"))
+        {
+            return false;
+        }
+        // The process has one in-flight RPC. Its generation and completed sequence
+        // distinguish obsolete deliveries without retaining one ID per opened session.
+        let Some((generation, sequence)) = response
+            .request_id
+            .strip_prefix("discovery:")
+            .and_then(|id| id.split_once(':'))
+        else {
+            return false;
+        };
+        generation == self.generation.to_string()
+            && sequence.parse::<u64>().is_ok_and(|n| {
+                n > 0 && n <= self.last_completed_discovery_request && sequence == n.to_string()
+            })
+    }
+
     async fn accept_outbound(&mut self, message: PluginOutboundMessage) -> Result<(), PluginError> {
+        // Sessions must see revocation even while another source is waiting on an RPC.
+        // Keeping it in ordered output also prevents a ready response overtaking it.
+        if let PluginOutboundMessage::EmitEvent { event } = &message
+            && event.name == permissions::DISCOVERY_INSTANCE_INVALIDATED
+            && let Some(sink) = &self.discovery_invalidation_sink
+        {
+            permissions::validate_discovery_invalidation(event, &self.discovery_providers)?;
+            sink(event.clone());
+        }
         if message.host_call_sensitivity().is_sensitive() {
             // Credentials never enter the public message/effect queues, even while idle.
             if let Some(response) = self.returnable_sensitive_host_call_response(message) {

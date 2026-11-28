@@ -115,6 +115,53 @@ impl SettingsSelectMenu<'_> {
                 | SettingsSelect::KnowledgeCollectionScope
                 | SettingsSelect::KnowledgeDocumentFormat,
             ) => self.knowledge_popup(open_select, width),
+            (SettingsTab::Discovery, SettingsSelect::DiscoveryProvider) => {
+                let mut popup = select_overlay_popup(self.tokens, width);
+                for provider in &self.settings_workspace.read(cx).discovery.providers {
+                    let source = provider.new_source();
+                    popup = popup.child(select_option_action(
+                        select_option(self.tokens, source.name.clone(), false),
+                        false,
+                        false,
+                        self.action(move |actions, _, window, cx| {
+                            actions.send(
+                                SelectMenuRequest::AddDiscoverySource(Box::new(source.clone())),
+                                window,
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        }),
+                    ));
+                }
+                Some(popup)
+            }
+            (SettingsTab::Discovery, SettingsSelect::DiscoveryChoice(field_index)) => {
+                let editor = self.settings_workspace.read(cx).discovery.editor.as_ref()?;
+                let field = editor.fields.get(field_index)?;
+                let editor_id = editor.source.id.clone();
+                let mut popup = select_overlay_popup(self.tokens, width);
+                for (index, (label, value)) in field.options.iter().enumerate() {
+                    let editor_id = editor_id.clone();
+                    popup = popup.child(select_option_action(
+                        select_option(self.tokens, label.clone(), field.value == value.to_string()),
+                        false,
+                        false,
+                        self.action(move |this, _, window, cx| {
+                            this.send(SelectMenuRequest::Close, window, cx);
+                            this.settings_workspace.update(cx, |state, cx| {
+                                if let Some(editor) = state.discovery.editor.as_mut()
+                                    && editor.source.id == editor_id
+                                {
+                                    editor.select_choice(field_index, index);
+                                    cx.notify();
+                                }
+                            });
+                            cx.stop_propagation();
+                        }),
+                    ));
+                }
+                Some(popup)
+            }
             (SettingsTab::Privilege, SettingsSelect::LocalPrivilegePromptType) => {
                 let mut popup = select_overlay_popup(&self.tokens, width);
                 let current = self.settings_workspace.read(cx).privilege_prompt_type();

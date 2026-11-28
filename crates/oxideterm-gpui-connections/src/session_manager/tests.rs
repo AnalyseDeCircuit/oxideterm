@@ -95,6 +95,144 @@ pub(super) fn ssh_config_display_projection_never_copies_proxy_command_secrets()
     assert!(!search_text.contains("secret-proxy-token"));
 }
 
+#[gpui::test]
+fn discovery_projection_routes_the_displayed_source_and_target(cx: &mut gpui::TestAppContext) {
+    use gpui::AppContext;
+    let west = oxideterm_discovery::CatalogEntry {
+        row_id: "discovery:4:west42".into(),
+        source_id: "west".into(),
+        target_id: "42".into(),
+        label: "api".into(),
+        detail: Some("db.internal".into()),
+        source_name: "West".into(),
+        scope: Some("production".into()),
+        tags: vec![],
+        group_paths: vec![
+            vec![oxideterm_discovery::DiscoveryGroupSegment {
+                id: "a/b".into(),
+                label: "On/Call".into(),
+            }],
+            vec![
+                oxideterm_discovery::DiscoveryGroupSegment {
+                    id: "a".into(),
+                    label: "Operations".into(),
+                },
+                oxideterm_discovery::DiscoveryGroupSegment {
+                    id: "b".into(),
+                    label: "On/Call".into(),
+                },
+            ],
+            vec![oxideterm_discovery::DiscoveryGroupSegment {
+                id: "a".into(),
+                label: "Operations".into(),
+            }],
+        ],
+    };
+    let east = oxideterm_discovery::CatalogEntry {
+        row_id: "discovery:4:east42".into(),
+        source_id: "east".into(),
+        source_name: "East".into(),
+        ..west.clone()
+    };
+    let item = SessionManagerDisplayItem::Discovery(west.clone());
+    assert_eq!(item.subtitle(), "db.internal · West · production");
+    assert_eq!(
+        item.open_target(),
+        SessionManagerOpenTarget::Discovery(("west".into(), "42".into()))
+    );
+    let group = DiscoveryCatalogGroup {
+        id: "west".into(),
+        name: "West".into(),
+        failed: false,
+        hint: None,
+    };
+    let empty = DiscoveryCatalogGroup {
+        id: "unavailable".into(),
+        name: "West".into(),
+        failed: true,
+        hint: Some("Sign in".into()),
+    };
+    let actions = empty.menu_actions();
+    assert!(matches!(
+        actions.as_slice(),
+        [(_, _, CatalogAction::RefreshDiscovery(refresh)), (_, _, CatalogAction::EditDiscoverySource(edit))]
+            if refresh == "unavailable" && edit == refresh
+    ));
+    let groups = [group.clone(), empty.clone()];
+    let roots = vec!["West".to_owned()];
+    let expanded = HashSet::from([vec!["unavailable".into()]]);
+    let rows = session_manager_tree_with_sources(
+        std::slice::from_ref(&item),
+        &roots,
+        &HashMap::new(),
+        &HashSet::new(),
+        &groups,
+        &expanded,
+        false,
+    );
+    assert!(
+        matches!(&rows[..], [SessionManagerTreeRow::Group{path,..},SessionManagerTreeRow::DiscoveryGroup{group: populated,expanded:false,..}, SessionManagerTreeRow::DiscoveryGroup{group: vacant,expanded:true,..},SessionManagerTreeRow::DiscoveryStatus(hint)] if path=="West" && populated.id=="west" && vacant.id=="unavailable" && hint=="Sign in")
+    );
+    let row = CatalogRow::from(item);
+    assert!(row.matches_query("on/call"));
+    let rows = [row];
+    let matches = session_manager_tree_with_sources(
+        &rows,
+        &[],
+        &HashMap::new(),
+        &HashSet::new(),
+        &groups,
+        &expanded,
+        true,
+    );
+    assert!(matches!(&matches[..], [
+            SessionManagerTreeRow::DiscoveryGroup{group,expanded:true,count:1},
+            SessionManagerTreeRow::DiscoverySubgroup{label, ..},
+            SessionManagerTreeRow::Item{item_index:0, depth:2},
+            SessionManagerTreeRow::DiscoverySubgroup{count:1,..},
+            SessionManagerTreeRow::DiscoverySubgroup{label: nested, count:1, ..},
+            SessionManagerTreeRow::Item{item_index:0,depth:3},
+            SessionManagerTreeRow::Item{item_index:0,depth:2},
+        ] if group.id=="west" && label=="On/Call" && nested==label));
+    let open = HashSet::from([vec!["west".into()], vec!["west".into(), "a/b".into()]]);
+    let folded = session_manager_tree_with_sources(
+        &rows,
+        &[],
+        &HashMap::new(),
+        &HashSet::new(),
+        &groups[..1],
+        &open,
+        false,
+    );
+    assert!(matches!(
+        &folded[..],
+        [
+            SessionManagerTreeRow::DiscoveryGroup { count: 1, .. },
+            SessionManagerTreeRow::DiscoverySubgroup { expanded: true, .. },
+            SessionManagerTreeRow::Item {
+                item_index: 0,
+                depth: 2
+            },
+            SessionManagerTreeRow::DiscoverySubgroup {
+                expanded: false,
+                ..
+            },
+        ]
+    ));
+    let manager = cx.new(SessionManagerState::new);
+    manager.update(cx, |manager, cx| {
+        manager.update_discovery(vec![east.clone(), west.clone()], groups.to_vec(), cx);
+        manager.focus_discovery_target(west.key(), cx);
+        manager.update_discovery(vec![west.clone(), east.clone()], groups.to_vec(), cx);
+        assert_eq!(
+            manager.focused_discovery,
+            Some(("west".into(), "42".into()))
+        );
+        manager.update_discovery(vec![east], groups.to_vec(), cx);
+        assert_eq!(manager.focused_discovery, None);
+    });
+}
+
 #[test]
 pub(super) fn row_menu_selection_target_maps_saved_profiles_and_skips_unselectable_rows() {
     // Every saved-profile kind participates in the row-menu multi-delete, so a
@@ -168,6 +306,13 @@ pub(super) fn row_menu_selection_target_maps_saved_profiles_and_skips_unselectab
         session_manager_row_menu_selection_target(&SessionManagerRowActionTarget::SshConfig(
             "host".into()
         )),
+        None
+    );
+    assert_eq!(
+        session_manager_row_menu_selection_target(&SessionManagerRowActionTarget::Discovery((
+            "source".into(),
+            "host".into()
+        ))),
         None
     );
 }

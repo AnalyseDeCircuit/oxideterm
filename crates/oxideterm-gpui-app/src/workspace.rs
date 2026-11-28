@@ -14,6 +14,7 @@ mod command_palette;
 mod connection_monitor;
 mod delivery;
 mod detached_tab_window;
+mod discovery;
 mod file_manager;
 mod forwards;
 mod graphics;
@@ -643,6 +644,9 @@ pub(crate) struct WorkspaceApp {
     connection_store: ConnectionStore,
     // The connection-layer worker owns SSH config parsing and persistence.
     ssh_config_sync_service: Option<SshConfigSyncService>,
+    pending_discovery_opens: HashMap<discovery::DiscoveryOpenKey, discovery::PendingDiscoveryOpen>,
+    discovery: Arc<oxideterm_discovery::DiscoveryService>,
+    _discovery_updates: Task<()>,
     _session_manager_subscription: Subscription,
     remote_desktop: Entity<remote_desktop::RemoteDesktopWorkspaceEntity>,
     local_shells: Vec<ShellInfo>,
@@ -753,9 +757,10 @@ impl WorkspaceApp {
 
 use oxideterm_terminal::command_completion::TerminalCommandSuggestion;
 
-#[derive(Clone)]
 struct DetachedLocalTerminalSession {
     history: SharedTerminalCommandHistory,
+    instance: Option<local_sessions::LocalTerminalInstance>,
+    discovery_pane: Option<(Entity<TerminalPane>, Subscription)>,
     session_id: TerminalSessionId,
     title: String,
     session: SharedTerminalSession,

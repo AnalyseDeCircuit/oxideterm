@@ -32,12 +32,61 @@ impl WorkspaceApp {
             })
     }
 
+    fn prepare_discovery_edit(
+        &mut self,
+        source: &mut oxideterm_discovery::DiscoverySource,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if source.id.is_empty() {
+            source.id = uuid::Uuid::new_v4().to_string();
+            return true;
+        }
+        // A second window may have deleted the source while this editor was open.
+        if self
+            .discovery
+            .source(&source.id)
+            .is_some_and(|saved| !saved.removal_pending)
+        {
+            return true;
+        }
+        self.report_discovery_failure(oxideterm_discovery::DiscoveryFailure::StaleTarget, cx);
+        false
+    }
+
     pub(super) fn handle_connection_page_request(
         &mut self,
         request: ConnectionRequest,
         cx: &mut Context<Self>,
     ) {
         match request {
+            ConnectionRequest::SaveDiscovery {
+                mut source,
+                secrets,
+            } => {
+                if self.prepare_discovery_edit(&mut source, cx) {
+                    self.save_discovery_source(source, secrets, cx);
+                }
+            }
+            ConnectionRequest::RunDiscoverySourceAction {
+                source_id,
+                action_id,
+            } => self.run_discovery_source_action(source_id, action_id, cx),
+            ConnectionRequest::DeleteDiscovery(id) => self.delete_discovery_source(&id, cx),
+            ConnectionRequest::SetDiscoveryEnabled(id, enabled) => {
+                let mut saved = self.settings_store.clone();
+                if saved.set_discovery_source_enabled(&id, enabled).is_ok() {
+                    self.reconcile_discovery_sources(cx);
+                    cx.notify();
+                } else {
+                    self.push_command_palette_toast(
+                        self.i18n.t("settings_view.discovery.title"),
+                        Some(self.i18n.t("settings_view.discovery.toggle_failed")),
+                        TerminalNoticeVariant::Error,
+                        cx,
+                    );
+                }
+            }
+            ConnectionRequest::RefreshDiscovery(id) => self.discovery.request_directory(&id, true),
             ConnectionRequest::LoadHosts(enabled) => {
                 self.edit_settings(
                     |settings| set_ssh_config_auto_load_hosts(settings, enabled),
@@ -143,6 +192,61 @@ mod settings_connection_entity_tests {
     use gpui::{AppContext, TestAppContext, point};
 
     use super::*;
+
+    #[gpui::test]
+    fn discovery_settings_list_toggles_source_and_opens_plugin_manager(cx: &mut TestAppContext) {
+        let Some(_) = crate::workspace::session_manager::tests::isolated_workspace_fixture(
+            cx,
+            "OXIDETERM_DISCOVERY_SETTINGS_LIST_TEST_DIR",
+        ) else {
+            return;
+        };
+        let mut store = SettingsStore::load_default().unwrap();
+        store.settings_mut().onboarding_completed = true;
+        store.settings_mut().onboarding_disclaimer_accepted = true;
+        store.settings_mut().ssh_config.auto_load_hosts = false;
+        store.save().unwrap();
+        store
+            .replace_discovery_sources(vec![oxideterm_discovery::DiscoverySource {
+                id: "unavailable".into(),
+                name: "Build assets".into(),
+                provider_id: "assets".into(),
+                plugin_id: Some("missing.plugin".into()),
+                ..Default::default()
+            }])
+            .unwrap();
+        crate::migration_snapshot::acknowledge_pre_2_0_migration_notice(&default_settings_path())
+            .unwrap();
+        cx.executor().allow_parking();
+        let (shell, cx) = cx.add_window_view(|window, cx| {
+            let workspace = cx.new(|cx| WorkspaceApp::new(window, cx, None, None).unwrap());
+            crate::workspace::window_shell::WorkspaceWindowShell::new(workspace, window, cx)
+        });
+        cx.simulate_resize(gpui::size(px(1400.0), px(1000.0)));
+        let workspace = shell.read_with(cx, |shell, _| shell.session_entity());
+        workspace.update_in(cx, |this, window, cx| {
+            this.settings_workspace.update(cx, |settings, cx| {
+                settings.set_active_tab(SettingsTab::Discovery, cx);
+            });
+            this.open_settings(window, cx);
+            this.sync_settings_section_list_state(cx);
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let toggle = cx.debug_bounds("discovery-enabled-unavailable").unwrap();
+        cx.simulate_click(toggle.center(), gpui::Modifiers::default());
+        let saved = SettingsStore::load_default().unwrap();
+        assert!(!saved.settings().discovery_sources[0].enabled);
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let plugins = cx.debug_bounds("discovery-open-plugins").unwrap();
+        cx.simulate_click(plugins.center(), gpui::Modifiers::default());
+        workspace.read_with(cx, |this, cx| {
+            assert_eq!(
+                this.active_content_tab(cx).unwrap().kind,
+                TabKind::PluginManager
+            );
+        });
+    }
 
     #[gpui::test]
     fn managed_key_long_paste_keeps_import_visible(cx: &mut TestAppContext) {

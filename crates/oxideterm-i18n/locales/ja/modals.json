@@ -280,6 +280,7 @@
       "verifying": "確認中..."
     },
     "new_connection": {
+      "saved_identity_changed": "保存済みの SSH 接続が変更されました。開き直して続行してください。",
       "transport_ftp": "FTP / FTPS",
       "ftp_description": "FTP または明示的 FTPS でリモートファイルを管理します。パッシブ接続を使用します。",
       "ftp_tls": "FTPS を使用（明示的 TLS）",

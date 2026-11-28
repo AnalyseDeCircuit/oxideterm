@@ -3,6 +3,7 @@ use super::*;
 /// Contains only values needed to build one modal frame after releasing the Entity borrow.
 struct ConnectionFormModalSnapshot {
     transport: NewConnectionTransport,
+    discovery: bool,
     name: String,
     host: String,
     port: String,
@@ -71,6 +72,10 @@ impl ConnectionFormModalSnapshot {
     fn from_form(form: &NewConnectionForm) -> Self {
         Self {
             transport: form.transport,
+            #[cfg(not(target_family = "wasm"))]
+            discovery: form.discovery_origin.is_some(),
+            #[cfg(target_family = "wasm")]
+            discovery: false,
             name: form.name.clone(),
             host: form.host.clone(),
             port: form.port.clone(),
@@ -314,7 +319,8 @@ impl ConnectionFormView {
             && !wsl_graphics_mode
             && !mosh_mode
             && !standalone_sftp_mode;
-        let shows_transport_selector = !prompt_mode
+        let shows_transport_selector = !form.discovery
+            && !prompt_mode
             && !duplicate_mode
             && !edit_properties_mode
             && !saved_profile_edit_mode
@@ -326,7 +332,7 @@ impl ConnectionFormView {
                 .t("modals.new_connection.transport_local_terminal")
         } else if drill_down_mode {
             self.i18n.t("ssh.drill_down.title")
-        } else if prompt_mode {
+        } else if prompt_mode || form.discovery {
             self.i18n
                 .t("sessionManager.connect_prompt.title")
                 .replace("{{name}}", &form.name)
@@ -362,7 +368,7 @@ impl ConnectionFormView {
                 .replace("{{host}}", &parent_host)
                 .replace("<host>", "")
                 .replace("</host>", "")
-        } else if prompt_mode {
+        } else if prompt_mode || form.discovery {
             format!("{}@{}:{}", form.username, form.host, form.port)
         } else if duplicate_mode {
             self.i18n
@@ -1882,7 +1888,7 @@ impl ConnectionFormView {
                         ),
                 )
                 .child({
-                    let show_test_button = self.environment.browser.is_none() && !reauthentication_mode
+                    let show_test_button = self.environment.browser.is_none() && !form.discovery && !reauthentication_mode
                         && !edit_properties_mode
                         && self.connection_form_state(cx).saved_connection_prompt_action.is_none()
                         && !drill_down_mode
@@ -1954,7 +1960,7 @@ impl ConnectionFormView {
                             false,
                             cx,
                         ))
-                        .when(reauthentication_mode, |footer| {
+                        .when(reauthentication_mode || form.discovery, |footer| {
                             footer.child(self.render_connection_button(
                                 self.i18n.t("ssh.form.connect"),
                                 true,
@@ -1964,7 +1970,7 @@ impl ConnectionFormView {
                             ))
                         })
                         .when(
-                            !reauthentication_mode
+                            !reauthentication_mode && !form.discovery
                                 && !edit_properties_mode
                                 && !saved_profile_edit_mode
                                 && self.connection_form_state(cx).saved_connection_prompt_action.is_none()

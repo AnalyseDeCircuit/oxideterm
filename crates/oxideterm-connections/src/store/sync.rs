@@ -133,29 +133,37 @@ impl ConnectionStore {
 
     pub fn restore_checkpoint(&mut self, checkpoint: &ConnectionStoreCheckpoint) -> Result<()> {
         self.ensure_saved_connections_sync_store(&checkpoint.store_path)?;
+        let generation = self.revision.gate.lock();
+        if generation.get() != self.revision.observed() {
+            bail!("Cannot roll back over a newer connection store transaction");
+        }
 
         // Restore disk first. If the write fails, the current in-memory model
         // remains aligned with the current file and restoration can retry.
-        match &checkpoint.original_file {
+        let restored_bytes = match &checkpoint.original_file {
             SavedConnectionsStoreFileCheckpoint::Missing => {
                 if self.path.exists() {
                     durable_remove(&self.path).with_context(|| {
                         format!("failed to remove current store {}", self.path.display())
                     })?;
                 }
+                None
             }
             SavedConnectionsStoreFileCheckpoint::Present(bytes) => {
                 atomic_write_file(&self.path, bytes).with_context(|| {
                     format!("failed to restore connection store {}", self.path.display())
                 })?;
+                Some(bytes.as_slice())
             }
-        }
+        };
 
         // This clone restores connections, groups, all profile types,
         // tombstones, recent entries, managed-key metadata, and local privilege
         // metadata as one in-memory state transition.
         self.data = checkpoint.original_data.clone();
         self.storage_format = checkpoint.original_storage_format;
+        generation.observe_file(restored_bytes);
+        self.revision.observe(generation.get());
         Ok(())
     }
 
@@ -287,6 +295,9 @@ impl ConnectionStore {
         snapshot: SavedConnectionsSyncSnapshot,
         strategy: SavedConnectionsConflictStrategy,
     ) -> Result<PreparedSavedConnectionsSync> {
+        let gate = self.revision.gate.clone();
+        let generation = gate.lock();
+        self.refresh_for_write(generation.get())?;
         let checkpoint = self.create_checkpoint()?;
         let mut result = ApplySavedConnectionsSyncSnapshotResult::default();
         let mut deleted_connection_ids = Vec::new();
@@ -380,6 +391,7 @@ impl ConnectionStore {
                     if let Some(removed) =
                         self.remove_connection_without_tombstone(&existing_same_name.id)
                     {
+                        self.data.ssh_identity_generations.remove(&removed.id);
                         deleted_connection_ids.push(removed.id);
                     }
                 }
@@ -504,8 +516,9 @@ impl ConnectionStore {
         pending_keychain_ids.dedup();
         let mut failed_keychain_ids = Vec::new();
 
+        let active = self.credential_reference_ids();
         for keychain_id in pending_keychain_ids {
-            if self.keychain.delete(&keychain_id).is_err() {
+            if !active.contains(&keychain_id) && self.keychain.delete(&keychain_id).is_err() {
                 failed_keychain_ids.push(keychain_id);
             }
         }

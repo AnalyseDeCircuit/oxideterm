@@ -30,6 +30,10 @@ impl WorkspaceApp {
             }
         }
         install_application_proxy_policy_from_settings(settings, &self.connection_store);
+        if previous_settings.network.upstream_proxy != settings.network.upstream_proxy {
+            self.discovery
+                .set_global_proxy(&settings.network.upstream_proxy);
+        }
         if previous_settings.appearance.app_icon != settings.appearance.app_icon {
             // Replacing the macOS application icon decodes the bundled image on the main thread,
             // so unrelated form edits must not repeat that work.

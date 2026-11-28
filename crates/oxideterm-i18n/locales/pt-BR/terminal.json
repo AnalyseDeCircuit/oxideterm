@@ -103,6 +103,9 @@
     "paste": {
       "edit_title": "Editar antes de colar",
       "clipboard_read_failed": "Não foi possível ler a área de transferência. Use o atalho de teclado para colar.",
+      "send_by_line": "Enviar linha por linha",
+      "stop_sending": "Parar envio",
+      "interrupted": "{{sent}} linhas enviadas por completo. Envio interrompido na linha {{line}}.",
       "strip_fence": "Remover delimitadores do bloco de código",
       "undo": "Desfazer",
       "redo": "Refazer",

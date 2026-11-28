@@ -280,6 +280,7 @@
       "verifying": "验证中..."
     },
     "new_connection": {
+      "saved_identity_changed": "已保存的 SSH 连接已变更，请重新打开后继续。",
       "transport_ftp": "FTP / FTPS",
       "ftp_description": "通过 FTP 或显式 FTPS 管理远程文件，使用被动数据连接。",
       "ftp_tls": "使用 FTPS（显式 TLS）",

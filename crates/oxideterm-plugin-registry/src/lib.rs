@@ -55,6 +55,7 @@ mod compatibility;
 mod constants;
 mod contributions;
 mod discovery;
+mod discovery_providers;
 mod install;
 mod paths;
 mod permissions;
@@ -87,6 +88,9 @@ pub use contributions::{
 };
 pub use discovery::{load_native_plugin_config, save_native_plugin_config};
 pub use install::{NATIVE_PLUGIN_LANGUAGE_ICON_MAX_BYTES, load_verified_language_icon_bytes};
+pub use oxideterm_plugin_manifest::discovery::{
+    DiscoveryConfigUse, DiscoveryLaunchKind, NativePluginDiscoveryProviderDef,
+};
 pub use paths::{native_plugin_config_path, native_plugins_dir};
 pub use permissions::{
     NATIVE_PLUGIN_TRUSTED_PROCESS_CAPABILITY, native_plugin_capabilities_fingerprint,

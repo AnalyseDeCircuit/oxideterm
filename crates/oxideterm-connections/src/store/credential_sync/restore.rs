@@ -381,6 +381,9 @@ impl ConnectionStore {
                     prepared.stale.push(old);
                 }
                 update_reference(&mut next_data, &target, reference, &mut next_global)?;
+                if let CredentialOwner::Connection(id) = &target.owner {
+                    next_data.rotate_ssh_identity(id);
+                }
                 next_data
                     .cleared_credentials
                     .retain(|entry| entry != &target);
@@ -426,13 +429,10 @@ impl ConnectionStore {
         &mut self,
         prepared: &mut PreparedProfileCredentials,
     ) -> Result<()> {
+        let active = self.credential_reference_ids();
         for reference in &prepared.stale {
             // Retain a shared slot if another profile still owns it.
-            if !self
-                .credential_bindings(None)
-                .iter()
-                .any(|binding| binding.reference == Some(reference.as_str()))
-            {
+            if !active.contains(reference) {
                 self.delete_or_queue_connection_keychain_entry(reference.clone())?;
             }
         }

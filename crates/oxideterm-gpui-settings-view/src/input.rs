@@ -91,7 +91,8 @@ impl SettingsWorkspaceEntity {
             ("escape", _) if crate::highlight_page::is_highlight_input(input) => CloseHighlight,
             ("escape", SettingsInput::TerminalCommandSpecsJson) => CloseCommandSpecs,
             ("enter", _)
-                if input == SettingsInput::TerminalCommandSpecsJson
+                if matches!(input, SettingsInput::DiscoveryMultiline(_))
+                    || input == SettingsInput::TerminalCommandSpecsJson
                     || (is_terminal_trigger_input(input) && input.accepts_newline()) =>
             {
                 self.replace_settings_entity_input(input, None, "\n", cx);

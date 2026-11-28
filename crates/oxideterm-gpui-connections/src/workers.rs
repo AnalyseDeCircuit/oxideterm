@@ -30,17 +30,13 @@ pub fn preflight(
     let upstream_proxy = config.upstream_proxy.take();
     let worker_config = config;
     let worker_title = title;
-    let routed_preflight = worker_config
-        .proxy_chain
-        .as_ref()
-        .is_some_and(|chain| !chain.is_empty())
-        && matches!(
-            &intent,
-            SshConnectionIntent::StandaloneSftp { .. }
-                | SshConnectionIntent::StandaloneSftpSecondary { .. }
-                | SshConnectionIntent::TestStandaloneSftp
-                | SshConnectionIntent::Mosh(_)
-        );
+    let routed_preflight = worker_config.discovery_origin.is_some()
+        || intent.uses_embedded_route(&worker_config)
+        || (matches!(&intent, SshConnectionIntent::Mosh(_))
+            && worker_config
+                .proxy_chain
+                .as_ref()
+                .is_some_and(|chain| !chain.is_empty()));
     let prompt_handler = Arc::new(NativeSshPromptHandler::new(tx.clone()));
     std::thread::spawn(move || {
         let mut worker_config = worker_config;
@@ -61,6 +57,7 @@ pub fn preflight(
                     intent,
                     host,
                     port,
+                    checked_hop: None,
                     status: HostKeyStatus::Error {
                         message: pre_connect_failure_message(Some(&i18n), failure),
                     },
@@ -71,22 +68,23 @@ pub fn preflight(
             // the node transport starts without repeating it.
             worker_config.pre_connect_completed = true;
         }
-        let (checked_host, checked_port, status) = match tokio::runtime::Runtime::new() {
+        let (checked_host, checked_port, checked_hop, status) = match tokio::runtime::Runtime::new()
+        {
             Ok(runtime) if routed_preflight => {
-                // Routed SFTP and Mosh preflight authenticate through every hop. The
-                // bounded zeroizing copy survives only until the accepted launch starts.
+                // Keep the original launch available for the endpoint-specific approval prompt.
                 let mut route_config = worker_config.clone();
                 route_config.upstream_proxy = upstream_proxy.clone();
                 runtime.block_on(
                     SshTransportClient::new(route_config)
                         .with_prompt_handler(prompt_handler)
                         .with_managed_key_resolver(managed_key_resolver)
-                        .preflight_route_host_keys(),
+                        .preflight_route_host_key_step(),
                 )
             }
             Ok(runtime) => (
                 host.clone(),
                 port,
+                None,
                 runtime.block_on(check_host_key_with_route(
                     &host,
                     port,
@@ -100,6 +98,7 @@ pub fn preflight(
             Err(error) => (
                 host.clone(),
                 port,
+                None,
                 HostKeyStatus::Error {
                     message: format!("failed to initialize SSH runtime: {error}"),
                 },
@@ -112,6 +111,7 @@ pub fn preflight(
             intent,
             host: checked_host,
             port: checked_port,
+            checked_hop,
             status,
         });
     });

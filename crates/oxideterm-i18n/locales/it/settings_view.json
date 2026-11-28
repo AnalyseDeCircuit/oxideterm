@@ -1,5 +1,32 @@
 {
   "settings_view": {
+    "discovery": {
+      "install_provider_hint": "Installa o attiva un plugin di rilevamento per aggiungere una sorgente.",
+      "toggle_failed": "Impossibile modificare lo stato di attivazione della sorgente.",
+      "edit_source": "Modifica sorgente",
+      "confirm_ssh_form": "Conferma il modulo prima della connessione",
+      "separate_session": "Apri una nuova sessione",
+      "identity_changed": "Il provider non ha potuto confermare l’identità di accesso precedente. Aprire una sessione separata?",
+      "reopen": "Riapri la destinazione",
+      "refresh": "Aggiorna elenco",
+      "refreshing": "Aggiornamento dell’elenco delle destinazioni…",
+      "refreshed": "Elenco aggiornato alle {time} · Destinazioni: {count}",
+      "refresh_failed": "Aggiornamento non riuscito: {reason}",
+      "title": "Rilevamento dinamico",
+      "description": "Gestisci le origini delle connessioni temporanee.",
+      "interval": "Intervallo di aggiornamento (minuti)",
+      "scheduled_refresh": "Aggiornamento automatico",
+      "add": "Aggiungi origine",
+      "save_before_action": "Salva e attiva questa origine per usare questa azione con le impostazioni visualizzate.",
+      "unavailable": "Origine non disponibile",
+      "permission_denied": "Accesso negato",
+      "stale_target": "La destinazione è cambiata. Aggiorna l’origine.",
+      "invalid_response": "Risposta del provider non valida",
+      "no_targets": "Nessuna destinazione disponibile",
+      "source_in_use": "Prima di eliminare l’origine, chiudi le sue sessioni in tutte le finestre e disconnetti i nodi inattivi da Sessioni attive.",
+      "cleanup_pending": "Sorgente salvata. Salva di nuovo per riprovare a rimuovere le vecchie credenziali.",
+      "removal_pending": "L’eliminazione dell’origine è incompleta. Seleziona Elimina per riprovare."
+    },
     "known_hosts": {
       "title": "Host attendibili",
       "description": "Gestisci le chiavi host SSH salvate.",

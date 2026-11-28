@@ -635,6 +635,9 @@ impl WorkspaceApp {
         window: &mut gpui::Window,
         cx: &mut Context<Self>,
     ) {
+        if !self.node_allows_session_tools(&node_id) {
+            return;
+        }
         let initial_path = self.active_ssh_terminal_cwd_path_for_node(&node_id, cx);
         if self.ide_workspace.read(cx).tab_for_node(&node_id).is_some() {
             self.open_ide_folder_picker_tab_with_initial_path(
@@ -739,6 +742,9 @@ impl WorkspaceApp {
         access: Option<oxideterm_ide_fs::RemoteAccess>,
         cx: &mut Context<Self>,
     ) {
+        if !self.node_allows_session_tools(&node_id) {
+            return;
+        }
         let node_title = self
             .ssh_nodes
             .get(&node_id)

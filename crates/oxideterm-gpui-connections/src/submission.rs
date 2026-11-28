@@ -115,12 +115,9 @@ impl ConnectionFlowEntity {
 
 impl ConnectionFlowEntity {
     pub fn default_submit_action(&self) -> NewConnectionSubmitAction {
-        if self
-            .form
-            .form
-            .as_ref()
-            .is_some_and(|form| form.standalone_connection_id.is_some())
-        {
+        if self.form.form.as_ref().is_some_and(|form| {
+            form.standalone_connection_id.is_some() || form.discovery_origin.is_some()
+        }) {
             NewConnectionSubmitAction::Connect
         } else {
             NewConnectionSubmitAction::SaveAndConnect
@@ -216,6 +213,7 @@ impl ConnectionFlowEntity {
             return false;
         };
         let mut form = crate::configuration::form_from_saved_connection(connection, error);
+        form.saved_identity = store.saved_ssh_identity(id);
         if prompt.is_some() {
             form.save_password = false;
         }
@@ -320,8 +318,9 @@ impl ConnectionFlowEntity {
         if !duplicate && store.get(&source).is_none() {
             return None;
         }
+        let expected = (!duplicate).then_some(form.saved_identity).flatten();
         match prepare_ssh_profile_update(form, store, &source, duplicate, i18n)
-            .and_then(|request| Ok(store.upsert(request)?))
+            .and_then(|request| store.upsert_confirmed_profile_edit(request, expected))
         {
             Ok(saved) => {
                 let reconnect_node = self

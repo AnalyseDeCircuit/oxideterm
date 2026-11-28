@@ -280,6 +280,7 @@
       "verifying": "Verifying..."
     },
     "new_connection": {
+      "saved_identity_changed": "The saved SSH connection changed. Reopen it before continuing.",
       "transport_ftp": "FTP / FTPS",
       "ftp_description": "Manage remote files over FTP or explicit FTPS. Uses passive data connections.",
       "ftp_tls": "Use FTPS (explicit TLS)",

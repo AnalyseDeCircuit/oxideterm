@@ -280,6 +280,7 @@
       "verifying": "확인 중..."
     },
     "new_connection": {
+      "saved_identity_changed": "저장된 SSH 연결이 변경되었습니다. 연결을 다시 열어 계속하세요.",
       "transport_ftp": "FTP / FTPS",
       "ftp_description": "패시브 데이터 연결로 FTP 또는 명시적 FTPS를 통해 원격 파일을 관리합니다.",
       "ftp_tls": "FTPS 사용 (명시적 TLS)",

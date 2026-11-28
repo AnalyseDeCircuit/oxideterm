@@ -117,6 +117,28 @@ pub(in crate::workspace) enum ReconnectRuntimeEffect {
     },
 }
 
+impl ReconnectRuntimeEffect {
+    pub(in crate::workspace) fn reconnect_node(&self) -> Option<&NodeId> {
+        match self {
+            Self::NodeConnected {
+                node_id,
+                reconnecting: true,
+                ..
+            }
+            | Self::NodeConnectFailed {
+                node_id,
+                action:
+                    ReconnectFailureAction::Retry { .. } | ReconnectFailureAction::FinishReconnect,
+                ..
+            }
+            | Self::GraceRecovered { node_id, .. }
+            | Self::GraceExpired { node_id, .. }
+            | Self::SftpTransfersSnapshotted { node_id, .. } => Some(node_id),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub(in crate::workspace) enum ReconnectFailureAction {
     InitialConnect,
@@ -210,6 +232,7 @@ pub(in crate::workspace) struct NodeTransportAttemptId(u64);
 
 #[derive(Debug)]
 struct NodeTransportAttempt {
+    discovery_restore: Option<ReconnectSnapshot>,
     id: NodeTransportAttemptId,
     connection_id: String,
     abort_handle: tokio::task::AbortHandle,
@@ -288,6 +311,8 @@ pub(in crate::workspace) struct WorkspaceRuntimeEntity {
     terminal_endpoint_sessions: HashMap<TerminalSessionId, SharedTerminalSession>,
     pending_ssh_terminal_opens: VecDeque<PendingSshTerminalOpen>,
     node_transport_attempts: HashMap<NodeId, NodeTransportAttempt>,
+    discovery_preparations:
+        HashMap<NodeId, (std::sync::Weak<()>, tokio_util::sync::CancellationToken)>,
     next_node_transport_attempt_id: u64,
     node_event_generations: HashMap<NodeId, u64>,
     node_router: NodeRouter,
@@ -426,6 +451,7 @@ impl WorkspaceRuntimeEntity {
             terminal_endpoint_sessions: HashMap::new(),
             pending_ssh_terminal_opens: VecDeque::new(),
             node_transport_attempts: HashMap::new(),
+            discovery_preparations: HashMap::new(),
             next_node_transport_attempt_id: 0,
             node_event_generations: HashMap::new(),
             node_router,
@@ -955,12 +981,54 @@ impl WorkspaceRuntimeEntity {
         managed_key_resolver: ManagedKeyResolver,
         i18n: oxideterm_i18n::I18n,
     ) -> Result<(), NodeTransportStartError> {
+        self.start_node_transport_attempt(node_id, managed_key_resolver, i18n, None)
+    }
+
+    pub(in crate::workspace) fn start_node_transport_attempt(
+        &mut self,
+        node_id: &NodeId,
+        managed_key_resolver: ManagedKeyResolver,
+        i18n: oxideterm_i18n::I18n,
+        replacement: Option<(SshConfig, ReconnectSnapshot)>,
+    ) -> Result<(), NodeTransportStartError> {
         // Release the old attempt before reacquiring the same logical consumer.
         self.cancel_node_transport_attempt(node_id);
-        let runtime_snapshot = self
+        let mut runtime_snapshot = self
             .node_router
             .node_runtime_snapshot(node_id)
             .ok_or(NodeTransportStartError::MissingRuntime)?;
+        let mut discovery_restore = None;
+        if let Some((config, snapshot)) = replacement {
+            let current = runtime_snapshot.config.discovery_origin.as_ref();
+            let next = config.discovery_origin.as_ref();
+            if !current
+                .zip(next)
+                .is_some_and(|(previous, next)| match &next.reconnect_from {
+                    Some((id, instance)) => {
+                        id == &node_id.0
+                            && instance == &previous.instance_id
+                            && previous.same_access_identity(next) == Some(true)
+                    }
+                    None => false,
+                })
+            {
+                return Err(NodeTransportStartError::Route(
+                    i18n.t("settings_view.discovery.stale_target"),
+                ));
+            }
+            runtime_snapshot.config = config;
+            discovery_restore = Some(snapshot);
+        }
+        if runtime_snapshot
+            .config
+            .discovery_origin
+            .as_ref()
+            .is_some_and(|origin| !origin.can_handshake())
+        {
+            return Err(NodeTransportStartError::Route(
+                i18n.t("settings_view.discovery.stale_target"),
+            ));
+        }
         let parent = if let Some(id) = runtime_snapshot.parent_id {
             let connection = self
                 .node_router
@@ -982,7 +1050,7 @@ impl WorkspaceRuntimeEntity {
         // Consume that one-shot marker so the next reconnect runs it again.
         let pre_connect_command = runtime_snapshot.config.pre_connect_command.clone();
         let pre_connect_completed = runtime_snapshot.config.pre_connect_completed;
-        if pre_connect_completed {
+        if pre_connect_completed && discovery_restore.is_none() {
             self.node_router.clear_pre_connect_completed(node_id);
         }
         let config = runtime_snapshot.config;
@@ -1136,6 +1204,7 @@ impl WorkspaceRuntimeEntity {
         self.node_transport_attempts.insert(
             node_id.clone(),
             NodeTransportAttempt {
+                discovery_restore,
                 id: attempt_id,
                 connection_id,
                 abort_handle: task.abort_handle(),
@@ -1240,6 +1309,9 @@ impl WorkspaceRuntimeEntity {
 
         // Stop producers and invalidate deferred transitions before touching
         // any node or registry owner they could otherwise reacquire.
+        for (_, (_, token)) in self.discovery_preparations.drain() {
+            token.cancel();
+        }
         self.shutdown_node_transport_attempts();
         for (_, (_, abort_handle)) in self.remote_shell_gate_tasks.drain() {
             abort_handle.abort();
@@ -1722,7 +1794,14 @@ impl WorkspaceRuntimeEntity {
                 .ssh_registry
                 .get(&connection_id)
                 .is_some_and(|handle| handle.has_physical());
-            if !connection_matches_node || !has_physical_transport {
+            if !connection_matches_node
+                || !has_physical_transport
+                || self
+                    .node_router
+                    .runtime_store()
+                    .discovery_origin(&node_id)
+                    .is_some_and(|origin| origin.invalidation().is_cancelled())
+            {
                 continue;
             }
             let Some(connection) = self
@@ -1836,14 +1915,60 @@ impl WorkspaceRuntimeEntity {
         let nodes_to_disconnect = self.runtime_subtree_postorder(root_node_id);
         self.cancel_node_runtime_work(&nodes_to_disconnect, cx);
         for node_id in &nodes_to_disconnect {
-            if let Some(connection_id) = self.node_router.connection_id_for_node(node_id) {
-                self.retire_node_connection(node_id, &connection_id);
-            }
-            let _ = self
-                .node_router
-                .disconnect_node_runtime(node_id, "explicit disconnect");
+            self.disconnect_node_runtime(node_id, "explicit disconnect");
         }
         nodes_to_disconnect
+    }
+
+    fn disconnect_node_runtime(&self, node_id: &NodeId, reason: &str) {
+        if let Some(connection_id) = self.node_router.connection_id_for_node(node_id) {
+            self.retire_node_connection(node_id, &connection_id);
+        }
+        let _ = self.node_router.disconnect_node_runtime(node_id, reason);
+    }
+
+    pub(in crate::workspace) fn begin_discovery_reconnect(
+        &mut self,
+        node: &NodeId,
+        owner: &Arc<()>,
+    ) -> Option<tokio_util::sync::CancellationToken> {
+        self.discovery_preparations
+            .retain(|_, (request, _)| request.strong_count() != 0);
+        if self.discovery_preparations.contains_key(node)
+            || self.node_transport_attempts.contains_key(node)
+        {
+            return None;
+        }
+        let token = tokio_util::sync::CancellationToken::new();
+        self.discovery_preparations
+            .insert(node.clone(), (Arc::downgrade(owner), token.clone()));
+        Some(token)
+    }
+
+    pub(in crate::workspace) fn cancel_discovery_reconnect(
+        &mut self,
+        instance_id: &str,
+        cx: &mut Context<Self>,
+    ) {
+        for node in self.active_reconnect_node_ids() {
+            if self
+                .node_router
+                .runtime_store()
+                .discovery_origin(&node)
+                .is_some_and(|origin| origin.instance_id == instance_id)
+            {
+                self.stop_revoked_discovery_reconnect(&node, cx);
+            }
+        }
+    }
+
+    fn stop_revoked_discovery_reconnect(&mut self, node: &NodeId, cx: &mut Context<Self>) {
+        self.cancel_node_runtime_work(std::slice::from_ref(node), cx);
+        self.remove_pending_ssh_terminal_opens_for_node(node);
+        self.runtime_effects.retain(|effect| {
+            !matches!(effect, WorkspaceRuntimeEffect::Reconnect(effect) if effect.reconnect_node() == Some(node))
+        });
+        self.disconnect_node_runtime(node, "discovery instance invalidated");
     }
 
     fn runtime_subtree_postorder(&self, root_node_id: &NodeId) -> Vec<NodeId> {
@@ -1862,6 +1987,11 @@ impl WorkspaceRuntimeEntity {
             .cloned();
         self.cancel_queued_reconnects(node_ids);
         for node_id in node_ids {
+            if let Some((request, token)) = self.discovery_preparations.remove(node_id)
+                && request.strong_count() > 0
+            {
+                token.cancel();
+            }
             if let Some((_, abort_handle)) = self.remote_shell_gate_tasks.remove(node_id) {
                 abort_handle.abort();
             }
@@ -2988,6 +3118,21 @@ impl WorkspaceRuntimeEntity {
         result: ReconnectWorkerResult,
         cx: &mut Context<Self>,
     ) -> Option<ReconnectRuntimeEffect> {
+        // A worker result can already be queued when the plugin revokes the instance.
+        if let ReconnectWorkerResult::NodeConnected { node_id, .. }
+        | ReconnectWorkerResult::NodeConnectFailed { node_id, .. }
+        | ReconnectWorkerResult::GraceRecovered { node_id, .. }
+        | ReconnectWorkerResult::GraceExpired { node_id, .. } = &result
+            && self.has_active_reconnect_job(node_id)
+            && self
+                .node_router
+                .runtime_store()
+                .discovery_origin(node_id)
+                .is_some_and(|origin| origin.invalidation().is_cancelled())
+        {
+            self.stop_revoked_discovery_reconnect(node_id, cx);
+            return None;
+        }
         match result {
             ReconnectWorkerResult::NodeConnectionProgress {
                 node_id,
@@ -3020,12 +3165,30 @@ impl WorkspaceRuntimeEntity {
                 ) {
                     return None;
                 }
-                let connection = match self
+                let restore = self
+                    .node_transport_attempts
+                    .get_mut(&node_id)
+                    .and_then(|attempt| attempt.discovery_restore.take());
+                let binding = self
                     .node_router
-                    .bind_established_connection(&node_id, &connection_id)
-                {
+                    .bind_established_connection(&node_id, &connection_id);
+                let connection = match binding {
                     Ok(connection) => connection,
                     Err(error) => {
+                        if restore.is_some() {
+                            // A completed but rejected handshake must not enter the idle pool.
+                            self.cancel_node_transport_attempt(&node_id);
+                            self.record_node_transport_start_failure(
+                                &node_id,
+                                error.to_string(),
+                                cx,
+                            );
+                            return Some(ReconnectRuntimeEffect::NodeConnectFailed {
+                                node_id,
+                                error: error.to_string(),
+                                action: ReconnectFailureAction::InitialConnect,
+                            });
+                        }
                         return self.reduce_reconnect_worker_result(
                             ReconnectWorkerResult::NodeConnectFailed {
                                 node_id,
@@ -3043,6 +3206,36 @@ impl WorkspaceRuntimeEntity {
                         step.parent_handoff =
                             self.node_router.lease_connection_handoff(&connection_id);
                     }
+                }
+                if let Some(snapshot) = restore {
+                    if let Some(origin) =
+                        self.node_router.runtime_store().discovery_origin(&node_id)
+                    {
+                        origin.finish_open_request();
+                    }
+                    let title = self
+                        .node_router
+                        .node_metadata(&node_id)
+                        .map(|node| node.host)
+                        .unwrap_or_default();
+                    if snapshot.old_terminal_session_ids.is_empty()
+                        && snapshot.terminal_sessions_by_node.is_empty()
+                    {
+                        self.queue_ssh_terminal_open(
+                            PendingSshTerminalOpen {
+                                node_id: node_id.clone(),
+                                title: title.clone(),
+                                reconnect_session_id: None,
+                                post_connect_command: None,
+                                mark_used_connection_id: None,
+                                save_after_open: None,
+                                cleanup_node_id: None,
+                                open_sftp_on_connect: false,
+                            },
+                            cx,
+                        );
+                    }
+                    self.start_reconnect_job(&node_id, title, snapshot);
                 }
                 self.complete_node_transport_attempt(&node_id, attempt_id);
                 self.finish_connection_trace_success(&node_id, cx);
@@ -3722,12 +3915,157 @@ mod tests {
         entity.node_transport_attempts.insert(
             node_id.clone(),
             NodeTransportAttempt {
+                discovery_restore: None,
                 id: attempt_id,
                 connection_id: connection_id.to_string(),
                 abort_handle: task.abort_handle(),
             },
         );
         attempt_id
+    }
+
+    #[gpui::test]
+    fn discovery_reconnect_binds_only_the_authorized_replacement_to_the_original_node(
+        cx: &mut TestAppContext,
+    ) {
+        let entity = test_runtime_entity(cx);
+        entity.update(cx, |runtime, cx| {
+            for (case, identity, remove) in [
+                ("same", Some("operator"), false),
+                ("other", Some("readonly"), false),
+                ("unknown", None, false),
+                ("removed", Some("operator"), true),
+            ] {
+                let node = NodeId::new(case);
+                let epoch = uuid::Uuid::new_v4();
+                let origin = |identity: Option<&str>| {
+                    oxideterm_discovery::DiscoveryOrigin::new("source".into(), "asset".into(), epoch)
+                        .with_session_identity(identity.map(str::to_owned))
+                };
+                let old = origin(Some("operator"));
+                runtime.node_router.upsert_node(node.clone(), SshConfig {
+                    discovery_origin: Some(old.clone()), ..Default::default()
+                });
+                let owner = Arc::new(());
+                let validity = runtime.begin_discovery_reconnect(&node, &owner).unwrap();
+                assert!(runtime.begin_discovery_reconnect(&node, &Arc::new(())).is_none());
+                let mut next = origin(identity).with_instance(format!("new-{case}"), validity.clone(), Arc::new(()));
+                next.reconnect_from = Some((node.0.clone(), old.instance_id.clone()));
+                let config = SshConfig {
+                    host: "resolved.example".into(), discovery_origin: Some(next.clone()), ..Default::default()
+                };
+                let handle = runtime.ssh_registry.acquire(config, ConnectionConsumer::NodeRouter(node.0.clone()));
+                let connection = handle.connection_id();
+                let attempt = register_test_node_transport_attempt(runtime, &node, connection);
+                let panes = vec![ReconnectNodeTerminalSnapshot {
+                    node_id: node.0.clone(), old_terminal_session_ids: vec!["31".into(), "42".into()],
+                }];
+                runtime.node_transport_attempts.get_mut(&node).unwrap().discovery_restore = Some(
+                    ReconnectSnapshot { terminal_sessions_by_node: panes, ..Default::default() }
+                );
+                next.connected();
+                handle.set_physical(Arc::new(()));
+                runtime.ssh_registry.mark_state(connection, ConnectionState::Active);
+                if remove {
+                    runtime.remove_node_runtime_subtree(&node, cx);
+                    assert!(validity.is_cancelled());
+                }
+                let effect = runtime.reduce_reconnect_worker_result(ReconnectWorkerResult::NodeConnected {
+                    node_id: node.clone(), connection_id: connection.into(), attempt_id: attempt, job_id: None,
+                }, cx);
+                if remove {
+                    assert!(effect.is_none());
+                    assert!(!runtime.node_router.contains_node(&node));
+                } else if case == "same" {
+                    assert!(matches!(effect, Some(ReconnectRuntimeEffect::NodeConnected { ref node_id, reconnecting: true, .. }) if node_id == &node));
+                    assert_eq!(runtime.node_router.connection_id_for_node(&node).as_deref(), Some(connection));
+                    assert_eq!(runtime.reconnect_terminal_session_ids(&node), ["31", "42"]);
+                    assert_eq!(runtime.node_router.runtime_store().discovery_origin(&node), Some(next));
+                } else {
+                    assert!(matches!(effect, Some(ReconnectRuntimeEffect::NodeConnectFailed { .. })));
+                    assert_eq!(runtime.node_router.connection_id_for_node(&node), None);
+                    assert_eq!(runtime.node_router.runtime_store().discovery_origin(&node), Some(old));
+                }
+            }
+        });
+    }
+
+    #[gpui::test]
+    fn discovery_revocation_discards_only_its_queued_reconnect(cx: &mut TestAppContext) {
+        let entity = test_runtime_entity(cx);
+        entity.update(cx, |entity, cx| {
+            let epoch = uuid::Uuid::new_v4();
+            let mut queue_reconnect = |instance_id: &str| {
+                let node = NodeId::new(instance_id);
+                let origin = oxideterm_discovery::DiscoveryOrigin::new(
+                    "source".into(),
+                    "same-target".into(),
+                    epoch,
+                )
+                .with_instance(
+                    instance_id.into(),
+                    Default::default(),
+                    Arc::new(()),
+                );
+                let config = SshConfig {
+                    host: "same.example.test".into(),
+                    discovery_origin: Some(origin.clone()),
+                    ..SshConfig::default()
+                };
+                entity.node_router.upsert_node(node.clone(), config.clone());
+                let handle = entity
+                    .ssh_registry
+                    .acquire(config, ConnectionConsumer::NodeRouter(node.0.clone()));
+                origin.connected();
+                handle.set_physical(Arc::new(()));
+                let connection_id = handle.connection_id().to_owned();
+                entity
+                    .ssh_registry
+                    .mark_state(&connection_id, ConnectionState::Active);
+                let job =
+                    entity.start_reconnect_job(&node, node.0.clone(), ReconnectSnapshot::default());
+                let attempt_id =
+                    register_test_node_transport_attempt(entity, &node, &connection_id);
+                entity
+                    .reconnect_worker_sender()
+                    .send(ReconnectWorkerResult::NodeConnected {
+                        node_id: node.clone(),
+                        connection_id: connection_id.clone(),
+                        attempt_id,
+                        job_id: Some(job.job_id),
+                    })
+                    .unwrap();
+                (node, connection_id, origin)
+            };
+            let (revoked, old_connection, old_origin) = queue_reconnect("first-instance");
+            let (sibling, sibling_connection, _) = queue_reconnect("second-instance");
+
+            old_origin.invalidation().cancel();
+            entity.drain_worker_results(cx);
+            entity.cancel_discovery_reconnect(&old_origin.instance_id, cx);
+
+            let effects = take_reconnect_effects(entity, cx);
+            assert!(matches!(
+                effects.as_slice(),
+                [ReconnectRuntimeEffect::NodeConnected { node_id, reconnecting: true, .. }]
+                    if node_id == &sibling
+            ));
+            assert_eq!(
+                entity
+                    .node_router
+                    .node_state(&revoked)
+                    .unwrap()
+                    .state
+                    .readiness,
+                NodeReadiness::Disconnected
+            );
+            assert!(!entity.has_active_reconnect_job(&revoked));
+            assert!(entity.ssh_registry.get(&old_connection).is_none());
+            assert_eq!(
+                entity.node_router.connection_id_for_node(&sibling),
+                Some(sibling_connection)
+            );
+        });
     }
 
     #[gpui::test]

@@ -95,6 +95,16 @@ impl SettingsSectionLayout<'_> {
                 self.mcp_credential_ready.hash(hasher);
                 self.mcp_startup_error.hash(hasher);
             }
+            SettingsTab::Discovery if section == Some(SettingsSectionId::DiscoverySources) => {
+                for source in &settings.discovery_sources {
+                    source.id.hash(hasher);
+                    source.name.hash(hasher);
+                    source.enabled.hash(hasher);
+                    source.removal_pending.hash(hasher);
+                    state.discovery.feedback.get(&source.id).hash(hasher);
+                }
+                state.discovery.hash_controls(hasher);
+            }
             SettingsTab::Connections => {
                 if section == Some(SettingsSectionId::ConnectionsKnownHosts) {
                     let state = &state.known_hosts;

@@ -1,0 +1,23 @@
+[lints]
+workspace = true
+
+[package]
+name = "oxideterm-discovery"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+oxideterm-plugin-protocol = { path = "../oxideterm-plugin-protocol" }
+oxideterm-settings = { path = "../oxideterm-settings" }
+serde_json.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+oxideterm-connections = { path = "../oxideterm-connections" }
+tempfile = "3"
+tokio = { workspace = true, features = ["test-util"] }

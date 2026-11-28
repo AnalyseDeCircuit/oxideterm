@@ -103,6 +103,9 @@
     "paste": {
       "edit_title": "貼上前編輯",
       "clipboard_read_failed": "無法讀取剪貼簿。請使用貼上快速鍵。",
+      "send_by_line": "逐行傳送",
+      "stop_sending": "停止傳送",
+      "interrupted": "已完整送出 {{sent}} 行，於第 {{line}} 行中斷。",
       "strip_fence": "移除程式碼區塊標記",
       "undo": "復原",
       "redo": "重做",

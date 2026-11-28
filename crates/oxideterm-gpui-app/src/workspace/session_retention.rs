@@ -51,9 +51,11 @@ impl WorkspaceApp {
 
     /// Returns whether removing SSH nodes already requested a tree snapshot write.
     pub(super) fn sync_session_retention(&mut self, cx: &mut Context<Self>) -> bool {
-        let Some(duration) = self.session_retention.duration else {
+        let duration = self.session_retention.duration;
+        if duration.is_none() && self.session_retention.closed_nodes.is_empty() {
             return false;
-        };
+        }
+        let mut finished_discovery = HashSet::new();
         let mut eligible = HashSet::new();
         let form_owner = self
             .connection_form_state(cx)
@@ -104,17 +106,32 @@ impl WorkspaceApp {
                             && node.sftp_session_id.is_none()
                     })
                 {
-                    eligible.insert(key);
+                    if self
+                        .node_router
+                        .runtime_store()
+                        .discovery_origin(id)
+                        .is_some()
+                    {
+                        finished_discovery.insert(key);
+                    } else {
+                        eligible.insert(key);
+                    }
                 }
             }
         }
+        let removed_discovery = !finished_discovery.is_empty()
+            && self.remove_expired_session_records(finished_discovery, cx);
+        let Some(duration) = duration else {
+            return removed_discovery;
+        };
         let now = cx.background_executor().now();
         let (expired, next) = self
             .session_retention
             .clock
             .reconcile(eligible, duration, now);
-        let snapshot_requested =
-            !expired.is_empty() && self.remove_expired_session_records(expired, cx);
+        let snapshot_requested = (!expired.is_empty()
+            && self.remove_expired_session_records(expired, cx))
+            || removed_discovery;
         if self
             .session_retention
             .wake

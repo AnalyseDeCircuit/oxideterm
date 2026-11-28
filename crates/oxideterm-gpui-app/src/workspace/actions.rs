@@ -2993,10 +2993,6 @@ impl WorkspaceApp {
         // protected connection credentials are never read into this path.
         let pane_entity = self.tab_host.read(cx).panes().get(&pane_id).cloned()?;
         let pane = pane_entity.read(cx);
-        let entry = self
-            .terminal_broadcast_entries(cx)
-            .into_iter()
-            .find(|entry| entry.pane_id == pane_id);
         let selected_group_name = self
             .terminal
             .read(cx)
@@ -3012,6 +3008,35 @@ impl WorkspaceApp {
                     .find(|group| group.id == group_id)
                     .map(|group| group.name.clone())
             });
+        if let Some(instance) = self
+            .session_id_for_pane(pane_id, cx)
+            .and_then(|id| self.tab_host.read(cx).local_sessions.get(&id))
+            .filter(|instance| instance.discovery.is_some())
+        {
+            // A provider PTY identifies the target, but its local helper cannot supply remote host or cwd.
+            return self
+                .plugin_entity
+                .read(cx)
+                .discovery_terminal_is_live(&pane.shared_session())
+                .then(|| QuickCommandTargetContext {
+                    target_id: pane_id.to_string(),
+                    label: instance.title.clone(),
+                    protocol: None,
+                    values: QuickCommandContextValues {
+                        connection: Some(Zeroizing::new(instance.title.clone())),
+                        group: selected_group_name.map(Zeroizing::new),
+                        selection: pane.selected_text_snapshot().map(Zeroizing::new),
+                        ..Default::default()
+                    },
+                });
+        }
+        if !self.discovery_pane_allows_target(pane_id, cx) {
+            return None;
+        }
+        let entry = self
+            .terminal_broadcast_entries(cx)
+            .into_iter()
+            .find(|entry| entry.pane_id == pane_id);
         let mut values = QuickCommandContextValues {
             cwd: pane.current_working_directory().map(Zeroizing::new),
             host: pane.current_working_directory_host().map(Zeroizing::new),
@@ -3057,7 +3082,7 @@ impl WorkspaceApp {
             label: entry
                 .map(|entry| entry.label)
                 .unwrap_or_else(|| pane.title().to_string()),
-            protocol,
+            protocol: Some(protocol),
             values,
         })
     }

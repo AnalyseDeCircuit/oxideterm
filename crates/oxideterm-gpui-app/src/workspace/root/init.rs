@@ -182,6 +182,21 @@ impl WorkspaceApp {
                 .worker_threads(Self::WORKSPACE_ASYNC_RUNTIME_WORKER_THREADS)
                 .build()?,
         );
+        let discovery = oxideterm_discovery::DiscoveryService::shared(
+            connection_store.path(),
+            &forwarding_runtime,
+        );
+        let mut discovery_changes = discovery.subscribe();
+        let discovery_updates = cx.spawn(async move |workspace, cx| {
+            while discovery_changes.changed().await.is_ok() {
+                if workspace
+                    .update(cx, |workspace, cx| workspace.publish_discovery_catalog(cx))
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
         cx.set_http_client(Arc::new(
             oxideterm_gpui_platform::http_client::AssetHttpClient::new(forwarding_runtime.clone())?,
         ));
@@ -1149,6 +1164,9 @@ impl WorkspaceApp {
             window_state_save_task: None,
             connection_store,
             ssh_config_sync_service: None,
+            discovery,
+            pending_discovery_opens: HashMap::new(),
+            _discovery_updates: discovery_updates,
             _session_manager_subscription: session_manager_subscription,
             remote_desktop,
             local_shells,
@@ -1192,10 +1210,12 @@ impl WorkspaceApp {
         workspace.bootstrap_cloud_sync_controller(cx);
         workspace.start_public_mcp_delivery(cx);
         workspace.sync_ssh_config_sync_service();
+        workspace.reconcile_discovery_sources(cx);
         if workspace.rails.section == SidebarSection::Connections
             && !workspace.rails.left.collapsed()
         {
             workspace.refresh_session_manager_ssh_config_hosts(cx);
+            workspace.discovery.ensure_visible();
         }
         workspace.restore_session_tree_snapshot();
         workspace.start_startup_ssh_tunnels(window, cx);
@@ -1551,6 +1571,9 @@ impl WorkspaceApp {
             paste_labels: TerminalPasteLabels {
                 edit_title: self.i18n.t("terminal.paste.edit_title"),
                 strip_fence: self.i18n.t("terminal.paste.strip_fence"),
+                send_by_line: self.i18n.t("terminal.paste.send_by_line"),
+                stop_sending: self.i18n.t("terminal.paste.stop_sending"),
+                interrupted: self.i18n.t("terminal.paste.interrupted"),
                 undo: self.i18n.t("terminal.paste.undo"),
                 redo: self.i18n.t("terminal.paste.redo"),
                 editor_menu: oxideterm_gpui_editor::EditorContextMenuLabels {

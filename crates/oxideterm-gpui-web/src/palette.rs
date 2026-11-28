@@ -894,7 +894,7 @@ impl Workspace {
             ShellPaletteRequest::Select(i) => {
                 let items = self.ranked(cx);
                 self.palette.model.update(cx, |m, cx| {
-                    m.set_selected_index(i, cx);
+                    m.set_selected_index(Some(i), cx);
                     m.reveal_selection(&items);
                 });
             }

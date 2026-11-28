@@ -30,7 +30,8 @@ pub struct QuickCommandContextValues {
 pub struct QuickCommandTargetContext {
     pub target_id: String,
     pub label: String,
-    pub protocol: QuickCommandTargetProtocol,
+    /// Provider-managed terminals may have no protocol known to the host.
+    pub protocol: Option<QuickCommandTargetProtocol>,
     pub values: QuickCommandContextValues,
 }
 
@@ -217,7 +218,7 @@ pub fn validate_quick_command_template(
     let target = QuickCommandTargetContext {
         target_id: "validation".to_string(),
         label: "validation".to_string(),
-        protocol: QuickCommandTargetProtocol::Local,
+        protocol: Some(QuickCommandTargetProtocol::Local),
         // Known context fields use empty values so validation checks token shape, not runtime data.
         values: QuickCommandContextValues {
             host: Some(Zeroizing::new(String::new())),
@@ -448,7 +449,7 @@ mod tests {
         let targets = ["a.example.com", "b.example.com"].map(|host| QuickCommandTargetContext {
             target_id: host.to_string(),
             label: host.to_string(),
-            protocol: QuickCommandTargetProtocol::Ssh,
+            protocol: Some(QuickCommandTargetProtocol::Ssh),
             values: QuickCommandContextValues {
                 host: Some(Zeroizing::new(host.to_string())),
                 ..QuickCommandContextValues::default()
@@ -530,7 +531,7 @@ mod tests {
             let target = QuickCommandTargetContext {
                 target_id: "local".to_string(),
                 label: "Local".to_string(),
-                protocol: QuickCommandTargetProtocol::Local,
+                protocol: Some(QuickCommandTargetProtocol::Local),
                 values: QuickCommandContextValues::default(),
             };
 
@@ -563,7 +564,7 @@ mod tests {
         let target = QuickCommandTargetContext {
             target_id: "ssh".to_string(),
             label: "SSH".to_string(),
-            protocol: QuickCommandTargetProtocol::Ssh,
+            protocol: Some(QuickCommandTargetProtocol::Ssh),
             values: QuickCommandContextValues::default(),
         };
         let unknown_values = BTreeMap::from([
@@ -643,13 +644,13 @@ mod tests {
             QuickCommandTargetContext {
                 target_id: "local".to_string(),
                 label: "Local".to_string(),
-                protocol: QuickCommandTargetProtocol::Local,
+                protocol: Some(QuickCommandTargetProtocol::Local),
                 values: QuickCommandContextValues::default(),
             },
             QuickCommandTargetContext {
                 target_id: "ssh".to_string(),
                 label: "Remote".to_string(),
-                protocol: QuickCommandTargetProtocol::Ssh,
+                protocol: Some(QuickCommandTargetProtocol::Ssh),
                 values: QuickCommandContextValues {
                     host: Some(Zeroizing::new("server.example.com".to_string())),
                     ..QuickCommandContextValues::default()
@@ -724,7 +725,7 @@ mod tests {
             |(id, label, host, user, connection, protocol)| QuickCommandTargetContext {
                 target_id: id.into(),
                 label: label.into(),
-                protocol,
+                protocol: Some(protocol),
                 values: QuickCommandContextValues {
                     host: Some(Zeroizing::new(host.into())),
                     username: Some(Zeroizing::new(user.into())),

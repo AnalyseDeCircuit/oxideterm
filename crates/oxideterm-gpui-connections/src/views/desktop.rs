@@ -42,6 +42,7 @@ pub enum ConnectionsWindowRequest {
         intent: SshConnectionIntent,
     },
     PreflightFailed {
+        discovery: bool,
         intent: SshConnectionIntent,
         message: String,
         inline: bool,

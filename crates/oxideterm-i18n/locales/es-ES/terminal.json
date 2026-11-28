@@ -103,6 +103,9 @@
     "paste": {
       "edit_title": "Editar antes de pegar",
       "clipboard_read_failed": "No se pudo leer el portapapeles. Usa el atajo de teclado para pegar.",
+      "send_by_line": "Enviar línea por línea",
+      "stop_sending": "Detener el envío",
+      "interrupted": "Se enviaron {{sent}} líneas completas. El envío se detuvo en la línea {{line}}.",
       "strip_fence": "Quitar marcadores de bloque de código",
       "undo": "Deshacer",
       "redo": "Rehacer",

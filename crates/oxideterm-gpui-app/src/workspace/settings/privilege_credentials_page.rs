@@ -27,7 +27,13 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let outcome = self.settings_workspace.update(cx, |settings, cx| {
-            settings.apply_credential_request(request, &mut self.connection_store, &self.i18n, cx)
+            settings.apply_credential_request(
+                request,
+                &self.settings_store.settings().discovery_sources,
+                &mut self.connection_store,
+                &self.i18n,
+                cx,
+            )
         });
         if outcome.close_select {
             self.close_settings_select();

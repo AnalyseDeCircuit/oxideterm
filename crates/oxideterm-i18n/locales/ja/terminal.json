@@ -103,6 +103,9 @@
     "paste": {
       "edit_title": "貼り付け前に編集",
       "clipboard_read_failed": "クリップボードを読み取れませんでした。キーボードショートカットで貼り付けてください。",
+      "send_by_line": "1 行ずつ送信",
+      "stop_sending": "送信を停止",
+      "interrupted": "{{sent}} 行を送信しました。{{line}} 行目で送信が中断されました。",
       "strip_fence": "コードブロックの記号を削除",
       "undo": "元に戻す",
       "redo": "やり直す",

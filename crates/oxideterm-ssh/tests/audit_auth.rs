@@ -18,6 +18,80 @@ impl AuditKeyProvider for Keys {
         self.load(id)
     }
 }
+
+#[tokio::test]
+async fn discovery_prepared_session_admits_one_shell_and_releases_its_provider_on_close() {
+    let (mut config, _, server, _) = start_peer(false).await;
+    let resource = Arc::new(());
+    let retained = Arc::downgrade(&resource);
+    let origin = oxideterm_discovery::DiscoveryOrigin::new(
+        "source".into(),
+        "asset".into(),
+        uuid::Uuid::new_v4(),
+    )
+    .with_instance("instance".into(), Default::default(), resource);
+    config.discovery_origin = Some(origin);
+    let registry = SshConnectionRegistry::default();
+    let router = NodeRouter::new(registry.clone());
+    let node = NodeId::new("asset");
+    router.upsert_node(node.clone(), config.clone());
+    let connection = SshTransportClient::new(config.clone())
+        .connect_node_with_registry(
+            registry.clone(),
+            ConnectionConsumer::NodeRouter(node.0.clone()),
+        )
+        .await
+        .unwrap();
+    let id = connection.connection_id();
+    let handoff = router.bind_established_connection(&node, id).unwrap();
+    let admission = registry.admit_initial_terminal(id).unwrap();
+    let shell = SshTransportClient::connect_admitted_terminal(
+        registry.clone(),
+        id.to_owned(),
+        ConnectionConsumer::Terminal("authorized-shell".into()),
+        80,
+        24,
+        None,
+        admission,
+    )
+    .await
+    .unwrap();
+    drop(handoff);
+    assert!(registry.admit_initial_terminal(id).is_none());
+    assert!(router.acquire_sftp(&node).await.is_err());
+    assert!(matches!(
+        connection
+            .open_direct_tcpip("localhost", 22, "localhost", 0)
+            .await,
+        Err(SshTransportError::CommandChannelUnavailable)
+    ));
+    assert!(matches!(
+        connection
+            .request_remote_tcpip_forward("localhost", 0)
+            .await,
+        Err(SshTransportError::CommandChannelUnavailable)
+    ));
+    assert!(matches!(
+        connection.open_session_channel().await,
+        Err(SshTransportError::CommandChannelUnavailable)
+    ));
+    assert!(matches!(
+        SshTransportClient::new(config)
+            .connect_dedicated_node_with_registry(
+                registry.clone(),
+                ConnectionConsumer::Sftp("extra".into())
+            )
+            .await,
+        Err(SshTransportError::CommandChannelUnavailable)
+    ));
+    assert!(retained.upgrade().is_some());
+    drop(shell);
+    assert!(registry.get(id).is_none());
+    assert!(retained.upgrade().is_none());
+    server.abort();
+    let _ = server.await;
+}
+
 #[tokio::test]
 async fn authentication_rejection_releases_the_pool_without_an_idle_retirement() {
     let (config, _, server, _) = start_peer(false).await;

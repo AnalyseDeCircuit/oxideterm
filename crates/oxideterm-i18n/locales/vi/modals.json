@@ -280,6 +280,7 @@
       "verifying": "Đang xác minh..."
     },
     "new_connection": {
+      "saved_identity_changed": "Kết nối SSH đã lưu đã thay đổi. Hãy mở lại để tiếp tục.",
       "transport_ftp": "FTP / FTPS",
       "ftp_description": "Quản lý tệp từ xa qua FTP hoặc FTPS tường minh với kết nối dữ liệu thụ động.",
       "ftp_tls": "Dùng FTPS (TLS tường minh)",

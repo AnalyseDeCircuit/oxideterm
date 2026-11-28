@@ -115,6 +115,7 @@ fn supported(tab: SettingsTab, section: SettingsSectionId) -> bool {
         ),
         SettingsTab::Portable => section == PortableRuntime,
         SettingsTab::Connections => section == ConnectionsKnownHosts,
+        SettingsTab::Discovery => false,
         SettingsTab::Privilege => section == PrivilegeCredentials,
         SettingsTab::Network => matches!(section, NetworkSharedProxy | NetworkRouting),
         SettingsTab::Help => matches!(

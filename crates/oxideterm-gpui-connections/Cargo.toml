@@ -15,6 +15,7 @@ oxideterm-editor-core = { path = "../oxideterm-editor-core" }
 oxideterm-gpui-editor = { path = "../oxideterm-gpui-editor" }
 oxideterm-gpui-ui = { path = "../oxideterm-gpui-ui" }
 oxideterm-gpui-settings-view = { path = "../oxideterm-gpui-settings-view" }
+oxideterm-plugin-protocol = { path = "../oxideterm-plugin-protocol" }
 oxideterm-i18n = { path = "../oxideterm-i18n" }
 oxideterm-quick-commands = { path = "../oxideterm-quick-commands" }
 oxideterm-remote-desktop = { path = "../oxideterm-remote-desktop" }
@@ -31,6 +32,7 @@ zeroize.workspace = true
 oxideterm-audit = { path = "../oxideterm-audit" }
 oxideterm-ble = { path = "../oxideterm-ble" }
 oxideterm-connections = { path = "../oxideterm-connections" }
+oxideterm-discovery = { path = "../oxideterm-discovery" }
 oxideterm-forwarding = { path = "../oxideterm-forwarding" }
 oxideterm-ftp = { path = "../oxideterm-ftp" }
 oxideterm-local-files = { path = "../oxideterm-local-files" }

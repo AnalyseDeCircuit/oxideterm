@@ -1,6 +1,7 @@
 //! Window-local interaction state. Provider tasks are cancelled when a picker closes or reopens.
 use super::{
-    CommandPaletteView, PaletteContent, PaletteState, ShellPaletteRequest, model::PaletteItem,
+    CommandPaletteView, PaletteContent, PaletteState, ShellPaletteRequest,
+    model::{PaletteItem, RankedItem, resolve_command_palette_selected_index},
 };
 use gpui::{Context, EventEmitter, Task, UniformListScrollHandle};
 use oxideterm_gpui_ui::motion::{ExitPhase, ExitPresence};
@@ -69,7 +70,10 @@ impl<P: PaletteProvider> PaletteModel<P> {
     pub fn reveal_selection<A>(&self, items: &[super::model::RankedItem<A>]) {
         use super::model::*;
         use oxideterm_gpui_ui::virtual_list::*;
-        if let Some(row) = command_palette_scroll_child_index(items, self.selected_index()) {
+        if let Some(row) = self
+            .selected_index()
+            .and_then(|i| command_palette_scroll_child_index(items, i))
+        {
             scroll_tauri_virtual_list_to_index(
                 self.scroll_handle(),
                 row,
@@ -81,7 +85,7 @@ impl<P: PaletteProvider> PaletteModel<P> {
             );
         }
     }
-    pub fn selected_index(&self) -> usize {
+    pub fn selected_index(&self) -> Option<usize> {
         self.interaction.selected_index
     }
 
@@ -168,13 +172,30 @@ impl<P: PaletteProvider> PaletteModel<P> {
         cx.notify();
     }
 
-    pub fn set_selected_index(&mut self, index: usize, cx: &mut Context<Self>) -> bool {
+    pub fn set_selected_index(&mut self, index: Option<usize>, cx: &mut Context<Self>) -> bool {
         if self.is_closing() || self.interaction.selected_index == index {
             return false;
         }
         self.interaction.selected_index = index;
         cx.notify();
         true
+    }
+
+    pub fn selected_item_id<'a, A>(&self, items: &'a [RankedItem<A>]) -> Option<&'a str> {
+        let index = resolve_command_palette_selected_index(items, self.selected_index())?;
+        Some(&items[index].item.id)
+    }
+
+    pub fn restore_item_selection<A>(
+        &mut self,
+        id: &str,
+        items: &[RankedItem<A>],
+        cx: &mut Context<Self>,
+    ) {
+        let index = items
+            .iter()
+            .position(|row| !row.item.disabled && row.item.id == id);
+        self.set_selected_index(index, cx);
     }
 
     pub fn take_item_action<A: Clone>(

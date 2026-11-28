@@ -30,6 +30,7 @@ pub enum SessionManagerOpenTarget {
     Plugin(String),
     Connection(String),
     SshConfig(String),
+    Discovery((String, String)),
     Serial(String),
     Ble(String),
     LocalTerminal(String),
@@ -270,6 +271,7 @@ pub enum SessionManagerRowActionTarget {
     Plugin(String),
     Connection(String),
     SshConfig(String),
+    Discovery((String, String)),
     Serial(String),
     Ble(String),
     LocalTerminal(String),
@@ -278,6 +280,7 @@ pub enum SessionManagerRowActionTarget {
     Mosh(String),
     StandaloneSftp(String),
     RemoteDesktop(String),
+    DiscoverySource(String),
     GroupRoot,
     Group(String),
 }
@@ -291,6 +294,7 @@ impl SessionManagerRowActionTarget {
             Self::Plugin(id) => Some(SessionManagerOpenTarget::Plugin(id.clone())),
             Self::Connection(id) => Some(SessionManagerOpenTarget::Connection(id.clone())),
             Self::SshConfig(alias) => Some(SessionManagerOpenTarget::SshConfig(alias.clone())),
+            Self::Discovery(alias) => Some(SessionManagerOpenTarget::Discovery(alias.clone())),
             Self::Serial(id) => Some(SessionManagerOpenTarget::Serial(id.clone())),
             Self::Ble(id) => Some(SessionManagerOpenTarget::Ble(id.clone())),
             Self::LocalTerminal(id) => Some(SessionManagerOpenTarget::LocalTerminal(id.clone())),
@@ -299,7 +303,7 @@ impl SessionManagerRowActionTarget {
             Self::Mosh(id) => Some(SessionManagerOpenTarget::Mosh(id.clone())),
             Self::StandaloneSftp(id) => Some(SessionManagerOpenTarget::StandaloneSftp(id.clone())),
             Self::RemoteDesktop(id) => Some(SessionManagerOpenTarget::RemoteDesktop(id.clone())),
-            Self::GroupRoot | Self::Group(_) => None,
+            Self::DiscoverySource(_) | Self::GroupRoot | Self::Group(_) => None,
         }
     }
 }
@@ -328,6 +332,7 @@ pub struct SessionManagerState {
     pub sidebar_search_open: bool,
     pub sidebar_sort_open: bool,
     pub selected_items: HashSet<SessionManagerSelectionTarget>,
+    pub focused_discovery: Option<(String, String)>,
     // The fixed endpoint of the last plain click, used by Shift+click range selection.
     pub selection_anchor: Option<SessionManagerSelectionTarget>,
     pub(super) keyboard_cursor: Option<SessionManagerSelectionTarget>,
@@ -357,6 +362,10 @@ pub struct SessionManagerState {
     pub status: Option<String>,
     #[cfg(not(target_family = "wasm"))]
     pub ssh_config_hosts: Vec<SshConfigHost>,
+    #[cfg(not(target_family = "wasm"))]
+    pub discovery_entries: Vec<oxideterm_discovery::CatalogEntry>,
+    pub discovery_groups: Vec<DiscoveryCatalogGroup>,
+    pub expanded_discovery: HashSet<Vec<String>>,
     pub main_grid_list_state: ListState,
     pub main_grid_list_cache: RefCell<VirtualListSignatureCache>,
     pub main_list_state: ListState,
@@ -434,6 +443,7 @@ impl Default for SessionManagerState {
             sidebar_search_open: false,
             sidebar_sort_open: false,
             selected_items: HashSet::new(),
+            focused_discovery: None,
             selection_anchor: None,
             keyboard_cursor: None,
             reveal_keyboard_cursor: false,
@@ -460,6 +470,10 @@ impl Default for SessionManagerState {
             status: None,
             #[cfg(not(target_family = "wasm"))]
             ssh_config_hosts: Vec::new(),
+            #[cfg(not(target_family = "wasm"))]
+            discovery_entries: Vec::new(),
+            discovery_groups: Vec::new(),
+            expanded_discovery: HashSet::new(),
             #[cfg(not(target_family = "wasm"))]
             batch_add: None,
             #[cfg(not(target_family = "wasm"))]
@@ -758,6 +772,31 @@ impl SessionManagerState {
         replace_utf16(value, replacement_range, text);
         cx.notify();
         true
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    pub fn update_discovery(
+        &mut self,
+        entries: Vec<oxideterm_discovery::CatalogEntry>,
+        groups: Vec<DiscoveryCatalogGroup>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.discovery_entries != entries || self.discovery_groups != groups {
+            if self
+                .focused_discovery
+                .as_ref()
+                .is_some_and(|(source, target)| {
+                    !entries
+                        .iter()
+                        .any(|entry| &entry.source_id == source && &entry.target_id == target)
+                })
+            {
+                self.focused_discovery = None;
+            }
+            self.discovery_entries = entries;
+            self.discovery_groups = groups;
+            cx.notify();
+        }
     }
 }
 impl Render for SessionManagerDrag {

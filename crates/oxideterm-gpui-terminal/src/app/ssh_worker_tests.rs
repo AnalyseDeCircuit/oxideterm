@@ -668,6 +668,140 @@ fn mouse_clipboard_paste_overrides_tracking_and_preserves_confirmation(cx: &mut 
 }
 
 #[gpui::test]
+fn line_paste_paces_submissions_preserves_final_text_and_stops(cx: &mut TestAppContext) {
+    let mut peer = ssh_peer::SshPeer::new();
+    let config =
+        SshSessionConfig::from(peer.config.take().unwrap()).with_runtime(peer.runtime.clone());
+    let (notify, notices) = std::sync::mpsc::channel();
+    let (pane, cx) = cx.add_window_view(move |window, cx| {
+        TerminalPane::new_ssh_with_preferences(
+            config,
+            TerminalUiPreferences {
+                notice_sink: Some(Arc::new(move |msg| {
+                    notify.send(msg.title).unwrap();
+                })),
+                ..Default::default()
+            },
+            window,
+            cx,
+        )
+        .unwrap()
+    });
+    let (sender, channel) = peer.ready.recv_timeout(Duration::from_secs(5)).unwrap();
+    cx.simulate_resize(size(px(900.0), px(600.0)));
+    let read_through_marker = || {
+        let mut input = Vec::new();
+        while !input.ends_with(b"@") {
+            input.extend(peer.input.recv_timeout(Duration::from_secs(5)).unwrap().0);
+        }
+        input
+    };
+    for bracketed in [false, true] {
+        let mode = if bracketed {
+            b"\x1b[?2004h"
+        } else {
+            b"\x1b[?2004l"
+        };
+        peer.runtime
+            .block_on(sender.data(channel, mode.to_vec()))
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while pane.read_with(cx, |pane, _| {
+            pane.terminal
+                .lock()
+                .mode()
+                .contains(TermMode::BRACKETED_PASTE)
+        }) != bracketed
+        {
+            assert!(Instant::now() < deadline, "paste mode was not parsed");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        pane.update(cx, |pane, cx| pane.tick(cx));
+        for (input, plain, wrapped, stop) in [
+            (
+                "一\r\n\r  tail;",
+                &["一\r@", "\r@", "  tail;@"][..],
+                &[
+                    "\x1b[200~一\x1b[201~\r@",
+                    "\r@",
+                    "\x1b[200~  tail;\x1b[201~@",
+                ][..],
+                false,
+            ),
+            (
+                "A\nB\r\n\r",
+                &["A\r@", "B\r@", "\r@"],
+                &["\x1b[200~A\x1b[201~\r@", "\x1b[200~B\x1b[201~\r@", "\r@"],
+                false,
+            ),
+            (
+                "first\nblocked\nlast",
+                &["first\r@", "@", "@"],
+                &["\x1b[200~first\x1b[201~\r@", "@", "@"],
+                false,
+            ),
+            ("\r\n", &["\r@"], &["\r@"], false),
+            (
+                "一\n\nstop",
+                &["一\r@", "@", "@"],
+                &["\x1b[200~一\x1b[201~\r@", "@", "@"],
+                true,
+            ),
+        ] {
+            cx.update(|window, cx| {
+                pane.update(cx, |pane, cx| {
+                    // Input hooks may return CRLF or CR even when the editor supplied LF.
+                    pane.set_plugin_input_interceptor(Some(Arc::new(|bytes, _| {
+                        if bytes == b"blocked\n" {
+                            return TerminalInputInterceptorResult::Suppress;
+                        }
+                        TerminalInputInterceptorResult::Continue(match bytes {
+                            b"A\n" => b"A\r\n".to_vec(),
+                            b"B\n" => b"B\r".to_vec(),
+                            _ => bytes.to_vec(),
+                        })
+                    })));
+                    pane.open_paste_editor(Zeroizing::new(input.into()), &[], cx);
+                });
+                window.draw(cx).clear(cx);
+            });
+            let send = cx.debug_bounds("paste-send-by-line").unwrap().center();
+            cx.simulate_click(send, Default::default());
+            let expected = if bracketed { wrapped } else { plain };
+            // The extra tick catches a phantom blank line after the last terminator.
+            for (i, wire) in expected.iter().chain([&"@"]).enumerate() {
+                if i > 0 {
+                    cx.executor()
+                        .advance_clock(super::paste::LINE_PASTE_INTERVAL);
+                }
+                cx.run_until_parked();
+                pane.update(cx, |pane, cx| pane.send_protocol_bytes(b"@", cx));
+                assert_eq!(
+                    read_through_marker(),
+                    wire.as_bytes(),
+                    "{input:?}, bracketed={bracketed}, tick={i}"
+                );
+                if stop && i == 0 {
+                    cx.update(|window, cx| window.draw(cx).clear(cx));
+                    let cancel = cx.debug_bounds("paste-stop").unwrap().center();
+                    cx.simulate_click(cancel, Default::default());
+                }
+            }
+            let stopped = stop || input.starts_with("first");
+            assert_eq!(
+                notices.try_iter().collect::<Vec<_>>(),
+                if stopped {
+                    vec!["Complete lines submitted: 1. Stopped at line 2."]
+                } else {
+                    vec![]
+                }
+            );
+        }
+    }
+    pane.update(cx, |pane, _| pane.shutdown());
+}
+
+#[gpui::test]
 fn application_scroll_accumulates_small_deltas_until_remote_input(cx: &mut TestAppContext) {
     use gpui::{ScrollDelta, ScrollEvent, TouchPhase};
 

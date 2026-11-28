@@ -352,7 +352,7 @@ impl PublicMcpHost {
             label: saved_connection
                 .map(|connection| connection.name.clone())
                 .unwrap_or_else(|| metadata.host.clone()),
-            protocol: QuickCommandTargetProtocol::Ssh,
+            protocol: Some(QuickCommandTargetProtocol::Ssh),
             values: QuickCommandContextValues {
                 host: Some(Zeroizing::new(metadata.host.clone())),
                 username: Some(Zeroizing::new(metadata.username.clone())),

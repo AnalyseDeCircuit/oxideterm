@@ -25,6 +25,7 @@ pub fn settings_tab_from_ai_section(section: &str) -> Option<SettingsTab> {
         "terminal" => Some(SettingsTab::Terminal),
         "appearance" => Some(SettingsTab::Appearance),
         "local" | "local_terminal" => Some(SettingsTab::Terminal),
+        "discovery" => Some(SettingsTab::Discovery),
         "connections" | "connection_manager" => Some(SettingsTab::Connections),
         "privilege" | "privilege_credentials" | "sudo" | "su" => Some(SettingsTab::Privilege),
         "ssh" | "ssh_keys" => Some(SettingsTab::Connections),
@@ -140,6 +141,8 @@ impl SettingsSelectAnchorExt for SettingsSelect {
             Self::HighlightPreset => SelectAnchorId::SettingsHighlightPreset,
             Self::HighlightRenderMode(index) => SelectAnchorId::SettingsHighlightRenderMode(index),
             Self::HighlightMatchScope(index) => SelectAnchorId::SettingsHighlightMatchScope(index),
+            Self::DiscoveryProvider => SelectAnchorId::SettingsDiscoveryProvider,
+            Self::DiscoveryChoice(index) => SelectAnchorId::SettingsDiscoveryChoice(index),
             Self::ConnectionImportSource => SelectAnchorId::SettingsConnectionImportSource,
             Self::ConnectionImportDuplicateStrategy => {
                 SelectAnchorId::SettingsConnectionImportDuplicateStrategy

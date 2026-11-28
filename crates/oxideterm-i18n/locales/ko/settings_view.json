@@ -1,5 +1,32 @@
 {
   "settings_view": {
+    "discovery": {
+      "install_provider_hint": "소스를 추가하려면 동적 검색 플러그인을 설치하거나 활성화하세요.",
+      "toggle_failed": "소스의 활성화 상태를 변경하지 못했습니다.",
+      "edit_source": "소스 편집",
+      "confirm_ssh_form": "연결 전 연결 양식 확인",
+      "separate_session": "새 세션 열기",
+      "identity_changed": "공급자가 이전 세션과 동일한 접근 계정인지 확인할 수 없습니다. 별도의 세션을 열까요?",
+      "reopen": "대상 다시 열기",
+      "refresh": "목록 새로 고침",
+      "refreshing": "대상 목록을 새로 고치는 중…",
+      "refreshed": "{time}에 목록을 새로 고침 · 대상 {count}개",
+      "refresh_failed": "목록을 새로 고칠 수 없습니다: {reason}",
+      "title": "동적 검색",
+      "description": "임시 연결을 검색할 소스를 관리합니다.",
+      "interval": "새로 고침 간격(분)",
+      "scheduled_refresh": "주기적 새로 고침",
+      "add": "소스 추가",
+      "save_before_action": "표시된 설정으로 이 작업을 수행하려면 소스를 저장하고 활성화하세요.",
+      "unavailable": "소스를 사용할 수 없음",
+      "permission_denied": "접근이 거부되었습니다",
+      "stale_target": "대상이 변경되었습니다. 소스를 새로 고치세요.",
+      "invalid_response": "공급자 응답이 올바르지 않습니다",
+      "no_targets": "사용 가능한 대상 없음",
+      "source_in_use": "삭제하기 전에 모든 창에서 이 소스의 세션을 닫고 활성 세션에서 유휴 노드의 연결을 끊으세요.",
+      "cleanup_pending": "소스를 저장했습니다. 이전 자격 증명 삭제를 다시 시도하려면 다시 저장하세요.",
+      "removal_pending": "소스를 완전히 삭제하지 못했습니다. 삭제를 선택해 다시 시도하세요."
+    },
     "known_hosts": {
       "title": "신뢰하는 호스트",
       "description": "저장된 SSH 호스트 키를 관리합니다.",

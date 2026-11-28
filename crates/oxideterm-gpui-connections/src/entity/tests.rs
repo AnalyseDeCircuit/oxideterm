@@ -31,9 +31,107 @@ fn unknown_host_key_challenge() -> HostKeyChallenge {
         },
         intent: SshConnectionIntent::Test,
         session_tree_challenge: false,
+        checked_hop: None,
         host: "example.test".to_string(),
         port: 22,
     }
+}
+
+#[gpui::test]
+fn discovery_jump_route_scopes_host_key_approvals_before_single_node_launch(
+    cx: &mut TestAppContext,
+) {
+    use crate::preflight::{PreflightOutcome, RoutePreflight, VerifiedManualSshRoute};
+    use crate::prompts::HostKeyApproval;
+    let entity = cx.new(ConnectionFlowEntity::new);
+    entity.update(cx, |entity, cx| {
+        let i18n = Default::default();
+        let mut config = SshConfig::password("app.example", 2222, "ops", "");
+        config.proxy_chain = Some(vec![
+            serde_json::from_value(serde_json::json!({
+                "host": "app.example", "port": 2222, "username": "jump",
+                "auth": {"type": "agent"}, "strict_host_key_checking": true
+            }))
+            .unwrap(),
+        ]);
+        let intent = SshConnectionIntent::Connect(Default::default());
+        let ordinary = entity
+            .plan_preflight(
+                config.clone(),
+                "target".into(),
+                intent.clone(),
+                false,
+                &i18n,
+                cx,
+            )
+            .unwrap();
+        assert!(matches!(ordinary.route, RoutePreflight::Routed));
+
+        config.discovery_origin = Some(oxideterm_discovery::DiscoveryOrigin::new(
+            "source".into(),
+            "alias".into(),
+            uuid::Uuid::new_v4(),
+        ));
+        let plan = entity
+            .plan_preflight(config, "target".into(), intent, false, &i18n, cx)
+            .unwrap();
+        assert!(matches!(plan.route, RoutePreflight::Direct));
+
+        let key = |fingerprint: &str| HostKeyStatus::Unknown {
+            fingerprint: fingerprint.into(),
+            key_type: "ssh-ed25519".into(),
+        };
+        let hop_challenge = entity.resolve_preflight(
+            plan.config,
+            plan.title,
+            plan.intent,
+            "app.example".into(),
+            2222,
+            Some(0),
+            key("SHA256:jump"),
+            cx,
+        );
+        assert!(matches!(hop_challenge, PreflightOutcome::ConfirmHostKey));
+        let Some(HostKeyApproval::Retry {
+            config,
+            title,
+            intent,
+        }) = entity.accept_host_key(false, &i18n, cx)
+        else {
+            panic!("expected to check the next endpoint");
+        };
+        let hop = &config.proxy_chain.as_ref().unwrap()[0];
+        assert_eq!(
+            hop.expected_host_key_fingerprint.as_deref(),
+            Some("SHA256:jump")
+        );
+        assert_eq!(config.expected_host_key_fingerprint, None);
+
+        let target_challenge = entity.resolve_preflight(
+            config,
+            title,
+            intent,
+            "app.example".into(),
+            2222,
+            None,
+            key("SHA256:app"),
+            cx,
+        );
+        assert!(matches!(target_challenge, PreflightOutcome::ConfirmHostKey));
+        let Some(HostKeyApproval::Continue { config, .. }) =
+            entity.accept_host_key(false, &i18n, cx)
+        else {
+            panic!("expected the verified route to be ready");
+        };
+        assert_eq!(
+            config.expected_host_key_fingerprint.as_deref(),
+            Some("SHA256:app")
+        );
+        assert!(matches!(
+            entity.prepare_verified_manual_terminal(&config, cx),
+            VerifiedManualSshRoute::Direct
+        ));
+    });
 }
 
 fn keyboard_interactive_request(flow_id: &str) -> KeyboardInteractivePromptRequest {

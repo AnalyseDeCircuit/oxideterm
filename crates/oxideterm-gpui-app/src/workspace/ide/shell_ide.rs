@@ -23,6 +23,9 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if !pane.read(cx).can_open_shell_ide() {
+            return;
+        }
         let existing = self
             .ide_workspace
             .read(cx)
@@ -107,6 +110,7 @@ impl WorkspaceApp {
                             .get(&pane_id)
                             .ok_or(ShellOpenError::Failed)?;
                         if current != &pane
+                            || !pane.read(cx).can_open_shell_ide()
                             || !Arc::ptr_eq(&source_session, &pane.read(cx).shared_session())
                         {
                             return Err(ShellOpenError::Failed);

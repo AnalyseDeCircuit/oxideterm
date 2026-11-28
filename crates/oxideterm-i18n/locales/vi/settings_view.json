@@ -1,5 +1,32 @@
 {
   "settings_view": {
+    "discovery": {
+      "install_provider_hint": "Cài đặt hoặc bật phần bổ trợ khám phá để thêm nguồn.",
+      "toggle_failed": "Không thể thay đổi trạng thái bật/tắt của nguồn.",
+      "edit_source": "Chỉnh sửa nguồn",
+      "confirm_ssh_form": "Xác nhận biểu mẫu trước khi kết nối",
+      "separate_session": "Mở phiên mới",
+      "identity_changed": "Nhà cung cấp không thể xác nhận danh tính truy cập của phiên trước. Mở một phiên riêng?",
+      "reopen": "Mở lại đích",
+      "refresh": "Làm mới danh sách",
+      "refreshing": "Đang làm mới danh sách đích…",
+      "refreshed": "Đã làm mới danh sách lúc {time} · Số đích: {count}",
+      "refresh_failed": "Không thể làm mới danh sách: {reason}",
+      "title": "Khám phá động",
+      "description": "Quản lý nguồn kết nối tạm thời.",
+      "interval": "Khoảng làm mới (phút)",
+      "scheduled_refresh": "Làm mới định kỳ",
+      "add": "Thêm nguồn",
+      "save_before_action": "Lưu và bật nguồn này để thực hiện thao tác với cấu hình đang hiển thị.",
+      "unavailable": "Nguồn không khả dụng",
+      "permission_denied": "Truy cập bị từ chối",
+      "stale_target": "Đích đã thay đổi. Hãy làm mới nguồn.",
+      "invalid_response": "Phản hồi của nhà cung cấp không hợp lệ",
+      "no_targets": "Không có đích khả dụng",
+      "source_in_use": "Trước khi xóa nguồn, hãy đóng các phiên của nguồn trong tất cả cửa sổ và ngắt kết nối các nút nhàn rỗi trong mục Phiên đang hoạt động.",
+      "cleanup_pending": "Đã lưu nguồn. Hãy lưu lại để thử xóa thông tin xác thực cũ.",
+      "removal_pending": "Chưa xóa xong nguồn. Chọn Xóa để thử lại."
+    },
     "known_hosts": {
       "title": "Máy chủ tin cậy",
       "description": "Quản lý khóa SSH của máy chủ đã lưu.",

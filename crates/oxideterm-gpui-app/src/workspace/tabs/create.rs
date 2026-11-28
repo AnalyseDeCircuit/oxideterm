@@ -481,6 +481,46 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<(TerminalSessionId, SharedTerminalSession)> {
+        let instance =
+            super::super::local_sessions::LocalTerminalInstance::new(&terminal_config, title);
+        self.create_terminal_tab_for_pty(terminal_config, instance, window, cx)
+    }
+
+    pub(in crate::workspace) fn create_discovery_terminal_tab(
+        &mut self,
+        terminal_config: LocalPtyConfig,
+        source: &oxideterm_discovery::DiscoverySource,
+        target_label: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<(TerminalSessionId, SharedTerminalSession)> {
+        use super::super::local_sessions::{DiscoveryTerminalDisplay, LocalTerminalInstance};
+        // Retain presentation metadata only; the provider launch arguments belong to this PTY.
+        let instance = LocalTerminalInstance {
+            profile_id: None,
+            discovery: Some(DiscoveryTerminalDisplay {
+                source_id: source.id.clone(),
+                source_name: source.name.clone(),
+                target_label: target_label.clone(),
+            }),
+            title: format!("{} · {}", source.name, target_label),
+            shell: None,
+            cwd: None,
+            remove_env: Vec::new(),
+        };
+        let session = self.create_terminal_tab_for_pty(terminal_config, instance, window, cx)?;
+        self.expanded_ssh_nodes
+            .insert(DiscoveryTerminalDisplay::group_id(&source.id));
+        Ok(session)
+    }
+
+    fn create_terminal_tab_for_pty(
+        &mut self,
+        terminal_config: LocalPtyConfig,
+        instance: super::super::local_sessions::LocalTerminalInstance,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<(TerminalSessionId, SharedTerminalSession)> {
         // Shell Launcher selections must use the same tab and pane lifecycle as
         // the default-shell shortcut; only the PTY configuration differs.
         let tab_id = self.alloc_tab_id(cx);
@@ -491,10 +531,7 @@ impl WorkspaceApp {
         let mut preferences =
             self.prepare_terminal_preferences_for_tab_kind(&TabKind::LocalTerminal, cx);
         preference_overrides.apply_to(&mut preferences);
-        let instance = super::super::local_sessions::LocalTerminalInstance::new(
-            &terminal_config,
-            title.clone(),
-        );
+        let title = instance.title.clone();
         let shared_session = TerminalPane::local_shared_session(terminal_config, &preferences)?;
         let pane = cx.new(|cx| {
             TerminalPane::from_shared_session(shared_session.clone(), preferences, window, cx)
@@ -1582,6 +1619,32 @@ impl WorkspaceApp {
         }
     }
 
+    pub(in crate::workspace) fn allow_discovery_channel_request(
+        &mut self,
+        node_id: &NodeId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(origin) = self.node_router.runtime_store().discovery_origin(node_id) else {
+            return true;
+        };
+        if origin.allows_asset_channels() {
+            return true;
+        }
+        if self
+            .discovery
+            .can_open(&origin.source_id, &origin.target_id)
+        {
+            self.prompt_reopen_discovery_target(node_id, window, cx);
+        } else {
+            self.report_discovery_open_failure(
+                oxideterm_discovery::DiscoveryFailure::StaleTarget,
+                cx,
+            );
+        }
+        false
+    }
+
     pub(in crate::workspace) fn ssh_terminal_session_config(
         &mut self,
         node_id: &NodeId,
@@ -1621,7 +1684,9 @@ impl WorkspaceApp {
                     connection.options.ssh_channel_strategy,
                 )
             });
-        let dedicated_new_terminal_connection = reuse_connection_id.is_none()
+        let discovery_origin = self.node_router.runtime_store().discovery_origin(node_id);
+        let dedicated_new_terminal_connection = discovery_origin.is_none()
+            && reuse_connection_id.is_none()
             && should_use_dedicated_terminal_connection(
                 allow_dedicated_connection,
                 saved_connection_policy.map(|policy| policy.0),
@@ -1653,13 +1718,12 @@ impl WorkspaceApp {
             .insert(node_id.clone(), preferences.command_history.clone());
         preference_overrides.apply_to(&mut preferences);
         let consumer = ConnectionConsumer::Terminal(session_id.0.to_string());
-        let route_lease = self
-            .ssh_registry
-            .lease_consumer(
-                &connection_id,
-                ConnectionConsumer::NodeRouter(format!("pane:{}", uuid::Uuid::new_v4())),
-            )
-            .ok_or_else(|| anyhow::anyhow!("SSH terminal route is no longer connected"))?;
+        let admission = if allow_dedicated_connection && discovery_origin.is_some() {
+            self.ssh_registry.admit_terminal(&connection_id)
+        } else {
+            self.ssh_registry.admit_initial_terminal(&connection_id)
+        }
+        .ok_or_else(|| anyhow::anyhow!(self.i18n.t("settings_view.discovery.stale_target")))?;
         let session_config = if dedicated_new_terminal_connection {
             // This zeroizing, secret-bearing snapshot moves directly into the
             // terminal task and is never copied into WorkspaceSshNode UI state.
@@ -1690,13 +1754,11 @@ impl WorkspaceApp {
         } else {
             // The default path adds a channel to the node-owned transport and
             // never clones its authentication configuration.
-            SshSessionConfig::for_existing_connection(connection_id, host, port, username)
+            SshSessionConfig::for_existing_connection(connection_id.clone(), host, port, username)
                 .with_x11_forwarding_override(node_x11_forwarding)
                 .with_registry(self.ssh_registry.clone(), consumer)
         }
-        .with_route_lease(route_lease)
-        // Opening another terminal never replays a post-connect command unless
-        // the caller explicitly supplies one.
+        .with_terminal_route(connection_id, Some(admission))
         .with_post_connect_command(post_connect_command)
         // Both policies keep remounted tabs on the deferred PTY boundary
         // so authentication cannot briefly start at a fallback size.
@@ -1714,6 +1776,10 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<(PaneId, TerminalSessionId)> {
+        if allow_dedicated_connection && !self.allow_discovery_channel_request(node_id, window, cx)
+        {
+            anyhow::bail!(self.i18n.t("settings_view.discovery.reopen"));
+        }
         let pane_id = self.alloc_pane_id(cx);
         let session_id = self.alloc_session_id(cx);
         let session_config = self.ssh_terminal_session_config(
@@ -1784,14 +1850,20 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<TerminalSessionId> {
-        let session_id = self.create_ssh_terminal_tab_for_existing_node_with_policy(
-            node_id,
-            post_connect_command,
-            title,
-            false,
-            window,
-            cx,
-        )?;
+        let session_id = self
+            .create_ssh_terminal_tab_for_existing_node_with_policy(
+                node_id,
+                post_connect_command,
+                title,
+                false,
+                window,
+                cx,
+            )
+            .inspect_err(|_| {
+                if let Some(origin) = self.node_router.runtime_store().discovery_origin(node_id) {
+                    origin.finish_open_request();
+                }
+            })?;
         self.maybe_open_sftp_after_terminal_open(
             node_id,
             session_id,
@@ -2079,30 +2151,40 @@ impl WorkspaceApp {
                             || pane.read(cx).ssh_reconnect_starting()
                     });
                 if !already_running {
-                    opened |= self.reconnect_ssh_terminal_session(session_id, &request.node_id, cx);
+                    opened |= self.reconnect_ssh_terminal_session(
+                        session_id,
+                        &request.node_id,
+                        false,
+                        cx,
+                    );
                 }
                 continue;
             }
-            if self
-                .create_initial_ssh_terminal_tab_for_existing_node(
-                    &request.node_id,
-                    request.post_connect_command,
-                    request.title,
-                    request.open_sftp_on_connect,
-                    window,
-                    cx,
-                )
-                .is_ok()
-            {
-                let mark_used_connection_id = request.mark_used_connection_id.clone();
-                if let Some(save_request) = request.save_after_open {
-                    self.save_connection_after_terminal_open(save_request, cx);
+            if let Err(error) = self.create_initial_ssh_terminal_tab_for_existing_node(
+                &request.node_id,
+                request.post_connect_command,
+                request.title,
+                request.open_sftp_on_connect,
+                window,
+                cx,
+            ) {
+                if self
+                    .node_router
+                    .runtime_store()
+                    .discovery_origin(&request.node_id)
+                    .is_some()
+                {
+                    self.report_discovery_open_error(error.to_string(), cx);
                 }
-                if let Some(connection_id) = mark_used_connection_id.as_deref() {
-                    self.mark_saved_connection_used_for_node(&request.node_id, connection_id);
-                }
-                opened = true;
+                continue;
             }
+            if let Some(save_request) = request.save_after_open {
+                self.save_connection_after_terminal_open(save_request, cx);
+            }
+            if let Some(connection_id) = request.mark_used_connection_id.as_deref() {
+                self.mark_saved_connection_used_for_node(&request.node_id, connection_id);
+            }
+            opened = true;
         }
         opened
     }
@@ -2113,7 +2195,7 @@ impl WorkspaceApp {
             .is_ok_and(|snapshot| snapshot.state.readiness == NodeReadiness::Ready)
     }
 
-    fn register_terminal_endpoint_session(
+    pub(in crate::workspace) fn register_terminal_endpoint_session(
         &mut self,
         node_id: &NodeId,
         session_id: TerminalSessionId,

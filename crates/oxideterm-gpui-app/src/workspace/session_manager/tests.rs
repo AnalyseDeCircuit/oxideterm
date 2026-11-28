@@ -302,7 +302,9 @@ fn selected_tunnels_share_host_auth_and_leave_manager_active(cx: &mut TestAppCon
 }
 
 #[gpui::test]
-fn ide_access_prompt_defers_tab_creation_until_selection(cx: &mut TestAppContext) {
+fn ide_access_prompt_defers_tab_creation_and_excludes_discovery_terminal_tools(
+    cx: &mut TestAppContext,
+) {
     let Some(fixture_dir) = isolated_workspace_fixture(cx, "OXIDETERM_IDE_ACCESS_PROMPT_TEST_DIR")
     else {
         return;
@@ -313,6 +315,21 @@ fn ide_access_prompt_defers_tab_creation_until_selection(cx: &mut TestAppContext
     let window_handle = cx.windows()[0];
     let node_id = NodeId::new("ide-choice-host");
     workspace.update(cx, |workspace, _cx| {
+        let asset = oxideterm_discovery::DiscoveryOrigin::new(
+            "source".into(),
+            "ide-asset".into(),
+            uuid::Uuid::new_v4(),
+        )
+        .with_asset_session(true);
+        asset.connected();
+        workspace.node_router.upsert_node(
+            node_id.clone(),
+            SshConfig {
+                discovery_origin: Some(asset),
+                ..Default::default()
+            },
+        );
+        assert!(!workspace.node_allows_drill_down(&node_id));
         workspace.ssh_nodes.insert(
             node_id.clone(),
             super::super::WorkspaceSshNode::new(
@@ -343,6 +360,31 @@ fn ide_access_prompt_defers_tab_creation_until_selection(cx: &mut TestAppContext
             })
             .unwrap()
     };
+    window_handle
+        .update(cx, |_, window, cx| {
+            workspace.update(cx, |workspace, cx| {
+                let target = NodeId::new("discovered-host");
+                let origin = oxideterm_discovery::DiscoveryOrigin::new(
+                    "source".into(),
+                    "host".into(),
+                    uuid::Uuid::new_v4(),
+                );
+                origin.connected();
+                workspace.node_router.upsert_node(
+                    target.clone(),
+                    SshConfig {
+                        discovery_origin: Some(origin),
+                        ..Default::default()
+                    },
+                );
+                workspace.open_sftp_tab_surface(target.clone(), None, cx);
+                workspace.open_ide_folder_picker_tab_at_path(target.clone(), "/work".into(), cx);
+                workspace.open_forwards_tab(target, window, cx);
+            });
+        })
+        .unwrap();
+    assert_eq!(tab_ids(cx), original_tabs);
+    assert!(!prompt_open(cx));
     for choose_ssh in [false, true] {
         window_handle
             .update(cx, |_, window, cx| {

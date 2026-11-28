@@ -350,6 +350,11 @@ impl NodeRouter {
         let runtime_snapshot = self
             .node_runtime_snapshot(node_id)
             .ok_or_else(|| RouteError::NodeNotFound(node_id.0.clone()))?;
+        if runtime_snapshot.config.discovery_origin.is_some() {
+            return Err(RouteError::CapabilityUnavailable(
+                "Discovery terminal does not authorize a dedicated connection".into(),
+            ));
+        }
         let parent_connection_id = runtime_snapshot
             .parent_id
             .map(|parent_id| {
@@ -388,18 +393,19 @@ impl NodeRouter {
             .get(&connection_id)
             .ok_or_else(|| RouteError::NotConnected(node_id.0.clone()))?;
         let connection = connection_info_for_runtime(&handle);
-        self.bind_connection_snapshot(node_id, connection)
+        self.bind_connection_snapshot(node_id, connection, None)
     }
 
     fn bind_connection_snapshot(
         &self,
         node_id: &NodeId,
         connection: ConnectionInfo,
+        replacement: Option<&SshConfig>,
     ) -> Result<NodeStateEvent, RouteError> {
         let connection_id = &connection.connection_id;
         let previous = self.runtime.connection_id_for_node(node_id);
         self.runtime
-            .bind_connection(node_id, connection_id.clone(), &connection)?;
+            .bind_connection(node_id, connection_id.clone(), &connection, replacement)?;
         if let Some(previous) = previous.filter(|id| id != connection_id) {
             self.emitter.unbind_node(&previous, node_id);
             self.registry.release(
@@ -536,10 +542,7 @@ impl NodeRouter {
         &self,
         connection_id: &str,
     ) -> Option<crate::ConnectionConsumerLease> {
-        self.registry.lease_consumer(
-            connection_id,
-            ConnectionConsumer::NodeRouter(format!("handoff:{}", Uuid::new_v4())),
-        )
+        self.registry.lease_connection_handoff(connection_id)
     }
 
     pub fn bind_established_connection(
@@ -555,7 +558,13 @@ impl NodeRouter {
         if readiness_for_connection(&connection) != NodeReadiness::Ready {
             return Err(RouteError::NotConnected(node_id.0.clone()));
         }
-        self.bind_connection_snapshot(node_id, connection)?;
+        let config = handoff.handle().config();
+        let replacement = config
+            .discovery_origin
+            .as_ref()
+            .and_then(|origin| origin.reconnect_from.as_ref())
+            .map(|_| config);
+        self.bind_connection_snapshot(node_id, connection, replacement)?;
         Ok(handoff)
     }
 

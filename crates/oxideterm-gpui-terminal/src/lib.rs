@@ -12,12 +12,12 @@ mod trzsz_worker;
 #[cfg(feature = "bench")]
 pub use app::TerminalPlaybackUpdateTimings;
 pub use app::{
-    SharedTerminalSession, TerminalBroadcastInputKind, TerminalClipboardImage,
-    TerminalContextAction, TerminalCursorAnchor, TerminalCwdShellIntegrationStatus,
-    TerminalInputBroadcaster, TerminalInputInterceptor, TerminalInputInterceptorResult,
-    TerminalKeybindings, TerminalPane, TerminalPaneEvent, TerminalPluginTextAction,
-    TerminalSearchStatus, TerminalSerialAction, TerminalSerialStatus, TerminalShortcut,
-    TerminalTelnetAction, TerminalWorkingDirectorySource,
+    LinePasteBroadcast, LinePasteBroadcastFactory, SharedTerminalSession,
+    TerminalBroadcastInputKind, TerminalClipboardImage, TerminalContextAction,
+    TerminalCursorAnchor, TerminalCwdShellIntegrationStatus, TerminalInputBroadcaster,
+    TerminalInputInterceptor, TerminalInputInterceptorResult, TerminalKeybindings, TerminalPane,
+    TerminalPaneEvent, TerminalPluginTextAction, TerminalSearchStatus, TerminalSerialAction,
+    TerminalSerialStatus, TerminalShortcut, TerminalTelnetAction, TerminalWorkingDirectorySource,
 };
 pub use app::{TerminalRenderedImage, TerminalRowTimestamp, TerminalRowTimestampStore};
 pub use background_cache::{

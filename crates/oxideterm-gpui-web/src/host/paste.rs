@@ -50,6 +50,9 @@ impl Workspace {
         let labels = TerminalPasteLabels {
             edit_title: self.i18n.t("terminal.paste.edit_title"),
             strip_fence: self.i18n.t("terminal.paste.strip_fence"),
+            send_by_line: self.i18n.t("terminal.paste.send_by_line"),
+            stop_sending: self.i18n.t("terminal.paste.stop_sending"),
+            interrupted: self.i18n.t("terminal.paste.interrupted"),
             undo: self.i18n.t("terminal.paste.undo"),
             redo: self.i18n.t("terminal.paste.redo"),
             editor_menu: EditorContextMenuLabels {
@@ -86,7 +89,7 @@ impl Workspace {
                 cx,
             );
         });
-        w.focus(&draft.editor.focus_handle(cx), cx);
+        w.focus(&draft.submit_focus, cx);
         self.paste_review = Some(PasteReview {
             session,
             draft,
@@ -102,6 +105,7 @@ impl Workspace {
             &review.labels,
             w,
             Self::finish_paste_review,
+            None,
             cx,
         ))
     }

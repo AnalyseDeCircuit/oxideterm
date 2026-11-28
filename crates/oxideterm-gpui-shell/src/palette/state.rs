@@ -26,7 +26,7 @@ pub struct PaletteState {
     pub content: PaletteContent,
     pub raw_query: String,
     pub mode: PaletteMode,
-    pub selected_index: usize,
+    pub selected_index: Option<usize>,
     pub scroll_handle: UniformListScrollHandle,
     pub error: Option<String>,
 }
@@ -36,7 +36,7 @@ impl Default for PaletteState {
             content: PaletteContent::Commands,
             raw_query: String::new(),
             mode: PaletteMode::All,
-            selected_index: 0,
+            selected_index: Some(0),
             scroll_handle: UniformListScrollHandle::new(),
             error: None,
         }
@@ -65,7 +65,7 @@ impl PaletteState {
         } else {
             mode
         };
-        self.selected_index = 0;
+        self.selected_index = Some(0);
         self.scroll_handle = UniformListScrollHandle::new();
         self.error = None;
     }

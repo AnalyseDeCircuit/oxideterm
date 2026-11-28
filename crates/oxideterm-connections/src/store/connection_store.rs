@@ -2,7 +2,6 @@ impl ConnectionStore {
     pub fn load(path: impl Into<PathBuf>) -> Result<Self> {
         let path = path.into();
         let mut store = Self::load_without_side_effects(path)?;
-        store.normalize();
         if store.migrate_legacy_credentials()? {
             store.save()?;
         }
@@ -13,26 +12,34 @@ impl ConnectionStore {
     }
 
     pub fn load_read_only(path: impl Into<PathBuf>) -> Result<Self> {
-        let path = path.into();
-        let mut store = Self::load_without_side_effects(path)?;
         // CLI and inspection callers need normalized data without triggering
         // legacy keychain migration or rewriting the store on disk.
-        store.normalize();
-        Ok(store)
+        Self::load_without_side_effects(path.into())
     }
 
     fn load_without_side_effects(path: PathBuf) -> Result<Self> {
-        let loaded = if path.exists() {
-            let bytes =
-                fs::read(&path).with_context(|| format!("failed to read {}", path.display()))?;
-            decode_connection_store_data(&bytes)
-                .with_context(|| format!("failed to parse {}", path.display()))?
-        } else {
-            LoadedConnectionStoreData {
-                data: ConnectionStoreData::default(),
-                format: ConnectionStoreStorageFormat::Missing,
+        let revision = write_coordination::StoreRevision::open(&path);
+        let gate = revision.gate.clone();
+        let generation = gate.lock();
+        let loaded = match fs::read(&path) {
+            Ok(bytes) => {
+                let loaded = decode_connection_store_data(&bytes)
+                    .with_context(|| format!("failed to parse {}", path.display()))?;
+                generation.observe_file(Some(&bytes));
+                loaded
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                generation.observe_file(None);
+                LoadedConnectionStoreData {
+                    data: ConnectionStoreData::default(),
+                    format: ConnectionStoreStorageFormat::Missing,
+                }
+            }
+            Err(error) => {
+                return Err(error).with_context(|| format!("failed to read {}", path.display()));
             }
         };
+        revision.observe(generation.get());
         #[cfg(target_os = "macos")]
         let privilege_keychain = ConnectionKeychain::with_macos_device_owner_authentication(
             PRIVILEGE_CREDENTIAL_KEYCHAIN_SERVICE,
@@ -42,14 +49,17 @@ impl ConnectionStore {
         let privilege_keychain =
             ConnectionKeychain::with_service(PRIVILEGE_CREDENTIAL_KEYCHAIN_SERVICE);
 
-        Ok(Self {
+        let mut store = Self {
+            revision,
             path,
             data: loaded.data,
             storage_format: loaded.format,
             keychain: ConnectionKeychain::default(),
             managed_keychain: ConnectionKeychain::with_service(MANAGED_SSH_KEYCHAIN_SERVICE),
             privilege_keychain,
-        })
+        };
+        store.normalize();
+        Ok(store)
     }
 
     pub fn path(&self) -> &Path {
@@ -119,13 +129,20 @@ impl ConnectionStore {
     }
 
     pub fn save(&self) -> Result<()> {
+        let generation = self.revision.gate.lock();
+        if generation.get() != self.revision.observed() {
+            bail!("The connection store changed in another window; reload before saving");
+        }
         if let Some(parent) = self.path.parent() {
             fs::create_dir_all(parent)
                 .with_context(|| format!("failed to create {}", parent.display()))?;
         }
         let data = encode_connection_store_data(&self.data, self.storage_format)?;
         atomic_write_file(&self.path, &data)
-            .with_context(|| format!("failed to replace {}", self.path.display()))
+            .with_context(|| format!("failed to replace {}", self.path.display()))?;
+        generation.observe_file(Some(&data));
+        self.revision.observe(generation.get());
+        Ok(())
     }
 
     fn data_dir(&self) -> Result<&Path> {
@@ -216,6 +233,9 @@ impl ConnectionStore {
         &mut self,
         request: SaveConnectionRequest,
     ) -> Result<(ConnectionInfo, SavedConnectionRuntimeSecrets)> {
+        let gate = self.revision.gate.clone();
+        let generation = gate.lock();
+        self.refresh_for_write(generation.get())?;
         let audit = oxideterm_audit::AuditOperation::begin(
             oxideterm_audit::AuditCategory::Configuration,
             "configuration_save",
@@ -236,6 +256,9 @@ impl ConnectionStore {
                 .get(&id)
                 .map(collect_connection_keychain_ids)
                 .unwrap_or_default();
+            let original_identity = self.saved_ssh_identity(&id);
+            let secret_replaced = request.auth.has_secret_draft()
+                || request.proxy_chain.iter().any(|hop| hop.auth.has_secret_draft());
             let existing = self.get(&id).cloned();
             let previous_last_used_at = existing.as_ref().and_then(|conn| conn.last_used_at);
             let existing_auth = existing.as_ref().map(|conn| conn.auth.clone());
@@ -358,6 +381,9 @@ impl ConnectionStore {
                 self.ensure_group(group)?;
             }
             self.record_cleared_credentials(previous_credentials);
+            if original_identity.is_some() && (secret_replaced || self.saved_ssh_identity(&id) != original_identity) {
+                self.data.rotate_ssh_identity(&id);
+            }
             self.normalize();
             self.save()?;
             for keychain_id in old_keychain_ids
@@ -381,6 +407,9 @@ impl ConnectionStore {
     }
 
     pub fn delete(&mut self, id: &str) -> Result<bool> {
+        let gate = self.revision.gate.clone();
+        let generation = gate.lock();
+        self.refresh_for_write(generation.get())?;
         let audit = oxideterm_audit::AuditOperation::begin(
             oxideterm_audit::AuditCategory::Configuration,
             "configuration_delete",
@@ -417,6 +446,9 @@ impl ConnectionStore {
 
     /// Replaces only the chosen authentication policy after its credentials have been confirmed.
     pub fn set_connection_auth(&mut self, id: &str, auth: SavedAuth) -> Result<bool> {
+        let gate = self.revision.gate.clone();
+        let generation = gate.lock();
+        self.refresh_for_write(generation.get())?;
         let audit = oxideterm_audit::AuditOperation::begin(
             oxideterm_audit::AuditCategory::Configuration,
             "credential_set",
@@ -440,6 +472,7 @@ impl ConnectionStore {
             connection.auth = auth;
             connection.updated_at = Some(Utc::now());
             let next_keychain_ids = collect_connection_keychain_ids(connection);
+            self.data.rotate_ssh_identity(id);
             self.record_cleared_credentials(previous_credentials);
             self.save()?;
             for keychain_id in old_keychain_ids
@@ -512,6 +545,7 @@ impl ConnectionStore {
                         plaintext_password: None,
                     };
                     connection.updated_at = Some(Utc::now());
+                    self.data.rotate_ssh_identity(id);
                     self.save()?;
                     return Ok(true);
                 }
@@ -532,6 +566,7 @@ impl ConnectionStore {
                 ConnectionCredentialSlot::UpstreamProxy => unreachable!("handled above"),
             }
             connection.updated_at = Some(Utc::now());
+            self.data.rotate_ssh_identity(id);
             self.save()?;
             Ok(true)
         })();
@@ -960,6 +995,9 @@ impl ConnectionStore {
         plugin_profile_ids: &[String],
         group: Option<&str>,
     ) -> Result<usize> {
+        let gate = self.revision.gate.clone();
+        let generation = gate.lock();
+        self.refresh_for_write(generation.get())?;
         let original_groups = self.data.groups.clone();
         let audit = oxideterm_audit::AuditOperation::begin(
             oxideterm_audit::AuditCategory::Configuration,
@@ -3132,6 +3170,7 @@ impl ConnectionStore {
                 return Err(error);
             }
             self.data = candidate.data;
+            self.revision.observe(candidate.revision.observed());
             let _ = self.retry_persisted_keychain_cleanup();
             Ok(credential)
         })();
@@ -3172,6 +3211,7 @@ impl ConnectionStore {
             candidate.touch_privilege_scope(connection_id);
             candidate.save()?;
             self.data = candidate.data;
+            self.revision.observe(candidate.revision.observed());
             let _ = self.retry_persisted_keychain_cleanup();
             Ok(true)
         })();
@@ -4674,6 +4714,7 @@ impl ConnectionStore {
         deleted_at: DateTime<Utc>,
     ) -> Option<SavedConnection> {
         let removed = self.remove_connection_without_tombstone(id)?;
+        self.data.ssh_identity_generations.remove(&removed.id);
         self.upsert_connection_tombstone(removed.id.clone(), deleted_at);
         Some(removed)
     }
