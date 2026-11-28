@@ -46,8 +46,8 @@ pub use delivery::{SftpConnected, SftpConnectedEndpoint};
 mod form;
 pub mod portable_form;
 pub use form::{
-    BrowserConnectionCapabilities, ConnectionFormEnvironment, FormKeyAction, FormPluginType, FormTotpCredential,
-    NEW_CONNECTION_TYPE_SIDEBAR_WIDTH, TunnelFormEnvironment, TunnelKind,
+    BrowserConnectionCapabilities, ConnectionFormEnvironment, FormKeyAction, FormPluginType,
+    FormTotpCredential, NEW_CONNECTION_TYPE_SIDEBAR_WIDTH, TunnelFormEnvironment, TunnelKind,
 };
 pub use portable_form::{
     PortableConnectionDraft, PortableConnectionFormEnvironment, PortableConnectionFormEvent,

@@ -5,17 +5,16 @@ mod fields;
 mod paste;
 use fields::{Field, Fields};
 mod confirm;
-mod sidebar;
 mod sender;
+mod sidebar;
 mod tab_drop;
 mod tab_menu;
 mod tab_scope;
-pub(crate) use tab_scope::{BrowserTabs, Scope};
-pub(crate) use confirm::CloseTarget;
 use crate::{
     connections, demo::*, files::FileViews, palette::Palette, terminal::Session, tools::Tools,
     transport::*,
 };
+pub(crate) use confirm::CloseTarget;
 use futures::{StreamExt, channel::mpsc};
 use gpui::{prelude::*, *};
 use oxideterm_gpui_connections::{
@@ -23,7 +22,6 @@ use oxideterm_gpui_connections::{
     views::{ConnectionsEnvironment, PortableConnectionFormView},
 };
 use oxideterm_gpui_host_tools::ContextSidebarTool;
-use oxideterm_settings_model::browser_preferences::WallpaperSettings;
 use oxideterm_gpui_settings_view::surface::{PortableSettingsChanged, PortableSettingsSurface};
 use oxideterm_gpui_shell::{
     notifications::*,
@@ -47,6 +45,7 @@ use oxideterm_gpui_ui::{
 };
 use oxideterm_i18n::I18n;
 use oxideterm_notification_center::*;
+use oxideterm_settings_model::browser_preferences::WallpaperSettings;
 use oxideterm_theme::ThemeTokens;
 use oxideterm_workspace::*;
 use std::{
@@ -54,6 +53,7 @@ use std::{
     rc::Rc,
     time::Duration,
 };
+pub(crate) use tab_scope::{BrowserTabs, Scope};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Action {
@@ -197,30 +197,43 @@ impl Workspace {
         let demo = gateway.is_none();
         let palette = Palette::new(demo, cx);
         let catalog = shortcuts::workspace_definitions();
-        let actions: Vec<_> = catalog.iter()
+        let actions: Vec<_> = catalog
+            .iter()
             .filter(|a| palette.supports_shortcut(a, demo))
-            .cloned().collect();
+            .cloned()
+            .collect();
         let (display_storage, preferences) = crate::preferences::DisplayStorage::load(catalog);
         let (terminal, editor) = crate::preferences::context_keys(&actions, &preferences, side);
         cx.set_global(terminal);
         cx.set_global(editor);
         let ui_font = browser_ui_font(&preferences.appearance.ui_font_family, cx);
         let sidebar = preferences.sidebar_ui.clone();
-        let wallpaper = WallpaperSettings::active(&preferences.terminal).filter(|bg| matches!(bg.image, oxideterm_settings_model::browser_preferences::WallpaperId::Bundled(_)));
+        let wallpaper = WallpaperSettings::active(&preferences.terminal).filter(|bg| {
+            matches!(
+                bg.image,
+                oxideterm_settings_model::browser_preferences::WallpaperId::Bundled(_)
+            )
+        });
         let wallpaper_owner = cx.weak_entity();
         let mut layout = TabLayout::default();
         layout
             .configure_terminal_output_highlight(preferences.terminal.highlight_tab_on_new_output);
         let settings = cx.new(|cx| {
             PortableSettingsSurface::browser_workspace_with_wallpapers(
-                preferences, actions.clone(), crate::wallpaper::gallery(demo,wallpaper_owner), cx,
+                preferences,
+                actions.clone(),
+                crate::wallpaper::gallery(demo, wallpaper_owner),
+                cx,
             )
         });
         let report_owner = cx.weak_entity();
         settings.update(cx, |s, cx| {
-            s.on_browser_report(move |w, cx| {
-                let _ = report_owner.update(cx, |h, cx| h.download_browser_report(w, cx));
-            }, cx);
+            s.on_browser_report(
+                move |w, cx| {
+                    let _ = report_owner.update(cx, |h, cx| h.download_browser_report(w, cx));
+                },
+                cx,
+            );
             s.set_app_icon_picker(
                 crate::icon::APP_ICON_VARIANTS,
                 crate::icon::APP_ICON_PREVIEW_SIZE,
@@ -283,7 +296,12 @@ impl Workspace {
         let mut ble_profiles = HashMap::new();
         let baseline = match saved {
             Ok(snapshot) => {
-                snapshot.clone().restore(&mut catalog_data, &mut profile_details, files.as_mut().map(|f|&mut f.sftp_profiles), &mut ble_profiles);
+                snapshot.clone().restore(
+                    &mut catalog_data,
+                    &mut profile_details,
+                    files.as_mut().map(|f| &mut f.sftp_profiles),
+                    &mut ble_profiles,
+                );
                 Some(snapshot)
             }
             Err(()) => None,
@@ -308,13 +326,24 @@ impl Workspace {
         })
         .detach();
         let notifications = NotificationState::default();
-        let frame = notices::frame(tokens, &i18n, wallpaper.as_ref().is_some_and(|bg|bg.includes("notification_center")), &notifications, &HashMap::new(), cx.weak_entity());
+        let frame = notices::frame(
+            tokens,
+            &i18n,
+            wallpaper
+                .as_ref()
+                .is_some_and(|bg| bg.includes("notification_center")),
+            &notifications,
+            &HashMap::new(),
+            cx.weak_entity(),
+        );
         let center = cx.new(|_| NotificationCenter::new(frame, None));
         let tools = Tools::new(demo, tokens, &i18n, &ui_font, &focus, cx);
         let host = cx.weak_entity();
         let sender = cx.new(|cx| sender::WebSender::new(host, tokens, &i18n, w, cx));
         let terminal_prefs = settings.read(cx).settings(cx).terminal.clone();
-        sender.update(cx, |s,cx| s.apply_appearance(tokens, &i18n, &terminal_prefs, cx));
+        sender.update(cx, |s, cx| {
+            s.apply_appearance(tokens, &i18n, &terminal_prefs, cx)
+        });
         let knowledge = crate::knowledge::WebKnowledge::new(&focus, demo.then_some(&settings), cx);
         let open_ai_settings_owner = cx.weak_entity();
         let insert_cmd_owner = cx.weak_entity();
@@ -344,9 +373,11 @@ impl Workspace {
                 )
             })
         };
-        cx.subscribe(&assistant, |h, _, notice: &crate::ai::ChatSetupNotice, cx| {
-            h.notice(notice.0, cx)
-        }).detach();
+        cx.subscribe(
+            &assistant,
+            |h, _, notice: &crate::ai::ChatSetupNotice, cx| h.notice(notice.0, cx),
+        )
+        .detach();
         Self {
             wallpaper,
             wallpaper_library: Default::default(),
@@ -376,7 +407,11 @@ impl Workspace {
                     &tokens,
                 ),
                 SidebarSection::Sessions,
-                if demo { ContextSidebarPanel::HostTools } else { ContextSidebarPanel::Assistant },
+                if demo {
+                    ContextSidebarPanel::HostTools
+                } else {
+                    ContextSidebarPanel::Assistant
+                },
             ),
             strip,
             drag: None,
@@ -463,7 +498,9 @@ impl Workspace {
         &self,
         cx: &App,
     ) -> oxideterm_settings_model::browser_preferences::BrowserPreferences {
-        let mut next = self.display_storage.capture(self.settings.read(cx).settings(cx));
+        let mut next = self
+            .display_storage
+            .capture(self.settings.read(cx).settings(cx));
         next.set_rails(
             (
                 self.rails.left.width().round() as i64,
@@ -520,11 +557,14 @@ impl Workspace {
         self.layout.sync_tab_titles(|key| self.i18n.t(key));
         self.fields.environment(self.tokens, &self.i18n, cx);
         let settings = self.settings.read(cx).settings(cx);
-        let (terminal, editor) = crate::preferences::context_keys(&self.actions, settings, self.side);
+        let (terminal, editor) =
+            crate::preferences::context_keys(&self.actions, settings, self.side);
         cx.set_global(terminal);
         cx.set_global(editor);
         let prefs = self.settings.read(cx).settings(cx).terminal.clone();
-        self.sender.update(cx, |s,cx| s.apply_appearance(self.tokens, &self.i18n, &prefs, cx));
+        self.sender.update(cx, |s, cx| {
+            s.apply_appearance(self.tokens, &self.i18n, &prefs, cx)
+        });
         self.refresh_terminals(w, cx);
         App::notify(cx, self.tools.onboarding.entity_id());
         self.tools.forwards.refresh(cx);
@@ -536,7 +576,12 @@ impl Workspace {
             f.refresh(self.tokens, &self.i18n, &self.ui_font, cx);
         }
         self.device_managers.refresh(cx);
-        self.projects.appearance(self.tokens,&self.i18n,crate::files::file_editor_settings(self.settings.read(cx).settings(cx)),cx);
+        self.projects.appearance(
+            self.tokens,
+            &self.i18n,
+            crate::files::file_editor_settings(self.settings.read(cx).settings(cx)),
+            cx,
+        );
         self.assistant.update(cx, |a, cx| {
             a.environment(self.tokens, self.i18n.clone(), self.ui_font.clone(), cx)
         });
@@ -667,7 +712,13 @@ impl Workspace {
             p.collect_page_ids(&mut pages);
         }
         for page in pages {
-            if self.layout.tab_by_id(page).is_some_and(|t| t.kind == TabKind::PluginManager) { self.pages.catalog.cancel(); }
+            if self
+                .layout
+                .tab_by_id(page)
+                .is_some_and(|t| t.kind == TabKind::PluginManager)
+            {
+                self.pages.catalog.cancel();
+            }
             self.tools.forwards.release(page);
             self.forget_notice_target(NoticeTarget::Page(page), cx);
             if let Some(idx) = self.layout.tab_index_by_id(page) {
@@ -675,18 +726,29 @@ impl Workspace {
             }
             self.projects.release(page);
             self.device_managers.release(page);
-            if let Some(files) = &mut self.files { files.sftp_pages.remove(&page); }
+            if let Some(files) = &mut self.files {
+                files.sftp_pages.remove(&page);
+            }
         }
         if let Some(idx) = self.layout.tab_index_by_id(id) {
             self.layout.remove_tab_at(idx);
         }
-        if !self.layout.tabs().iter().any(|t| t.kind == TabKind::PluginManager) { self.pages.catalog.cancel(); }
+        if !self
+            .layout
+            .tabs()
+            .iter()
+            .any(|t| t.kind == TabKind::PluginManager)
+        {
+            self.pages.catalog.cancel();
+        }
         if container != id {
             self.tidy_container(container);
         }
         self.projects.release(id);
         self.device_managers.release(id);
-        if let Some(files) = &mut self.files { files.sftp_pages.remove(&id); }
+        if let Some(files) = &mut self.files {
+            files.sftp_pages.remove(&id);
+        }
         self.tools.forwards.release(id);
         self.forget_notice_target(NoticeTarget::Page(id), cx);
         if let Some(visual) = exiting_visual {
@@ -724,10 +786,13 @@ impl Workspace {
         use self::Action::*;
         match action {
             Terminal => self.ready,
-            TerminalSearch => self.active_session().is_some_and(|id| self.sessions.contains_key(&id)),
+            TerminalSearch => self
+                .active_session()
+                .is_some_and(|id| self.sessions.contains_key(&id)),
             Split(_) => self.split_target().is_some(),
             Ble => crate::ble::available(),
-            Assistant | Palette | Settings | Notifications | Welcome | Theme | Zen | Close | Plugins => true,
+            Assistant | Palette | Settings | Notifications | Welcome | Theme | Zen | Close
+            | Plugins => true,
             Sftp => {
                 self.demo
                     && (self.focused_tab().is_some_and(|t| t.kind == TabKind::Sftp)
@@ -750,7 +815,8 @@ impl Workspace {
             Terminal => self.new_terminal("local".into(), None, w, cx),
             TerminalSearch => {
                 if let Some(s) = self.active_session().and_then(|id| self.sessions.get(&id)) {
-                    s.view.update(cx, |view, cx| view.open_search(&self.i18n, w, cx));
+                    s.view
+                        .update(cx, |view, cx| view.open_search(&self.i18n, w, cx));
                 }
             }
             Close => {
@@ -813,12 +879,18 @@ impl Workspace {
                     self.open_node_ide(&node, w, cx);
                 }
             }
-            Forwards => { if let Some(node) = self.focused_forward_node(cx) { self.open_node_forwards(&node, cx); } }
+            Forwards => {
+                if let Some(node) = self.focused_forward_node(cx) {
+                    self.open_node_forwards(&node, cx);
+                }
+            }
             Runtime => self.open_page(TabKind::Runtime, a.key(), cx),
             Topology => self.open_page(TabKind::Topology, a.key(), cx),
             Plugins => {
                 self.open_page(TabKind::PluginManager, a.key(), cx);
-                if self.pages.plugin_tab == crate::pages::PluginManagerTab::Marketplace { self.ensure_plugin_catalog(cx); }
+                if self.pages.plugin_tab == crate::pages::PluginManagerTab::Marketplace {
+                    self.ensure_plugin_catalog(cx);
+                }
             }
             CloudSync => self.open_page(TabKind::CloudSync, a.key(), cx),
             Knowledge => {
@@ -872,7 +944,7 @@ impl Workspace {
             divider: border,
             left_divider: self.divider(0x40),
         };
-        self.projects.sync_project_mounts(&self.layout,cx);
+        self.projects.sync_project_mounts(&self.layout, cx);
         self.tab_drop.regions.borrow_mut().clear();
         let center = if let Some(tab) = self.layout.active_tab().cloned() {
             let content = if let Some(root) = tab.root_pane {
@@ -893,7 +965,9 @@ impl Workspace {
                 fade_in(
                     &t,
                     ("web-page-enter", tab.id.0 as usize),
-                    div().size_full().child(self.wallpaper_content(&tab.kind, self.page(&tab, cx))),
+                    div()
+                        .size_full()
+                        .child(self.wallpaper_content(&tab.kind, self.page(&tab, cx))),
                     MotionDuration::Micro,
                 )
             };
@@ -915,7 +989,11 @@ impl Workspace {
                 "web-empty-workspace-enter",
                 div().size_full().child({
                     let welcome = self.empty_workspace(w, cx);
-                    if self.window_wallpaper().is_some() { oxideterm_gpui_ui::tab_canvas_surface(&t, welcome) } else { welcome }
+                    if self.window_wallpaper().is_some() {
+                        oxideterm_gpui_ui::tab_canvas_surface(&t, welcome)
+                    } else {
+                        welcome
+                    }
                 }),
                 8.0,
                 MotionDuration::Control,
@@ -923,11 +1001,14 @@ impl Workspace {
         };
         let center = self.with_sender(center, cx);
         let top = t.metrics.titlebar_height;
-        let embedded = self.files_navigator_visible(cx).then(|| self.embedded_files(cx)).flatten();
+        let embedded = self
+            .files_navigator_visible(cx)
+            .then(|| self.embedded_files(cx))
+            .flatten();
         let left = self.rails.left.mounted().then(|| {
             let drawer = self.left_drawer(cx);
             match &embedded {
-                Some(browser) => self.with_embedded_files(drawer,browser,cx),
+                Some(browser) => self.with_embedded_files(drawer, browser, cx),
                 None => drawer,
             }
         });
@@ -954,7 +1035,12 @@ impl Workspace {
             .capture_key_down(cx.listener(Self::key))
             .on_mouse_move(cx.listener(|h, e: &MouseMoveEvent, w, cx| {
                 h.resize_sender(Some(e), cx);
-                h.resize_embedded_files(e.pressed_button.filter(|b| *b == MouseButton::Left).map(|_| e.position.y),cx);
+                h.resize_embedded_files(
+                    e.pressed_button
+                        .filter(|b| *b == MouseButton::Left)
+                        .map(|_| e.position.y),
+                    cx,
+                );
                 if let Some(d) = &h.drag {
                     h.pane_request(d.resize_at(e.position), w, cx);
                 }
@@ -967,19 +1053,19 @@ impl Workspace {
                 cx.listener(|h, _, w, cx| {
                     h.drag = None;
                     h.resize_sender(None, cx);
-                    h.resize_embedded_files(None,cx);
+                    h.resize_embedded_files(None, cx);
                     h.request(ShellRequest::EndResize, w, cx)
                 }),
             );
         let mut overlays = OverlayStack::default();
-        if self.assistant_visible(){
+        if self.assistant_visible() {
             overlays.at(PALETTE - 1);
             overlays.extend([self.assistant.read(cx).layers()]);
         }
         if let Some(browser) = embedded {
             overlays.at(FORM - 1);
             let editor = crate::files::file_editor_settings(self.settings.read(cx).settings(cx));
-            overlays.extend([browser.update(cx, |b,cx| b.mount_dialog(editor,cx))]);
+            overlays.extend([browser.update(cx, |b, cx| b.mount_dialog(editor, cx))]);
         }
         if let Some(choice) = self.sftp_choice(cx) {
             overlays.at(PALETTE + 1);
@@ -1096,7 +1182,9 @@ impl Workspace {
         overlays.extend(self.transients.render_tooltip(&t));
         ShellContent::Frame(ShellFrameSlots {
             root,
-            background: self.window_wallpaper().and_then(|bg| self.wallpaper_layer(bg)),
+            background: self
+                .window_wallpaper()
+                .and_then(|bg| self.wallpaper_layer(bg)),
             title_row: (!zen && !self.onboarding_locked()).then(|| self.titlebar(w, cx)),
             left_rail: Some(self.left_activity_rail(&env, cx)),
             right_rail: Some(self.right_activity_rail(w, &env, cx)),
@@ -1140,17 +1228,31 @@ impl Workspace {
         }
     }
     pub(crate) fn matches_key(&self, key: &Keystroke, id: &str, cx: &App) -> bool {
-        self.actions.iter().find(|a| a.id == id).is_some_and(|action| {
-            shortcuts::keystroke_matches_action(key, action, self.side, &self.settings.read(cx).settings(cx).keybindings.overrides)
-        })
+        self.actions
+            .iter()
+            .find(|a| a.id == id)
+            .is_some_and(|action| {
+                shortcuts::keystroke_matches_action(
+                    key,
+                    action,
+                    self.side,
+                    &self.settings.read(cx).settings(cx).keybindings.overrides,
+                )
+            })
     }
 
     fn scoped_key(&self, key: &Keystroke, scope: ActionScope, cx: &App) -> Option<&str> {
-        shortcuts::matched_scoped_action(&self.actions, self.side, key, scope, &self.settings.read(cx).settings(cx).keybindings.overrides)
+        shortcuts::matched_scoped_action(
+            &self.actions,
+            self.side,
+            key,
+            scope,
+            &self.settings.read(cx).settings(cx).keybindings.overrides,
+        )
     }
 
-    fn assistant_visible(&self)->bool{
-        !self.rails.right.collapsed() && self.rails.context_panel==ContextSidebarPanel::Assistant
+    fn assistant_visible(&self) -> bool {
+        !self.rails.right.collapsed() && self.rails.context_panel == ContextSidebarPanel::Assistant
     }
 
     fn key(&mut self, e: &KeyDownEvent, w: &mut Window, cx: &mut Context<Self>) {
@@ -1170,8 +1272,12 @@ impl Workspace {
             return;
         }
         if self.sftp_choice_open() {
-            if e.keystroke.key == "escape" { self.choose_files_surface(None,cx); }
-            w.prevent_default(); cx.stop_propagation(); return;
+            if e.keystroke.key == "escape" {
+                self.choose_files_surface(None, cx);
+            }
+            w.prevent_default();
+            cx.stop_propagation();
+            return;
         }
         if self.paste_review.is_some() {
             return;
@@ -1186,7 +1292,9 @@ impl Workspace {
             w.prevent_default();
             return;
         }
-        if self.tab_menu.is_some() { return; }
+        if self.tab_menu.is_some() {
+            return;
+        }
         if self.confirmation_key(&e.keystroke, w, cx)
             || self.context_tools_key(&e.keystroke.key, w, cx)
         {
@@ -1208,8 +1316,11 @@ impl Workspace {
             cx.notify();
             return;
         }
-        if self.assistant_visible() && self.assistant.update(cx,|a,cx|a.overlay_key(e,w,cx)){return;}
-        if self.assistant.read(cx).composer_focused(w, cx) || self.fields.owns_keys(w, cx)
+        if self.assistant_visible() && self.assistant.update(cx, |a, cx| a.overlay_key(e, w, cx)) {
+            return;
+        }
+        if self.assistant.read(cx).composer_focused(w, cx)
+            || self.fields.owns_keys(w, cx)
             || (self.focused_manager().is_some_and(|v| {
                 v.body.read(cx).field_focused(w, cx) || v.dialog.read(cx).field_focused(w, cx)
             }) && !matches!(e.keystroke.key.as_str(), "tab" | "up" | "down"))
@@ -1246,17 +1357,19 @@ impl Workspace {
             } else {
                 return;
             }
-        } else if self.files_own_keys(w, cx) || self.sender.read(cx).owns_keys(w,cx) || self.tools.forwards.editing_text(w) {
+        } else if self.files_own_keys(w, cx)
+            || self.sender.read(cx).owns_keys(w, cx)
+            || self.tools.forwards.editing_text(w)
+        {
             return;
         } else if self.focused_manager().is_some_and(|manager| {
-                let file = self.scoped_key(&e.keystroke, ActionScope::FileManager, cx);
-                let preview = self.scoped_key(&e.keystroke, ActionScope::Preview, cx);
-                manager.body.update(cx, |v, cx| {
-                    v.handle_file_manager_dialog_input_footer_key(e, cx)
-                        || v.handle_file_manager_key(e, file, preview, cx)
-                })
+            let file = self.scoped_key(&e.keystroke, ActionScope::FileManager, cx);
+            let preview = self.scoped_key(&e.keystroke, ActionScope::Preview, cx);
+            manager.body.update(cx, |v, cx| {
+                v.handle_file_manager_dialog_input_footer_key(e, cx)
+                    || v.handle_file_manager_key(e, file, preview, cx)
             })
-        {
+        }) {
         } else {
             let Some((def, _)) = shortcuts::matched_action_for_keystroke(
                 &self.actions,
@@ -1267,10 +1380,17 @@ impl Workspace {
                 return;
             };
             let id = def.id.as_ref();
-            let terminal = self.active_session().and_then(|id| self.sessions.get(&id)).map(|s| s.view.read(cx));
+            let terminal = self
+                .active_session()
+                .and_then(|id| self.sessions.get(&id))
+                .map(|s| s.view.read(cx));
             if terminal.is_some_and(|v| v.search_focused(w, cx)) {
-                if id != "terminal.search" { return; }
-            } else if id == "terminal.search" && !terminal.is_some_and(|v| v.focus_handle(cx).is_focused(w)) {
+                if id != "terminal.search" {
+                    return;
+                }
+            } else if id == "terminal.search"
+                && !terminal.is_some_and(|v| v.focus_handle(cx).is_focused(w))
+            {
                 return;
             }
             if let Some(index) = id
@@ -1379,7 +1499,11 @@ impl Workspace {
             background: self.chrome_fill(t.ui.shell_bg()),
             divider: self.chrome_divider(),
             active_background: self.chrome_fill(t.ui.shell_active_tab_bg()),
-            idle_background: if self.window_wallpaper().is_some() { rgba(0) } else { rgb(t.ui.shell_bg()) },
+            idle_background: if self.window_wallpaper().is_some() {
+                rgba(0)
+            } else {
+                rgb(t.ui.shell_bg())
+            },
             translucent: self.window_wallpaper().is_some(),
             leading_margin: 0.,
             filler: None,

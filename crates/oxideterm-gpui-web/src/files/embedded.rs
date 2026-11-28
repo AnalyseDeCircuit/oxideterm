@@ -100,7 +100,12 @@ impl Workspace {
         self.present_files_at(node, path, cx);
     }
 
-    pub(crate) fn present_files_at(&mut self, node: &str, path: Option<String>, cx: &mut Context<Self>) {
+    pub(crate) fn present_files_at(
+        &mut self,
+        node: &str,
+        path: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
         let Some(files) = &self.files else { return };
         let existing = files
             .sftp_pages

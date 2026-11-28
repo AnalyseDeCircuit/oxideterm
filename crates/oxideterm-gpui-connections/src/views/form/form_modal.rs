@@ -164,7 +164,9 @@ impl ConnectionFormModalSnapshot {
                     }
                     form.ble.web_services.iter().any(|service| {
                         service.uuid == uuid
-                            && (service.has_notify || service.has_write || service.has_write_without_response)
+                            && (service.has_notify
+                                || service.has_write
+                                || service.has_write_without_response)
                     })
                 }),
             #[cfg(not(target_family = "wasm"))]

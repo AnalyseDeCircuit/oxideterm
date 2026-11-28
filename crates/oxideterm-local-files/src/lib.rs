@@ -9,10 +9,11 @@ mod preview_format;
 mod preview_stream;
 
 pub use archive::{ArchiveEntryOutcome, can_extract_archive, list_archive_contents};
-pub use checksum::FileChecksums;
 pub use bookmarks::{
-    BOOKMARKS_FILENAME, bookmark_name_for_path, new_file_manager_bookmark_id, now_ms, reordered_bookmarks,
+    BOOKMARKS_FILENAME, bookmark_name_for_path, new_file_manager_bookmark_id, now_ms,
+    reordered_bookmarks,
 };
+pub use checksum::FileChecksums;
 pub use listing::{local_file_default_cmp, sorted_local_files};
 pub use model::{
     LocalArchiveEntry, LocalArchiveInfo, LocalBatchProgress, LocalBookmark, LocalChecksumResult,

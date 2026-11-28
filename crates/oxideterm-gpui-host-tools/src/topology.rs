@@ -1,7 +1,7 @@
 mod graph;
-pub use graph::{topology_canvas, topology_node};
 use super::*;
 use gpui::{MouseMoveEvent, ScrollEvent};
+pub use graph::{topology_canvas, topology_node};
 use oxideterm_topology::{TOPOLOGY_NODE_HEIGHT, TOPOLOGY_NODE_WIDTH, TopologyLayoutNode};
 
 impl HostToolsEntity {

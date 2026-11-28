@@ -201,7 +201,9 @@ impl SettingsPageFrame<'_> {
         } = self;
         let scroll = |key: &str| scroll(key, cx);
         Some(match data {
-            SettingsPageData::AiBasic => crate::ai::basic::basic_section(&controls, section, false, cx),
+            SettingsPageData::AiBasic => {
+                crate::ai::basic::basic_section(&controls, section, false, cx)
+            }
             SettingsPageData::AiProviders(view) => view.into_any_element(),
             SettingsPageData::AiMcp(view) => view.into_any_element(),
             SettingsPageData::AiSubagents => crate::ai::subagents::render(&controls, state, cx),

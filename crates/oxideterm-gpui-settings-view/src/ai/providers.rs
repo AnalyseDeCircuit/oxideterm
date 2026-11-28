@@ -109,7 +109,10 @@ impl EventEmitter<ProviderLayoutChanged> for AiProviderSettingsView {}
 
 impl AiProviderSettingsView {
     pub(crate) fn for_session(bindings: AiProviderBindings) -> Self {
-        Self {session_only: true, ..Self::new(bindings)}
+        Self {
+            session_only: true,
+            ..Self::new(bindings)
+        }
     }
     pub fn new(bindings: AiProviderBindings) -> Self {
         Self {

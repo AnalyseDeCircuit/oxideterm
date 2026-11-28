@@ -391,8 +391,15 @@ impl SftpDialogView {
                                 false,
                                 cx.listener(move |this, _event, window, cx| {
                                     #[cfg(target_family = "wasm")]
-                                    if matches!(this.sftp_view().read(cx).pair_primary_remote_id,Some(SftpRemoteId::DeviceFolder(_))) {
-                                        this.send(SftpDialogRequest::CompareDeviceFile(name.clone()),window,cx);
+                                    if matches!(
+                                        this.sftp_view().read(cx).pair_primary_remote_id,
+                                        Some(SftpRemoteId::DeviceFolder(_))
+                                    ) {
+                                        this.send(
+                                            SftpDialogRequest::CompareDeviceFile(name.clone()),
+                                            window,
+                                            cx,
+                                        );
                                         cx.stop_propagation();
                                         return;
                                     }

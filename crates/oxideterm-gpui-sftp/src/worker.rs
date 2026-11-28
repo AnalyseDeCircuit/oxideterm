@@ -137,7 +137,11 @@ impl SftpWorkspaceEntity {
     }
 
     /// Replacing the left endpoint must not restart or clear the right directory.
-    pub fn set_primary_endpoint(&mut self, primary_remote_id: SftpRemoteId, primary_initial_path: Option<String>) {
+    pub fn set_primary_endpoint(
+        &mut self,
+        primary_remote_id: SftpRemoteId,
+        primary_initial_path: Option<String>,
+    ) {
         self.completion_selection.remove(&SftpPane::Local);
         self.local_path_completion.dismiss();
         self.pair_primary_remote_id = Some(primary_remote_id.clone());
@@ -892,8 +896,12 @@ impl SftpWorkspaceEntity {
                 self.preview_image = match &content {
                     PreviewContent::Image { data, mime_type } => {
                         use base64::Engine;
-                        gpui::ImageFormat::from_mime_type(mime_type).and_then(|format|
-                            base64::engine::general_purpose::STANDARD.decode(data).ok().map(|bytes|Arc::new(gpui::Image::from_bytes(format,bytes))))
+                        gpui::ImageFormat::from_mime_type(mime_type).and_then(|format| {
+                            base64::engine::general_purpose::STANDARD
+                                .decode(data)
+                                .ok()
+                                .map(|bytes| Arc::new(gpui::Image::from_bytes(format, bytes)))
+                        })
                     }
                     _ => None,
                 };

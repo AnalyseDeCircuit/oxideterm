@@ -351,7 +351,11 @@ impl<S: KeybindingOwner> KeybindingPageView<'_, S> {
 
     pub fn settings_keybindings_section(&self, section: SettingsSectionId, cx: &App) -> AnyElement {
         let settings = self.settings;
-        let modified = self.catalog.iter().filter(|a| settings.keybindings.overrides.contains_key(a.id.as_ref())).count();
+        let modified = self
+            .catalog
+            .iter()
+            .filter(|a| settings.keybindings.overrides.contains_key(a.id.as_ref()))
+            .count();
         let section_index = match section {
             SettingsSectionId::KeybindingsToolbar => return self.keybinding_toolbar(modified, cx),
             SettingsSectionId::KeybindingsScope(scope_index) => scope_index + 1,
@@ -460,7 +464,10 @@ impl<S: KeybindingOwner> KeybindingPageView<'_, S> {
         let mut filters = div().flex().flex_wrap().gap(px(4.0)).max_w_full();
         for filter in SettingsKeybindingScopeFilter::all().iter().copied() {
             if filter != SettingsKeybindingScopeFilter::All
-                && !self.catalog.iter().any(|a| settings_keybinding_scope_matches(filter, a.scope))
+                && !self
+                    .catalog
+                    .iter()
+                    .any(|a| settings_keybinding_scope_matches(filter, a.scope))
             {
                 continue;
             }

@@ -43,7 +43,9 @@ pub enum GatewayRequest {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum GatewayEvent {
     #[serde(skip)]
-    DemoDirectoryChanged { session: u64 },
+    DemoDirectoryChanged {
+        session: u64,
+    },
     Connected,
     Disconnected,
     Output {
@@ -60,7 +62,9 @@ pub enum GatewayEvent {
 
 pub trait WebTransport {
     fn send(&mut self, request: GatewayRequest) -> Result<(), ()>;
-    fn directory(&self, _session: u64) -> Option<&str> { None }
+    fn directory(&self, _session: u64) -> Option<&str> {
+        None
+    }
     fn change_directory(&mut self, _session: u64, _path: &str) -> Result<(), &'static str> {
         Err("sftp.toolbar.terminal_directory_unavailable")
     }

@@ -42,7 +42,11 @@ impl Session {
 
     pub(crate) fn ble_labels(&self) -> Option<(&str, &str)> {
         match &self.transport {
-            SessionTransport::Ble { profile_name, device_name, .. } => Some((profile_name, device_name)),
+            SessionTransport::Ble {
+                profile_name,
+                device_name,
+                ..
+            } => Some((profile_name, device_name)),
             _ => None,
         }
     }
@@ -63,7 +67,6 @@ impl Session {
 }
 
 impl Workspace {
-
     pub fn active_session(&self) -> Option<TerminalSessionId> {
         let tab = self.layout.active_tab()?;
         tab.root_pane
@@ -124,7 +127,10 @@ impl Workspace {
     }
     pub(crate) fn open_demo_preview(&mut self, w: &mut Window, cx: &mut Context<Self>) {
         self.new_terminal_with_sftp("demo".into(), None, Some(false), w, cx);
-        if let Some(session) = self.active_session().and_then(|id| self.sessions.get_mut(&id)) {
+        if let Some(session) = self
+            .active_session()
+            .and_then(|id| self.sessions.get_mut(&id))
+        {
             // A page reload is not a user visit to the example connection.
             session.unused_demo_preview = true;
         }
@@ -141,7 +147,12 @@ impl Workspace {
     }
 
     pub(crate) fn new_terminal_with_sftp(
-        &mut self, node: String, split: Option<SplitDirection>, open_sftp: Option<bool>, w: &mut Window, cx: &mut Context<Self>,
+        &mut self,
+        node: String,
+        split: Option<SplitDirection>,
+        open_sftp: Option<bool>,
+        w: &mut Window,
+        cx: &mut Context<Self>,
     ) {
         if is_ble_node(&node) {
             if split.is_some() {
@@ -157,7 +168,11 @@ impl Workspace {
             return;
         }
         let is_local = node == "local";
-        let kind = if is_local { TabKind::LocalTerminal } else { TabKind::SshTerminal };
+        let kind = if is_local {
+            TabKind::LocalTerminal
+        } else {
+            TabKind::SshTerminal
+        };
         let profile_name = (!is_local).then(|| {
             self.catalog_data.items.iter().find_map(|row| match &row.target {
                 oxideterm_gpui_connections::session_manager::SessionManagerOpenTarget::Connection(pid)
@@ -214,14 +229,20 @@ impl Workspace {
                 h.notice("terminal.paste.clipboard_read_failed", cx)
             }
             TerminalViewEvent::SendBytes(bytes) => h.input(session, bytes, cx),
-            TerminalViewEvent::Resized(size) if h.sessions.get(&session).is_some_and(|s| s.writable(h.ready)) => h.send(
-                GatewayRequest::Resize {
-                    session: session.0,
-                    cols: size.cols.min(65535) as u16,
-                    rows: size.rows.min(65535) as u16,
-                },
-                cx,
-            ),
+            TerminalViewEvent::Resized(size)
+                if h.sessions
+                    .get(&session)
+                    .is_some_and(|s| s.writable(h.ready)) =>
+            {
+                h.send(
+                    GatewayRequest::Resize {
+                        session: session.0,
+                        cols: size.cols.min(65535) as u16,
+                        rows: size.rows.min(65535) as u16,
+                    },
+                    cx,
+                )
+            }
             TerminalViewEvent::TitleChanged(Some(title)) => {
                 if let Some(s) = h.sessions.get_mut(&session) {
                     s.title = title.clone();
@@ -260,7 +281,10 @@ impl Workspace {
             },
         );
         self.sync_active_scope(cx);
-        let sftp_node = (self.demo && open_sftp.unwrap_or_else(|| self.profile_details.get(&node).is_some_and(|p| p.open_sftp))).then(|| node.clone());
+        let sftp_node = (self.demo
+            && open_sftp
+                .unwrap_or_else(|| self.profile_details.get(&node).is_some_and(|p| p.open_sftp)))
+        .then(|| node.clone());
         self.send(
             GatewayRequest::Open {
                 node,
@@ -271,7 +295,9 @@ impl Workspace {
         );
         if !self.ready {
             self.reject_open(session, cx);
-        } else if let Some(node) = sftp_node && let Some(tab) = self.session_tab(session) {
+        } else if let Some(node) = sftp_node
+            && let Some(tab) = self.session_tab(session)
+        {
             self.open_node_sftp(&node, cx);
             self.activate_page(tab, cx);
             w.focus(&self.sessions[&session].view.read(cx).focus_handle(cx), cx);
@@ -406,7 +432,12 @@ impl Workspace {
                     let Some(s) = h.sessions.get_mut(&session) else {
                         return false;
                     };
-                    let SessionTransport::Ble { link: slot, device_name, .. } = &mut s.transport else {
+                    let SessionTransport::Ble {
+                        link: slot,
+                        device_name,
+                        ..
+                    } = &mut s.transport
+                    else {
                         return false;
                     };
                     let caps = match (info.has_tx, info.has_rx) {
@@ -508,7 +539,12 @@ impl Workspace {
         self.try_input(session, bytes, cx);
     }
 
-    pub(crate) fn write_sender_frame(&mut self, id: TerminalSessionId, frame: &oxideterm_gpui_command_sender::TerminalSenderFrame, cx: &mut Context<Self>) -> Option<bool> {
+    pub(crate) fn write_sender_frame(
+        &mut self,
+        id: TerminalSessionId,
+        frame: &oxideterm_gpui_command_sender::TerminalSenderFrame,
+        cx: &mut Context<Self>,
+    ) -> Option<bool> {
         use oxideterm_gpui_command_sender::TerminalSenderFrame::*;
         let session = self.sessions.get(&id)?;
         Some(match frame {
@@ -519,7 +555,9 @@ impl Workspace {
             }
             TextChunk(text) => self.try_input(id, text.as_bytes(), cx),
             RawBytes(bytes) => match &session.transport {
-                SessionTransport::Ble { link, .. } => link.as_ref().is_some_and(|l| l.write_raw(bytes).is_ok()),
+                SessionTransport::Ble { link, .. } => {
+                    link.as_ref().is_some_and(|l| l.write_raw(bytes).is_ok())
+                }
                 SessionTransport::Gateway(_) => self.try_input(id, bytes, cx),
             },
         })
@@ -553,7 +591,10 @@ impl Workspace {
                     },
                     cx,
                 );
-                if preview && self.ready && let Some(s) = self.sessions.get_mut(&session) {
+                if preview
+                    && self.ready
+                    && let Some(s) = self.sessions.get_mut(&session)
+                {
                     s.unused_demo_preview = false;
                     let node = s.node.clone();
                     self.record_connection_use(&node, cx);
@@ -617,8 +658,10 @@ impl Workspace {
                 }
             }
             GatewayEvent::DemoDirectoryChanged { session } => {
-                if let Some(s) = self.sessions.get(&TerminalSessionId(session)) && let Some(f) = &self.files {
-                    f.refresh_terminal_directory(&s.node,cx);
+                if let Some(s) = self.sessions.get(&TerminalSessionId(session))
+                    && let Some(f) = &self.files
+                {
+                    f.refresh_terminal_directory(&s.node, cx);
                 }
             }
             GatewayEvent::Disconnected => {

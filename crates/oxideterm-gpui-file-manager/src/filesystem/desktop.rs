@@ -7,8 +7,8 @@ use oxideterm_local_files::{
     local_file_audit_context, local_file_operation, local_file_properties,
     local_inspection_preview, local_operation_unit_count, local_preview_metadata,
     local_sidebar_locations, open_path_external, paste_local_files, read_local_preview,
-    read_local_preview_range, rename_local_entry, reveal_path_external,
-    save_local_bookmarks, unique_copy_path,
+    read_local_preview_range, rename_local_entry, reveal_path_external, save_local_bookmarks,
+    unique_copy_path,
 };
 
 pub(crate) struct DesktopFileSystem;

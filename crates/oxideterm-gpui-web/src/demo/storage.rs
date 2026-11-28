@@ -9,7 +9,9 @@ pub const LOCAL: &str = "/home/demo";
 #[path = "storage/archive.rs"]
 mod archive;
 #[cfg(target_family = "wasm")]
-pub(crate) use archive::{MAX_BYTES as MAX_ARCHIVE_BYTES, MAX_ENTRIES as MAX_ARCHIVE_ENTRIES, unpack_zip};
+pub(crate) use archive::{
+    MAX_BYTES as MAX_ARCHIVE_BYTES, MAX_ENTRIES as MAX_ARCHIVE_ENTRIES, unpack_zip,
+};
 #[path = "storage/transfer.rs"]
 pub(super) mod transfer;
 pub const REMOTE: &str = "/srv/oxideterm";

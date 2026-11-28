@@ -3,9 +3,9 @@
 
 mod dialogs;
 
-use oxideterm_ai::rag_keyword::{KeywordDocument, search_documents};
 use crate::host::{Action, Workspace};
 use gpui::{prelude::*, *};
+use oxideterm_ai::rag_keyword::{KeywordDocument, search_documents};
 use oxideterm_ai::{
     DocScope, RagAddDocumentRequest, RagCollectionResponse, RagCreateBlankDocumentRequest,
     RagCreateCollectionRequest, RagDocScopeRequest as DocScopeRequest, RagDocumentContentResponse,
@@ -46,7 +46,11 @@ impl StoredDoc {
     fn new(mut meta: RagDocumentResponse, content: String) -> Result<Self, String> {
         let index = KeywordDocument::new(&meta, &content)?;
         meta.chunk_count = index.chunk_count();
-        Ok(Self { meta, content, index })
+        Ok(Self {
+            meta,
+            content,
+            index,
+        })
     }
 }
 
@@ -127,7 +131,12 @@ impl AiKnowledgeHost for WebKnowledgeHost {
             .inner
             .lock()
             .map_err(|_| "store poisoned".to_string())?;
-        Ok(guard.collections.iter().filter(|c| c.scope.visible_to(scope_filter)).cloned().collect())
+        Ok(guard
+            .collections
+            .iter()
+            .filter(|c| c.scope.visible_to(scope_filter))
+            .cloned()
+            .collect())
     }
 
     fn list_documents(
@@ -262,7 +271,11 @@ impl AiKnowledgeHost for WebKnowledgeHost {
             .inner
             .lock()
             .map_err(|_| "store poisoned".to_string())?;
-        if !guard.collections.iter().any(|c| c.id == request.collection_id) {
+        if !guard
+            .collections
+            .iter()
+            .any(|c| c.id == request.collection_id)
+        {
             return Err("Collection no longer exists".into());
         }
         let id = format!("doc-{}", guard.next_id);
@@ -290,7 +303,10 @@ impl AiKnowledgeHost for WebKnowledgeHost {
             .inner
             .lock()
             .map_err(|_| "store poisoned".to_string())?;
-        search_documents(guard.documents.iter().map(|d| (&d.meta, &d.index)), &request)
+        search_documents(
+            guard.documents.iter().map(|d| (&d.meta, &d.index)),
+            &request,
+        )
     }
 
     fn get_collection_stats(&self, collection_id: &str) -> Result<RagStatsResponse, String> {
@@ -351,7 +367,8 @@ impl AiKnowledgeHost for WebKnowledgeHost {
         {
             return Err(KnowledgeSaveError::Conflict);
         }
-        doc.index = KeywordDocument::new(&doc.meta, &content).map_err(KnowledgeSaveError::Failed)?;
+        doc.index =
+            KeywordDocument::new(&doc.meta, &content).map_err(KnowledgeSaveError::Failed)?;
         doc.meta.chunk_count = doc.index.chunk_count();
         doc.meta.indexed_at = js_sys::Date::now() as i64;
         doc.content = content;
@@ -413,13 +430,19 @@ impl AiKnowledgeHost for WebKnowledgeHost {
             .inner
             .lock()
             .map_err(|_| "store poisoned".to_string())?;
-        if let Some(destination) = collection && !guard.collections.iter().any(|c| c.id == destination) {
+        if let Some(destination) = collection
+            && !guard.collections.iter().any(|c| c.id == destination)
+        {
             return Err("Collection no longer exists".into());
         }
-        let doc = guard.documents.iter_mut()
+        let doc = guard
+            .documents
+            .iter_mut()
             .find(|d| d.meta.id == id)
             .ok_or_else(|| format!("Document {id} not found"))?;
-        if doc.meta.version != version { return Err("Document version conflict".into()); }
+        if doc.meta.version != version {
+            return Err("Document version conflict".into());
+        }
         if let Some(title) = name {
             doc.index.retitle(title);
             doc.meta.title = title.to_owned();

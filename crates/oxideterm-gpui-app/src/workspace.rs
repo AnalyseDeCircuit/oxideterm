@@ -334,7 +334,6 @@ use oxideterm_gpui_shell::tabs::{
     strip::{MeasuredTabStrip, ShellTabRequest},
 };
 
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct TabRenameDialog {
     // The dialog edits display metadata for one canonical terminal tab only.

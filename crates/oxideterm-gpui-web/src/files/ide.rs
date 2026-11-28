@@ -30,7 +30,7 @@ fn version(e: &Entry) -> SavedFileVersion {
     SavedFileVersion {
         size_bytes: e.data.as_ref().map(|v| v.len() as u64),
         etag: Some(e.revision.to_string()),
-        modified_millis: e.modified.map(|s|s*1000),
+        modified_millis: e.modified.map(|s| s * 1000),
     }
 }
 impl PortableIdeHost for MemoryFs {
@@ -181,7 +181,10 @@ impl PortableIdeHost for MemoryFs {
                     continue;
                 }
                 let Some(bytes) = &entry.data else { continue };
-                let Ok(file) = oxideterm_ide_fs::text::decode_file(bytes, None, version(entry)) else { continue; };
+                let Ok(file) = oxideterm_ide_fs::text::decode_file(bytes, None, version(entry))
+                else {
+                    continue;
+                };
                 for (i, line) in file.text.lines().enumerate() {
                     if hits.len() >= q.max_results as usize {
                         return Ok(hits);

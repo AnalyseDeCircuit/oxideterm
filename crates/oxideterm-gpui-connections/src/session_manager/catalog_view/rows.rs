@@ -3009,23 +3009,25 @@ impl CatalogView {
             ));
 
             let test_id = id.clone();
-            popup = popup.when(self.host_tools, |popup| popup.child(self.render_session_manager_menu_action(
-                oxideterm_gpui_ui::dropdown_menu::dropdown_menu_item_with_icon(
-                    &self.tokens,
-                    "lucide/wifi.svg",
-                    self.i18n.t("sessionManager.actions.test_connection"),
+            popup = popup.when(self.host_tools, |popup| {
+                popup.child(self.render_session_manager_menu_action(
+                    oxideterm_gpui_ui::dropdown_menu::dropdown_menu_item_with_icon(
+                        &self.tokens,
+                        "lucide/wifi.svg",
+                        self.i18n.t("sessionManager.actions.test_connection"),
+                        false,
+                        false,
+                    ),
                     false,
                     false,
-                ),
-                false,
-                false,
-                has_background,
-                move |this, _event, window, cx| {
-                    this.action(CatalogAction::Test(test_id.to_owned()), Some(window), cx);
-                    cx.stop_propagation();
-                },
-                cx,
-            )));
+                    has_background,
+                    move |this, _event, window, cx| {
+                        this.action(CatalogAction::Test(test_id.to_owned()), Some(window), cx);
+                        cx.stop_propagation();
+                    },
+                    cx,
+                ))
+            });
 
             let duplicate_id = id.clone();
             popup = popup

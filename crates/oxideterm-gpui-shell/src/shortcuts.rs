@@ -60,7 +60,10 @@ pub fn context_bindings<T: std::marker::Copy>(
     for &(id, action) in actions {
         if let Some(def) = definitions.iter().find(|def| def.id == id) {
             for combo in effective_combos(def, overrides, side) {
-                bindings.push((gpui::KeyBinding::new(&combo_to_gpui(&combo), gpui::NoAction {}, None), action));
+                bindings.push((
+                    gpui::KeyBinding::new(&combo_to_gpui(&combo), gpui::NoAction {}, None),
+                    action,
+                ));
             }
         }
     }

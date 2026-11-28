@@ -208,9 +208,7 @@ impl CatalogView {
         if !self.host_tools
             && matches!(
                 action,
-                Action::Test(_)
-                    | Action::ShowBatchAdd
-                    | Action::OpenImporters
+                Action::Test(_) | Action::ShowBatchAdd | Action::OpenImporters
             )
         {
             return;

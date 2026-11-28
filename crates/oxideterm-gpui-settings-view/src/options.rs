@@ -280,7 +280,6 @@ pub fn is_supported_background_image(path: &Path) -> bool {
     oxideterm_settings::is_supported_background_image(path)
 }
 
-
 pub const OXIDE_THEME_IDS: &[&str] = &[
     "azurite",
     "bismuth",

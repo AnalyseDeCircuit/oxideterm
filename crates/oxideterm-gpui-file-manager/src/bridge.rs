@@ -105,7 +105,7 @@ pub enum FileManagerRequest {
 }
 
 pub enum FileManagerPointer {
-    #[cfg(target_family="wasm")]
+    #[cfg(target_family = "wasm")]
     BrowseDeviceFolder,
     Focus,
     TextDown(FileManagerInput, MouseDownEvent),

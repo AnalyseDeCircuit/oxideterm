@@ -125,14 +125,20 @@ fn browser_studio_switches_between_available_protocols(cx: &mut gpui::TestAppCon
         let options = window.debug_bounds("ssh-summary-SshSecurity").unwrap();
         window.simulate_click(options.center(), gpui::Modifiers::default());
         window.simulate_keystrokes("tab");
-        view.read_with(window, |v, app| assert!(!v.form(app).unwrap().field_focused));
+        view.read_with(window, |v, app| {
+            assert!(!v.form(app).unwrap().field_focused)
+        });
         window.simulate_keystrokes("escape");
         let sftp = window
             .debug_bounds("new-connection-transport-StandaloneSftp")
             .unwrap();
         window.simulate_click(sftp.center(), gpui::Modifiers::default());
         window.update(|w, app| w.draw(app).clear(app));
-        assert!(window.debug_bounds("standalone-sftp-summary-Route").is_none());
+        assert!(
+            window
+                .debug_bounds("standalone-sftp-summary-Route")
+                .is_none()
+        );
         view.read_with(window, |view, app| {
             assert_eq!(
                 view.form(app).unwrap().transport,

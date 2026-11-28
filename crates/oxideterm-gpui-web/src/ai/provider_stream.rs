@@ -14,8 +14,8 @@ pub(crate) async fn read_text_events<B: AsRef<[u8]>, E>(
         if !anthropic && frame.data.trim() == "[DONE]" {
             return Ok(());
         }
-        let value: Value =
-            serde_json::from_str(&frame.data).map_err(|_| "settings_view.ai.chat_invalid_stream")?;
+        let value: Value = serde_json::from_str(&frame.data)
+            .map_err(|_| "settings_view.ai.chat_invalid_stream")?;
         if value.get("error").is_some() || frame.event == "error" {
             return Err("settings_view.ai.chat_rejected");
         }

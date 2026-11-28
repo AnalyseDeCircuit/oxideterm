@@ -73,10 +73,18 @@ impl Workspace {
             CloseTarget::Right(ids) | CloseTarget::Others(ids) | CloseTarget::All(ids) => ids,
             _ => &[],
         };
-        let mut dirty_file_pages=self.projects.dirty_pages(closing,&self.layout,cx);
-        if let Some(files)=&self.files {
-            dirty_file_pages.extend(files.sftp_pages.iter().filter(|(id,_)|closing.contains(id)||closing.contains(&self.layout.container_tab_id(**id)))
-                .filter_map(|(_,page)|page.read(cx).dirty_preview(cx)));
+        let mut dirty_file_pages = self.projects.dirty_pages(closing, &self.layout, cx);
+        if let Some(files) = &self.files {
+            dirty_file_pages.extend(
+                files
+                    .sftp_pages
+                    .iter()
+                    .filter(|(id, _)| {
+                        closing.contains(id)
+                            || closing.contains(&self.layout.container_tab_id(**id))
+                    })
+                    .filter_map(|(_, page)| page.read(cx).dirty_preview(cx)),
+            );
         }
         if confirm || !dirty_file_pages.is_empty() {
             let (title, detail) = self.close_description(&target, &dirty_file_pages);

@@ -926,16 +926,24 @@ impl WebWindowInner {
                         && old_units[old_units.len() - suffix_length..]
                             == new_units[new_units.len() - suffix_length..]
                 });
-            let mut suffix_length = anchored_suffix_length.unwrap_or_else(|| {
-                old_units
-                    .iter()
-                    .rev()
-                    .zip(new_units.iter().rev())
-                    .take_while(|(old_unit, new_unit)| old_unit == new_unit)
-                    .count()
-            }).min(old_units.len().saturating_sub(element_selection_end as usize));
+            let mut suffix_length = anchored_suffix_length
+                .unwrap_or_else(|| {
+                    old_units
+                        .iter()
+                        .rev()
+                        .zip(new_units.iter().rev())
+                        .take_while(|(old_unit, new_unit)| old_unit == new_unit)
+                        .count()
+                })
+                .min(
+                    old_units
+                        .len()
+                        .saturating_sub(element_selection_end as usize),
+                );
             // A low surrogate alone cannot be retained as a suffix of a scalar.
-            if suffix_length > 0 && (0xdc00..=0xdfff).contains(&old_units[old_units.len() - suffix_length]) {
+            if suffix_length > 0
+                && (0xdc00..=0xdfff).contains(&old_units[old_units.len() - suffix_length])
+            {
                 suffix_length -= 1;
             }
             let mut prefix_length = old_units

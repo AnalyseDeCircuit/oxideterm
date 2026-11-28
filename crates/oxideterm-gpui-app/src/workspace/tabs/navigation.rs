@@ -1207,7 +1207,8 @@ impl WorkspaceApp {
         self.apply_tab_mount_cleanup(mount_cleanup, window.as_deref_mut(), cx);
         self.sync_host_tools_lifecycle(false, cx);
         if self
-            .tab_context_menu.as_ref()
+            .tab_context_menu
+            .as_ref()
             .is_some_and(|(id, _)| *id == tab.id)
         {
             self.tab_context_menu = None;

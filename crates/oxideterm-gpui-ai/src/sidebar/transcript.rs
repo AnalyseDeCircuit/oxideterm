@@ -779,7 +779,11 @@ impl AiAssistantSidebarView {
     }
 
     fn insert_ai_code_block_command(&self, command: String, window: &mut Window, cx: &mut App) {
-        (self.bindings.request)(AiTranscriptRequest::InsertCommand(command), Some(window), cx);
+        (self.bindings.request)(
+            AiTranscriptRequest::InsertCommand(command),
+            Some(window),
+            cx,
+        );
     }
 
     fn retry_ai_chat_initialization(&self, cx: &mut App) {

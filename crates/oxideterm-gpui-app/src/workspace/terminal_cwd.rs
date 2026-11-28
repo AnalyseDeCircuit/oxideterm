@@ -12,11 +12,10 @@ use std::{
 
 use oxideterm_editor_core::utf16::replace_utf16;
 use oxideterm_environment::{
-    CurrentDirectoryEntry, CurrentDirectoryKey, CurrentDirectoryScope,
-    CurrentDirectorySnapshot, CurrentDirectorySource, current_directory_cd_command,
-    current_directory_parent, current_directory_report_command,
-    current_directory_shell_path_argument, list_local_current_directory,
-    sort_current_directory_entries,
+    CurrentDirectoryEntry, CurrentDirectoryKey, CurrentDirectoryScope, CurrentDirectorySnapshot,
+    CurrentDirectorySource, current_directory_cd_command, current_directory_parent,
+    current_directory_report_command, current_directory_shell_path_argument,
+    list_local_current_directory, sort_current_directory_entries,
 };
 use oxideterm_sftp::{FileType as RemotePathFileType, ListFilter, SortOrder};
 use oxideterm_ssh::NodeId;
@@ -72,7 +71,9 @@ async fn run_terminal_cwd_remote_stages<H, T, AcquireError, ListError>(
         .map_err(|_| ())
 }
 
-pub(in crate::workspace) use oxideterm_gpui_command_sender::cwd::{Entry as TerminalCwdVisibleEntry, Kind as TerminalCwdVisibleEntryKind};
+pub(in crate::workspace) use oxideterm_gpui_command_sender::cwd::{
+    Entry as TerminalCwdVisibleEntry, Kind as TerminalCwdVisibleEntryKind,
+};
 
 pub(in crate::workspace) struct TerminalCwdPickerState {
     open: bool,
@@ -356,7 +357,11 @@ impl WorkspaceTerminalEntity {
         let Some(path) = self.cwd_browse_path() else {
             return Vec::new();
         };
-        oxideterm_gpui_command_sender::cwd::choices(path, &self.cwd_picker.entries, &self.cwd_picker.query)
+        oxideterm_gpui_command_sender::cwd::choices(
+            path,
+            &self.cwd_picker.entries,
+            &self.cwd_picker.query,
+        )
     }
 
     pub(in crate::workspace) fn replace_cwd_query(
@@ -594,7 +599,6 @@ impl WorkspaceTerminalEntity {
         }
         true
     }
-
 
     fn ensure_cwd_highlight(&mut self) {
         let visible = self.visible_cwd_entries();

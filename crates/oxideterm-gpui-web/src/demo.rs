@@ -3,8 +3,8 @@ mod storage;
 use crate::transport::*;
 use shell::Shell;
 use std::collections::HashMap;
-pub use storage::*;
 pub use storage::transfer::TransferDestination;
+pub use storage::*;
 use zeroize::Zeroizing;
 
 pub struct DemoTransport {

@@ -7,8 +7,8 @@ use oxideterm_preview::{PreviewContent, PreviewKind, TextLineEnding};
 use std::sync::Arc;
 
 mod inline;
-pub(super) use inline::{format,sftp_content};
 pub(super) use inline::language;
+pub(super) use inline::{format, sftp_content};
 
 pub(super) fn local_preview_bytes(path: &str, bytes: &[u8]) -> LocalPreview {
     let (kind, mime) = format(path, bytes);

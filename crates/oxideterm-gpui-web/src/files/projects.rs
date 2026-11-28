@@ -143,11 +143,7 @@ impl Projects {
     pub(crate) fn release(&mut self, id: TabId) {
         self.tabs.remove(&id);
     }
-    pub(crate) fn sync_project_mounts(
-        &self,
-        layout: &crate::host::BrowserTabs,
-        cx: &mut App,
-    ) {
+    pub(crate) fn sync_project_mounts(&self, layout: &crate::host::BrowserTabs, cx: &mut App) {
         for (id, p) in &self.tabs {
             let mount = if layout.surface_is_visible(*id) {
                 IdeSurfaceMount::MainWindow

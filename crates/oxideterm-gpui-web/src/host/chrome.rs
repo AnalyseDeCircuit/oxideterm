@@ -174,7 +174,8 @@ impl Workspace {
             .active_scheme(dark(window));
         let dark_scheme = scheme.is_some_and(oxideterm_settings::AppearanceScheme::is_dark);
         let actions_width = 3.0 * (size + 2.0 * action_padding);
-        let available = f32::from(window.viewport_size().width) - 2.0 * (actions_width + t.spacing.two);
+        let available =
+            f32::from(window.viewport_size().width) - 2.0 * (actions_width + t.spacing.two);
         let scope = self.scope_trigger(available, cx);
         let show_scope = scope.is_some();
         let actions = div()
@@ -270,7 +271,13 @@ impl Workspace {
                     }),
             )
             .children(scope)
-            .child(div().when(show_scope, |right| right.flex_1().min_w(px(actions_width))).flex().justify_end().child(actions))
+            .child(
+                div()
+                    .when(show_scope, |right| right.flex_1().min_w(px(actions_width)))
+                    .flex()
+                    .justify_end()
+                    .child(actions),
+            )
             .into_any_element()
     }
 
@@ -400,7 +407,9 @@ impl Workspace {
 
         div()
             .size_full()
-            .when(self.window_wallpaper().is_none(), |view| view.bg(rgb(theme.bg)))
+            .when(self.window_wallpaper().is_none(), |view| {
+                view.bg(rgb(theme.bg))
+            })
             .text_color(rgb(theme.text_muted))
             .child(
                 div()

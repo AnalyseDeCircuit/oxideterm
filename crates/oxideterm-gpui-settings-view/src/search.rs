@@ -875,7 +875,10 @@ fn settings_search_specs(host: SettingsHost) -> Vec<SettingsSearchEntrySpec> {
                     "settings_view.help.open_logs",
                 ]
             } else if host == SettingsHost::Browser {
-                &["settings_view.help.browser_report", "settings_view.help.memory_export"]
+                &[
+                    "settings_view.help.browser_report",
+                    "settings_view.help.memory_export",
+                ]
             } else {
                 &[
                     "settings_view.help.debug_logs",

@@ -51,10 +51,6 @@ pub use tmux::{
 
 pub use activity::TerminalActivityReceiver;
 pub use alacritty_terminal::term::TermMode;
-pub use oxideterm_terminal_encoding::command_sender::{
-    TerminalSenderFrame, TerminalSenderInputMode, TerminalSenderPacing, TerminalSenderPlan,
-    TerminalSenderPlanError, build_terminal_sender_plan,
-};
 pub use editor_integration::{
     EMACS_FREE_TYPE_INTEGRATION_SOURCE, TerminalEditorApplication, TerminalEditorCapabilities,
     TerminalEditorClipboardEvent, TerminalEditorClipboardOperation, TerminalEditorIntegrationEvent,
@@ -80,6 +76,10 @@ pub use oxideterm_terminal_emulator::{
     TerminalImageSnapshot, TerminalLogicalContext, TerminalLogicalContextRow,
     TerminalLogicalMember, TerminalRow, TerminalSearchMatch, TerminalSearchRange, TerminalSnapshot,
     TerminalStyleOrigin, TerminalUnderlineStyle,
+};
+pub use oxideterm_terminal_encoding::command_sender::{
+    TerminalSenderFrame, TerminalSenderInputMode, TerminalSenderPacing, TerminalSenderPlan,
+    TerminalSenderPlanError, build_terminal_sender_plan,
 };
 pub use oxideterm_terminal_encoding::{
     EncodingMismatchDetector, TERMINAL_ENCODINGS, TerminalEncoding,

@@ -9,8 +9,8 @@
 
 mod languages;
 pub mod line_edit;
-pub mod paste;
 mod metrics;
+pub mod paste;
 mod settings;
 mod surface;
 mod viewport;

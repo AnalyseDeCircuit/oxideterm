@@ -343,7 +343,11 @@ impl SampleHost {
 impl HostToolsBridge for SampleHost {
     fn pool_snapshot(&self) -> HostPoolSnapshot {
         // Sample metrics don't represent an SSH pool owned by this browser.
-        HostPoolSnapshot { stats: None, summaries: Vec::new(), topology: None }
+        HostPoolSnapshot {
+            stats: None,
+            summaries: Vec::new(),
+            topology: None,
+        }
     }
     fn connections(&self) -> Vec<MonitorConnectionOption> {
         vec![MonitorConnectionOption {
@@ -451,7 +455,9 @@ impl Monitor {
         self.entity.read(cx).active_tool()
     }
 
-    pub(crate) fn graph_controls(&self) -> Entity<HostToolsEntity> { self.entity.clone() }
+    pub(crate) fn graph_controls(&self) -> Entity<HostToolsEntity> {
+        self.entity.clone()
+    }
 
     pub fn tool_enabled(&self, tool: ContextSidebarTool) -> bool {
         tool.monitoring_enabled(&self.monitoring)

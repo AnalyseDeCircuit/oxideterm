@@ -365,7 +365,6 @@ impl WorkspaceApp {
         self.tab_host.read(cx).can_combine_pages(source, target)
     }
 
-
     fn combine_tabs(
         &mut self,
         source_tab_id: TabId,

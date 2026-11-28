@@ -196,8 +196,11 @@ pub fn list_local_archive_contents(path: &str) -> Result<LocalArchiveInfo, Strin
     list_archive_contents(file)
 }
 
-pub fn list_archive_contents(source: impl std::io::Read + std::io::Seek) -> Result<LocalArchiveInfo, String> {
-    let mut archive = zip::ZipArchive::new(source).map_err(|error| format!("Failed to read archive: {error}"))?;
+pub fn list_archive_contents(
+    source: impl std::io::Read + std::io::Seek,
+) -> Result<LocalArchiveInfo, String> {
+    let mut archive =
+        zip::ZipArchive::new(source).map_err(|error| format!("Failed to read archive: {error}"))?;
     let mut entries = Vec::new();
     let mut total_files = 0;
     let mut total_dirs = 0;
@@ -228,7 +231,9 @@ pub fn list_archive_contents(source: impl std::io::Read + std::io::Seek) -> Resu
         } else {
             total_files += 1;
             total_size = total_size.checked_add(size).ok_or("Invalid ZIP size")?;
-            compressed_size = compressed_size.checked_add(comp_size).ok_or("Invalid ZIP size")?;
+            compressed_size = compressed_size
+                .checked_add(comp_size)
+                .ok_or("Invalid ZIP size")?;
         }
         let display_name = Path::new(&name)
             .file_name()

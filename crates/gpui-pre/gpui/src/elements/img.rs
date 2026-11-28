@@ -778,7 +778,8 @@ impl Asset for ImageAssetLoader {
         let renderer = cx.svg_renderer();
         async move {
             if matches!(source, Resource::RotatedBytes { .. }) {
-                return sized::SourceInfo::new(source, None)?.decode((u32::MAX,u32::MAX),renderer);
+                return sized::SourceInfo::new(source, None)?
+                    .decode((u32::MAX, u32::MAX), renderer);
             }
             let bytes = bytes.await?;
             if matches!(source, Resource::RotatedImage { .. }) {
@@ -799,7 +800,9 @@ impl ImageAssetLoader {
         let asset_source = cx.asset_source().clone();
         async move {
             let bytes = match source.clone() {
-                Resource::Image(image) | Resource::RotatedBytes {image,..} => image.bytes.clone(),
+                Resource::Image(image) | Resource::RotatedBytes { image, .. } => {
+                    image.bytes.clone()
+                }
                 Resource::Path(uri) | Resource::RotatedImage { path: uri, .. } => {
                     fs::read(uri.as_ref())?
                 }
