@@ -52,7 +52,7 @@ impl TerminalPane {
         if self.paste_editor.is_some() {
             return;
         }
-        self.line_paste_task = None;
+        self.stop_line_paste();
         let tokens = self.theme.tokens;
         // This pane owns the transient editor and its undo history. Neither is persisted;
         // submission or cancellation drops the entity and all draft UI state.
@@ -161,6 +161,12 @@ impl TerminalPane {
     fn start_line_paste(&mut self, text: Zeroizing<String>, cx: &mut Context<Self>) {
         // The pane owns the timer and the sole remaining draft. Dropping the task
         // on cancellation or session replacement also drops its zeroizing buffer.
+        let mut broadcast = self
+            .line_paste_broadcast_factory
+            .as_ref()
+            .map(|capture| capture(cx));
+        let observer = self.input_broadcaster.clone();
+        self.line_paste_submitted = 0;
         self.line_paste_task = Some(cx.spawn(async move |pane, cx| {
             let mut remaining = text.as_str();
             while !remaining.is_empty() {
@@ -173,20 +179,61 @@ impl TerminalPane {
                     }
                 });
                 let (line, rest) = remaining.split_at(end);
-                let sent = pane.update(cx, |pane, cx| {
-                    pane.deliver_user_paste(line, TerminalBroadcastInputKind::PasteLine, cx)
+                let more = pane.update(cx, |pane, cx| {
+                    let secret = pane.input_answers_privilege_prompt(line.as_bytes());
+                    if !pane.paste_text_without_broadcast(line, true, cx) {
+                        pane.stop_line_paste();
+                        cx.notify();
+                        return false;
+                    }
+                    if !secret {
+                        if let Some(send) = broadcast.as_mut() {
+                            if !send(line.as_bytes(), cx) {
+                                pane.stop_line_paste();
+                                cx.notify();
+                                return false;
+                            }
+                        } else if let Some(send) = &observer {
+                            send(TerminalBroadcastInputKind::PasteLine, line.as_bytes(), cx);
+                        }
+                    }
+                    pane.line_paste_submitted += 1;
+                    if rest.is_empty() {
+                        pane.line_paste_task = None;
+                        cx.notify();
+                        return false;
+                    }
+                    true
                 });
-                if !matches!(sent, Ok(true)) || rest.is_empty() {
-                    break;
+                if !matches!(more, Ok(true)) {
+                    return;
                 }
                 remaining = rest;
                 cx.background_executor().timer(LINE_PASTE_INTERVAL).await;
             }
-            let _ = pane.update(cx, |pane, cx| {
-                pane.line_paste_task = None;
-                cx.notify();
-            });
         }));
+    }
+
+    pub(super) fn stop_line_paste(&mut self) -> bool {
+        if self.line_paste_task.take().is_none() {
+            return false;
+        }
+        if let Some(sink) = &self.preferences.notice_sink {
+            let sent = self.line_paste_submitted;
+            sink(TerminalNotice {
+                title: self
+                    .preferences
+                    .paste_labels
+                    .interrupted
+                    .replace("{{sent}}", &sent.to_string())
+                    .replace("{{line}}", &(sent + 1).to_string()),
+                description: None,
+                status_text: None,
+                progress: None,
+                variant: TerminalNoticeVariant::Warning,
+            });
+        }
+        true
     }
 
     fn close_paste_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -230,7 +277,7 @@ impl TerminalPane {
                 .right(px(tokens.spacing.three))
                 .top(px(tokens.spacing.three))
                 .on_click(cx.listener(|pane, _, _, cx| {
-                    pane.line_paste_task = None;
+                    pane.stop_line_paste();
                     cx.notify();
                 }))
                 .into_any_element(),

@@ -672,9 +672,20 @@ fn line_paste_paces_submissions_preserves_final_text_and_stops(cx: &mut TestAppC
     let mut peer = ssh_peer::SshPeer::new();
     let config =
         SshSessionConfig::from(peer.config.take().unwrap()).with_runtime(peer.runtime.clone());
+    let (notify, notices) = std::sync::mpsc::channel();
     let (pane, cx) = cx.add_window_view(move |window, cx| {
-        TerminalPane::new_ssh_with_preferences(config, TerminalUiPreferences::default(), window, cx)
-            .unwrap()
+        TerminalPane::new_ssh_with_preferences(
+            config,
+            TerminalUiPreferences {
+                notice_sink: Some(Arc::new(move |msg| {
+                    notify.send(msg.title).unwrap();
+                })),
+                ..Default::default()
+            },
+            window,
+            cx,
+        )
+        .unwrap()
     });
     let (sender, channel) = peer.ready.recv_timeout(Duration::from_secs(5)).unwrap();
     cx.simulate_resize(size(px(900.0), px(600.0)));
@@ -723,6 +734,12 @@ fn line_paste_paces_submissions_preserves_final_text_and_stops(cx: &mut TestAppC
                 &["\x1b[200~A\x1b[201~\r@", "\x1b[200~B\x1b[201~\r@", "\r@"],
                 false,
             ),
+            (
+                "first\nblocked\nlast",
+                &["first\r@", "@", "@"],
+                &["\x1b[200~first\x1b[201~\r@", "@", "@"],
+                false,
+            ),
             ("\r\n", &["\r@"], &["\r@"], false),
             (
                 "一\n\nstop",
@@ -735,6 +752,9 @@ fn line_paste_paces_submissions_preserves_final_text_and_stops(cx: &mut TestAppC
                 pane.update(cx, |pane, cx| {
                     // Input hooks may return CRLF or CR even when the editor supplied LF.
                     pane.set_plugin_input_interceptor(Some(Arc::new(|bytes, _| {
+                        if bytes == b"blocked\n" {
+                            return TerminalInputInterceptorResult::Suppress;
+                        }
                         TerminalInputInterceptorResult::Continue(match bytes {
                             b"A\n" => b"A\r\n".to_vec(),
                             b"B\n" => b"B\r".to_vec(),
@@ -767,6 +787,15 @@ fn line_paste_paces_submissions_preserves_final_text_and_stops(cx: &mut TestAppC
                     cx.simulate_click(cancel, Default::default());
                 }
             }
+            let stopped = stop || input.starts_with("first");
+            assert_eq!(
+                notices.try_iter().collect::<Vec<_>>(),
+                if stopped {
+                    vec!["Complete lines submitted: 1. Stopped at line 2."]
+                } else {
+                    vec![]
+                }
+            );
         }
     }
     pane.update(cx, |pane, _| pane.shutdown());

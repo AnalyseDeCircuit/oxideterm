@@ -86,7 +86,7 @@ impl TerminalPane {
         let key = event.keystroke.key.as_str();
         let modifiers = event.keystroke.modifiers;
 
-        if self.line_paste_task.take().is_some() {
+        if self.stop_line_paste() {
             cx.notify();
             if key == "escape" {
                 return true;

@@ -103,6 +103,7 @@
       "edit_title": "Editar antes de colar",
       "send_by_line": "Enviar linha por linha",
       "stop_sending": "Parar envio",
+      "interrupted": "{{sent}} linhas enviadas por completo. Envio interrompido na linha {{line}}.",
       "strip_fence": "Remover delimitadores do bloco de código",
       "undo": "Desfazer",
       "redo": "Refazer",

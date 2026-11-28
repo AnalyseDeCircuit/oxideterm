@@ -83,26 +83,24 @@ struct TerminalInputBroadcastRoute {
     terminal: gpui::WeakEntity<WorkspaceTerminalEntity>,
 }
 
-impl TerminalInputBroadcastRoute {
-    fn broadcaster(self) -> TerminalInputBroadcaster {
-        Rc::new(move |kind, bytes, cx| self.deliver(kind, bytes, cx))
+#[derive(Default)]
+struct LinePasteTargets(Vec<(PaneId, gpui::EntityId, u64)>);
+
+impl LinePasteTargets {
+    fn remaining(&mut self, live: Self) -> Vec<PaneId> {
+        let live: HashSet<_> = live.0.into_iter().collect();
+        // A batch can lose recipients, but never acquire one, even if a pane ID is reused.
+        self.0.retain(|target| live.contains(target));
+        self.0.iter().map(|(id, _, _)| *id).collect()
     }
+}
 
-    fn deliver(&self, kind: TerminalBroadcastInputKind, bytes: &[u8], cx: &mut App) {
-        if let Some(runtime) = self.ai_runtime.upgrade() {
-            if let Some(key) = runtime.read(cx).terminal_resource_key(self.session_id) {
-                if self.agent_resources.has_owner(&key) {
-                    self.agent_resources.invalidate(&key);
-                }
-            }
-        }
-        let Some(tab_host) = self.tab_host.upgrade() else {
-            return;
+impl TerminalInputBroadcastRoute {
+    fn targets(&self, cx: &mut App) -> Vec<PaneId> {
+        let (Some(tab_host), Some(terminal)) = (self.tab_host.upgrade(), self.terminal.upgrade())
+        else {
+            return Vec::new();
         };
-        let Some(terminal) = self.terminal.upgrade() else {
-            return;
-        };
-
         let (live_panes, mut candidates) = {
             let tab_host = tab_host.read(cx);
             let live_panes = tab_host.panes().keys().copied().collect::<HashSet<_>>();
@@ -117,13 +115,60 @@ impl TerminalInputBroadcastRoute {
         candidates
             .retain(|pane_id| *pane_id != self.source_pane_id && live_panes.contains(pane_id));
 
-        let targets = terminal.update(cx, |terminal, _cx| {
+        terminal.update(cx, |terminal, _cx| {
             terminal.retain_live_broadcast_targets(&live_panes);
             terminal.filter_broadcast_targets(self.source_pane_id, candidates)
-        });
-        if targets.is_empty() {
-            return;
+        })
+    }
+
+    fn line_targets(&self, cx: &mut App) -> LinePasteTargets {
+        let ids = self.targets(cx);
+        let Some(host) = self.tab_host.upgrade() else {
+            return LinePasteTargets::default();
+        };
+        LinePasteTargets(
+            ids.into_iter()
+                .filter_map(|id| {
+                    let pane = host.read(cx).panes().get(&id)?;
+                    Some((
+                        id,
+                        pane.entity_id(),
+                        pane.read(cx).ssh_reconnect_generation(),
+                    ))
+                })
+                .collect(),
+        )
+    }
+
+    fn capture_line_paste(&self, cx: &mut App) -> oxideterm_gpui_terminal::LinePasteBroadcast {
+        let route = self.clone();
+        let mut recipients = self.line_targets(cx);
+        Box::new(move |bytes, cx| {
+            let ids = recipients.remaining(route.line_targets(cx));
+            route.deliver(TerminalBroadcastInputKind::PasteLine, bytes, ids, cx)
+        })
+    }
+
+    fn deliver(
+        &self,
+        kind: TerminalBroadcastInputKind,
+        bytes: &[u8],
+        targets: Vec<PaneId>,
+        cx: &mut App,
+    ) -> bool {
+        if let Some(runtime) = self.ai_runtime.upgrade() {
+            if let Some(key) = runtime.read(cx).terminal_resource_key(self.session_id) {
+                if self.agent_resources.has_owner(&key) {
+                    self.agent_resources.invalidate(&key);
+                }
+            }
         }
+        if targets.is_empty() {
+            return true;
+        }
+        let Some(tab_host) = self.tab_host.upgrade() else {
+            return false;
+        };
         let explicit_send = matches!(
             kind,
             TerminalBroadcastInputKind::Paste | TerminalBroadcastInputKind::PasteLine
@@ -192,6 +237,7 @@ impl TerminalInputBroadcastRoute {
                 None,
             );
         }
+        sent_count == target_count
     }
 }
 
@@ -206,19 +252,24 @@ impl WorkspaceApp {
     ) {
         let window_handle = window.window_handle();
         let terminal_label = pane.read(cx).title().to_string();
-        let broadcaster = TerminalInputBroadcastRoute {
+        let route = TerminalInputBroadcastRoute {
             source_pane_id: pane_id,
             session_id,
             ai_runtime: self.ai.authority.downgrade(),
             agent_resources: self.ai.state.read(cx).agents.services.resources.clone(),
             tab_host: self.tab_host.downgrade(),
             terminal: self.terminal.downgrade(),
-        }
-        .broadcaster();
+        };
+        let live_route = route.clone();
+        let broadcaster: TerminalInputBroadcaster = Rc::new(move |kind, bytes, cx| {
+            let targets = live_route.targets(cx);
+            live_route.deliver(kind, bytes, targets, cx);
+        });
         pane.update(cx, |pane, _cx| {
             // Weak routing endpoints follow pane remounts without taking
             // ownership of the pane, its SSH channel, or the physical node.
             pane.set_input_broadcaster(Some(broadcaster));
+            pane.set_line_paste_broadcast_factory(Rc::new(move |cx| route.capture_line_paste(cx)));
             // Plugin input hooks attribute keystrokes to this session id.
             pane.set_plugin_session_id(Some(session_id.0.to_string()));
         });
@@ -1423,6 +1474,29 @@ fn x11_forwarding_notice(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn line_paste_never_sends_a_suffix_to_a_new_or_reconnected_receiver() {
+        let target = |pane, entity: u64, generation| {
+            (PaneId(pane), gpui::EntityId::from(entity), generation)
+        };
+        let a = target(1, 11, 0);
+        let b = target(2, 22, 0);
+        let c = target(3, 33, 0);
+        let d = target(4, 44, 0);
+        let mut batch = LinePasteTargets(vec![a, b, c, d]);
+        let live = LinePasteTargets(vec![
+            a,
+            target(3, 33, 1),
+            target(4, 45, 0),
+            target(5, 55, 0),
+        ]);
+        assert_eq!(batch.remaining(live), [PaneId(1)]);
+        assert_eq!(
+            batch.remaining(LinePasteTargets(vec![a, b, c, d])),
+            [PaneId(1)]
+        );
+    }
 
     #[test]
     fn x11_notices_distinguish_acceptance_and_optional_forwarding_failures() {
