@@ -101,6 +101,9 @@
     },
     "paste": {
       "edit_title": "Modifier avant de coller",
+      "send_by_line": "Envoyer ligne par ligne",
+      "stop_sending": "Arrêter l’envoi",
+      "interrupted": "{{sent}} lignes entièrement envoyées. Envoi interrompu à la ligne {{line}}.",
       "strip_fence": "Retirer les délimiteurs du bloc de code",
       "undo": "Annuler",
       "redo": "Rétablir",

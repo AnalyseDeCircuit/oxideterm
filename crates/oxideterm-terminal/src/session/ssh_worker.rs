@@ -828,6 +828,12 @@ impl TerminalSessionBackend for SshPtySession {
         self.enqueue_input(cost, move |core| core.paste_text(&text))
     }
 
+    fn paste_line(&mut self, text: &str) -> Result<()> {
+        // Admit the body and Enter together so queue pressure cannot reject just the Enter.
+        let text = Zeroizing::new(text.to_owned());
+        self.enqueue_input(text.len(), move |core| core.paste_line(&text))
+    }
+
     fn set_encoding(&mut self, encoding: TerminalEncoding) {
         self.enqueue_control(0, move |core| {
             core.set_encoding(encoding);

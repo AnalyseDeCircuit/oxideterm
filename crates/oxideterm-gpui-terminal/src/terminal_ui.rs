@@ -782,6 +782,9 @@ impl Default for TerminalKittyFileTransmissionLabels {
 pub struct TerminalPasteLabels {
     pub edit_title: String,
     pub strip_fence: String,
+    pub send_by_line: String,
+    pub stop_sending: String,
+    pub interrupted: String,
     pub undo: String,
     pub redo: String,
     pub editor_menu: oxideterm_gpui_editor::EditorContextMenuLabels,
@@ -794,6 +797,9 @@ impl Default for TerminalPasteLabels {
         Self {
             edit_title: "Edit before pasting".into(),
             strip_fence: "Remove code block markers".into(),
+            send_by_line: "Send line by line".into(),
+            stop_sending: "Stop sending".into(),
+            interrupted: "Complete lines submitted: {{sent}}. Stopped at line {{line}}.".into(),
             undo: "Undo".into(),
             redo: "Redo".into(),
             editor_menu: oxideterm_gpui_editor::EditorContextMenuLabels::default(),
