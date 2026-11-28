@@ -3591,6 +3591,19 @@ mod shared_text_tests {
             );
 
             let tab = surface.clean_upload_tab(&target, cx).unwrap();
+            surface.apply_upload_tab_refresh(
+                &target,
+                tab,
+                Err(IdeFileError::new(
+                    IdeFileErrorKind::Timeout,
+                    "read timed out",
+                )),
+                cx,
+            );
+            assert_eq!(surface.editors[&first], editor);
+            assert_eq!(editor.read(cx).buffer().text(), "uploaded contents");
+
+            let tab = surface.clean_upload_tab(&target, cx).unwrap();
             editor.update(cx, |editor, cx| {
                 editor.replace_text_external("draft typed during read", cx)
             });

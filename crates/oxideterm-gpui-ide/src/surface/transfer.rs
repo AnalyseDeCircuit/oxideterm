@@ -267,6 +267,20 @@ impl IdeSurface {
     ) {
         // Typing or saving during the remote read takes precedence over the upload refresh.
         if self.clean_upload_tab(target, cx).as_ref() == Some(&tab) {
+            if let Err(error) = &contents
+                && self.editors.contains_key(&tab.tab_id)
+                && matches!(
+                    error.kind,
+                    IdeFileErrorKind::Disconnected
+                        | IdeFileErrorKind::Timeout
+                        | IdeFileErrorKind::Cancelled
+                )
+            {
+                // A failed background read says nothing about the contents of the uploaded file.
+                self.last_error = Some(self.file_error_message(error));
+                cx.notify();
+                return;
+            }
             self.complete_file_open(tab.tab_id, target.clone(), contents, cx);
         }
     }

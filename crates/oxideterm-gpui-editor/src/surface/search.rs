@@ -364,8 +364,7 @@ impl TextEditorView {
 
     pub(super) fn refresh_find_after_edit(
         &mut self,
-        edits: &[TextRange],
-        inserted: usize,
+        edits: &[(TextRange, usize)],
         cx: &mut Context<Self>,
     ) {
         let boundary_sensitive = self.find_uses_regex() || self.find_options().whole_word;
@@ -373,11 +372,13 @@ impl TextEditorView {
         if boundary_sensitive {
             painted.retain(|range| {
                 // A neighboring edit can change a word boundary or an anchor.
-                let next = edits.partition_point(|edit| edit.end.0 < range.start);
-                edits.get(next).is_none_or(|edit| edit.start.0 > range.end)
+                let next = edits.partition_point(|(edit, _)| edit.end.0 < range.start);
+                edits
+                    .get(next)
+                    .is_none_or(|(edit, _)| edit.start.0 > range.end)
             });
         }
-        painted.retain_mut(super::rebase_painted_ranges(edits, inserted));
+        painted.retain_mut(super::rebase_painted_ranges(edits));
         self.start_find_request(None, cx);
     }
 

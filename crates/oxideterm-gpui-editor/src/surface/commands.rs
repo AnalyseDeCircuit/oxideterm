@@ -292,8 +292,17 @@ impl TextEditorView {
             "end" => self.move_to_line_boundary(true, modifiers.shift, cx),
             "backspace" => self.delete_backward(cx),
             "delete" => self.delete_forward(cx),
-            "enter" => self.insert_text(self.indented_newline(), cx),
-            "tab" => self.insert_text(self.settings.indentation_unit(), cx),
+            "enter" if !self.read_only && self.marked_text.is_none() => {
+                let ranges = self.selections_primary_first().map(|s| s.range()).collect();
+                self.replace_cursor_ranges(ranges, Self::indented_newline, cx);
+                window.prevent_default();
+                cx.stop_propagation();
+            }
+            "tab" if !self.read_only && self.marked_text.is_none() => {
+                self.insert_text(self.settings.indentation_unit(), cx);
+                window.prevent_default();
+                cx.stop_propagation();
+            }
             _ => {}
         }
     }
@@ -392,13 +401,13 @@ impl TextEditorView {
     }
 
     pub(super) fn undo(&mut self, cx: &mut Context<Self>) {
-        if self.buffer.undo().ok() == Some(true) {
+        if !self.read_only && self.buffer.undo().ok() == Some(true) {
             self.after_history_change(self.buffer.selections_after_undo().map(<[_]>::to_vec), cx);
         }
     }
 
     pub(super) fn redo(&mut self, cx: &mut Context<Self>) {
-        if self.buffer.redo().ok() == Some(true) {
+        if !self.read_only && self.buffer.redo().ok() == Some(true) {
             self.after_history_change(self.buffer.selections_after_redo().map(<[_]>::to_vec), cx);
         }
     }
@@ -443,9 +452,8 @@ impl TextEditorView {
         cx.notify();
     }
 
-    fn indented_newline(&self) -> String {
-        let selection = self.cursor.selection();
-        let Ok(position) = self.buffer.offset_to_line_col(selection.range().start) else {
+    fn indented_newline(&self, range: super::TextRange) -> String {
+        let Ok(position) = self.buffer.offset_to_line_col(range.start) else {
             return "\n".to_string();
         };
         let line = self.buffer.line_text(position.line).unwrap_or_default();

@@ -96,7 +96,7 @@ impl TextEditorView {
 
     // Preserve only painted tokens while the parser owns the previous syntax tree.
     // Ranges intersecting an edit are discarded; unaffected ranges track byte shifts.
-    pub(super) fn retain_visible_colors(&mut self, edits: &[TextRange], inserted: usize) {
+    pub(super) fn retain_visible_colors(&mut self, edits: &[(TextRange, usize)]) {
         let cache = self.highlight_chunk_cache.borrow();
         if self.syntax_version.is_some()
             && cache
@@ -119,7 +119,7 @@ impl TextEditorView {
             self.interim_colors
                 .sort_unstable_by_key(|(range, _)| range.start);
         }
-        let mut rebase = super::rebase_painted_ranges(edits, inserted);
+        let mut rebase = super::rebase_painted_ranges(edits);
         self.interim_colors.retain_mut(|(range, _)| rebase(range));
     }
 

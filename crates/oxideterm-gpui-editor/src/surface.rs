@@ -75,18 +75,20 @@ const EDITOR_SELECTION_SCROLL_INTERVAL: Duration = Duration::from_millis(30);
 
 // Both edits and painted ranges are in source order. Rebase untouched ranges
 // in one pass while the authoritative syntax or search result is pending.
-fn rebase_painted_ranges(
-    edits: &[TextRange],
-    inserted: usize,
-) -> impl FnMut(&mut Range<usize>) -> bool {
+fn rebase_painted_ranges(edits: &[(TextRange, usize)]) -> impl FnMut(&mut Range<usize>) -> bool {
     let mut pos = 0;
     let mut delta = 0isize;
     move |range| {
-        while let Some(edit) = edits.get(pos).filter(|edit| edit.end.0 <= range.start) {
+        while let Some(&(edit, inserted)) =
+            edits.get(pos).filter(|(edit, _)| edit.end.0 <= range.start)
+        {
             delta += inserted as isize - edit.len() as isize;
             pos += 1;
         }
-        if edits.get(pos).is_some_and(|edit| edit.start.0 < range.end) {
+        if edits
+            .get(pos)
+            .is_some_and(|(edit, _)| edit.start.0 < range.end)
+        {
             return false;
         }
         *range = range.start.saturating_add_signed(delta)..range.end.saturating_add_signed(delta);
@@ -1014,17 +1016,11 @@ impl TextEditorView {
 
     /// Exposes undo to embedding surfaces without bypassing editor history bookkeeping.
     pub fn undo_external(&mut self, cx: &mut Context<Self>) {
-        if self.read_only {
-            return;
-        }
         self.undo(cx);
     }
 
     /// Exposes redo to embedding surfaces without bypassing editor history bookkeeping.
     pub fn redo_external(&mut self, cx: &mut Context<Self>) {
-        if self.read_only {
-            return;
-        }
         self.redo(cx);
     }
 
@@ -1262,7 +1258,8 @@ impl TextEditorView {
             .apply_transaction(EditTransaction::single(TextEdit::new(range, replacement)))
             .is_ok()
         {
-            self.retain_visible_colors(&[range], caret.0 - range.start.0);
+            let changes = [(range, caret.0 - range.start.0)];
+            self.retain_visible_colors(&changes);
             self.request_syntax(syntax_edit, false, cx);
             self.cursor.set_selection(Selection::caret(caret));
             self.secondary_cursors.clear();
@@ -1270,7 +1267,7 @@ impl TextEditorView {
             self.save_status = EditorSaveStatus::Dirty;
             self.clear_folds_after_buffer_change();
             self.restore_rows_after_edit(row_edit);
-            self.refresh_find_after_edit(&[range], caret.0 - range.start.0, cx);
+            self.refresh_find_after_edit(&changes, cx);
             if self.render_cache_active {
                 self.viewport
                     .clamp(self.document_row_count(), self.metrics.line_height);
@@ -1306,6 +1303,19 @@ impl TextEditorView {
             self.replace_range_with_caret(*range, replacement, cx);
             return;
         }
+        self.replace_cursor_ranges(ranges, |_, _| replacement.clone(), cx);
+    }
+
+    fn replace_cursor_ranges(
+        &mut self,
+        ranges: Vec<TextRange>,
+        replacement_for: impl Fn(&Self, TextRange) -> String,
+        cx: &mut Context<Self>,
+    ) {
+        if let [range] = ranges.as_slice() {
+            self.replace_range_with_caret(*range, replacement_for(self, *range), cx);
+            return;
+        }
         // The first range belongs to the primary cursor, even if the platform
         // supplied a replacement range different from its current selection.
         let primary_range = ranges[0];
@@ -1329,12 +1339,15 @@ impl TextEditorView {
         let mut shift = 0isize;
         let mut carets = Vec::with_capacity(merged.len());
         let mut edits = Vec::with_capacity(merged.len());
+        let mut changes = Vec::with_capacity(merged.len());
         for range in &merged {
+            let replacement = replacement_for(self, *range);
             let end = range.start.0.saturating_add_signed(shift) + replacement.len();
             carets.push(Selection::caret(BufferOffset(end)));
             shift += replacement.len() as isize - range.len() as isize;
             if !range.is_empty() || !replacement.is_empty() {
-                edits.push(TextEdit::new(*range, replacement.clone()));
+                changes.push((*range, replacement.len()));
+                edits.push(TextEdit::new(*range, replacement));
             }
         }
         if edits.is_empty() {
@@ -1355,12 +1368,12 @@ impl TextEditorView {
         {
             self.cursor.set_selection(carets.remove(0));
             self.secondary_cursors = carets.into_iter().map(Cursor::from).collect();
-            self.retain_visible_colors(&merged, replacement.len());
+            self.retain_visible_colors(&changes);
             self.marked_text = None;
             self.save_status = EditorSaveStatus::Dirty;
             self.request_syntax(None, false, cx);
             self.clear_folds_after_buffer_change();
-            self.refresh_find_after_edit(&merged, replacement.len(), cx);
+            self.refresh_find_after_edit(&changes, cx);
             if self.render_cache_active {
                 self.viewport
                     .clamp(self.document_row_count(), self.metrics.line_height);
@@ -1405,7 +1418,15 @@ impl TextEditorView {
                 let range = selection.range();
                 (range.start.0, range.end.0)
             });
-            selections.dedup();
+            selections.dedup_by(|next, previous| {
+                let left = previous.range();
+                let right = next.range();
+                if right.start >= left.end {
+                    return false;
+                }
+                *previous = Selection::new(left.start, left.end.max(right.end));
+                true
+            });
         }
         selections
     }
@@ -2046,6 +2067,49 @@ mod tests {
             editor.add_next_find_match_as_cursor(cx);
             editor.insert_text("X", cx);
             assert_eq!(editor.buffer.text(), "XbaX");
+
+            editor.replace_text_external("abcdef", cx);
+            editor
+                .cursor
+                .set_selection(Selection::new(BufferOffset(4), BufferOffset(1)));
+            editor
+                .secondary_cursors
+                .push(Selection::new(BufferOffset(2), BufferOffset(5)).into());
+            assert!(editor.cut_selection_to_clipboard(cx));
+            assert_eq!(
+                cx.read_from_clipboard().unwrap().text().as_deref(),
+                Some("bcde")
+            );
+            assert_eq!(editor.buffer.text(), "af");
+        });
+    }
+
+    #[gpui::test]
+    fn multicursor_enter_uses_each_lines_indent_in_one_undo_step(cx: &mut gpui::TestAppContext) {
+        let (editor, cx) = cx.add_window_view(|window, cx| {
+            let mut editor =
+                super::TextEditorView::new("if {\n  done", &oxideterm_theme::default_tokens(), cx);
+            window.focus(&editor.focus_handle, cx);
+            editor.reveal_line_column(2, 7, cx);
+            editor.add_cursor_at(BufferOffset(4), cx);
+            editor
+        });
+        cx.simulate_keystrokes("enter");
+        editor.update(cx, |view, cx| {
+            assert_eq!(view.buffer.text(), "if {\n    \n  done\n  ");
+            view.set_read_only(true);
+            view.undo(cx);
+            assert_eq!(view.buffer.text(), "if {\n    \n  done\n  ");
+            view.set_read_only(false);
+            view.undo(cx);
+            assert_eq!(view.buffer.text(), "if {\n  done");
+            view.set_read_only(true);
+            view.redo(cx);
+            assert_eq!(view.buffer.text(), "if {\n  done");
+            view.set_read_only(false);
+            view.redo(cx);
+            view.insert_text("x", cx);
+            assert_eq!(view.buffer.text(), "if {\n    x\n  done\n  x");
         });
     }
 
