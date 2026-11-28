@@ -13,6 +13,7 @@ use crate::{
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct HistoryEntry {
     edits: Vec<TextEdit>,
+    selections: Option<Box<(Vec<Selection>, Vec<Selection>)>>,
     before_revision: u64,
     after_revision: u64,
 }
@@ -448,6 +449,15 @@ impl TextBuffer {
     }
 
     pub fn apply_transaction(&mut self, transaction: EditTransaction) -> Result<(), EditorError> {
+        self.apply_transaction_with_selections(transaction, None)
+    }
+
+    /// The first selection is the primary caret in each snapshot.
+    pub fn apply_transaction_with_selections(
+        &mut self,
+        transaction: EditTransaction,
+        selections: Option<(Vec<Selection>, Vec<Selection>)>,
+    ) -> Result<(), EditorError> {
         if transaction.is_empty() {
             return Ok(());
         }
@@ -459,6 +469,7 @@ impl TextBuffer {
         self.content_revision = after_revision;
         self.undo_stack.push(HistoryEntry {
             edits: inverse,
+            selections: selections.map(Box::new),
             before_revision,
             after_revision,
         });
@@ -478,6 +489,14 @@ impl TextBuffer {
         Ok(Selection::caret(caret))
     }
 
+    pub fn selections_after_undo(&self) -> Option<&[Selection]> {
+        Some(&self.redo_stack.last()?.selections.as_ref()?.0)
+    }
+
+    pub fn selections_after_redo(&self) -> Option<&[Selection]> {
+        Some(&self.undo_stack.last()?.selections.as_ref()?.1)
+    }
+
     pub fn undo(&mut self) -> Result<bool, EditorError> {
         let Some(entry) = self.undo_stack.pop() else {
             return Ok(false);
@@ -488,6 +507,7 @@ impl TextBuffer {
         self.content_revision = entry.before_revision;
         self.redo_stack.push(HistoryEntry {
             edits: redo,
+            selections: entry.selections,
             before_revision: entry.before_revision,
             after_revision: entry.after_revision,
         });
@@ -504,6 +524,7 @@ impl TextBuffer {
         self.content_revision = entry.after_revision;
         self.undo_stack.push(HistoryEntry {
             edits: undo,
+            selections: entry.selections,
             before_revision: entry.before_revision,
             after_revision: entry.after_revision,
         });

@@ -69,6 +69,7 @@ impl PortableIdeHost for MemoryFs {
                 .into_iter()
                 .map(|(p, e)| FileTreeEntry {
                     location: IdeLocation::remote(node_id, p),
+                    is_symlink: false,
                     kind: if e.data.is_some() {
                         FileKind::File
                     } else {

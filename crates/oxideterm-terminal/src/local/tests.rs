@@ -232,6 +232,74 @@ mod tests {
     }
 
     #[cfg(unix)]
+    #[tokio::test]
+    async fn local_pty_failed_ide_restore_terminates_background_child_before_release() {
+        use std::time::Duration;
+
+        let directory = tempfile::tempdir().unwrap();
+        // The background shell survives a PTY hangup and reports only an explicit termination.
+        let script = r#"trap '' HUP
+/bin/sh -c 'trap "printf terminated > child-result; exit 0" TERM; : > ready; sleep 8' &
+wait"#;
+        let config = crate::LocalPtyConfig {
+            cwd: Some(directory.path().to_owned()),
+            shell: Some(
+                crate::ShellInfo::new("test-sh", "Test", "/bin/sh")
+                    .with_args(vec!["-c".into(), script.into()]),
+            ),
+            load_profile: false,
+            ..Default::default()
+        };
+        let mut session = LocalPtySession::spawn_with_config_graphics_and_encoding(
+            80,
+            6,
+            config,
+            Default::default(),
+            Default::default(),
+            100,
+        )
+        .unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !directory.path().join("ready").exists() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("background shell did not install its signal handler");
+
+        let mut channel = session
+            .acquire_shell_channel()
+            .unwrap()
+            .await
+            .unwrap()
+            .unwrap();
+        let mut released = channel.release_receiver();
+        channel.write(b"start\n").await.unwrap();
+        channel.output.close();
+        drop(channel);
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            released.wait_for(|released| *released),
+        )
+        .await
+        .expect("failed IDE channel was not released")
+        .unwrap();
+
+        assert_eq!(
+            std::fs::read(directory.path().join("child-result")).unwrap(),
+            b"terminated"
+        );
+        session.drain_output();
+        assert_eq!(session.lifecycle(), TerminalLifecycle::Exited(None));
+        assert!(
+            session
+                .take_events()
+                .iter()
+                .any(|event| matches!(event, TerminalEvent::ProcessingFailed))
+        );
+    }
+
+    #[cfg(unix)]
     #[test]
     fn local_pty_exit_records_actual_child_code_without_input() {
         use oxideterm_audit::{AuditContext, AuditOutcome, AuditQuery, AuditService, AuditSource};

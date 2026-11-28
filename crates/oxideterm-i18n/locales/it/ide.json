@@ -44,6 +44,8 @@
     "search": "Cerca",
     "refresh": "Aggiorna",
     "searching": "Ricerca in corso...",
+    "find_file_by_name": "Cerca file per nome",
+    "file_search_partial": "Sono visualizzati solo i file delle cartelle esaminate",
     "search_placeholder": "Cerca nel contenuto dei file...",
     "search_hint": "Inserisci parole chiave per cercare",
     "no_results": "Nessun risultato trovato",

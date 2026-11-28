@@ -261,7 +261,7 @@ pub(super) fn bootstrap_script(token: &str, body: &str, pty: bool) -> String {
     format!(
         r#"oxide_tty=
 oxide_dir=
-trap 'oxide_result=$?; test -z "$oxide_dir" || rm -rf -- "$oxide_dir"; if test -z "$oxide_tty" || stty "$oxide_tty"; then printf "\\036%s:RESTORED\\037" "{token}"; fi; exit "$oxide_result"' EXIT
+trap 'oxide_result=$?; if [ -n "$oxide_dir" ]; then for ref in "$oxide_dir"/upload-*; do [ ! -L "$ref" ] || rm -f -- "$(readlink -- "$ref")"; done; rm -rf -- "$oxide_dir"; fi; if test -z "$oxide_tty" || stty "$oxide_tty"; then printf "\\036%s:RESTORED\\037" "{token}"; fi; exit "$oxide_result"' EXIT
 trap 'exit 1' HUP INT TERM
 {tty_setup}
 [ "$(uname -s)" = Linux ] || exit 1
@@ -504,7 +504,7 @@ finally:
                     arch: "x86_64".into(),
                     os: "linux".into(),
                     pid: 7,
-                    capabilities: vec!["file-bytes".into()],
+                    capabilities: vec!["file-bytes".into(), "single-file-transfer".into()],
                 },
             )),
         }));
@@ -535,6 +535,56 @@ finally:
         let file = read.await.unwrap().unwrap();
         assert_eq!(&*file.text, "container\n");
         assert_eq!(file.version.etag.as_deref(), Some("container-hash"));
+        let local = tempfile::tempdir().unwrap();
+        let destination = local.path().join("previous");
+        std::fs::write(&destination, b"previous contents").unwrap();
+        let (_cancel, cancel) = watch::channel(false);
+        let (progress, _) = watch::channel((0, 0));
+        let download_fs = fs.clone();
+        let download_path = destination.clone();
+        let download = tokio::spawn(async move {
+            download_fs
+                .transfer_file(
+                    IdeLocation::remote("shell:container-root", "/archive"),
+                    download_path,
+                    crate::TransferDirection::Download,
+                    true,
+                    cancel,
+                    progress,
+                )
+                .await
+        });
+        for (offset, version, content) in [
+            (
+                0,
+                "original",
+                base64::engine::general_purpose::STANDARD.encode(vec![0u8; 32768]),
+            ),
+            (32768, "replaced", "AQ==".to_owned()),
+        ] {
+            let request: serde_json::Value =
+                serde_json::from_str(&requests.recv().await.unwrap()).unwrap();
+            assert_eq!(request["method"], "transfer/read");
+            assert_eq!(
+                request["params"],
+                serde_json::json!({"path":"/archive","offset":offset})
+            );
+            let response = pending
+                .lock()
+                .await
+                .remove(&request["id"].as_u64().unwrap())
+                .unwrap();
+            response
+                .send(Ok(
+                    serde_json::json!({"content":content,"size":32769,"version":version}),
+                ))
+                .unwrap();
+        }
+        assert_eq!(
+            download.await.unwrap().unwrap_err().message,
+            "Remote file changed during download"
+        );
+        assert_eq!(std::fs::read(&destination).unwrap(), b"previous contents");
         let binary_fs = fs.clone();
         let binary = tokio::spawn(async move {
             binary_fs

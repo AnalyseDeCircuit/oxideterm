@@ -1,5 +1,6 @@
 #[derive(Default)]
 struct DesktopSession {
+    transfer: Option<TreeTransfer>,
     access_request: Option<(String, String)>,
     backend_binding_abort: Option<tokio::task::AbortHandle>,
     agent_install_progress: Option<oxideterm_ide_fs::AgentInstallProgress>,

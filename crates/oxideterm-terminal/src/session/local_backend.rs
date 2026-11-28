@@ -15,6 +15,10 @@ impl TerminalSessionBackend for LocalPtySession {
         LocalPtySession::lifecycle(self)
     }
 
+    fn is_interactive(&self) -> bool {
+        self.lifecycle.is_running() && !self.shell_channel_owned()
+    }
+
     fn process_info(&self) -> TerminalProcessInfo {
         LocalPtySession::process_info(self)
     }
@@ -61,6 +65,14 @@ impl TerminalSessionBackend for LocalPtySession {
 
     fn take_events(&mut self) -> Vec<TerminalEvent> {
         LocalPtySession::take_events(self)
+    }
+
+    fn shell_channel_owned(&self) -> bool {
+        LocalPtySession::shell_channel_owned(self)
+    }
+
+    fn acquire_shell_channel(&mut self) -> Result<crate::ShellChannelAcquisition> {
+        LocalPtySession::acquire_shell_channel(self)
     }
 
     fn write_input(&mut self, bytes: &[u8]) -> Result<()> {

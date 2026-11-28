@@ -1,11 +1,61 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::ops::Range;
+use std::{borrow::Cow, ops::Range};
 
 use oxideterm_editor_core::Selection;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
+
+pub(super) const CONTROL_MARKER: &str = "�";
+
+pub(super) struct ControlMarker {
+    pub source: Range<usize>,
+    display_end: usize,
+}
+
+pub(super) struct DisplayedLine<'a> {
+    pub text: Cow<'a, str>,
+    pub controls: Vec<ControlMarker>,
+}
+
+impl<'a> DisplayedLine<'a> {
+    pub fn new(source: &'a str, highlight_controls: bool) -> Self {
+        let mut controls = Vec::new();
+        let mut text = None;
+        if highlight_controls {
+            let mut start = 0;
+            for (byte, ch) in source
+                .char_indices()
+                .filter(|(_, ch)| ch.is_control() && *ch != '\t')
+            {
+                let output = text.get_or_insert_with(|| String::with_capacity(source.len()));
+                output.push_str(&source[start..byte]);
+                output.push_str(CONTROL_MARKER);
+                start = byte + ch.len_utf8();
+                controls.push(ControlMarker {
+                    source: byte..start,
+                    display_end: output.len(),
+                });
+            }
+            if let Some(output) = &mut text {
+                output.push_str(&source[start..]);
+            }
+        }
+        Self {
+            text: text.map_or(Cow::Borrowed(source), Cow::Owned),
+            controls,
+        }
+    }
+
+    pub fn display_byte(&self, byte: usize) -> usize {
+        let n = self.controls.partition_point(|c| c.source.end <= byte);
+        match self.controls[..n].last() {
+            Some(marker) => marker.display_end + (byte - marker.source.end),
+            None => byte,
+        }
+    }
+}
 
 pub(super) fn floor_char_boundary(text: &str, byte: usize) -> usize {
     let mut byte = byte.min(text.len());

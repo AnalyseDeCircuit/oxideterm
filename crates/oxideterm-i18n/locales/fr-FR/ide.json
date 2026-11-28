@@ -44,6 +44,8 @@
     "search": "Rechercher",
     "refresh": "Actualiser",
     "searching": "Recherche...",
+    "find_file_by_name": "Rechercher un fichier par nom",
+    "file_search_partial": "Seuls les fichiers des dossiers parcourus sont affichés",
     "search_placeholder": "Rechercher dans les fichiers...",
     "search_hint": "Entrez des mots-clés pour rechercher",
     "no_results": "Aucun résultat trouvé",

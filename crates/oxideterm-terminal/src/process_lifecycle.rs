@@ -24,6 +24,36 @@ use windows::Win32::{
 #[cfg(unix)]
 const LOCAL_PTY_TERMINATE_GRACE: Duration = Duration::from_millis(350);
 
+pub(crate) struct LocalPtyProcessTree {
+    #[cfg(not(windows))]
+    root: parking_lot::Mutex<Option<u32>>,
+    #[cfg(windows)]
+    root: parking_lot::Mutex<Option<WindowsTerminalJob>>,
+}
+
+impl LocalPtyProcessTree {
+    pub(crate) fn new(shell_pid: Option<u32>) -> Self {
+        #[cfg(not(windows))]
+        let root = shell_pid;
+        #[cfg(windows)]
+        let root = WindowsTerminalJob::for_shell(shell_pid);
+        Self {
+            root: parking_lot::Mutex::new(root),
+        }
+    }
+
+    pub(crate) fn terminate(&self) {
+        // Pane shutdown and a failed IDE restoration can close the same PTY concurrently.
+        let mut root = self.root.lock();
+        #[cfg(not(windows))]
+        cleanup_local_pty_process_tree(root.take());
+        #[cfg(windows)]
+        if let Some(job) = root.take() {
+            job.terminate();
+        }
+    }
+}
+
 #[cfg(unix)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct UnixProcessEntry {

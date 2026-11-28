@@ -542,6 +542,7 @@ fn file_tree_entry(node_id: &NodeId, entry: FileInfo) -> FileTreeEntry {
     let version = version_from_remote(&entry);
     FileTreeEntry {
         location: IdeLocation::remote(node_id.0.clone(), entry.path.clone()),
+        is_symlink: entry.is_symlink,
         kind: match entry.file_type {
             FileType::File => FileKind::File,
             FileType::Directory => FileKind::Directory,
@@ -605,7 +606,7 @@ pub(crate) fn map_route_error(error: RouteError) -> IdeFileError {
     IdeFileError::new(kind, message)
 }
 
-fn map_sftp_error(error: SftpError) -> IdeFileError {
+pub(crate) fn map_sftp_error(error: SftpError) -> IdeFileError {
     let recoverable = error.is_channel_recoverable();
     let message = error.to_string();
     let kind = match &error {
@@ -628,7 +629,8 @@ fn map_sftp_error(error: SftpError) -> IdeFileError {
         }
         SftpError::SubsystemNotAvailable(_) => IdeFileErrorKind::Unsupported,
         SftpError::InvalidPath(_) => IdeFileErrorKind::NotFound,
-        SftpError::TransferCancelled | SftpError::TransferShutdown => IdeFileErrorKind::Other,
+        SftpError::TransferCancelled => IdeFileErrorKind::Cancelled,
+        SftpError::TransferShutdown => IdeFileErrorKind::Disconnected,
         SftpError::TransferInterrupted(_) => IdeFileErrorKind::Disconnected,
         SftpError::NotInitialized(_) => IdeFileErrorKind::Disconnected,
         SftpError::TransferError(_) | SftpError::WriteError(_) | SftpError::StorageError(_) => {

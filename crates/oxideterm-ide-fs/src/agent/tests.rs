@@ -34,8 +34,8 @@ mod tests {
     }
 
     #[test]
-    fn installed_agent_without_private_save_creation_requires_update() {
-        for compatibility_version in [4, 5] {
+    fn installed_agent_without_single_file_transfer_requires_update() {
+        for compatibility_version in [4, 5, 6] {
             assert_eq!(
                 parse_remote_version_output(&format!("oxideterm-agent 2.2.4 compat {compatibility_version}")),
                 RemoteAgentInstallState::Incompatible(RemoteAgentVersionInfo {
@@ -43,7 +43,10 @@ mod tests {
                 })
             );
         }
-        assert_eq!(parse_remote_version_output("oxideterm-agent 2.2.4 compat 6"), RemoteAgentInstallState::Current);
+        assert_eq!(
+            parse_remote_version_output("oxideterm-agent 2.2.4 compat 7"),
+            RemoteAgentInstallState::Current
+        );
     }
 
     #[test]
@@ -65,6 +68,7 @@ mod tests {
 
         let mapped = file_tree_entry_from_agent(&node_id, entry);
         assert_eq!(mapped.kind, FileKind::Directory);
+        assert!(mapped.is_symlink);
         assert_eq!(
             mapped.location,
             IdeLocation::remote("node-1", "/repo/current")

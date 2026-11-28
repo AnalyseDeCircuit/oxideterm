@@ -44,6 +44,8 @@
     "search": "検索",
     "refresh": "更新",
     "searching": "検索中...",
+    "find_file_by_name": "ファイル名で検索",
+    "file_search_partial": "検索済みのフォルダーにあるファイルのみ表示しています",
     "search_placeholder": "ファイル内容を検索...",
     "search_hint": "キーワードを入力して検索",
     "no_results": "結果が見つかりません",

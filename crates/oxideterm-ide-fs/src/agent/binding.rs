@@ -15,10 +15,14 @@ impl NodeAgentIdeFileSystem {
     /// The returned owner cannot resolve paths through the node's SFTP or exec channels.
     pub async fn from_shell_channel(
         &self,
-        channel: ShellChannel,
+        mut channel: ShellChannel,
         access: RemoteAccess,
         progress: Option<watch::Sender<AgentInstallProgress>>,
     ) -> Result<(Self, String), IdeFileError> {
+        channel
+            .verify_local_shell_environment()
+            .await
+            .map_err(|error| IdeFileError::new(IdeFileErrorKind::Unsupported, error.to_string()))?;
         let id = format!("shell:{}", channel.token);
         let audit = channel.audit_context();
         let session = Self::start_channel(IdeChannel::Terminal(channel), access, progress).await?;

@@ -85,6 +85,7 @@ impl IdeSurface {
     }
 
     fn remove_editor(&mut self, tab_id: EditorTabId) {
+        self.pending_search_queries.remove(&tab_id);
         self.editors.remove(&tab_id);
         self.markdown_previews.remove(&tab_id);
     }

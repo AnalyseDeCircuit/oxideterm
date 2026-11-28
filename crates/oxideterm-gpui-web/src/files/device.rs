@@ -247,6 +247,7 @@ impl DeviceFolder {
         Ok(entries
             .into_iter()
             .map(|e| FileTreeEntry {
+                is_symlink: false,
                 location: IdeLocation::remote(
                     node,
                     format!("{}/{}", path.trim_end_matches('/'), e.name),

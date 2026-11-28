@@ -902,6 +902,10 @@ pub(crate) struct TmuxController {
 }
 
 impl TmuxController {
+    pub(crate) fn is_active(&self) -> bool {
+        self.display.is_active()
+    }
+
     pub(crate) fn restart_transport(&mut self) {
         self.leave(&mut TmuxAdvance::new());
         self.stream = ControlStream::new();

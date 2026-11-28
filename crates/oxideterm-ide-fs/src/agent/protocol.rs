@@ -6,6 +6,14 @@ struct AgentRequest {
     params: serde_json::Value,
 }
 
+impl Drop for AgentRequest {
+    fn drop(&mut self) {
+        if let Some(serde_json::Value::String(content)) = self.params.get_mut("content") {
+            zeroize::Zeroize::zeroize(content);
+        }
+    }
+}
+
 #[derive(Deserialize)]
 struct AgentResponse {
     id: u64,

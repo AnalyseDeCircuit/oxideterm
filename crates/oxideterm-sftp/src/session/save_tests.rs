@@ -8,12 +8,30 @@ use std::sync::Mutex;
 #[derive(Default)]
 struct Files {
     bytes: HashMap<String, Vec<u8>>,
+    attributes: HashMap<String, (u32, u32, u32)>,
+    deny_chown: bool,
     atomic: bool,
     reject_install: bool,
     reject_restore: bool,
     change_during_upload: bool,
+    directory_race: bool,
+    deny_truncate: bool,
     replacements: usize,
     removed: Vec<String>,
+}
+
+impl Files {
+    fn move_attributes(&mut self, source: &str, target: &str) {
+        self.attributes.remove(target);
+        if let Some(attrs) = self.attributes.remove(source) {
+            self.attributes.insert(target.to_owned(), attrs);
+        }
+    }
+
+    fn is_directory(&self, path: &str) -> bool {
+        let prefix = format!("{path}/");
+        self.bytes.keys().any(|entry| entry.starts_with(&prefix))
+    }
 }
 
 struct Server {
@@ -53,13 +71,28 @@ impl Handler for Server {
     }
     async fn stat(&mut self, id: u32, path: String) -> Result<Attrs, StatusCode> {
         let state = self.files.lock().unwrap();
-        let data = state.bytes.get(&path).ok_or(StatusCode::NoSuchFile)?;
+        let (size, (uid, gid, permissions)) = if let Some(data) = state.bytes.get(&path) {
+            (
+                data.len() as u64,
+                state
+                    .attributes
+                    .get(&path)
+                    .copied()
+                    .unwrap_or((1000, 1000, 0o100600)),
+            )
+        } else if state.is_directory(&path) {
+            (0, (1000, 1000, 0o040700))
+        } else {
+            return Err(StatusCode::NoSuchFile);
+        };
         Ok(Attrs {
             id,
             attrs: FileAttributes {
-                size: Some(data.len() as u64),
+                size: Some(size),
                 mtime: Some(1),
-                permissions: Some(0o100600),
+                uid: Some(uid),
+                gid: Some(gid),
+                permissions: Some(permissions),
                 ..Default::default()
             },
         })
@@ -75,13 +108,22 @@ impl Handler for Server {
         _: FileAttributes,
     ) -> Result<Handle, StatusCode> {
         let mut state = self.files.lock().unwrap();
+        if path.rsplit('/').next().unwrap().len() > 255 {
+            return Err(StatusCode::Failure);
+        }
+        if state.deny_truncate
+            && flags.contains(OpenFlags::TRUNCATE)
+            && state.bytes.contains_key(&path)
+        {
+            return Err(StatusCode::PermissionDenied);
+        }
         if flags.contains(OpenFlags::CREATE) {
             if flags.contains(OpenFlags::EXCLUDE) && state.bytes.contains_key(&path) {
                 return Err(StatusCode::Failure);
             }
             state.bytes.entry(path.clone()).or_default();
         }
-        if !state.bytes.contains_key(&path) {
+        if !state.bytes.contains_key(&path) && !state.is_directory(&path) {
             return Err(StatusCode::NoSuchFile);
         }
         Ok(Handle { id, handle: path })
@@ -130,14 +172,29 @@ impl Handler for Server {
     async fn setstat(
         &mut self,
         id: u32,
-        _: String,
-        _: FileAttributes,
+        path: String,
+        attrs: FileAttributes,
     ) -> Result<Status, StatusCode> {
+        let mut state = self.files.lock().unwrap();
+        if state.deny_chown && attrs.uid.is_some() {
+            return Err(StatusCode::PermissionDenied);
+        }
+        let entry = state
+            .attributes
+            .entry(path)
+            .or_insert((1000, 1000, 0o100600));
+        if let Some((uid, gid)) = attrs.uid.zip(attrs.gid) {
+            *entry = (uid, gid, entry.2 & !0o6000);
+        }
+        if let Some(mode) = attrs.permissions {
+            entry.2 = 0o100000 | (mode & 0o7777);
+        }
         Ok(ok(id))
     }
     async fn remove(&mut self, id: u32, path: String) -> Result<Status, StatusCode> {
         let mut state = self.files.lock().unwrap();
         state.bytes.remove(&path).ok_or(StatusCode::NoSuchFile)?;
+        state.attributes.remove(&path);
         state.removed.push(path);
         Ok(ok(id))
     }
@@ -148,16 +205,45 @@ impl Handler for Server {
         target: String,
     ) -> Result<Status, StatusCode> {
         let mut state = self.files.lock().unwrap();
+        if target.rsplit('/').next().unwrap().len() > 255 {
+            return Err(StatusCode::Failure);
+        }
         if (state.reject_install && source.ends_with(".tmp"))
             || (state.reject_restore && source.ends_with(".bak"))
         {
             return Err(StatusCode::Failure);
         }
-        if state.bytes.contains_key(&target) {
+        if state.bytes.contains_key(&target) || state.is_directory(&target) {
             return Err(StatusCode::Failure);
         }
-        let bytes = state.bytes.remove(&source).ok_or(StatusCode::NoSuchFile)?;
-        state.bytes.insert(target, bytes);
+        if state.directory_race && source == "/file.txt" {
+            state.directory_race = false;
+            state.bytes.remove(&source);
+            state
+                .bytes
+                .insert(format!("{source}/child"), b"keep this file".to_vec());
+        }
+        if let Some(bytes) = state.bytes.remove(&source) {
+            state.move_attributes(&source, &target);
+            state.bytes.insert(target, bytes);
+        } else {
+            let prefix = format!("{source}/");
+            let children: Vec<_> = state
+                .bytes
+                .keys()
+                .filter(|path| path.starts_with(&prefix))
+                .cloned()
+                .collect();
+            if children.is_empty() {
+                return Err(StatusCode::NoSuchFile);
+            }
+            for child in children {
+                let bytes = state.bytes.remove(&child).unwrap();
+                state
+                    .bytes
+                    .insert(format!("{target}/{}", &child[prefix.len()..]), bytes);
+            }
+        }
         Ok(ok(id))
     }
     async fn extended(
@@ -176,6 +262,7 @@ impl Handler for Server {
             .bytes
             .remove(&paths.oldpath)
             .ok_or(StatusCode::NoSuchFile)?;
+        state.move_attributes(&paths.oldpath, &paths.newpath);
         state.bytes.insert(paths.newpath, bytes);
         state.replacements += 1;
         Ok(ok(id).into())
@@ -236,6 +323,113 @@ async fn session(files: Files) -> (SftpSession, Arc<Mutex<Files>>) {
         cwd: "/".into(),
     };
     (session, files)
+}
+
+#[tokio::test]
+async fn staged_file_transfer_preserves_binary_data_and_existing_destinations() {
+    let local = tempfile::tempdir().unwrap();
+    let source = local.path().join("源.bin");
+    let bytes = [0, 255, 13, 10, 1];
+    std::fs::write(&source, bytes).unwrap();
+    let remote = format!("/{}", "x".repeat(255));
+    let attrs = (1234, 2345, 0o102750);
+    for atomic in [true, false] {
+        let (sftp, state) = session(Files {
+            atomic,
+            deny_truncate: true,
+            bytes: HashMap::from([(remote.clone(), b"old".to_vec())]),
+            attributes: HashMap::from([(remote.clone(), attrs)]),
+            deny_chown: true,
+            ..Default::default()
+        })
+        .await;
+        let (tx, _rx) = tokio::sync::mpsc::channel(32);
+        let manager = Arc::new(SftpTransferManager::new());
+        let send = |overwrite| {
+            sftp.upload_staged_file(
+                source.to_str().unwrap(),
+                &remote,
+                "task",
+                overwrite,
+                tx.clone(),
+                manager.clone(),
+            )
+        };
+        assert!(matches!(send(false).await, Err(SftpError::Conflict(path)) if path == remote));
+        assert!(send(true).await.is_err());
+        assert_eq!(
+            state.lock().unwrap().bytes,
+            HashMap::from([(remote.clone(), b"old".to_vec())])
+        );
+        state.lock().unwrap().deny_chown = false;
+        send(true).await.unwrap();
+        assert_eq!(
+            state.lock().unwrap().bytes,
+            HashMap::from([(remote.clone(), bytes.to_vec())])
+        );
+        assert_eq!(state.lock().unwrap().attributes[&remote], attrs);
+        let download = local.path().join(format!("download-{atomic}"));
+        sftp.download_into_staging(&remote, download.to_str().unwrap(), "get", None, None)
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(download).unwrap(), bytes);
+        let new_remote = format!("/{}", "y".repeat(220));
+        sftp.upload_staged_file(
+            source.to_str().unwrap(),
+            &new_remote,
+            "create",
+            false,
+            tx.clone(),
+            manager.clone(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            state.lock().unwrap().bytes,
+            HashMap::from([
+                (remote.clone(), bytes.to_vec()),
+                (new_remote, bytes.to_vec()),
+            ])
+        );
+    }
+}
+
+#[tokio::test]
+async fn staged_file_transfer_restores_a_directory_that_appears_during_v3_replacement() {
+    let local = tempfile::tempdir().unwrap();
+    let source = local.path().join("upload");
+    std::fs::write(&source, b"incoming file").unwrap();
+    let (sftp, state) = session(Files {
+        bytes: HashMap::from([("/file.txt".into(), b"original".to_vec())]),
+        directory_race: true,
+        ..Default::default()
+    })
+    .await;
+    let (tx, _rx) = tokio::sync::mpsc::channel(8);
+    let error = sftp
+        .upload_staged_file(
+            source.to_str().unwrap(),
+            "/file.txt",
+            "task",
+            true,
+            tx,
+            Arc::new(SftpTransferManager::new()),
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(error, SftpError::Conflict(path) if path == "/file.txt"));
+    assert_eq!(
+        state.lock().unwrap().bytes,
+        HashMap::from([("/file.txt/child".into(), b"keep this file".to_vec())])
+    );
+
+    let download = local.path().join("download");
+    let error = sftp
+        .download_into_staging("/file.txt", download.to_str().unwrap(), "get", None, None)
+        .await
+        .unwrap_err();
+    assert!(matches!(error, SftpError::InvalidPath(path) if path == "/file.txt"));
+    assert!(!download.exists());
 }
 
 #[tokio::test]

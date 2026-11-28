@@ -645,7 +645,7 @@
       "sftp": "SFTP",
       "convert": "In IDE umwandeln",
       "return": "Zurück zum Terminal",
-      "confirm": "Bestätigen Sie eine Shell-Eingabeaufforderung ohne ausstehende Eingabe. Befehle oder Agent verwenden den aktuellen Benutzer, Container und Ordner. Die Terminaleingabe pausiert bis zur Rückkehr aus der IDE.",
+      "confirm": "Nur Linux-Shells werden unterstützt. Fahren Sie an einer leeren Eingabeaufforderung fort.",
       "failed": "Dateizugriff konnte nicht gestartet werden. Prüfen Sie Shell und Umgebung. Verbinden Sie das Terminal erneut, falls es nicht wiederhergestellt wurde.",
       "preparing": "IDE-Dateidienst wird gestartet; Terminaleingaben sind pausiert…",
       "ssh": "SSH",

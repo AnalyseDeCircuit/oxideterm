@@ -34,7 +34,8 @@ tokio.workspace = true
 tracing.workspace = true
 zstd = "0.13"
 
-[dev-dependencies]
 tempfile = "3.23"
+
+[dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
 rand10.workspace = true

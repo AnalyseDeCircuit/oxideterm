@@ -40,6 +40,8 @@ use oxideterm_terminal_graphics::{
     GraphicsIngress, GraphicsOptions, TerminalGraphicsEvent, TerminalGraphicsSegment,
 };
 use polling::{Event as PollingEvent, Events, PollMode, Poller};
+use tokio::sync::oneshot;
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::{
     LocalProtocolReplies, TerminalEvent, TerminalOutputProcessor, TerminalPalette, TerminalSize,
@@ -63,6 +65,13 @@ const PTY_CHILD_EVENT_TOKEN: usize = 1;
 pub(crate) enum LocalGraphicsMsg {
     Input(Cow<'static, [u8]>),
     ControlInput(Cow<'static, [u8]>, Option<crate::tmux::ExternalReply>),
+    AcquireShell(Box<LocalShellAcquisition>),
+    ShellInput {
+        token: String,
+        bytes: Zeroizing<Vec<u8>>,
+        written: oneshot::Sender<()>,
+    },
+    CloseShell(String),
     Shutdown,
     Resize(WindowSize, Option<(u64, Arc<std::sync::atomic::AtomicU64>)>),
     SetEncoding(TerminalEncoding),
@@ -76,6 +85,12 @@ pub(crate) enum LocalGraphicsMsg {
     },
     FinishModemTransfer,
     InterruptModemTransfer,
+}
+
+pub(crate) struct LocalShellAcquisition {
+    pub(crate) channel: crate::ShellChannel,
+    pub(crate) sink: crate::shell_channel::ShellChannelSink,
+    pub(crate) reply: oneshot::Sender<anyhow::Result<crate::ShellChannel>>,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -95,6 +110,7 @@ pub(crate) struct LocalGraphicsEventLoop<U: EventListener> {
     #[cfg(target_os = "macos")]
     read_ahead: read_ahead::PtyReadAhead,
     pty: tty::Pty,
+    process_tree: Arc<crate::LocalPtyProcessTree>,
     rx: PeekableReceiver<LocalGraphicsMsg>,
     tx: Sender<LocalGraphicsMsg>,
     terminal: Arc<FairMutex<Term<U>>>,
@@ -122,6 +138,7 @@ where
         event_proxy: U,
         protocol_rx: crossbeam_channel::Receiver<Event>,
         pty: tty::Pty,
+        process_tree: Arc<crate::LocalPtyProcessTree>,
         drain_on_exit: bool,
         graphics_tx: CrossbeamSender<TerminalGraphicsEvent>,
         magic_tx: CrossbeamSender<TerminalMagicKind>,
@@ -142,6 +159,7 @@ where
             #[cfg(target_os = "macos")]
             read_ahead,
             pty,
+            process_tree,
             rx: PeekableReceiver::new(rx),
             tx,
             terminal,
@@ -320,6 +338,27 @@ where
         bytes: &[u8],
         lock_wait: &mut Duration,
     ) -> (usize, bool) {
+        // Intercept raw PTY bytes before recording, terminal events and protocol parsers.
+        let visible;
+        let bytes = if let Some(sink) = state.shell_channel.as_mut() {
+            let was_active = sink.is_active();
+            visible = sink.feed(bytes);
+            if !sink.is_active() {
+                state.shell_channel.take();
+                if was_active {
+                    state
+                        .parser
+                        .advance(&mut *self.terminal.lock(), b"\r\x1b[2K");
+                    self.event_proxy.send_event(Event::Wakeup);
+                }
+            }
+            if visible.is_empty() {
+                return (0, false);
+            }
+            visible.as_slice()
+        } else {
+            bytes
+        };
         let events = state.modem_consumer.process_server_output(bytes);
         self.handle_modem_consumer_events(state, events, lock_wait)
     }
@@ -432,14 +471,70 @@ where
         }
     }
 
-    fn drain_recv_channel(&mut self, state: &mut LocalGraphicsState) -> bool {
+    fn drain_recv_channel(&mut self, state: &mut LocalGraphicsState, child_exited: bool) -> bool {
         while let Some(msg) = self.rx.recv() {
             match msg {
+                LocalGraphicsMsg::AcquireShell(request) => {
+                    let LocalShellAcquisition {
+                        channel,
+                        sink,
+                        reply,
+                    } = *request;
+                    self.queue_protocol_replies(state);
+                    let busy = state.shell_channel_active()
+                        || state.needs_write()
+                        || state.modem_consumer.active_transfer().is_some()
+                        || state
+                            .tmux_controller
+                            .as_ref()
+                            .is_some_and(crate::tmux::TmuxController::is_active)
+                        || self
+                            .terminal
+                            .lock()
+                            .mode()
+                            .contains(crate::TermMode::ALT_SCREEN);
+                    if busy {
+                        let _ = reply.send(Err(anyhow::anyhow!(
+                            "Terminal is busy or already owned by an IDE"
+                        )));
+                    } else {
+                        // The reader owns interception before the caller can send the bootstrap.
+                        state.shell_channel = Some(sink);
+                        let _ = reply.send(Ok(channel));
+                    }
+                }
+                LocalGraphicsMsg::ShellInput {
+                    token,
+                    mut bytes,
+                    written,
+                } => {
+                    if state.owns_shell_channel(&token) {
+                        let mut write = Writing::new(Cow::Owned(std::mem::take(&mut *bytes)));
+                        write.shell_completion = Some((token, written));
+                        state.write_list.push_back(write);
+                    }
+                }
+                LocalGraphicsMsg::CloseShell(token) => {
+                    if !child_exited && state.owns_shell_channel(&token) {
+                        if let Some(sink) = &state.recording_sink {
+                            sink.interrupt();
+                        }
+                        // Descendants must still be attached to the shell when it is terminated.
+                        self.process_tree.terminate();
+                        let _ = self.event_tx.send(TerminalEvent::ProcessingFailed);
+                        self.event_proxy.send_event(Event::Wakeup);
+                        return false;
+                    }
+                }
                 LocalGraphicsMsg::Input(input) => {
-                    state.write_list.push_back(Writing::new(input));
+                    if !state.shell_channel_active() {
+                        state.write_list.push_back(Writing::new(input));
+                    }
                 }
                 LocalGraphicsMsg::ControlInput(input, reply) => {
-                    state.push_external_tmux_write(input, reply);
+                    if !state.shell_channel_active() {
+                        state.push_external_tmux_write(input, reply);
+                    }
                 }
                 LocalGraphicsMsg::Resize(mut window_size, mut completion) => {
                     // Only adjacent resizes can supersede one another; input and
@@ -517,7 +612,12 @@ where
                     request,
                     response_tx,
                 } => {
-                    let _ = response_tx.send(state.modem_consumer.start_manual_transfer(request));
+                    let transfer = if state.shell_channel_active() {
+                        None
+                    } else {
+                        state.modem_consumer.start_manual_transfer(request)
+                    };
+                    let _ = response_tx.send(transfer);
                 }
                 LocalGraphicsMsg::FinishModemTransfer => {
                     let trailing_output = state.modem_consumer.finish_transfer();
@@ -594,7 +694,12 @@ where
             graphics_changed |= changed;
 
             processed += parsed_bytes;
-            if !state.flush_recording() || processed >= LOCAL_MAX_LOCKED_PARSE_BYTES {
+            let budget_used = if state.shell_channel.is_some() {
+                raw_bytes
+            } else {
+                processed
+            };
+            if !state.flush_recording() || budget_used >= LOCAL_MAX_LOCKED_PARSE_BYTES {
                 budget_exhausted = true;
                 break;
             }
@@ -663,6 +768,10 @@ where
         if state.protocol.rx.is_empty() {
             return;
         }
+        if state.shell_channel_active() {
+            state.protocol.rx.try_iter().for_each(drop);
+            return;
+        }
         let replies = state.protocol.drain(&self.terminal.lock(), self.size);
         state.push_priority_writes(replies);
     }
@@ -672,6 +781,13 @@ where
         state.ensure_next();
 
         'write_many: while let Some(mut current) = state.take_current() {
+            if let Some((token, _)) = &current.shell_completion
+                && !state.owns_shell_channel(token)
+            {
+                // A restoration marker may arrive while a nonblocking write is still queued.
+                state.goto_next();
+                continue;
+            }
             'write_one: loop {
                 match self.pty.writer().write(current.remaining_bytes()) {
                     Ok(0) => {
@@ -828,7 +944,7 @@ where
                         // otherwise Linux leaves reads disabled after backpressure.
                     }
 
-                    if !self.drain_recv_channel(&mut state) {
+                    if !self.drain_recv_channel(&mut state, child_exited) {
                         break;
                     }
 
@@ -977,6 +1093,7 @@ struct Writing {
     written: usize,
     modem_completion: Option<(ModemTransfer, usize)>,
     tmux_reply: Option<TmuxWriteReply>,
+    shell_completion: Option<(String, oneshot::Sender<()>)>,
 }
 
 enum TmuxWriteReply {
@@ -1035,6 +1152,23 @@ pub(crate) struct LocalGraphicsEventLoopSender {
 }
 
 impl LocalGraphicsEventLoopSender {
+    pub(crate) async fn write_shell_input(&self, token: &str, bytes: &[u8]) -> anyhow::Result<()> {
+        let (written, complete) = oneshot::channel();
+        self.send(LocalGraphicsMsg::ShellInput {
+            token: token.to_owned(),
+            bytes: Zeroizing::new(bytes.to_vec()),
+            written,
+        })
+        .map_err(|_| anyhow::anyhow!("Local shell channel closed"))?;
+        complete
+            .await
+            .map_err(|_| anyhow::anyhow!("Local shell channel closed during write"))
+    }
+
+    pub(crate) fn close_shell_channel(&self, token: &str) {
+        let _ = self.send(LocalGraphicsMsg::CloseShell(token.to_owned()));
+    }
+
     pub(crate) fn send(&self, msg: LocalGraphicsMsg) -> Result<(), EventLoopSendError> {
         self.sender
             .send(msg)
@@ -1044,6 +1178,7 @@ impl LocalGraphicsEventLoopSender {
 }
 
 struct LocalGraphicsState {
+    shell_channel: Option<crate::shell_channel::ShellChannelSink>,
     protocol: LocalProtocolReplies,
     priority_writes: VecDeque<Writing>,
     write_list: VecDeque<Writing>,
@@ -1078,6 +1213,7 @@ impl LocalGraphicsState {
             .as_ref()
             .map(|sink| Rc::new(RefCell::new(RecordingOutput::new(sink.clone()))));
         Self {
+            shell_channel: None,
             protocol: LocalProtocolReplies {
                 rx: protocol_rx,
                 palette: TerminalPalette::default(),
@@ -1107,6 +1243,18 @@ impl LocalGraphicsState {
         self.recording_pending
             .as_ref()
             .is_none_or(|pending| pending.borrow_mut().flush())
+    }
+
+    fn shell_channel_active(&self) -> bool {
+        self.shell_channel
+            .as_ref()
+            .is_some_and(|sink| sink.is_active())
+    }
+
+    fn owns_shell_channel(&self, token: &str) -> bool {
+        self.shell_channel
+            .as_ref()
+            .is_some_and(|sink| sink.is_active() && sink.matches_token(token))
     }
 
     fn set_encoding(&mut self, encoding: TerminalEncoding) {
@@ -1218,6 +1366,7 @@ impl Writing {
             written: 0,
             modem_completion: None,
             tmux_reply: None,
+            shell_completion: None,
         }
     }
 
@@ -1228,6 +1377,7 @@ impl Writing {
             written: 0,
             modem_completion: Some((transfer, byte_len)),
             tmux_reply: None,
+            shell_completion: None,
         }
     }
 
@@ -1250,6 +1400,14 @@ impl Writing {
 
 impl Drop for Writing {
     fn drop(&mut self) {
+        if let Some((_, written)) = self.shell_completion.take() {
+            if self.finished() {
+                let _ = written.send(());
+            }
+            if let Cow::Owned(bytes) = &mut self.source {
+                bytes.zeroize();
+            }
+        }
         let Some((transfer, byte_len)) = self.modem_completion.take() else {
             return;
         };

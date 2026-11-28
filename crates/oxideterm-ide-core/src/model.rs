@@ -131,6 +131,9 @@ impl Default for SavedFileVersion {
 pub struct FileTreeEntry {
     pub location: IdeLocation,
     pub kind: FileKind,
+    /// Directory links can be expanded interactively, but recursive discovery skips them.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub is_symlink: bool,
     pub name: String,
     pub version: SavedFileVersion,
 }

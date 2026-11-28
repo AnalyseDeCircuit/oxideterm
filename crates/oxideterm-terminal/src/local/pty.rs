@@ -2,6 +2,7 @@ pub struct LocalPtySession {
     pub(crate) audit: Option<oxideterm_audit::AuditContext>,
     term: Arc<FairMutex<Term<LocalEventListener>>>,
     notifier: LocalGraphicsNotifier,
+    shell_release: Option<tokio::sync::watch::Receiver<bool>>,
     event_rx: LocalEventReceiver,
     graphics_rx: Receiver<TerminalGraphicsEvent>,
     magic_rx: Receiver<TerminalMagicKind>,
@@ -18,8 +19,7 @@ pub struct LocalPtySession {
     launch_shell: crate::ShellInfo,
     shell_integration: Option<LocalShellIntegration>,
     shell_integration_launch_state: TerminalCwdIntegrationLaunchState,
-    #[cfg(windows)]
-    process_job: Option<WindowsTerminalJob>,
+    process_tree: Arc<LocalPtyProcessTree>,
     graphics: TerminalGraphicsState,
     encoding: TerminalEncoding,
     input_encoder: TerminalInputEncoder,
@@ -210,8 +210,7 @@ impl LocalPtySession {
         let shell_pid = windows_shell_pid(&pty);
         #[cfg(not(target_os = "windows"))]
         let shell_pid = Some(pty.child().id());
-        #[cfg(windows)]
-        let process_job = WindowsTerminalJob::for_shell(shell_pid);
+        let process_tree = Arc::new(LocalPtyProcessTree::new(shell_pid));
         #[cfg(not(target_os = "windows"))]
         let pty_master = pty.file().try_clone().ok();
         #[cfg(target_os = "windows")]
@@ -230,6 +229,7 @@ impl LocalPtySession {
             listener.clone(),
             protocol_rx,
             pty,
+            process_tree.clone(),
             true,
             graphics_tx,
             magic_tx,
@@ -257,6 +257,7 @@ impl LocalPtySession {
             audit,
             term,
             notifier,
+            shell_release: None,
             event_rx,
             graphics_rx,
             magic_rx,
@@ -273,8 +274,7 @@ impl LocalPtySession {
             launch_shell: shell,
             shell_integration: launch.integration,
             shell_integration_launch_state: launch.integration_state,
-            #[cfg(windows)]
-            process_job,
+            process_tree,
             graphics: crate::desktop_graphics_state(),
             encoding,
             input_encoder: TerminalInputEncoder::new(encoding),
@@ -346,6 +346,13 @@ impl LocalPtySession {
                 break;
             };
             report.events_drained += 1;
+            if matches!(event, TerminalEvent::ProcessingFailed) && self.lifecycle.is_running() {
+                self.audit_exit(oxideterm_audit::AuditOutcome::Failed, None);
+                self.lifecycle = TerminalLifecycle::Exited(None);
+                self.process.mark_exited();
+                self.shell_integration.take();
+                changed = true;
+            }
             self.pending_events.push(event);
         }
 
@@ -363,6 +370,32 @@ impl LocalPtySession {
 
     pub fn take_events(&mut self) -> Vec<TerminalEvent> {
         std::mem::take(&mut self.pending_events)
+    }
+
+    pub(crate) fn shell_channel_owned(&self) -> bool {
+        self.shell_release
+            .as_ref()
+            .is_some_and(|released| !*released.borrow())
+    }
+
+    pub(crate) fn acquire_shell_channel(&mut self) -> Result<crate::ShellChannelAcquisition> {
+        if !self.lifecycle.is_running() || self.shell_channel_owned() {
+            anyhow::bail!("Local terminal is closed or already owned by an IDE");
+        }
+        let (mut channel, sink) = crate::shell_channel::local_channel(self.notifier.0.clone());
+        channel.set_audit_context(self.audit.clone());
+        self.shell_release = Some(channel.release_receiver());
+        let (reply, acquisition) = tokio::sync::oneshot::channel();
+        let request = crate::local_graphics_event_loop::LocalShellAcquisition {
+            channel,
+            sink,
+            reply,
+        };
+        self.notifier
+            .0
+            .send(LocalGraphicsMsg::AcquireShell(Box::new(request)))
+            .map_err(|_| anyhow::anyhow!("Local terminal is closed"))?;
+        Ok(acquisition)
     }
 
     pub fn write_input(&mut self, bytes: &[u8]) -> Result<()> {
@@ -386,7 +419,7 @@ impl LocalPtySession {
     }
 
     fn write_transport_bytes(&mut self, bytes: &[u8]) -> Result<()> {
-        if self.lifecycle.is_running() && !bytes.is_empty() {
+        if self.lifecycle.is_running() && !self.shell_channel_owned() && !bytes.is_empty() {
             self.notifier.notify(Cow::Owned(bytes.to_vec()));
         }
         Ok(())
@@ -579,6 +612,9 @@ impl LocalPtySession {
     }
 
     fn signal_active_task(&mut self, signal: TerminalSignal) -> Result<()> {
+        if self.shell_channel_owned() {
+            anyhow::bail!("Terminal is owned by an IDE");
+        }
         self.refresh_process_info();
         let foreground_group = self.process.info.foreground_process_group_id;
         let shell_pid = self.process.info.shell_pid;
@@ -767,12 +803,7 @@ impl LocalPtySession {
 
         if self.lifecycle.is_running() {
             self.audit_exit(oxideterm_audit::AuditOutcome::Cancelled, None);
-            #[cfg(windows)]
-            if let Some(job) = &self.process_job {
-                job.terminate();
-            }
-            #[cfg(not(windows))]
-            cleanup_local_pty_process_tree(self.process.info.shell_pid);
+            self.process_tree.terminate();
         }
         // An exited child can still have a reader draining its recorded tail.
         let _ = self.notifier.0.send(LocalGraphicsMsg::Shutdown);

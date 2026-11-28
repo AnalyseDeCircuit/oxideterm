@@ -262,13 +262,20 @@ impl IdeSurface {
         } else {
             self.labels.pin_tab.as_str()
         };
+        let menu_labels = [
+            pin_label,
+            self.labels.close_tab.as_str(),
+            self.labels.close_other_tabs.as_str(),
+            self.labels.close_all_tabs.as_str(),
+        ];
         let menu_width = oxideterm_gpui_ui::estimate_menu_width(
             &self.tokens,
             IDE_TAB_CONTEXT_MENU_WIDTH,
             280.0,
             true,
-            [pin_label, self.labels.close_tab.as_str()],
+            menu_labels,
         );
+        let rows_height = IDE_TAB_CONTEXT_MENU_ITEM_HEIGHT * menu_labels.len() as f32;
         let viewport = window.viewport_size();
         let x = menu
             .x
@@ -276,7 +283,7 @@ impl IdeSurface {
             .max(8.0);
         let y = menu
             .y
-            .min(f32::from(viewport.height) - IDE_TAB_CONTEXT_MENU_ITEM_HEIGHT * 2.0 - 16.0)
+            .min(f32::from(viewport.height) - rows_height - 16.0)
             .max(8.0);
 
         let popup = context_menu_event_boundary(
@@ -285,11 +292,8 @@ impl IdeSurface {
                 .min_w_0()
                 .child(self.render_tab_context_menu_item(
                     "lucide/pin.svg",
-                    if pinned {
-                        self.labels.unpin_tab.clone()
-                    } else {
-                        self.labels.pin_tab.clone()
-                    },
+                    pin_label.to_owned(),
+                    false,
                     false,
                     cx.listener(move |this, _event, _window, cx| {
                         this.toggle_tab_pin(menu.tab_id, cx);
@@ -302,12 +306,33 @@ impl IdeSurface {
                     "lucide/x.svg",
                     self.labels.close_tab.clone(),
                     true,
+                    false,
                     cx.listener(move |this, _event, _window, cx| {
                         this.close_tab(menu.tab_id, cx);
                         this.tab_context_menu = None;
                         cx.stop_propagation();
                     }),
-                )),
+                ))
+                .children(
+                    [
+                        (&self.labels.close_other_tabs, Some(menu.tab_id)),
+                        (&self.labels.close_all_tabs, None),
+                    ]
+                    .into_iter()
+                    .map(|(label, keep)| {
+                        self.render_tab_context_menu_item(
+                            "lucide/x.svg",
+                            label.clone(),
+                            true,
+                            !self.can_close_file_tabs(keep),
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.tab_context_menu = None;
+                                this.close_file_tabs(keep, cx);
+                                cx.stop_propagation();
+                            }),
+                        )
+                    }),
+                ),
         )
         .into_any_element();
 
@@ -352,11 +377,12 @@ impl IdeSurface {
         icon: &'static str,
         label: String,
         danger: bool,
+        disabled: bool,
         listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
     ) -> AnyElement {
         context_menu_action(
-            context_menu_item_with_icon(&self.tokens, icon, label, danger, false).w_full(),
-            false,
+            context_menu_item_with_icon(&self.tokens, icon, label, danger, disabled).w_full(),
+            disabled,
             false,
             listener,
         )
@@ -398,6 +424,8 @@ impl IdeSurface {
             true,
             [
                 (self.labels.context_new_file.as_str(), None),
+                (self.labels.upload.as_str(), None),
+                (self.labels.download.as_str(), None),
                 (self.labels.context_new_folder.as_str(), None),
                 (self.labels.context_rename.as_str(), Some("F2")),
                 (self.labels.context_delete.as_str(), None),
@@ -419,6 +447,32 @@ impl IdeSurface {
         let remote_disabled = !self.remote_actions_ready();
         let multiple = self.workspace.file_tree().selection().len() > 1;
         let paste_disabled = remote_disabled || self.tree_clipboard.is_none();
+
+        #[cfg(not(target_family = "wasm"))]
+        let transfer_item = Some(self.render_tree_context_menu_item(
+            if menu.is_directory {
+                "lucide/upload.svg"
+            } else {
+                "lucide/download.svg"
+            },
+            if menu.is_directory {
+                self.labels.upload.clone()
+            } else {
+                self.labels.download.clone()
+            },
+            None,
+            false,
+            remote_disabled || self.desktop.transfer.is_some(),
+            cx.listener(|this, _, window, cx| {
+                if let Some(menu) = this.tree_context_menu.take() {
+                    this.pick_transfer_file(menu, window, cx);
+                }
+                cx.stop_propagation();
+                cx.notify();
+            }),
+        ));
+        #[cfg(target_family = "wasm")]
+        let transfer_item: Option<AnyElement> = None;
 
         let popup = context_menu_event_boundary(
             context_menu_content(&self.tokens)
@@ -471,6 +525,7 @@ impl IdeSurface {
                 }
             }),
         ))
+        .children(transfer_item)
         .child(self.render_tree_context_menu_divider())
         .child(self.render_tree_context_menu_item(
             "lucide/edit-3.svg",

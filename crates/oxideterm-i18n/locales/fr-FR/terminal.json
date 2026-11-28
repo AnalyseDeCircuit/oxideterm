@@ -645,7 +645,7 @@
       "sftp": "SFTP",
       "convert": "Convertir en IDE",
       "return": "Retour au terminal",
-      "confirm": "Confirmez que le terminal affiche une invite shell sans saisie en attente. Les commandes ou l’agent utilisent l’utilisateur, le conteneur et le dossier actuels. La saisie est suspendue jusqu’au retour depuis l’IDE.",
+      "confirm": "Seuls les shells Linux sont pris en charge. Continuez depuis une invite de commande vide.",
       "failed": "Impossible de démarrer l’accès aux fichiers. Vérifiez le shell et les prérequis. Reconnectez le terminal si sa restauration a échoué.",
       "preparing": "Démarrage du service de fichiers IDE ; la saisie du terminal est suspendue…",
       "ssh": "SSH",

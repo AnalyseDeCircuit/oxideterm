@@ -26,5 +26,7 @@ pub use agent::{
 pub use local::LocalIdeFileSystem;
 #[cfg(not(target_family = "wasm"))]
 pub use node_sftp::NodeSftpIdeFileSystem;
+#[cfg(not(target_family = "wasm"))]
+pub use oxideterm_sftp::TransferDirection;
 
 pub mod text;

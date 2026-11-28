@@ -2,6 +2,8 @@ use super::*;
 use oxideterm_ssh::{
     ConnectionTransportStatus, SshConfig, SshConnectionRegistry, SshTransportClient,
 };
+#[cfg(unix)]
+use oxideterm_terminal::{LocalPtyConfig, ShellInfo, TerminalEvent, TerminalSession};
 use russh::{ChannelId, server};
 use std::{collections::HashMap, process::Stdio, sync::atomic::AtomicUsize};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -24,13 +26,67 @@ struct UploadGate {
 
 struct Peer {
     home: PathBuf,
+    sftp_program: Option<&'static str>,
     upload_gate: Option<Arc<UploadGate>>,
     exec: bool,
+    interactive: bool,
     channels: HashMap<ChannelId, tokio::task::JoinHandle<()>>,
     processes: HashMap<ChannelId, Process>,
     sftp: Arc<AtomicUsize>,
 }
 impl Peer {
+    async fn listen(self) -> (u16, russh::keys::PublicKey, tokio::task::JoinHandle<()>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let key =
+            russh::keys::PrivateKey::random(&mut rand10::rng(), russh::keys::Algorithm::Ed25519)
+                .unwrap();
+        let public_key = key.public_key().clone();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let connection = server::run_stream(
+                Arc::new(server::Config {
+                    keys: vec![key],
+                    ..Default::default()
+                }),
+                stream,
+                self,
+            )
+            .await
+            .unwrap();
+            let _ = connection.await;
+        });
+        (port, public_key, server)
+    }
+
+    async fn connect(
+        self,
+    ) -> (
+        NodeAgentIdeFileSystem,
+        NodeId,
+        oxideterm_ssh::SshConnectionHandle,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let (port, key, server) = self.listen().await;
+        let fingerprint = key.fingerprint(russh::keys::HashAlg::Sha256).to_string();
+        let mut config = SshConfig::password("127.0.0.1", port, "fixture", "synthetic-password");
+        config.expected_host_key_fingerprint = Some(fingerprint);
+        config.trust_host_key = Some(false);
+        let registry = SshConnectionRegistry::default();
+        let node = NodeId::new("file-contract");
+        let router = NodeRouter::new(registry.clone());
+        router.upsert_node(node.clone(), config.clone());
+        let handle = SshTransportClient::new(config)
+            .connect_node_with_registry(registry, ConnectionConsumer::NodeRouter(node.0.clone()))
+            .await
+            .unwrap();
+        router
+            .bind_connection(&node, handle.connection_id().to_string())
+            .unwrap();
+        let base = NodeAgentIdeFileSystem::new(router, NodeAgentMode::Disabled);
+        (base, node, handle, server)
+    }
+
     fn start(&mut self, channel: ChannelId, session: &mut server::Session) {
         let mut command = if cfg!(target_os = "linux") {
             let mut command = tokio::process::Command::new("/bin/sh");
@@ -49,6 +105,41 @@ impl Peer {
             ]);
             command
         };
+        if self.interactive {
+            // OpenSSH drives a real Linux slave PTY so stty and echo have their usual semantics.
+            command.args([
+                "-ec",
+                r#"mkdir "$HOME/work tree"
+cd "$HOME/work tree"
+printf 'remote file\n' > note.txt
+export PS1='remote-fixture> '
+exec script -qefc '/bin/sh -i' /dev/null"#,
+            ]);
+        } else if !self.exec {
+            // Shell-only gateways can expose dd without GNU's byte-skip and status operands.
+            command.args([
+                "-ec",
+                r#"mkdir -p "$HOME/test-bin"
+cat > "$HOME/test-bin/dd" <<'SH'
+#!/bin/sh
+for arg do
+    case "$arg" in iflag=*|status=*) exit 1 ;; esac
+done
+exec /bin/dd "$@"
+SH
+chmod +x "$HOME/test-bin/dd"
+PATH="$HOME/test-bin:$PATH" exec /bin/sh"#,
+            ]);
+        }
+        self.start_process(channel, session, command);
+    }
+
+    fn start_process(
+        &mut self,
+        channel: ChannelId,
+        session: &mut server::Session,
+        mut command: tokio::process::Command,
+    ) {
         let mut child = command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -128,12 +219,34 @@ impl server::Handler for Peer {
     async fn subsystem_request(
         &mut self,
         channel: ChannelId,
-        _: &str,
+        name: &str,
         session: &mut server::Session,
     ) -> Result<(), Self::Error> {
         self.sftp.fetch_add(1, Ordering::SeqCst);
+        if let Some(program) = self.sftp_program.filter(|_| name == "sftp") {
+            session.channel_success(channel)?;
+            self.start_process(channel, session, tokio::process::Command::new(program));
+            return Ok(());
+        }
         session.channel_failure(channel)?;
         session.close(channel)
+    }
+    async fn pty_request(
+        &mut self,
+        channel: ChannelId,
+        _: &str,
+        _: u32,
+        _: u32,
+        _: u32,
+        _: u32,
+        _: &[(russh::Pty, u32)],
+        session: &mut server::Session,
+    ) -> Result<(), Self::Error> {
+        if self.interactive {
+            session.channel_success(channel)
+        } else {
+            session.channel_failure(channel)
+        }
     }
     async fn exec_request(
         &mut self,
@@ -198,6 +311,229 @@ impl server::Handler for Peer {
     }
 }
 
+#[cfg(unix)]
+async fn output_until(terminal: &mut TerminalSession, marker: &[u8]) -> Vec<u8> {
+    let activity = terminal.activity_receiver();
+    tokio::time::timeout(Duration::from_secs(15), async {
+        let mut bytes = Vec::new();
+        loop {
+            terminal.read_pending();
+            for event in terminal.take_events() {
+                if let TerminalEvent::Output(output) = event {
+                    bytes.extend(output);
+                }
+            }
+            if memchr::memmem::find(&bytes, marker).is_some() {
+                return bytes;
+            }
+            assert!(activity.notified().await);
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("waiting for {}", String::from_utf8_lossy(marker)))
+}
+
+#[cfg(unix)]
+fn local_test_terminal() -> TerminalSession {
+    let config = LocalPtyConfig {
+        shell: Some(ShellInfo::new("test-sh", "Shell", "/bin/sh")),
+        load_profile: false,
+        ..Default::default()
+    };
+    let mut terminal = TerminalSession::local_with_config_graphics_and_encoding(
+        100,
+        24,
+        config,
+        Default::default(),
+        oxideterm_terminal::TerminalEncoding::Utf8,
+        100,
+    )
+    .unwrap();
+    terminal.set_output_events_enabled(true);
+    terminal
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn local_pty_ide_returns_the_unsupported_shell_to_its_user() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let bin = tempfile::tempdir().unwrap();
+    let uname = bin.path().join("uname");
+    std::fs::write(&uname, "#!/bin/sh\nprintf 'Darwin\\n'\n").unwrap();
+    std::fs::set_permissions(&uname, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let mut terminal = local_test_terminal();
+    let prepare = format!(
+        "export PATH='{}':\"$PATH\"; shell_only=original; printf 'ready-%s\\n' \"$(uname -s)\"\r",
+        shell_single_quote(&bin.path().to_string_lossy()),
+    );
+    terminal.write_input(prepare.as_bytes()).unwrap();
+    output_until(&mut terminal, b"ready-Darwin").await;
+
+    let channel = terminal
+        .acquire_shell_channel()
+        .unwrap()
+        .await
+        .unwrap()
+        .unwrap();
+    let mut released = channel.release_receiver();
+    let fs =
+        NodeAgentIdeFileSystem::new(NodeRouter::new(Default::default()), NodeAgentMode::Disabled);
+    let error = fs
+        .from_shell_channel(channel, RemoteAccess::Commands, None)
+        .await
+        .err()
+        .expect("the active shell reports Darwin");
+    assert_eq!(error.kind, IdeFileErrorKind::Unsupported);
+    tokio::time::timeout(Duration::from_secs(5), released.wait_for(|done| *done))
+        .await
+        .unwrap()
+        .unwrap();
+    terminal
+        .write_input(b"printf 'resumed-%s\\n' \"$shell_only\"\r")
+        .unwrap();
+    output_until(&mut terminal, b"resumed-original").await;
+    terminal.shutdown();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "requires local Docker for a Linux shell behind loopback OpenSSH"
+)]
+async fn local_pty_ide_reads_and_restores_the_native_ssh_shell() {
+    let home = tempfile::tempdir().unwrap();
+    let peer = Peer {
+        home: home.path().to_owned(),
+        sftp_program: None,
+        upload_gate: None,
+        exec: false,
+        interactive: true,
+        channels: HashMap::new(),
+        processes: HashMap::new(),
+        sftp: Arc::new(AtomicUsize::new(0)),
+    };
+    let (port, key, server) = peer.listen().await;
+    let known_hosts = home.path().join("known_hosts");
+    std::fs::write(
+        &known_hosts,
+        format!("[127.0.0.1]:{port} {}\n", key.to_openssh().unwrap()),
+    )
+    .unwrap();
+    let mut terminal = local_test_terminal();
+    let login = format!(
+        "/usr/bin/ssh -tt -F /dev/null -oBatchMode=yes -oStrictHostKeyChecking=yes -oUserKnownHostsFile='{}' -p {port} fixture@127.0.0.1\r",
+        shell_single_quote(&known_hosts.to_string_lossy())
+    );
+    terminal.write_input(login.as_bytes()).unwrap();
+    output_until(&mut terminal, b"remote-fixture> ").await;
+    terminal
+        .write_input(b"shell_only=retained; printf 'prepared-%s\\n' yes\r")
+        .unwrap();
+    output_until(&mut terminal, b"prepared-yes").await;
+
+    let channel = terminal
+        .acquire_shell_channel()
+        .unwrap()
+        .await
+        .unwrap()
+        .unwrap();
+    let token = channel.token.clone();
+    let mut released = channel.release_receiver();
+    let base =
+        NodeAgentIdeFileSystem::new(NodeRouter::new(Default::default()), NodeAgentMode::Disabled);
+    let (fs, cwd) = base
+        .from_shell_channel(channel, RemoteAccess::Commands, None)
+        .await
+        .unwrap();
+    let remote_home = if cfg!(target_os = "linux") {
+        home.path()
+    } else {
+        std::path::Path::new("/root")
+    };
+    assert_eq!(std::path::Path::new(&cwd), remote_home.join("work tree"));
+    let node = fs.terminal_session_id().unwrap();
+    let file = IdeLocation::remote(node, format!("{cwd}/note.txt"));
+    // If ordinary input reaches the PTY, this line shuts down the live file service.
+    terminal.write_input(b"!quit\n").unwrap();
+    let data = fs.read_file(&file, None).await.unwrap();
+    assert_eq!(data.text.as_str(), "remote file\n");
+    fs.write_file(
+        &file,
+        &"edited".into(),
+        &data.format,
+        Some(&data.version),
+        WriteMode::AtomicReplace,
+    )
+    .await
+    .unwrap();
+
+    fs.release_ide_session_for_node(node);
+    tokio::time::timeout(Duration::from_secs(10), released.wait_for(|done| *done))
+        .await
+        .unwrap()
+        .unwrap();
+    terminal
+        .write_input(b"printf '%s:%s\\n' \"$shell_only\" \"$(cat note.txt)\"\r")
+        .unwrap();
+    let output = output_until(&mut terminal, b"retained:edited").await;
+    assert!(
+        memchr::memmem::find(&output, token.as_bytes()).is_none(),
+        "IDE protocol reached terminal recording"
+    );
+    terminal.shutdown();
+    server.abort();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "requires a local OpenSSH sftp-server executable"
+)]
+async fn sftp_search_skips_directory_links_and_binary_text_files() {
+    let home = tempfile::tempdir().unwrap();
+    let root = home.path().canonicalize().unwrap();
+    let git = root.join(".git");
+    std::fs::create_dir(&git).unwrap();
+    std::fs::write(git.join("private.txt"), "needle").unwrap();
+    std::os::unix::fs::symlink(&git, root.join("linked")).unwrap();
+    std::fs::write(root.join("binary.txt"), b"needle\0bytes").unwrap();
+    let visible = root.join("visible.txt");
+    std::fs::write(&visible, "first\nneedle").unwrap();
+    let program = ["/usr/libexec/sftp-server", "/usr/lib/openssh/sftp-server"]
+        .into_iter()
+        .find(|path| std::path::Path::new(path).is_file())
+        .expect("OpenSSH sftp-server required");
+    let peer = Peer {
+        home: root.clone(),
+        sftp_program: Some(program),
+        upload_gate: None,
+        exec: false,
+        interactive: false,
+        channels: HashMap::new(),
+        processes: HashMap::new(),
+        sftp: Arc::new(AtomicUsize::new(0)),
+    };
+    let (base, node, _handle, server) = peer.connect().await;
+    let fs = base
+        .bind_node(&node.0, RemoteAccess::Sftp, None)
+        .await
+        .unwrap();
+    let mut query =
+        IdeSearchQuery::tauri_literal_project_search("needle", root.to_str().unwrap(), 20, 0);
+    query.include_hidden = true;
+    let hits = fs.search_project(&node.0, query).await.unwrap();
+    let hits: Vec<_> = hits
+        .iter()
+        .map(|hit| (hit.path.as_str(), hit.line))
+        .collect();
+    assert_eq!(hits, [(visible.to_str().unwrap(), 2)]);
+    fs.release_ide_session_for_node(&node.0);
+    server.abort();
+}
+
 #[tokio::test]
 #[cfg_attr(
     not(target_os = "linux"),
@@ -213,61 +549,20 @@ async fn ssh_file_backends_work_without_sftp_through_exec_and_shell() {
             } else {
                 "/tmp"
             };
-            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-            let port = listener.local_addr().unwrap().port();
-            let key = russh::keys::PrivateKey::random(
-                &mut rand10::rng(),
-                russh::keys::Algorithm::Ed25519,
-            )
-            .unwrap();
-            let fingerprint = key
-                .public_key()
-                .fingerprint(russh::keys::HashAlg::Sha256)
-                .to_string();
             let sftp = Arc::new(AtomicUsize::new(0));
             let upload_gate =
                 (exec && access == RemoteAccess::Agent).then(|| Arc::new(UploadGate::default()));
             let peer = Peer {
                 home: home.path().to_path_buf(),
+                sftp_program: None,
                 upload_gate: upload_gate.clone(),
                 exec,
+                interactive: false,
                 channels: HashMap::new(),
                 sftp: sftp.clone(),
                 processes: HashMap::new(),
             };
-            let server = tokio::spawn(async move {
-                let (stream, _) = listener.accept().await.unwrap();
-                let connection = server::run_stream(
-                    Arc::new(server::Config {
-                        keys: vec![key],
-                        ..Default::default()
-                    }),
-                    stream,
-                    peer,
-                )
-                .await
-                .unwrap();
-                let _ = connection.await;
-            });
-            let mut config =
-                SshConfig::password("127.0.0.1", port, "fixture", "synthetic-password");
-            config.expected_host_key_fingerprint = Some(fingerprint);
-            config.trust_host_key = Some(false);
-            let registry = SshConnectionRegistry::default();
-            let node = NodeId::new("file-contract");
-            let router = NodeRouter::new(registry.clone());
-            router.upsert_node(node.clone(), config.clone());
-            let handle = SshTransportClient::new(config)
-                .connect_node_with_registry(
-                    registry,
-                    ConnectionConsumer::NodeRouter(node.0.clone()),
-                )
-                .await
-                .unwrap();
-            router
-                .bind_connection(&node, handle.connection_id().to_string())
-                .unwrap();
-            let base = NodeAgentIdeFileSystem::new(router, NodeAgentMode::Disabled);
+            let (base, node, handle, server) = peer.connect().await;
             let (progress_tx, progress_rx) = watch::channel(AgentInstallProgress::Checking);
             let startup_fs = base.clone();
             let startup_node = node.0.clone();
@@ -375,10 +670,83 @@ async fn ssh_file_backends_work_without_sftp_through_exec_and_shell() {
                 fs.read_file(&binary, None).await.unwrap_err().kind,
                 IdeFileErrorKind::Binary
             );
+            let local = tempfile::tempdir().unwrap();
+            let source = local.path().join("上传 binary");
+            let destination = local.path().join("download");
+            let mut bytes = vec![0xff; 32768];
+            bytes.extend([0, 1, 2]);
+            std::fs::write(&source, &bytes).unwrap();
+            let (_cancel, cancel) = watch::channel(false);
+            let (progress, _updates) = watch::channel((0, 0));
+            fs.transfer_file(
+                binary.clone(),
+                source,
+                crate::TransferDirection::Upload,
+                true,
+                cancel.clone(),
+                progress.clone(),
+            )
+            .await
+            .unwrap();
+            if exec {
+                let previous = b"previous private download";
+                std::fs::write(&destination, previous).unwrap();
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    std::fs::set_permissions(&destination, std::fs::Permissions::from_mode(0o600))
+                        .unwrap();
+                }
+                let (_cancelled_tx, cancelled) = watch::channel(true);
+                let cancelled_error = fs
+                    .transfer_file(
+                        IdeLocation::remote(
+                            node.0.clone(),
+                            format!("{remote_root}/missing-download"),
+                        ),
+                        destination.clone(),
+                        crate::TransferDirection::Download,
+                        true,
+                        cancelled,
+                        progress.clone(),
+                    )
+                    .await
+                    .unwrap_err();
+                assert_eq!(cancelled_error.kind, IdeFileErrorKind::Cancelled);
+                assert_eq!(std::fs::read(&destination).unwrap(), previous);
+            }
+            fs.transfer_file(
+                binary.clone(),
+                destination.clone(),
+                crate::TransferDirection::Download,
+                exec,
+                cancel,
+                progress,
+            )
+            .await
+            .unwrap();
+            assert_eq!(std::fs::read(&destination).unwrap(), bytes);
+            #[cfg(unix)]
+            if exec {
+                use std::os::unix::fs::PermissionsExt;
+                assert_eq!(
+                    std::fs::metadata(&destination)
+                        .unwrap()
+                        .permissions()
+                        .mode()
+                        & 0o777,
+                    0o600
+                );
+            }
             fs.delete_item(node.0.clone(), &binary_path, false)
                 .await
                 .unwrap();
-            let unicode_path = format!("{remote_root}/ide-unicode-contract");
+            let project = format!("{remote_root}/ide-filenames");
+            fs.create_folder(&node.0, &project).await.unwrap();
+            fs.create_folder(&node.0, format!("{project}/src"))
+                .await
+                .unwrap();
+            let unicode_path = format!("{project}/src/示例.py");
             let unicode = IdeLocation::remote(node.0.clone(), &unicode_path);
             let format = oxideterm_ide_core::TextFileFormat {
                 encoding: "UTF-16LE".into(),
@@ -394,8 +762,15 @@ async fn ssh_file_backends_work_without_sftp_through_exec_and_shell() {
             )
             .await
             .unwrap();
+            let mut index =
+                oxideterm_ide_core::ProjectFileIndex::new(IdeLocation::remote(&node.0, &project));
+            while let Some(directory) = index.next_directory() {
+                index.add_entries(fs.list_dir(&directory).await.unwrap());
+            }
+            let hits = index.matches("示例", 10);
+            assert_eq!(hits, [unicode], "exec={exec} access={access:?}");
             assert_eq!(
-                fs.read_file(&unicode, Some("UTF-16LE"))
+                fs.read_file(&hits[0], Some("UTF-16LE"))
                     .await
                     .unwrap()
                     .text

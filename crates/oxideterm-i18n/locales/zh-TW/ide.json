@@ -44,6 +44,8 @@
     "search": "搜尋",
     "refresh": "重新整理",
     "searching": "正在搜尋...",
+    "find_file_by_name": "依名稱搜尋檔案",
+    "file_search_partial": "僅顯示已掃描資料夾中的檔案",
     "search_placeholder": "搜尋檔案內容...",
     "search_hint": "輸入關鍵字進行搜尋",
     "no_results": "無搜尋結果",

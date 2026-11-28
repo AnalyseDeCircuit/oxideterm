@@ -44,6 +44,8 @@
     "search": "搜索",
     "refresh": "刷新",
     "searching": "正在搜索...",
+    "find_file_by_name": "按名称查找文件",
+    "file_search_partial": "仅显示已扫描目录中的文件",
     "search_placeholder": "搜索文件内容...",
     "search_hint": "输入关键词开始搜索",
     "no_results": "无搜索结果",

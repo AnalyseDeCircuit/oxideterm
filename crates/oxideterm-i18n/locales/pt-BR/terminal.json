@@ -645,7 +645,7 @@
       "sftp": "SFTP",
       "convert": "Converter em IDE",
       "return": "Voltar ao terminal",
-      "confirm": "Confirme que o terminal esteja no prompt sem entrada pendente. Comandos ou agente usam o usuário, contêiner e diretório atuais. A entrada fica pausada até voltar do IDE.",
+      "confirm": "Somente shells Linux são compatíveis. Continue com a linha de comando vazia.",
       "failed": "Não foi possível iniciar o acesso aos arquivos. Verifique o shell e os requisitos do ambiente. Reconecte o terminal se ele não foi restaurado.",
       "preparing": "Iniciando o serviço de arquivos do IDE; a entrada do terminal está pausada…",
       "ssh": "SSH",

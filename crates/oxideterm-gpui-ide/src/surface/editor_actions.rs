@@ -196,6 +196,12 @@ impl IdeSurface {
     }
 
     pub fn copy_active_editor_selection(&mut self, cx: &mut Context<Self>) -> bool {
+        if let Some(picker) = &self.quick_open {
+            picker
+                .input
+                .update(cx, |input, cx| input.copy_selection_to_clipboard(cx));
+            return true;
+        }
         if self.is_markdown_preview() {
             self.copy_markdown_selection(cx);
             return true;
@@ -209,6 +215,12 @@ impl IdeSurface {
     }
 
     pub fn cut_active_editor_selection(&mut self, cx: &mut Context<Self>) -> bool {
+        if let Some(picker) = &self.quick_open {
+            picker
+                .input
+                .update(cx, |input, cx| input.cut_selection_to_clipboard(cx));
+            return true;
+        }
         if self.is_markdown_preview() {
             return true;
         }
@@ -219,6 +231,12 @@ impl IdeSurface {
     }
 
     pub fn paste_into_active_editor(&mut self, cx: &mut Context<Self>) -> bool {
+        if let Some(picker) = &self.quick_open {
+            picker
+                .input
+                .update(cx, |input, cx| input.paste_from_clipboard(cx));
+            return true;
+        }
         if self.is_markdown_preview() {
             return true;
         }
@@ -232,6 +250,10 @@ impl IdeSurface {
     }
 
     pub fn select_all_in_active_editor(&mut self, cx: &mut Context<Self>) -> bool {
+        if let Some(picker) = &self.quick_open {
+            picker.input.update(cx, |input, cx| input.select_all(cx));
+            return true;
+        }
         if self.is_markdown_preview() {
             self.select_all_markdown(cx);
             return true;
@@ -246,6 +268,9 @@ impl IdeSurface {
     }
 
     pub fn open_active_editor_search(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.quick_open.is_some() {
+            return true;
+        }
         if let Some(tab_id) = self.workspace.active_tab() {
             self.show_markdown_source(tab_id, cx);
         }
@@ -256,7 +281,7 @@ impl IdeSurface {
     }
 
     pub fn select_next_active_editor_search_match(&mut self, cx: &mut Context<Self>) -> bool {
-        if self.is_markdown_preview() {
+        if self.quick_open.is_some() || self.is_markdown_preview() {
             return true;
         }
         let Some(editor) = self.active_editor() else {
@@ -267,7 +292,7 @@ impl IdeSurface {
     }
 
     pub fn select_previous_active_editor_search_match(&mut self, cx: &mut Context<Self>) -> bool {
-        if self.is_markdown_preview() {
+        if self.quick_open.is_some() || self.is_markdown_preview() {
             return true;
         }
         let Some(editor) = self.active_editor() else {
@@ -295,6 +320,8 @@ impl IdeSurface {
             return;
         }
 
+        self.reset_quick_open();
+        self.tab_close_batch = None;
         self.node_id = Some(node_id);
         self.root_path = Some(root_path);
         self.load_state = IdeLoadState::Ready;
@@ -404,6 +431,7 @@ impl IdeSurface {
         if !self.ensure_remote_actions_ready(cx) {
             return;
         }
+        self.reset_quick_open();
         self.search.open = true;
         self.search.error = None;
         let query_end = self.search.query.encode_utf16().count();
@@ -671,39 +699,35 @@ impl IdeSurface {
             return;
         };
         let path = resolve_search_match_path(&root_path, &hit.path);
-        self.pending_search_queries
-            .insert(path.clone(), (self.search.query.clone(), PendingEditorReveal { line: hit.line, column: hit.column }));
-        self.open_remote_file(
+        let Some(tab_id) = self.open_remote_file(
             IdeLocation::remote(node_id, path),
             Some(FileOrigin::User),
             cx,
-        );
+        ) else {
+            return;
+        };
+        if !self.file_open_errors.contains_key(&tab_id) {
+            let target = PendingEditorReveal {
+                line: hit.line,
+                column: hit.column,
+            };
+            self.pending_search_queries
+                .insert(tab_id, (self.search.query.clone(), target));
+            self.apply_pending_search_query(tab_id, cx);
+        }
     }
 
-    fn apply_pending_search_query_for_location(
-        &mut self,
-        location: &IdeLocation,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(path) = remote_path(location).map(ToOwned::to_owned) else {
+    fn apply_pending_search_query(&mut self, tab_id: EditorTabId, cx: &mut Context<Self>) {
+        let Some(editor) = self.editors.get(&tab_id).cloned() else {
             return;
         };
-        let Some((query, hit)) = self.pending_search_queries.remove(&path) else {
-            return;
-        };
-        let Some(tab_id) = self
-            .workspace
-            .tabs()
-            .iter()
-            .find(|tab| tab.location == *location)
-            .map(|tab| tab.id)
-        else {
+        let Some((query, hit)) = self.pending_search_queries.remove(&tab_id) else {
             return;
         };
         self.show_markdown_source(tab_id, cx);
-        if let Some(editor) = self.editors.get(&tab_id) {
-            editor.update(cx, |editor, cx| editor.show_project_match(query, hit.line, hit.column, cx));
-        }
+        editor.update(cx, |editor, cx| {
+            editor.show_project_match(query, hit.line, hit.column, cx)
+        });
     }
 
     fn apply_pending_editor_reveal_for_location(
@@ -793,28 +817,30 @@ impl IdeSurface {
         location: IdeLocation,
         source: Option<FileOrigin>,
         cx: &mut Context<Self>,
-    ) {
+    ) -> Option<EditorTabId> {
         if !self.ensure_remote_actions_ready(cx) {
-            return;
+            return None;
         }
-        if let Some(tab_id) = self
+        let existing = self
             .workspace
             .tabs()
             .iter()
             .find(|tab| tab.location == location)
-            .map(|tab| tab.id)
-        {
+            .map(|tab| tab.id);
+        if matches!(source, Some(FileOrigin::User)) {
+            self.autosave_before_switch(existing, cx);
+        }
+        if let Some(tab_id) = existing {
             let _ = self.workspace.set_active_tab(tab_id);
             self.sync_tab_render_caches(cx);
             self.apply_pending_reconnect_dirty_for_tab(tab_id, cx);
-            self.apply_pending_search_query_for_location(&location, cx);
             self.apply_pending_editor_reveal_for_location(&location, cx);
             cx.notify();
-            return;
+            return Some(tab_id);
         }
         let key = location.stable_key();
         if self.loading_paths.contains(&key) {
-            return;
+            return None;
         }
         let tab_id = match self.workspace.open_file(
             location.clone(),
@@ -826,7 +852,7 @@ impl IdeSurface {
             Err(error) => {
                 self.last_error = Some(error.to_string());
                 cx.notify();
-                return;
+                return None;
             }
         };
         self.loading_file_tabs.insert(tab_id);
@@ -862,6 +888,7 @@ impl IdeSurface {
             });
         })
         .detach();
+        Some(tab_id)
     }
 
     fn complete_file_open(
@@ -883,15 +910,25 @@ impl IdeSurface {
                 }
                 let dirty_text = remote_path(&result.location)
                     .and_then(|path| self.pending_restore_dirty_contents.remove(path));
-                let text: SharedText = result.text.into();
-                let _ = self.workspace.replace_buffer_text(tab_id, text.clone());
+                let text = if let Some(editor) = self.editors.get(&tab_id) {
+                    // A background upload can refresh an already focused editor.
+                    editor.update(cx, |editor, cx| {
+                        editor.replace_text_external(result.text, cx);
+                        editor.mark_saved_external(cx);
+                        editor.buffer().shared_text()
+                    })
+                } else {
+                    let text: SharedText = result.text.into();
+                    self.create_editor(tab_id, &result.location, text.clone(), cx);
+                    text
+                };
+                let _ = self.workspace.replace_buffer_text(tab_id, text);
                 let _ = self.workspace.set_file_format(tab_id, result.format);
                 let _ = self.workspace.mark_saved(tab_id, result.version);
-                self.create_editor(tab_id, &result.location, text, cx);
                 if let Some(dirty_text) = dirty_text {
                     self.apply_reconnect_dirty_text(tab_id, dirty_text, cx);
                 }
-                self.apply_pending_search_query_for_location(&result.location, cx);
+                self.apply_pending_search_query(tab_id, cx);
                 self.apply_pending_editor_reveal_for_location(&result.location, cx);
             }
             Err(error) => {
@@ -900,6 +937,8 @@ impl IdeSurface {
                     .buffer(tab_id)
                     .is_some_and(|current| current.location == location)
                 {
+                    self.editors.remove(&tab_id);
+                    self.pending_search_queries.remove(&tab_id);
                     self.file_open_errors.insert(tab_id, error);
                 }
             }
@@ -1030,26 +1069,28 @@ impl IdeSurface {
 
     fn activate_tab(&mut self, tab_id: EditorTabId, cx: &mut Context<Self>) {
         self.finish_markdown_selection();
-        let previous = self.workspace.active_tab();
-        if previous == Some(tab_id) {
+        if self.workspace.active_tab() == Some(tab_id) {
             return;
         }
-        // Tauri auto-saves the previously active dirty tab when activeTabId
-        // changes. Window-blur save-all still needs a GPUI focus-loss hook.
-        if self.runtime_settings.auto_save
-            && let Some(previous_tab_id) = previous
-            && self.is_tab_dirty(previous_tab_id, cx)
-        {
-            self.save_tab_with_source(previous_tab_id, FileOrigin::System, cx);
-        }
+        self.autosave_before_switch(Some(tab_id), cx);
         let _ = self.workspace.set_active_tab(tab_id);
         self.sync_tab_render_caches(cx);
         cx.notify();
     }
 
-    fn close_tab(&mut self, tab_id: EditorTabId, cx: &mut Context<Self>) {
+    fn autosave_before_switch(&mut self, next: Option<EditorTabId>, cx: &mut Context<Self>) {
+        if self.runtime_settings.auto_save
+            && let Some(previous_tab_id) = self.workspace.active_tab()
+            && Some(previous_tab_id) != next
+            && self.is_tab_dirty(previous_tab_id, cx)
+        {
+            self.save_tab_with_source(previous_tab_id, FileOrigin::System, cx);
+        }
+    }
+
+    fn close_tab(&mut self, tab_id: EditorTabId, cx: &mut Context<Self>) -> bool {
         self.sync_editor_to_workspace(tab_id, cx);
-        match self.workspace.request_close_tab(tab_id) {
+        let closed = match self.workspace.request_close_tab(tab_id) {
             Ok(None) => {
                 self.remove_editor(tab_id);
                 self.sync_tab_render_caches(cx);
@@ -1063,14 +1104,17 @@ impl IdeSurface {
                 {
                     self.conflict_state = None;
                 }
-                cx.notify();
+                true
             }
-            Ok(Some(_)) => cx.notify(),
+            Ok(Some(_)) => false,
             Err(error) => {
                 self.last_error = Some(error.to_string());
-                cx.notify();
+                self.tab_close_batch = None;
+                false
             }
-        }
+        };
+        cx.notify();
+        closed
     }
 
     fn request_delete_tree_item(
@@ -1166,6 +1210,7 @@ impl IdeSurface {
             entries.push(FileTreeEntry {
                 location,
                 name,
+                is_symlink: false,
                 kind: if is_directory {
                     FileKind::Directory
                 } else {
@@ -1799,7 +1844,7 @@ impl IdeSurface {
 
     fn resolve_dirty_close(&mut self, decision: DirtyCloseDecision, cx: &mut Context<Self>) {
         if decision == DirtyCloseDecision::Cancel {
-            self.shell_return_requested = false;
+            self.tab_close_batch = None;
         }
         let Some(request) = self.workspace.pending_close().cloned() else {
             return;
@@ -1827,7 +1872,7 @@ impl IdeSurface {
                 cx.notify();
             }
         }
-        self.advance_shell_return(cx);
+        self.advance_tab_close_batch(cx);
     }
 
     fn save_tab(&mut self, tab_id: EditorTabId, cx: &mut Context<Self>) {
@@ -1953,7 +1998,7 @@ impl IdeSurface {
                 if let Some(next) = this.complete_file_save(request, result, cx) {
                     this.dispatch_file_save(next, cx);
                 }
-                this.advance_shell_return(cx);
+                this.advance_tab_close_batch(cx);
                 cx.notify();
             });
         })
@@ -2257,7 +2302,7 @@ impl IdeSurface {
                         }
                     }
                 }
-                this.advance_shell_return(cx);
+                this.advance_tab_close_batch(cx);
                 cx.notify();
             });
         })
@@ -3124,6 +3169,198 @@ mod shared_text_tests {
     }
 
     #[gpui::test]
+    fn project_search_collapses_one_file_and_reopens_its_match(cx: &mut TestAppContext) {
+        let surface = ready_surface(cx);
+        let original = surface.update(cx, |surface, cx| {
+            let original = surface.workspace.active_tab().unwrap();
+            surface.editors.remove(&original);
+            surface.loading_file_tabs.insert(original);
+            let other = IdeLocation::remote("save-test", "/repo/src/text.txt");
+            surface
+                .workspace
+                .open_file(other.clone(), "original", SavedFileVersion::unknown())
+                .unwrap();
+            let tab = surface.workspace.active_tab().unwrap();
+            surface.create_editor(tab, &other, "original".into(), cx);
+
+            let query = IdeSearchQuery::tauri_literal_project_search(
+                "original",
+                "/repo",
+                IDE_SEARCH_MAX_RESULTS,
+                0,
+            );
+            let hits = [
+                ("/repo/text.txt", 1),
+                ("/repo/text.txt", 3),
+                ("/repo/src/text.txt", 1),
+            ]
+            .map(|(path, line)| IdeSearchMatch {
+                path: path.into(),
+                line,
+                column: 1,
+                preview: "original".into(),
+                match_start: 0,
+                match_end: 8,
+            });
+            surface.put_search_cache(query.cache_key(), group_search_matches(hits.into()), false);
+            surface.search.open = true;
+            surface.search.query = query.pattern;
+            surface.run_project_search(cx);
+            original
+        });
+        let (_, cx) = cx.add_window_view(|_, cx| IdeSurfaceFixture::new(surface.clone(), cx));
+        cx.simulate_resize(gpui::size(px(1000.0), px(650.0)));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let header = "ide-search-file-/repo/text.txt";
+        let first_hit = "ide-search-match-/repo/text.txt-1-1";
+        let other_hit = "ide-search-match-/repo/src/text.txt-1-1";
+        assert!(cx.debug_bounds(first_hit).is_some());
+        for expanded in [false, true] {
+            let point = cx.debug_bounds(header).unwrap().center();
+            cx.simulate_click(point, gpui::Modifiers::default());
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            assert_eq!(cx.debug_bounds(first_hit).is_some(), expanded);
+            assert!(cx.debug_bounds(other_hit).is_some());
+        }
+        let hit = cx
+            .debug_bounds("ide-search-match-/repo/text.txt-3-1")
+            .unwrap()
+            .center();
+        cx.simulate_click(hit, gpui::Modifiers::default());
+        surface.update(cx, |surface, cx| {
+            let location = surface.workspace.buffer(original).unwrap().location.clone();
+            surface.loading_file_tabs.remove(&original);
+            surface.complete_file_open(
+                original,
+                location.clone(),
+                Ok(FileOpenResult {
+                    format: Default::default(),
+                    location,
+                    text: "original\nother\noriginal".into(),
+                    version: SavedFileVersion::unknown(),
+                }),
+                cx,
+            );
+        });
+        cx.run_until_parked();
+        surface.read_with(cx, |surface, cx| {
+            assert_eq!(surface.workspace.active_tab(), Some(original));
+            let editor = surface.editors[&original].read(cx);
+            assert_eq!(editor.find_query(), "original");
+            assert_eq!(editor.active_find_position(), Some((2, 2)));
+        });
+    }
+
+    #[gpui::test]
+    fn quick_open_filters_files_and_reuses_the_selected_editor(cx: &mut TestAppContext) {
+        let surface = ready_surface(cx);
+        let (original, draft_tab, draft_editor) = surface.update(cx, |surface, cx| {
+            let original = surface.workspace.active_tab().unwrap();
+            surface.runtime_settings.auto_save = true;
+            surface.editors[&original].update(cx, |editor, cx| {
+                editor.replace_text_external("edited original", cx);
+                editor.select_all(cx);
+            });
+            // The backend resolved the user's relative project path to /repo.
+            surface.root_path = Some(".".into());
+            let entries: Vec<_> = ["包_分.py", "工具_分.py", "text.txt"]
+                .into_iter()
+                .map(|name| FileTreeEntry {
+                    location: IdeLocation::remote("save-test", format!("/repo/{name}")),
+                    name: name.to_string(),
+                    kind: FileKind::File,
+                    is_symlink: false,
+                    version: SavedFileVersion::unknown(),
+                })
+                .collect();
+            let target = entries[1].location.clone();
+            surface
+                .workspace
+                .set_tree_children(IdeLocation::remote("save-test", "/repo"), entries)
+                .unwrap();
+            surface
+                .workspace
+                .open_file(target.clone(), "saved", SavedFileVersion::unknown())
+                .unwrap();
+            let tab = surface.workspace.active_tab().unwrap();
+            surface.create_editor(tab, &target, "saved".into(), cx);
+            let editor = surface.editors[&tab].clone();
+            editor.update(cx, |editor, cx| editor.replace_text_external("draft", cx));
+            surface.workspace.set_active_tab(original).unwrap();
+            (original, tab, editor)
+        });
+        let (_, cx) = cx.add_window_view(|_, cx| IdeSurfaceFixture::new(surface.clone(), cx));
+        cx.simulate_resize(gpui::size(px(1000.0), px(650.0)));
+        let shortcut = cx.update(|window, cx| {
+            let editor = surface.read(cx).active_editor().unwrap();
+            window.focus(&editor.focus_handle(cx), cx);
+            window.draw(cx).clear(cx);
+            if cx.platform_info().is_mac() {
+                "cmd-p"
+            } else {
+                "ctrl-p"
+            }
+        });
+        cx.simulate_keystrokes(shortcut);
+        cx.simulate_input("_分");
+        surface.update(cx, |surface, cx| {
+            let input = surface.quick_open.as_ref().unwrap().input.clone();
+            assert!(surface.select_all_in_active_editor(cx));
+            assert!(surface.copy_active_editor_selection(cx));
+            assert_eq!(
+                cx.read_from_clipboard().unwrap().text().as_deref(),
+                Some("_分")
+            );
+            assert!(surface.cut_active_editor_selection(cx));
+            assert_eq!(input.read(cx).buffer().text(), "");
+            assert!(surface.paste_into_active_editor(cx));
+            assert_eq!(input.read(cx).buffer().text(), "_分");
+            assert_eq!(
+                surface.editors[&original].read(cx).buffer().text(),
+                "edited original"
+            );
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert!(cx.debug_bounds("ide-quick-open-result-1").is_some());
+        assert!(cx.debug_bounds("ide-quick-open-result-2").is_none());
+        cx.simulate_keystrokes("down enter");
+        surface.read_with(cx, |surface, _| {
+            assert_eq!(surface.workspace.active_tab(), Some(draft_tab));
+            assert_eq!(surface.workspace.tabs().len(), 2);
+            assert!(surface.saving_tabs.contains(&original));
+            assert_eq!(
+                surface.workspace.buffer(original).unwrap().text.to_string(),
+                "edited original"
+            );
+        });
+        cx.simulate_input("!");
+        draft_editor.read_with(cx, |editor, _| assert_eq!(editor.buffer().text(), "!draft"));
+
+        let button = cx.debug_bounds("ide-tree-quick-open").unwrap().center();
+        cx.simulate_click(button, gpui::Modifiers::default());
+        cx.simulate_keystrokes("escape");
+        cx.update(|window, cx| assert!(draft_editor.focus_handle(cx).is_focused(window)));
+
+        cx.simulate_keystrokes(shortcut);
+        cx.simulate_input("包");
+        cx.run_until_parked();
+        cx.simulate_keystrokes("enter");
+        surface.read_with(cx, |surface, _| {
+            let active = surface.workspace.active_tab().unwrap();
+            assert_eq!(
+                remote_path(&surface.workspace.buffer(active).unwrap().location),
+                Some("/repo/包_分.py")
+            );
+            assert!(surface.saving_tabs.contains(&draft_tab));
+            assert_eq!(
+                surface.workspace.buffer(draft_tab).unwrap().text.to_string(),
+                "!draft"
+            );
+        });
+    }
+
+    #[gpui::test]
     fn clicking_document_whitespace_focuses_editor_and_inserts_at_end(cx: &mut TestAppContext) {
         let surface = ready_surface(cx);
         let (_, cx) = cx.add_window_view(|_, cx| IdeSurfaceFixture::new(surface.clone(), cx));
@@ -3306,6 +3543,75 @@ mod shared_text_tests {
                 );
             });
         }
+    }
+
+    #[gpui::test]
+    fn uploaded_file_refreshes_its_clean_tab_and_preserves_edits_during_the_read(
+        cx: &mut TestAppContext,
+    ) {
+        let surface = ready_surface(cx);
+        surface.update(cx, |surface, cx| {
+            let first = surface.workspace.active_tab().unwrap();
+            let target = surface.workspace.buffer(first).unwrap().location.clone();
+            let editor = surface.editors[&first].clone();
+            let other = IdeLocation::remote("save-test", "/repo/other/text.txt");
+            surface
+                .workspace
+                .open_file(other.clone(), "other file", SavedFileVersion::unknown())
+                .unwrap();
+            let active = surface.workspace.active_tab().unwrap();
+            surface.create_editor(active, &other, "other file".into(), cx);
+            let uploaded = || FileOpenResult {
+                format: TextFileFormat::default(),
+                location: target.clone(),
+                text: "uploaded contents".into(),
+                version: SavedFileVersion {
+                    etag: Some("uploaded".into()),
+                    ..SavedFileVersion::unknown()
+                },
+            };
+            let tab = surface.clean_upload_tab(&target, cx).unwrap();
+            surface.apply_upload_tab_refresh(&target, tab, Ok(uploaded()), cx);
+            assert_eq!(editor.read(cx).buffer().text(), "uploaded contents");
+            assert_eq!(
+                surface
+                    .workspace
+                    .buffer(first)
+                    .unwrap()
+                    .version
+                    .etag
+                    .as_deref(),
+                Some("uploaded")
+            );
+            assert!(!surface.is_tab_dirty(first, cx));
+            assert_eq!(surface.workspace.active_tab(), Some(active));
+            assert_eq!(
+                surface.editors[&active].read(cx).buffer().text(),
+                "other file"
+            );
+
+            let tab = surface.clean_upload_tab(&target, cx).unwrap();
+            surface.apply_upload_tab_refresh(
+                &target,
+                tab,
+                Err(IdeFileError::new(
+                    IdeFileErrorKind::Timeout,
+                    "read timed out",
+                )),
+                cx,
+            );
+            assert_eq!(surface.editors[&first], editor);
+            assert_eq!(editor.read(cx).buffer().text(), "uploaded contents");
+
+            let tab = surface.clean_upload_tab(&target, cx).unwrap();
+            editor.update(cx, |editor, cx| {
+                editor.replace_text_external("draft typed during read", cx)
+            });
+            surface.apply_upload_tab_refresh(&target, tab, Ok(uploaded()), cx);
+            assert_eq!(editor.read(cx).buffer().text(), "draft typed during read");
+            assert!(surface.is_tab_dirty(first, cx));
+            assert!(surface.clean_upload_tab(&target, cx).is_none());
+        });
     }
 
     #[gpui::test]

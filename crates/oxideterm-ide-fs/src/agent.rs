@@ -46,7 +46,7 @@ const AGENT_REMOTE_PATH: &str = "~/.oxideterm/oxideterm-agent";
 const AGENT_RPC_TIMEOUT_SECS: u64 = 30;
 const AGENT_COMPRESS_THRESHOLD: usize = 32 * 1024;
 const LEGACY_AGENT_COMPATIBILITY_VERSION: u32 = 1;
-const CURRENT_AGENT_COMPATIBILITY_VERSION: u32 = 6;
+const CURRENT_AGENT_COMPATIBILITY_VERSION: u32 = 7;
 const INVALID_AGENT_COMPATIBILITY_VERSION: u32 = 0;
 
 static NEXT_AGENT_REQUEST_ID: AtomicU64 = AtomicU64::new(1);
@@ -406,4 +406,5 @@ mod channel;
 use channel::IdeChannel;
 mod commands;
 mod shell;
+mod transfer;
 use binding::{BoundNodeOwner, RemoteBinding};

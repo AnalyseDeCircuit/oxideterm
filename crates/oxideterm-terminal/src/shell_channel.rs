@@ -1,6 +1,7 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
+use crate::local_graphics_event_loop::LocalGraphicsEventLoopSender;
 use oxideterm_ssh::SshTransportCommand;
 use std::sync::{
     Arc,
@@ -11,10 +12,37 @@ use zeroize::Zeroizing;
 
 pub type ShellChannelAcquisition = oneshot::Receiver<anyhow::Result<ShellChannel>>;
 
-/// An exclusive lease on one existing PTY, never on its shared SSH connection.
+#[derive(Clone)]
+enum ShellWriter {
+    Ssh(mpsc::Sender<SshTransportCommand>),
+    Local(LocalGraphicsEventLoopSender),
+}
+
+impl ShellWriter {
+    async fn write(&self, token: &str, bytes: &[u8]) -> anyhow::Result<()> {
+        match self {
+            Self::Ssh(writer) => writer
+                .send(SshTransportCommand::Data(bytes.to_vec()))
+                .await
+                .map_err(|_| anyhow::anyhow!("Shell channel closed")),
+            Self::Local(writer) => writer.write_shell_input(token, bytes).await,
+        }
+    }
+
+    fn close(&self, token: &str) {
+        match self {
+            Self::Ssh(writer) => {
+                let _ = writer.try_send(SshTransportCommand::Close);
+            }
+            Self::Local(writer) => writer.close_shell_channel(token),
+        }
+    }
+}
+
+/// An exclusive lease on one existing PTY, including its current shell environment.
 pub struct ShellChannel {
     pub token: String,
-    writer: mpsc::Sender<SshTransportCommand>,
+    writer: ShellWriter,
     pub output: mpsc::Receiver<Zeroizing<Vec<u8>>>,
     restored: Arc<AtomicBool>,
     released: watch::Sender<bool>,
@@ -53,6 +81,45 @@ impl ShellChannel {
         }
     }
 
+    /// A local PTY may be driving a native SSH client, a container or a non-POSIX shell.
+    pub async fn verify_local_shell_environment(&mut self) -> anyhow::Result<()> {
+        let ShellWriter::Local(writer) = &self.writer else {
+            return Ok(());
+        };
+        let command = format!(
+            " /bin/sh -c 'printf \"\\036{}:%s\\037\" \"$(uname -s)\"'\r",
+            self.token
+        );
+        let prefix = format!("\x1e{}:", self.token);
+        // This single probe never changes tty modes or starts the file service. Leaving the
+        // lease unstarted lets cancellation return a PowerShell or cmd prompt immediately.
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            writer
+                .write_shell_input(&self.token, command.as_bytes())
+                .await?;
+            let mut response = Zeroizing::new(Vec::new());
+            while let Some(chunk) = self.output.recv().await {
+                anyhow::ensure!(
+                    response.len() + chunk.len() <= 64 * 1024,
+                    "Shell environment probe exceeded its response limit"
+                );
+                response.extend_from_slice(&chunk);
+                if chunk.contains(&0x1f)
+                    && let Some(start) = memchr::memmem::find(&response, prefix.as_bytes())
+                {
+                    let os = &response[start + prefix.len()..];
+                    if let Some(end) = memchr::memchr(0x1f, os) {
+                        anyhow::ensure!(&os[..end] == b"Linux", "Shell IDE requires a Linux shell");
+                        return Ok(());
+                    }
+                }
+            }
+            anyhow::bail!("Terminal closed during shell environment probe")
+        })
+        .await
+        .map_err(|_| anyhow::anyhow!("The current terminal did not confirm a Linux shell"))?
+    }
+
     pub async fn write(&self, bytes: &[u8]) -> anyhow::Result<()> {
         self.write_with_timeout(bytes, std::time::Duration::from_secs(5))
             .await
@@ -65,13 +132,9 @@ impl ShellChannel {
     ) -> anyhow::Result<()> {
         self.started.store(true, Ordering::Release);
         for chunk in bytes.chunks(4096) {
-            tokio::time::timeout(
-                timeout,
-                self.writer.send(SshTransportCommand::Data(chunk.to_vec())),
-            )
-            .await
-            .map_err(|_| anyhow::anyhow!("Shell channel write timed out"))?
-            .map_err(|_| anyhow::anyhow!("Shell channel closed"))?;
+            tokio::time::timeout(timeout, self.writer.write(&self.token, chunk))
+                .await
+                .map_err(|_| anyhow::anyhow!("Shell channel write timed out"))??;
         }
         Ok(())
     }
@@ -95,7 +158,7 @@ impl ShellChannel {
 }
 
 async fn restore_shell(
-    writer: &mpsc::Sender<SshTransportCommand>,
+    writer: &ShellWriter,
     output: &mut mpsc::Receiver<Zeroizing<Vec<u8>>>,
     restored: &AtomicBool,
     token: &str,
@@ -107,9 +170,7 @@ async fn restore_shell(
         // Every bootstrap reader recognizes this line. If the child has already
         // exited, it is only a comment in the original shell, never a command or signal.
         writer
-            .send(SshTransportCommand::Data(
-                format!("\n#oxideterm-cancel-{token}\n").into_bytes(),
-            ))
+            .write(token, format!("\n#oxideterm-cancel-{token}\n").as_bytes())
             .await
             .map_err(|_| anyhow::anyhow!("Shell channel closed during restoration"))?;
         while !restored.load(Ordering::Acquire) {
@@ -148,7 +209,7 @@ impl Drop for ShellChannel {
                         if let Some(handler) = handler {
                             handler();
                         } else {
-                            let _ = writer.try_send(SshTransportCommand::Close);
+                            writer.close(&token);
                         }
                     }
                 });
@@ -157,13 +218,14 @@ impl Drop for ShellChannel {
             if let Some(handler) = &self.failure_handler {
                 handler();
             } else {
-                let _ = self.writer.try_send(SshTransportCommand::Close);
+                self.writer.close(&self.token);
             }
         }
     }
 }
 
 pub(crate) struct ShellChannelSink {
+    token: String,
     output: Option<mpsc::Sender<Zeroizing<Vec<u8>>>>,
     marker: Vec<u8>,
     tail: Zeroizing<Vec<u8>>,
@@ -181,6 +243,16 @@ impl Drop for ShellChannelSink {
 pub(crate) fn channel(
     writer: mpsc::Sender<SshTransportCommand>,
 ) -> (ShellChannel, ShellChannelSink) {
+    new_channel(ShellWriter::Ssh(writer))
+}
+
+pub(crate) fn local_channel(
+    writer: LocalGraphicsEventLoopSender,
+) -> (ShellChannel, ShellChannelSink) {
+    new_channel(ShellWriter::Local(writer))
+}
+
+fn new_channel(writer: ShellWriter) -> (ShellChannel, ShellChannelSink) {
     let token = uuid::Uuid::new_v4().simple().to_string();
     let marker = format!("\x1e{token}:RESTORED\x1f").into_bytes();
     let (tx, rx) = mpsc::channel(4096);
@@ -188,7 +260,7 @@ pub(crate) fn channel(
     let (released, _) = watch::channel(false);
     (
         ShellChannel {
-            token,
+            token: token.clone(),
             writer,
             output: rx,
             restored: restored.clone(),
@@ -200,6 +272,7 @@ pub(crate) fn channel(
             _terminal: None,
         },
         ShellChannelSink {
+            token,
             output: Some(tx),
             marker,
             tail: Zeroizing::new(Vec::new()),
@@ -210,6 +283,10 @@ pub(crate) fn channel(
 }
 
 impl ShellChannelSink {
+    pub(crate) fn matches_token(&self, token: &str) -> bool {
+        self.token == token
+    }
+
     pub(crate) fn is_active(&self) -> bool {
         !self.restored.load(Ordering::Acquire)
     }

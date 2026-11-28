@@ -62,6 +62,8 @@ impl TextEditorView {
                 .clamp(self.document_row_count(), self.metrics.line_height);
             self.reveal_pending_find_match();
         } else {
+            self.interim_colors.clear();
+            self.find_work.painted.get_mut().clear();
             self.syntax_generation.fetch_add(1, Ordering::AcqRel);
             self.pending_syntax = None;
             // Keep the receiver until cancellation completes. A quick return
@@ -92,12 +94,44 @@ impl TextEditorView {
         }
     }
 
+    // Preserve only painted tokens while the parser owns the previous syntax tree.
+    // Ranges intersecting an edit are discarded; unaffected ranges track byte shifts.
+    pub(super) fn retain_visible_colors(&mut self, edits: &[(TextRange, usize)]) {
+        let cache = self.highlight_chunk_cache.borrow();
+        if self.syntax_version.is_some()
+            && cache
+                .recency
+                .range(cache.frame_start + 1..)
+                .next()
+                .is_some()
+        {
+            self.interim_colors.clear();
+            for (_, key) in cache.recency.range(cache.frame_start + 1..) {
+                for chunk in cache.entries[key].chunks.iter() {
+                    if chunk.color != self.appearance.text_hex {
+                        self.interim_colors.push((
+                            key.range_start + chunk.start..key.range_start + chunk.end,
+                            chunk.color,
+                        ));
+                    }
+                }
+            }
+            self.interim_colors
+                .sort_unstable_by_key(|(range, _)| range.start);
+        }
+        let mut rebase = super::rebase_painted_ranges(edits);
+        self.interim_colors.retain_mut(|(range, _)| rebase(range));
+    }
+
     pub(super) fn request_syntax(
         &mut self,
         edit: Option<SyntaxEdit>,
         reset: bool,
         cx: &mut Context<Self>,
     ) {
+        if reset {
+            self.interim_colors.clear();
+        }
         let generation = self.syntax_generation.fetch_add(1, Ordering::AcqRel) + 1;
         self.highlight_chunk_cache.borrow_mut().clear();
         // The browser build detects languages but ships no tree-sitter parsers.
@@ -450,9 +484,22 @@ mod tests {
             editor
                 .cursor
                 .set_selection(Selection::caret(BufferOffset(3)));
+            let before = editor.highlighted_line_chunks(0, "fn main() {}", 0..12);
+            let keyword = before
+                .iter()
+                .find(|chunk| chunk.text.as_ref() == "fn")
+                .unwrap()
+                .color;
+            assert_ne!(keyword, editor.appearance.text_hex);
             for text in ["a", "b", "c"] {
                 editor.insert_text(text, cx);
             }
+            let during = editor.highlighted_line_chunks(0, "fn abcmain() {}", 0..15);
+            assert!(
+                during
+                    .iter()
+                    .any(|chunk| chunk.text.as_ref() == "fn" && chunk.color == keyword)
+            );
             assert_eq!(editor.buffer.text(), "fn abcmain() {}\n");
             assert_eq!(
                 editor.pending_syntax.as_ref().unwrap().version,
@@ -477,6 +524,15 @@ mod tests {
                     .unwrap()
                     .highlight_spans("fn abcmain() {}\n")
             );
+        });
+        // The parser published between frames. Another keypress must retain
+        // the visible keyword even though the new tree has not been painted.
+        editor.update(cx, |editor, cx| {
+            editor.insert_text("d", cx);
+            let chunks = editor.highlighted_line_chunks(0, "fn abcdmain() {}", 0..16);
+            assert!(chunks.iter().any(|chunk| {
+                chunk.text.as_ref() == "fn" && chunk.color != editor.appearance.text_hex
+            }));
         });
     }
 

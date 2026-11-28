@@ -44,6 +44,8 @@
     "search": "Buscar",
     "refresh": "Actualizar",
     "searching": "Buscando...",
+    "find_file_by_name": "Buscar archivo por nombre",
+    "file_search_partial": "Solo se muestran archivos de las carpetas examinadas",
     "search_placeholder": "Buscar contenido de archivos...",
     "search_hint": "Ingrese palabras clave para buscar",
     "no_results": "No se encontraron resultados",

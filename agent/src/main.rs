@@ -21,8 +21,9 @@ use sha2::{Digest, Sha256};
 use walkdir::WalkDir;
 
 mod ide;
+mod transfer;
 
-const COMPATIBILITY_VERSION: u32 = 6;
+const COMPATIBILITY_VERSION: u32 = 7;
 const ERR_METHOD_NOT_FOUND: i32 = -32601;
 const ERR_INVALID_PARAMS: i32 = -32602;
 const ERR_INTERNAL: i32 = -32603;
@@ -261,6 +262,7 @@ fn main() {
 
     let stdin = io::stdin();
     let mut stdout = io::stdout();
+    let mut upload = None;
     for line in BufReader::new(stdin.lock()).lines() {
         let line = match line {
             Ok(line) => line,
@@ -273,7 +275,7 @@ fn main() {
             continue;
         }
         let response = match serde_json::from_str::<Request>(&line) {
-            Ok(request) => handle_request(request),
+            Ok(request) => handle_request(request, &mut upload),
             Err(error) => Response {
                 id: 0,
                 result: None,
@@ -290,8 +292,12 @@ fn main() {
     }
 }
 
-fn handle_request(request: Request) -> Response {
-    let result = dispatch(&request.method, request.params);
+fn handle_request(request: Request, upload: &mut Option<transfer::Upload>) -> Response {
+    let result = if request.method.starts_with("transfer/") {
+        transfer::dispatch(&request.method, request.params, upload)
+    } else {
+        dispatch(&request.method, request.params)
+    };
     match result {
         Ok(result) => Response {
             id: request.id,
@@ -363,7 +369,7 @@ fn sys_info() -> SysInfoResult {
         arch: env::consts::ARCH.to_string(),
         os: env::consts::OS.to_string(),
         pid: std::process::id(),
-        capabilities: vec!["file-bytes".into()],
+        capabilities: vec!["file-bytes".into(), "single-file-transfer".into()],
     }
 }
 

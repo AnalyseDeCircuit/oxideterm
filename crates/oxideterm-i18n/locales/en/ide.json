@@ -44,6 +44,8 @@
     "search": "Search",
     "refresh": "Refresh",
     "searching": "Searching...",
+    "find_file_by_name": "Find file by name",
+    "file_search_partial": "Only files from scanned folders are shown",
     "search_placeholder": "Search file contents...",
     "search_hint": "Enter keywords to search",
     "no_results": "No results found",
