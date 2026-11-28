@@ -222,9 +222,12 @@ async fn dial_docker_exec(
                             buffered.extend_from_slice(&message);
                         }
                     }
-                    probe_exec_start_failure(&buffered)
+                    probe_exec_start_failure(&config.launch, &buffered)
                 }
-                // No early output (or a silent stream error): treat the
+                Ok(Some(Err(error))) => {
+                    return Err(ExecAttempt::Failed(ContainerError::Exec(error.to_string())));
+                }
+                // No early output: treat the
                 // process as started and continue with the normal transport.
                 _ => ExecProbeVerdict::Started,
             };
@@ -278,7 +281,9 @@ async fn dial_docker_exec(
             ContainerError::Exec("exec detached unexpectedly".to_string()),
         )),
         Err(error) => {
-            if classify_shell_start_error(&error.to_string()) == ShellFallback::MissingExecutable {
+            if let bollard::errors::Error::DockerResponseServerError { message, .. } = &error
+                && classify_shell_start_error(message) == ShellFallback::MissingExecutable
+            {
                 Err(ExecAttempt::MissingExecutable(error.to_string()))
             } else {
                 Err(ExecAttempt::Failed(ContainerError::Exec(error.to_string())))
@@ -298,7 +303,11 @@ enum ExecProbeVerdict {
 
 /// Pure classifier for the probed startup frames so busybox-style failures
 /// that surface over the stream fall through to the next shell candidate.
-fn probe_exec_start_failure(buffered: &[u8]) -> ExecProbeVerdict {
+fn probe_exec_start_failure(mode: &ContainerLaunchMode, buffered: &[u8]) -> ExecProbeVerdict {
+    if matches!(mode, ContainerLaunchMode::Command { .. }) {
+        // Once attached, stdout is user data. Retrying could repeat a completed command.
+        return ExecProbeVerdict::Started;
+    }
     let text = String::from_utf8_lossy(buffered).to_lowercase();
     if text.contains(OCI_EXEC_FAILURE_MARKER) {
         if classify_shell_start_error(&text) == ShellFallback::MissingExecutable {
@@ -326,28 +335,13 @@ fn pump_docker_output(
     prefix: Vec<u8>,
     resize: ResizeFn,
 ) -> (ResizeFn, Pin<Box<dyn AsyncRead + Send>>) {
-    let (mut duplex_writer, duplex_reader) = tokio::io::duplex(DUPLEX_BUFFER_BYTES);
-    tokio::spawn(async move {
-        if !prefix.is_empty() && duplex_writer.write_all(&prefix).await.is_err() {
-            return;
-        }
-        let mut output = output;
-        while let Some(frame) = output.next().await {
-            match frame {
-                Ok(bollard::container::LogOutput::StdOut { message })
-                | Ok(bollard::container::LogOutput::StdErr { message })
-                | Ok(bollard::container::LogOutput::StdIn { message })
-                | Ok(bollard::container::LogOutput::Console { message }) => {
-                    if duplex_writer.write_all(&message).await.is_err() {
-                        break;
-                    }
-                }
-                Err(_) => break,
-            }
-        }
-        let _ = duplex_writer.shutdown().await;
+    let frames = output.map(|frame| {
+        frame
+            .map(|item| item.into_bytes())
+            .map_err(std::io::Error::other)
     });
-    (resize, Box::pin(duplex_reader))
+    let reader = std::io::Cursor::new(prefix).chain(tokio_util::io::StreamReader::new(frames));
+    (resize, Box::pin(reader))
 }
 
 /// Interactive TTY params for one pod container: `pod_container` names the
@@ -504,7 +498,7 @@ async fn dial_kube_exec(
         },
         Ok(Ok(read)) => {
             buffered.extend_from_slice(&probe_buf[..read]);
-            probe_exec_start_failure(&buffered)
+            probe_exec_start_failure(&config.launch, &buffered)
         }
         // No early output: treat the process as started and continue with the
         // normal transport; the shell prompt lands after the probe window.
@@ -680,28 +674,14 @@ fn pump_kube_output(
     resize_tx: Option<futures_channel::mpsc::Sender<kube::api::TerminalSize>>,
     prefix: Vec<u8>,
 ) -> (ResizeFn, Pin<Box<dyn AsyncRead + Send>>) {
-    let (mut duplex_writer, duplex_reader) = tokio::io::duplex(DUPLEX_BUFFER_BYTES);
-    tokio::spawn(async move {
-        // Keep the attached process alive until the server closes the stream;
-        // its Drop impl aborts the websocket task.
-        let _attached = attached;
-        if !prefix.is_empty() && duplex_writer.write_all(&prefix).await.is_err() {
-            return;
-        }
-        let mut stdout = stdout;
-        let mut buffer = vec![0_u8; DUPLEX_BUFFER_BYTES];
-        loop {
-            match stdout.read(&mut buffer).await {
-                Ok(0) | Err(_) => break,
-                Ok(read) => {
-                    if duplex_writer.write_all(&buffer[..read]).await.is_err() {
-                        break;
-                    }
-                }
-            }
-        }
-        let _ = duplex_writer.shutdown().await;
+    // EOF on stdout alone can also mean the WebSocket task failed.
+    let completion = futures_util::stream::once(async move {
+        attached.join().await.map_err(std::io::Error::other)?;
+        Ok::<&'static [u8], std::io::Error>(&[])
     });
+    let reader = std::io::Cursor::new(prefix)
+        .chain(stdout)
+        .chain(tokio_util::io::StreamReader::new(completion));
     let resize = Box::new(move |cols: u16, rows: u16| {
         match &resize_tx {
             Some(sender) => {
@@ -723,7 +703,7 @@ fn pump_kube_output(
             None => Box::pin(async { Ok(()) }) as ResizeFuture,
         }
     });
-    (resize, Box::pin(duplex_reader))
+    (resize, Box::pin(reader))
 }
 
 #[cfg(test)]
@@ -803,19 +783,54 @@ mod tests {
         let missing = b"OCI runtime exec failed: exec failed: unable to start \
 container process: exec: \"/bin/bash\": stat /bin/bash: no such file or directory";
         assert!(matches!(
-            probe_exec_start_failure(missing),
+            probe_exec_start_failure(&ContainerLaunchMode::Shell { shell: None }, missing),
             ExecProbeVerdict::MissingExecutable(_)
         ));
+        assert_eq!(
+            probe_exec_start_failure(
+                &ContainerLaunchMode::Command {
+                    command: "status".into()
+                },
+                missing
+            ),
+            ExecProbeVerdict::Started
+        );
         // Runtime rejections without a missing executable are hard failures.
         assert!(matches!(
-            probe_exec_start_failure(b"OCI runtime exec failed: permission denied"),
+            probe_exec_start_failure(
+                &ContainerLaunchMode::Shell { shell: None },
+                b"OCI runtime exec failed: permission denied"
+            ),
             ExecProbeVerdict::Failed(_)
         ));
         // Normal first frames (prompt, banner, MOTD) keep the transport.
         assert!(matches!(
-            probe_exec_start_failure(b"# \r\nbusybox shell ready\r\n"),
+            probe_exec_start_failure(
+                &ContainerLaunchMode::Shell { shell: None },
+                b"# \r\nbusybox shell ready\r\n"
+            ),
             ExecProbeVerdict::Started
         ));
+    }
+
+    #[tokio::test]
+    async fn docker_output_keeps_the_prefix_and_reports_a_broken_stream() {
+        let frames = futures_util::stream::iter([
+            Ok(bollard::container::LogOutput::Console {
+                message: "body".into(),
+            }),
+            Err(bollard::errors::Error::IOError {
+                err: std::io::Error::other("disconnected"),
+            }),
+        ]);
+        let (_, mut output) = pump_docker_output(
+            Box::pin(frames),
+            b"prefix".to_vec(),
+            Box::new(|_, _| Box::pin(async { Ok(()) })),
+        );
+        let mut bytes = Vec::new();
+        assert!(output.read_to_end(&mut bytes).await.is_err());
+        assert_eq!(bytes, b"prefixbody");
     }
 
     fn exit_status(status: &str, reason: &str, message: &str) -> KubeExitStatus {

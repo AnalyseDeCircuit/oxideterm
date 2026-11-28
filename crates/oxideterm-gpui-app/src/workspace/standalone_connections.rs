@@ -210,6 +210,13 @@ pub(super) async fn resolve_saved_container_launch(
     // Normalize the pin with the rule the form applies on selection; keeping
     // the launch identity equal to a form-opened session lets reconnect dedup
     // match instead of stacking a second pane.
+    if profile
+        .pod_container
+        .as_deref()
+        .is_some_and(|pin| !entry.contains_pod_container(pin))
+    {
+        return Err(SavedContainerResolveError::ContainerNotFound);
+    }
     let pod_container = entry.normalize_pod_container(profile.pod_container.as_deref());
     Ok(oxideterm_docker::ContainerConnectionConfig {
         engine: profile.engine,
@@ -920,6 +927,48 @@ mod tests {
             pod_container: None,
             launch: oxideterm_docker::ContainerLaunchMode::Shell { shell: None },
         }
+    }
+
+    #[test]
+    fn transient_container_commands_are_not_written_to_session_history() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sessions.json");
+        let mut registry = StandaloneConnectionRegistry {
+            snapshot_path: Some(path.clone()),
+            ..Default::default()
+        };
+        for (name, launch) in [
+            (
+                "shell",
+                oxideterm_docker::ContainerLaunchMode::Shell { shell: None },
+            ),
+            (
+                "temporary",
+                oxideterm_docker::ContainerLaunchMode::Command {
+                    command: "private-test-argument".into(),
+                },
+            ),
+        ] {
+            let mut config = container_config(name);
+            config.launch = launch;
+            registry.insert_pending(
+                StandaloneConnectionKind::Container,
+                name.into(),
+                StandaloneConnectionLaunch::Container {
+                    config,
+                    terminal_options: Default::default(),
+                },
+            );
+        }
+        let entries: Vec<serde_json::Value> =
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        assert_eq!(
+            entries
+                .iter()
+                .map(|e| e["title"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            ["shell"]
+        );
     }
 
     #[test]

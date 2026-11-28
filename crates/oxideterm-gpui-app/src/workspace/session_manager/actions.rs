@@ -201,7 +201,7 @@ impl WorkspaceApp {
             let _ = workspace.update_in(cx, |this, window, cx| {
                 match resolved {
                     Ok(config) => {
-                        let _ = this.create_container_terminal_tab_for_connection(
+                        let opened = this.create_container_terminal_tab_for_connection(
                             config,
                             terminal_options,
                             title,
@@ -209,7 +209,7 @@ impl WorkspaceApp {
                             window,
                             cx,
                         );
-                        if matches!(
+                        if opened.is_ok() && matches!(
                             this.connection_store.mark_container_profile_used(&profile_id),
                             Ok(true)
                         ) {

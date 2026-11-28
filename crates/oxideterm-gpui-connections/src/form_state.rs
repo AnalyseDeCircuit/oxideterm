@@ -1123,7 +1123,7 @@ pub struct ContainerFormState {
     pub engines_generation: u64,
     pub engines: Vec<oxideterm_docker::EngineInfo>,
     pub engines_loading: bool,
-    pub selected_engine_index: usize,
+    pub selected_engine_index: Option<usize>,
     pub containers: Vec<oxideterm_docker::ContainerEntry>,
     pub containers_loading: bool,
     pub selected_container_index: Option<usize>,
@@ -1163,7 +1163,7 @@ impl Default for ContainerFormState {
             engines_generation: 0,
             engines: Vec::new(),
             engines_loading: false,
-            selected_engine_index: 0,
+            selected_engine_index: None,
             containers: Vec::new(),
             containers_loading: false,
             selected_container_index: None,
@@ -1183,6 +1183,56 @@ impl Default for ContainerFormState {
     }
 }
 
+impl ContainerFormState {
+    pub(crate) fn reset_listing(&mut self, entries: Vec<oxideterm_docker::ContainerEntry>) {
+        let name = self.pending_container_name.take();
+        let pin = self.pending_pod_container.take();
+        self.selected_container_index = if self.profile_id.is_some() {
+            entries.iter().position(|entry| {
+                Some(&entry.name) == name.as_ref()
+                    && pin
+                        .as_deref()
+                        .is_none_or(|p| entry.contains_pod_container(p))
+            })
+        } else {
+            (entries.len() == 1).then_some(0)
+        };
+        self.pod_container = self
+            .selected_container_index
+            .and_then(|i| entries[i].normalize_pod_container(pin.as_deref()));
+        self.details = None;
+        self.containers = entries;
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn container_profile_edit_never_adopts_an_unrelated_only_row() {
+    use oxideterm_docker::{ContainerEntry, EngineInfo, EngineKind};
+    let entry = ContainerEntry {
+        id: "new-id".into(),
+        name: "other".into(),
+        image: String::new(),
+        state: "Running".into(),
+        namespace: None,
+        containers: Vec::new(),
+        engine: EngineInfo {
+            kind: EngineKind::Docker,
+            label: "Docker".into(),
+            socket_path: Some("/test.sock".into()),
+            kube_context: None,
+            kube_context_namespace: None,
+        },
+    };
+    let mut form = ContainerFormState::default();
+    form.reset_listing(vec![entry.clone()]);
+    assert_eq!(form.selected_container_index, Some(0));
+    form.profile_id = Some("saved".into());
+    form.pending_container_name = Some("original".into());
+    form.reset_listing(vec![entry]);
+    assert_eq!(form.selected_container_index, None);
+}
+
 impl fmt::Debug for ContainerFormState {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -1198,7 +1248,7 @@ impl fmt::Debug for ContainerFormState {
             .field("pod_container", &self.pod_container)
             .field("shell", &self.shell)
             .field("launch_mode", &self.launch_mode)
-            .field("custom_command", &self.custom_command)
+            .field("has_custom_command", &!self.custom_command.is_empty())
             .field("profile_id", &self.profile_id)
             .field("pending_engine", &self.pending_engine.is_some())
             .field(

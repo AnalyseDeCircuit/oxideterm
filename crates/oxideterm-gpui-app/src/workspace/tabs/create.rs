@@ -736,6 +736,11 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<TerminalSessionId> {
+        if let Some(id) = connection_attempt_id.as_deref()
+            && !self.standalone_connections.is_connecting_attempt(id)
+        {
+            anyhow::bail!("Container connection attempt is no longer active");
+        }
         // Reopening an identical container target focuses the live session
         // instead of stacking a duplicate tab and active-session row, matching
         // the SSH saved-connection reuse behavior.

@@ -96,6 +96,10 @@ impl StandaloneConnectionRegistry {
         let snapshots = self
             .records
             .iter()
+            .filter(|record| !matches!(&record.launch,
+                StandaloneConnectionLaunch::Container { config, .. }
+                if matches!(config.launch, oxideterm_docker::ContainerLaunchMode::Command { .. })
+            ))
             .map(|record| SessionSnapshot {
                 id: record.id.clone(),
                 title: record.title.clone(),

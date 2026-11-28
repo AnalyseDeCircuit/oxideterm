@@ -307,36 +307,19 @@ pub(crate) fn current_kubeconfig_context_namespace() -> Option<String> {
 /// Builds the kube client shared by listing and exec/dial. The second tuple
 /// element is the cluster API host from the loaded config, which only the
 /// listing path needs to label the no-context engine.
-///
-/// Any proxy inherited from `HTTPS_PROXY` or the kubeconfig is dropped: kube
-/// is built without the proxy feature, so a configured proxy fails client
-/// construction outright, and enabling the feature is no cure either because
-/// its `NO_PROXY` parser rejects common glob forms ("127.*", "*example.com").
-/// Cluster access therefore stays direct, like kubectl after its own
-/// loopback/no-proxy exemption.
 pub(crate) async fn kube_client_for(
     context: Option<&str>,
 ) -> Result<(kube::Client, Option<String>), ContainerError> {
-    let mut config = match context {
-        Some(context) => {
-            // An explicit context binds the whole surface: label, listing and
-            // exec all resolve through that kubeconfig entry.
-            kube::Config::from_kubeconfig(&kube::config::KubeConfigOptions {
-                context: Some(context.to_string()),
-                cluster: None,
-                user: None,
-            })
-            .await
-            .map_err(|_| ContainerError::KubeConfigUnavailable)?
+    let config = match kube::config::Kubeconfig::read() {
+        Ok(file) => config_for_context(file, context)?,
+        Err(_) if context.is_none() => {
+            kube::Config::incluster().map_err(|_| ContainerError::KubeConfigUnavailable)?
         }
-        None => kube::Config::infer()
-            .await
-            .map_err(|_| ContainerError::KubeConfigUnavailable)?,
+        Err(_) => return Err(ContainerError::KubeConfigUnavailable),
     };
-    config.proxy_url = None;
     let cluster_host = config.cluster_url.host().map(str::to_string);
     let client = kube::Client::try_from(config)
-        .map_err(|error| ContainerError::Engine(error.to_string()))?;
+        .map_err(|_| ContainerError::Engine("Could not configure Kubernetes client".into()))?;
     Ok((client, cluster_host))
 }
 
@@ -450,6 +433,80 @@ fn discover_kube_engines_from(candidates: &[KubeContextCandidate]) -> Vec<Engine
         .iter()
         .filter_map(|candidate| kube_context_engine_info(candidates, &candidate.context))
         .collect()
+}
+
+// kube's default loader mixes the cluster proxy with HTTPS_PROXY / NO_PROXY.
+// The desktop connection uses only the selected cluster's transport settings.
+fn config_for_context(
+    file: kube::config::Kubeconfig,
+    name: Option<&str>,
+) -> Result<kube::Config, ContainerError> {
+    let missing = || ContainerError::KubeConfigUnavailable;
+    let name = name
+        .or(file.current_context.as_deref())
+        .ok_or_else(missing)?;
+    let context = file
+        .contexts
+        .iter()
+        .find(|entry| entry.name == name)
+        .and_then(|entry| entry.context.as_ref())
+        .ok_or_else(missing)?;
+    let cluster = file
+        .clusters
+        .iter()
+        .find(|entry| entry.name == context.cluster)
+        .and_then(|entry| entry.cluster.as_ref())
+        .ok_or_else(missing)?;
+    let info = kube::config::ExecAuthCluster::try_from(cluster).map_err(|_| missing())?;
+    let mut config = kube::Config::new(
+        cluster
+            .server
+            .as_deref()
+            .ok_or_else(missing)?
+            .parse()
+            .map_err(|_| missing())?,
+    );
+    if let Some(namespace) = &context.namespace {
+        config.default_namespace = namespace.clone();
+    }
+    config.accept_invalid_certs = cluster.insecure_skip_tls_verify.unwrap_or_default();
+    config.tls_server_name = cluster.tls_server_name.clone();
+    config.disable_compression = cluster.disable_compression.unwrap_or_default();
+    config.root_cert = info
+        .certificate_authority_data
+        .as_deref()
+        .map(|data| {
+            pem::parse_many(data).map(|certs| {
+                certs
+                    .into_iter()
+                    .filter(|p| p.tag() == "CERTIFICATE")
+                    .map(|p| p.into_contents())
+                    .collect()
+            })
+        })
+        .transpose()
+        .map_err(|_| missing())?;
+    config.proxy_url = cluster
+        .proxy_url
+        .as_deref()
+        .filter(|url| !url.is_empty())
+        .map(str::parse)
+        .transpose()
+        .map_err(|_| missing())?;
+    if let Some(user) = &context.user {
+        config.auth_info = file
+            .auth_infos
+            .into_iter()
+            .find(|entry| &entry.name == user)
+            .and_then(|entry| entry.auth_info)
+            .unwrap_or_default();
+        if let Some(exec) = &mut config.auth_info.exec
+            && exec.provide_cluster_info
+        {
+            exec.cluster = Some(info);
+        }
+    }
+    Ok(config)
 }
 
 /// Engine entry for one context, shared by discovery and listing so both
@@ -593,7 +650,21 @@ mod tests {
 
     #[test]
     fn kube_context_candidates_lead_with_the_current_context() {
-        let candidates = kube_context_candidates_from(&context_fixture("desktop-ctx"));
+        let mut file = context_fixture("desktop-ctx");
+        file.clusters[1].cluster.as_mut().unwrap().proxy_url =
+            Some("http://cluster-proxy:8080".into());
+        let config = config_for_context(file.clone(), Some("prod-ctx")).unwrap();
+        assert_eq!(
+            config.proxy_url.unwrap().to_string(),
+            "http://cluster-proxy:8080/"
+        );
+        assert!(
+            config_for_context(file.clone(), None)
+                .unwrap()
+                .proxy_url
+                .is_none()
+        );
+        let candidates = kube_context_candidates_from(&file);
         assert_eq!(
             candidates
                 .iter()
@@ -626,7 +697,21 @@ mod tests {
 
     #[test]
     fn same_cluster_contexts_get_context_name_appended_to_the_label() {
-        let candidates = kube_context_candidates_from(&context_fixture("desktop-ctx"));
+        let mut file = context_fixture("desktop-ctx");
+        file.clusters[1].cluster.as_mut().unwrap().proxy_url =
+            Some("http://cluster-proxy:8080".into());
+        let config = config_for_context(file.clone(), Some("prod-ctx")).unwrap();
+        assert_eq!(
+            config.proxy_url.unwrap().to_string(),
+            "http://cluster-proxy:8080/"
+        );
+        assert!(
+            config_for_context(file.clone(), None)
+                .unwrap()
+                .proxy_url
+                .is_none()
+        );
+        let candidates = kube_context_candidates_from(&file);
         let engines = discover_kube_engines_from(&candidates);
         let labels = engines
             .iter()

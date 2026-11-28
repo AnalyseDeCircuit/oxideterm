@@ -4675,13 +4675,13 @@ impl ConnectionFormView {
                         form.container.details_generation += 1;
                         form.container.details = None;
                         form.container.details_loading = false;
-                        form.container.selected_engine_index = 0;
+                        form.container.selected_engine_index = None;
                     }
                     form.error = None;
                     let previous_target = form
                         .container
-                        .engines
-                        .get(form.container.selected_engine_index)
+                        .selected_engine_index
+                        .and_then(|i| form.container.engines.get(i))
                         .map(container_listing_target);
                     Some((form.container.engines_generation, previous_target))
                 })
@@ -4720,48 +4720,47 @@ impl ConnectionFormView {
                         // Catalog edit backfill: re-select the profile's engine
                         // once discovery returns; fall back to the first entry.
                         if let Some(pending_engine) = form.container.pending_engine.take() {
-                            let matched = form
-                                .container
-                                .engines
-                                .iter()
-                                .position(|engine| {
-                                    // Kube profiles persist the pod namespace in
-                                    // the target, so identity compares the
-                                    // transport only (socket path or context).
-                                    let target = container_listing_target(engine);
-                                    match (&target, &pending_engine) {
-                                        (
-                                            oxideterm_docker::EngineTarget::DockerSocket {
-                                                socket_path: listed,
-                                            },
-                                            oxideterm_docker::EngineTarget::DockerSocket {
-                                                socket_path: pending,
-                                            },
-                                        ) => listed == pending,
-                                        (
-                                            oxideterm_docker::EngineTarget::Kube {
-                                                context: listed,
-                                                ..
-                                            },
-                                            oxideterm_docker::EngineTarget::Kube {
-                                                context: pending,
-                                                ..
-                                            },
-                                        ) => listed == pending,
-                                        _ => false,
-                                    }
-                                })
-                                .unwrap_or(0);
+                            let matched = form.container.engines.iter().position(|engine| {
+                                // Kube profiles persist the pod namespace in
+                                // the target, so identity compares the
+                                // transport only (socket path or context).
+                                let target = container_listing_target(engine);
+                                match (&target, &pending_engine) {
+                                    (
+                                        oxideterm_docker::EngineTarget::DockerSocket {
+                                            socket_path: listed,
+                                        },
+                                        oxideterm_docker::EngineTarget::DockerSocket {
+                                            socket_path: pending,
+                                        },
+                                    ) => listed == pending,
+                                    (
+                                        oxideterm_docker::EngineTarget::Kube {
+                                            context: listed,
+                                            ..
+                                        },
+                                        oxideterm_docker::EngineTarget::Kube {
+                                            context: pending,
+                                            ..
+                                        },
+                                    ) => listed == pending,
+                                    _ => false,
+                                }
+                            });
                             form.container.selected_engine_index = matched;
-                        } else {
-                            form.container.selected_engine_index = 0;
+                            if matched.is_some() {
+                                listing_target = Some(pending_engine);
+                            }
+                        } else if form.container.profile_id.is_none() {
+                            form.container.selected_engine_index =
+                                (!form.container.engines.is_empty()).then_some(0);
                         }
                         if let Some(engine) = form
                             .container
-                            .engines
-                            .get(form.container.selected_engine_index)
+                            .selected_engine_index
+                            .and_then(|i| form.container.engines.get(i))
                         {
-                            listing_target = Some(container_listing_target(engine));
+                            listing_target.get_or_insert_with(|| container_listing_target(engine));
                         }
                     } else {
                         // Popup-triggered rediscovery keeps the user's engine
@@ -4769,8 +4768,8 @@ impl ConnectionFormView {
                         // first entry and reloads its container list.
                         let selected_target = form
                             .container
-                            .engines
-                            .get(form.container.selected_engine_index)
+                            .selected_engine_index
+                            .and_then(|i| form.container.engines.get(i))
                             .map(container_listing_target);
                         if selected_target.as_ref() != previous_target.as_ref() {
                             let kept = previous_target.as_ref().and_then(|target| {
@@ -4780,10 +4779,21 @@ impl ConnectionFormView {
                                     .position(|engine| &container_listing_target(engine) == target)
                             });
                             match kept {
-                                Some(index) => form.container.selected_engine_index = index,
+                                Some(index) => form.container.selected_engine_index = Some(index),
                                 None => {
-                                    form.container.selected_engine_index = 0;
-                                    if let Some(engine) = form.container.engines.first() {
+                                    form.container.selected_engine_index = None;
+                                    form.container.generation += 1;
+                                    form.container.details_generation += 1;
+                                    form.container.containers_loading = false;
+                                    form.container.details_loading = false;
+                                    form.container.containers.clear();
+                                    form.container.selected_container_index = None;
+                                    form.container.pod_container = None;
+                                    form.container.details = None;
+                                    if form.container.profile_id.is_none()
+                                        && let Some(engine) = form.container.engines.first()
+                                    {
+                                        form.container.selected_engine_index = Some(0);
                                         listing_target = Some(container_listing_target(engine));
                                     }
                                 }
@@ -4810,8 +4820,8 @@ impl ConnectionFormView {
                     return None;
                 }
                 form.container
-                    .engines
-                    .get(form.container.selected_engine_index)
+                    .selected_engine_index
+                    .and_then(|i| form.container.engines.get(i))
                     .map(container_listing_target)
             })
         }) else {
@@ -4869,44 +4879,7 @@ impl ConnectionFormView {
                     match result {
                         Ok(containers) => {
                             if reset {
-                                // A reset always dropped the selection at
-                                // request time, so any details on screen belong
-                                // to the previous engine or container and must
-                                // not show under the new selection.
-                                form.container.details = None;
-                                // Catalog edit backfill: pre-select the profile's
-                                // container by name once the list returns.
-                                let pending_name = form.container.pending_container_name.take();
-                                let pending_pod_container =
-                                    form.container.pending_pod_container.take();
-                                let pending_index = pending_name.as_deref().and_then(|name| {
-                                    containers.iter().position(|entry| entry.name == name)
-                                });
-                                if containers.is_empty() {
-                                    form.container.selected_container_index = None;
-                                    form.container.pod_container = None;
-                                    form.container.details = None;
-                                } else if let Some(index) = pending_index {
-                                    form.container.selected_container_index = Some(index);
-                                    // The saved name may reference a container
-                                    // renamed or removed since the profile was
-                                    // written; the normalized pin keeps this
-                                    // backfill equal to both the open-time
-                                    // resolve and a fresh row selection.
-                                    form.container.pod_container = containers[index]
-                                        .normalize_pod_container(pending_pod_container.as_deref());
-                                } else if containers.len() == 1 {
-                                    form.container.selected_container_index = Some(0);
-                                    // Same normalization as a row click: a
-                                    // multi-container pod is pinned to its
-                                    // first container so the picker and the
-                                    // details describe one container, while
-                                    // docker rows and single-container pods stay
-                                    // unpinned.
-                                    form.container.pod_container =
-                                        containers[0].normalize_pod_container(None);
-                                }
-                                form.container.containers = containers;
+                                form.container.reset_listing(containers);
                                 hydrate = form.container.selected_container_index.is_some();
                             } else {
                                 // Refresh-in-place: swap the rows and keep the
@@ -4923,6 +4896,11 @@ impl ConnectionFormView {
                                         .containers
                                         .iter()
                                         .position(|entry| entry.id == id)
+                                });
+                                let selected = selected.filter(|&i| {
+                                    form.container.pod_container.as_deref().is_none_or(|pin| {
+                                        form.container.containers[i].contains_pod_container(pin)
+                                    })
                                 });
                                 form.container.selected_container_index = selected;
                                 // Re-validate the pin against the refreshed
@@ -4992,15 +4970,15 @@ impl ConnectionFormView {
             let target = container_listing_target(&form.container.engines[index]);
             if form
                 .container
-                .engines
-                .get(form.container.selected_engine_index)
+                .selected_engine_index
+                .and_then(|i| form.container.engines.get(i))
                 .map(container_listing_target)
                 .as_ref()
                 == Some(&target)
             {
                 return None;
             }
-            form.container.selected_engine_index = index;
+            form.container.selected_engine_index = Some(index);
             form.container.selected_container_index = None;
             form.container.pod_container = None;
             // Invalidate any in-flight inspect: its reply describes the
@@ -5240,8 +5218,8 @@ impl ConnectionFormView {
         // The title follows the selected engine (not the rows): an empty or
         // loading kube list must already say "Pods", and switching engines
         // flips the label with the next render.
-        let engine_is_kube = engines
-            .get(selected_engine_index)
+        let engine_is_kube = selected_engine_index
+            .and_then(|i| engines.get(i))
             .map(|engine| engine.kind == oxideterm_docker::EngineKind::Kube)
             .unwrap_or(false);
         let container_field = self.render_container_list_field(
@@ -5575,7 +5553,7 @@ impl ConnectionFormView {
         &self,
         engines: &[oxideterm_docker::EngineInfo],
         loading: bool,
-        selected_index: usize,
+        selected_index: Option<usize>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let selector = if engines.is_empty() {
@@ -5627,8 +5605,8 @@ impl ConnectionFormView {
                 )
                 .into_any_element()
         } else {
-            let selected_label = engines
-                .get(selected_index)
+            let selected_label = selected_index
+                .and_then(|i| engines.get(i))
                 .map(|engine| engine.label.clone())
                 .unwrap_or_else(|| self.i18n.t("modals.new_connection.container_select_engine"));
             div()
@@ -6570,19 +6548,23 @@ impl ConnectionFormView {
             .into_any_element()
     }
 
-    fn render_open_sftp_switch(&self, open_sftp_on_connect: bool, cx: &mut Context<Self>) -> AnyElement {
+    fn render_open_sftp_switch(
+        &self,
+        open_sftp_on_connect: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         self.render_connection_switch_row_with_help(
-                "new-connection-open-sftp-help",
-                "new-connection-open-sftp",
-                "ssh.form.open_sftp_on_connect",
-                "ssh.form.open_sftp_on_connect_hint",
-                open_sftp_on_connect,
-                false,
-                |form| {
-                    form.open_sftp_on_connect = !form.open_sftp_on_connect;
-                },
-                cx,
-            )
+            "new-connection-open-sftp-help",
+            "new-connection-open-sftp",
+            "ssh.form.open_sftp_on_connect",
+            "ssh.form.open_sftp_on_connect_hint",
+            open_sftp_on_connect,
+            false,
+            |form| {
+                form.open_sftp_on_connect = !form.open_sftp_on_connect;
+            },
+            cx,
+        )
     }
 
     pub(super) fn render_connection_ssh_options(
@@ -6593,7 +6575,11 @@ impl ConnectionFormView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         if self.environment.browser.is_some() {
-            let checked = self.connection_form_state(cx).form.as_ref().is_some_and(|form| form.open_sftp_on_connect);
+            let checked = self
+                .connection_form_state(cx)
+                .form
+                .as_ref()
+                .is_some_and(|form| form.open_sftp_on_connect);
             return self.render_open_sftp_switch(checked, cx);
         }
         let Some((
@@ -7163,7 +7149,9 @@ impl ConnectionFormView {
                 cx,
             ))
             .child(self.render_connection_hint(self.i18n.t("sftp.standalone.initial_path_hint")))
-            .when(self.environment.browser.is_none(), |col| col.child(self.form_hairline()).child(timeout_row))
+            .when(self.environment.browser.is_none(), |col| {
+                col.child(self.form_hairline()).child(timeout_row)
+            })
             .into_any_element()
     }
 

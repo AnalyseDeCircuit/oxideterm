@@ -86,27 +86,23 @@ impl ContainerEntry {
         }
     }
 
-    /// Normalized pod container pin, shared by saved-profile resolve, form
-    /// backfill, selection and refresh so every path derives one launch
-    /// identity for the same target. A single-container pod stays unpinned
-    /// because the API already targets its only container; a multi-container
-    /// pod keeps a pin that still names a listed container and otherwise falls
-    /// back to the first spec entry.
+    pub fn contains_pod_container(&self, name: &str) -> bool {
+        self.containers
+            .iter()
+            .any(|container| container.name == name)
+    }
+
+    /// Only an unpinned launch may default to the first container.
     pub fn normalize_pod_container(&self, pin: Option<&str>) -> Option<String> {
+        if let Some(name) = pin {
+            return Some(name.to_owned());
+        }
         if self.containers.len() <= 1 {
             return None;
         }
-        pin.filter(|name| {
-            self.containers
-                .iter()
-                .any(|container| container.name == *name)
-        })
-        .map(str::to_string)
-        .or_else(|| {
-            self.containers
-                .first()
-                .map(|container| container.name.clone())
-        })
+        self.containers
+            .first()
+            .map(|container| container.name.clone())
     }
 }
 
@@ -132,7 +128,7 @@ pub enum EngineTarget {
 /// How the terminal process is started inside the container. Exec variants
 /// spawn a fresh process; `Attach` binds the terminal to the already-running
 /// main process TTY.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ContainerLaunchMode {
     /// Interactive shell; `None` lets the backend try its POSIX shell
@@ -142,6 +138,16 @@ pub enum ContainerLaunchMode {
     Command { command: String },
     /// Attach to the container/pod main process TTY instead of exec.
     Attach,
+}
+
+impl std::fmt::Debug for ContainerLaunchMode {
+    fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Shell { shell } => out.debug_struct("Shell").field("shell", shell).finish(),
+            Self::Command { .. } => out.write_str("Command { redacted }"),
+            Self::Attach => out.write_str("Attach"),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -379,15 +385,15 @@ mod tests {
         );
         assert_eq!(
             multi.normalize_pod_container(Some("removed")).as_deref(),
-            Some("c1"),
-            "a stale pin must fall back instead of targeting a missing container"
+            Some("removed"),
+            "never silently retarget an explicit pin"
         );
 
         let single = pod(&["only"]);
         assert_eq!(
             single.normalize_pod_container(Some("only")),
-            None,
-            "a single-container pod needs no pin, matching a fresh selection"
+            Some("only".to_owned()),
+            "keep an explicit pin even when only one container remains"
         );
         assert_eq!(single.normalize_pod_container(None), None);
     }

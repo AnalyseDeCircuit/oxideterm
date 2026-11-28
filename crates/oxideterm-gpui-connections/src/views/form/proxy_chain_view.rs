@@ -975,8 +975,7 @@ impl ConnectionFormView {
                     .connection_form_state(cx)
                     .form
                     .as_ref()
-                    .map(|form| form.container.selected_engine_index)
-                    .unwrap_or_default();
+                    .and_then(|form| form.container.selected_engine_index);
                 let engines = self
                     .connection_form_state(cx)
                     .form
@@ -998,7 +997,7 @@ impl ConnectionFormView {
                     popup = popup.child(select_option(&self.tokens, label, false));
                 } else {
                     for (index, engine) in engines.iter().enumerate() {
-                        let selected = index == selected_index;
+                        let selected = Some(index) == selected_index;
                         popup = popup.child(select_option_action(
                             select_option(&self.tokens, engine.label.clone(), selected),
                             false,
