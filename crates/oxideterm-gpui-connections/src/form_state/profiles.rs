@@ -1,4 +1,50 @@
 use super::*;
+use std::collections::HashSet;
+
+pub fn duplicate_connection_template_name<'a>(
+    source_name: &str,
+    existing_names: impl IntoIterator<Item = &'a str>,
+) -> String {
+    let occupied_names = existing_names
+        .into_iter()
+        .map(|name| name.trim().to_lowercase())
+        .collect::<HashSet<_>>();
+    let base_name = duplicate_template_base_name(source_name);
+
+    // Match the Tauri duplicate-template flow: the first candidate is
+    // "<name> Copy", then numbered copies are appended until the draft is unique.
+    for copy_index in 1usize.. {
+        let candidate = if copy_index == 1 {
+            format!("{base_name} Copy")
+        } else {
+            format!("{base_name} Copy {copy_index}")
+        };
+        if !occupied_names.contains(&candidate.to_lowercase()) {
+            return candidate;
+        }
+    }
+    unreachable!("unbounded duplicate-name search must eventually find a free name")
+}
+
+fn duplicate_template_base_name(source_name: &str) -> String {
+    let trimmed = source_name.trim();
+    let stripped = if let Some(base_name) = trimmed.strip_suffix(" Copy") {
+        base_name.trim()
+    } else if let Some((base_name, copy_index)) = trimmed.rsplit_once(" Copy ") {
+        if !copy_index.is_empty() && copy_index.chars().all(|ch| ch.is_ascii_digit()) {
+            base_name.trim()
+        } else {
+            trimmed
+        }
+    } else {
+        trimmed
+    };
+    if stripped.is_empty() {
+        "Connection".to_string()
+    } else {
+        stripped.to_string()
+    }
+}
 
 #[cfg(not(target_family = "wasm"))]
 pub fn form_from_remote_desktop_profile(

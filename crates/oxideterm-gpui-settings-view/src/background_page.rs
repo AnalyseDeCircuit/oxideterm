@@ -22,7 +22,7 @@ use std::{
 };
 
 use crate::{
-    appearance_page::AppearancePage, entity::SettingsWorkspaceEntity, surface::nav::render_icon, *,
+    appearance::background_tab_icon, appearance_page::AppearancePage, entity::SettingsWorkspaceEntity, surface::nav::render_icon, *,
 };
 
 const SETTINGS_PERCENT_SCALE: f64 = 100.0;
@@ -46,25 +46,6 @@ fn background_scope_index(scope: BackgroundScope) -> usize {
         .unwrap_or(0)
 }
 
-fn background_tab_icon(icon: SettingsBackgroundTabIcon) -> &'static str {
-    match icon {
-        SettingsBackgroundTabIcon::Activity => "lucide/activity.svg",
-        SettingsBackgroundTabIcon::ArrowLeftRight => "lucide/arrow-left-right.svg",
-        SettingsBackgroundTabIcon::Bell => "lucide/bell.svg",
-        SettingsBackgroundTabIcon::Cloud => "lucide/cloud.svg",
-        SettingsBackgroundTabIcon::Code2 => "lucide/code-2.svg",
-        SettingsBackgroundTabIcon::Folder => "lucide/folder.svg",
-        SettingsBackgroundTabIcon::FolderInput => "lucide/folder-input.svg",
-        SettingsBackgroundTabIcon::Gauge => "lucide/gauge.svg",
-        SettingsBackgroundTabIcon::ListTree => "lucide/list-tree.svg",
-        SettingsBackgroundTabIcon::Monitor => "lucide/monitor.svg",
-        SettingsBackgroundTabIcon::Network => "lucide/network.svg",
-        SettingsBackgroundTabIcon::Puzzle => "lucide/puzzle.svg",
-        SettingsBackgroundTabIcon::Rocket => "lucide/rocket.svg",
-        SettingsBackgroundTabIcon::Settings => "lucide/settings.svg",
-        SettingsBackgroundTabIcon::Terminal => "lucide/terminal.svg",
-    }
-}
 
 #[derive(Clone)]
 pub enum BackgroundRequest {

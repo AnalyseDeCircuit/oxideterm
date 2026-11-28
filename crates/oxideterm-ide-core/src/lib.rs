@@ -13,6 +13,8 @@ mod filesystem;
 pub use oxideterm_editor_core::SharedText;
 mod model;
 mod plugin_snapshot;
+mod project_search;
+pub use project_search::{IdeSearchMatch, SearchPaths};
 mod tree;
 mod workspace;
 #[cfg(test)]

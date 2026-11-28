@@ -20,7 +20,7 @@ fn fs_error(e: String) -> IdeFileError {
         e,
     )
 }
-fn path(loc: &IdeLocation) -> Result<&str, IdeFileError> {
+pub(super) fn path(loc: &IdeLocation) -> Result<&str, IdeFileError> {
     match loc {
         IdeLocation::Remote { path, .. } => Ok(path),
         _ => Err(error(IdeFileErrorKind::Unsupported)),
@@ -30,7 +30,7 @@ fn version(e: &Entry) -> SavedFileVersion {
     SavedFileVersion {
         size_bytes: e.data.as_ref().map(|v| v.len() as u64),
         etag: Some(e.revision.to_string()),
-        modified_millis: None,
+        modified_millis: e.modified.map(|s|s*1000),
     }
 }
 impl PortableIdeHost for MemoryFs {
@@ -86,9 +86,6 @@ impl PortableIdeHost for MemoryFs {
         encoding: Option<&'a str>,
     ) -> FileFuture<'a, IdeFileData> {
         ready((|| {
-            if encoding.is_some_and(|s| !s.eq_ignore_ascii_case("utf-8")) {
-                return Err(error(IdeFileErrorKind::Unsupported));
-            }
             let fs = self.files.borrow();
             let e = fs
                 .entries
@@ -98,28 +95,7 @@ impl PortableIdeHost for MemoryFs {
                 .data
                 .as_ref()
                 .ok_or_else(|| error(IdeFileErrorKind::Unsupported))?;
-            if bytes.contains(&0) {
-                return Err(error(IdeFileErrorKind::Binary));
-            }
-            let value =
-                std::str::from_utf8(bytes).map_err(|_| error(IdeFileErrorKind::InvalidEncoding))?;
-            let has_bom = value.starts_with('\u{feff}');
-            let v = value.trim_start_matches('\u{feff}');
-            Ok(IdeFileData {
-                version: version(e),
-                text: v.replace("\r\n", "\n").replace('\r', "\n"),
-                format: TextFileFormat {
-                    has_bom,
-                    line_ending: if v.contains("\r\n") {
-                        LineEnding::CrLf
-                    } else if v.contains('\r') {
-                        LineEnding::Cr
-                    } else {
-                        LineEnding::Lf
-                    },
-                    ..Default::default()
-                },
-            })
+            oxideterm_ide_fs::text::decode_file(bytes, encoding, version(e))
         })())
     }
     fn stat<'a>(&'a self, l: &'a IdeLocation) -> FileFuture<'a, FileStat> {
@@ -144,9 +120,6 @@ impl PortableIdeHost for MemoryFs {
         mode: WriteMode,
     ) -> FileFuture<'a, SavedFileVersion> {
         ready((|| {
-            if !f.encoding.eq_ignore_ascii_case("utf-8") {
-                return Err(error(IdeFileErrorKind::Unsupported));
-            }
             let p = path(l)?;
             let mut fs = self.files.borrow_mut();
             let prev = fs.entries.get(p);
@@ -160,17 +133,8 @@ impl PortableIdeHost for MemoryFs {
             }
             fs.list(Path::new(p).parent().and_then(Path::to_str).unwrap_or("/"))
                 .map_err(fs_error)?;
-            let mut v = if f.has_bom {
-                "\u{feff}".to_owned()
-            } else {
-                String::new()
-            };
-            text.with_text(|s| match f.line_ending {
-                LineEnding::Lf => v.push_str(s),
-                LineEnding::CrLf => v.push_str(&s.replace('\n', "\r\n")),
-                LineEnding::Cr => v.push_str(&s.replace('\n', "\r")),
-            });
-            fs.put(p, Some(v.into_bytes()));
+            let mut bytes = oxideterm_ide_fs::text::encode_chunks(text.chunks(), f)?;
+            fs.put(p, Some(std::mem::take(&mut *bytes)));
             Ok(version(&fs.entries[p]))
         })())
     }
@@ -194,39 +158,44 @@ impl PortableIdeHost for MemoryFs {
         ready(self.remove(&p, r).map_err(fs_error))
     }
     fn search_project(&self, _: String, q: IdeSearchQuery) -> FileFuture<'_, Vec<IdeSearchMatch>> {
-        let mut items = Vec::new();
-        let root = DemoFiles::path("/", &q.root_path);
-        if q.regex {
-            return ready(Err(error(IdeFileErrorKind::Unsupported)));
-        }
-        for (p, e) in &self.files.borrow().entries {
-            if !Path::new(p).starts_with(&root) {
-                continue;
-            }
-            if let Some(s) = e.data.as_ref().and_then(|v| std::str::from_utf8(v).ok()) {
-                for (i, line) in s.lines().enumerate() {
-                    let found = if q.case_sensitive {
-                        line.find(&q.pattern)
-                    } else {
-                        line.to_ascii_lowercase()
-                            .find(&q.pattern.to_ascii_lowercase())
-                    };
-                    if let Some(a) = found {
-                        if items.len() >= q.max_results as usize {
-                            return ready(Ok(items));
-                        }
-                        items.push(IdeSearchMatch {
-                            path: p.clone(),
-                            line: i as u32 + 1,
-                            column: line[..a].chars().count() as u32 + 1,
-                            preview: line.into(),
-                            match_start: a,
-                            match_end: a + q.pattern.len(),
-                        });
+        ready((|| {
+            let matcher = q.text_matcher()?;
+            let paths = SearchPaths::new(&q)?;
+            let root = DemoFiles::path("/", &q.root_path);
+            let mut hits = Vec::new();
+            for (path, entry) in &self.files.borrow().entries {
+                let Ok(relative) = Path::new(path).strip_prefix(&root) else {
+                    continue;
+                };
+                if !paths.allows(path)
+                    || relative.parent().is_some_and(|parent| {
+                        parent.components().any(|c| {
+                            matches!(
+                                c.as_os_str().to_str(),
+                                Some(".git" | "node_modules" | "target")
+                            )
+                        })
+                    })
+                {
+                    continue;
+                }
+                let Some(bytes) = &entry.data else { continue };
+                let Ok(file) = oxideterm_ide_fs::text::decode_file(bytes, None, version(entry)) else { continue; };
+                for (i, line) in file.text.lines().enumerate() {
+                    if hits.len() >= q.max_results as usize {
+                        return Ok(hits);
+                    }
+                    if let Some(found) = matcher.find(line) {
+                        hits.push(IdeSearchMatch::from_line(
+                            path,
+                            i as u32 + 1,
+                            line,
+                            found.range(),
+                        ));
                     }
                 }
             }
-        }
-        ready(Ok(items))
+            Ok(hits)
+        })())
     }
 }

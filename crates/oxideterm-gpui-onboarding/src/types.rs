@@ -101,6 +101,30 @@ pub struct OnboardingFrame {
     pub shortcuts: Vec<OnboardingShortcutItem>,
 }
 
+/// Only actions that the current host can execute belong on the launch step.
+#[derive(Clone, Copy)]
+pub struct OnboardingLaunchActions {
+    pub terminal_description: Option<&'static str>,
+    pub new_connection: bool,
+    pub import_ssh: bool,
+    pub import_apps: bool,
+    pub cli: bool,
+    pub ai: bool,
+    pub ai_tools: bool,
+}
+
+impl OnboardingLaunchActions {
+    pub const DESKTOP: Self = Self {
+        terminal_description: Some("onboarding.open_terminal_desc"),
+        new_connection: true,
+        import_ssh: true,
+        import_apps: true,
+        cli: true,
+        ai: true,
+        ai_tools: true,
+    };
+}
+
 pub struct OnboardingViewBindings {
     pub frame: Rc<dyn Fn(&App) -> Option<OnboardingFrame>>,
     pub dispatch: Rc<dyn Fn(OnboardingRequest, &mut Window, &mut App)>,

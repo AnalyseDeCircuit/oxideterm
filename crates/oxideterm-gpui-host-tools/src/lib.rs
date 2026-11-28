@@ -15,7 +15,9 @@ mod health;
 mod helpers;
 mod lifecycle;
 mod multiplexer;
+pub mod rail;
 mod topology;
+pub use topology::{topology_canvas, topology_node};
 mod types;
 mod window_text;
 

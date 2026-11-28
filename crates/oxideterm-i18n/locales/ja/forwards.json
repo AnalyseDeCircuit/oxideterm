@@ -18,6 +18,7 @@
   "copy_address": "アドレスをコピー",
   "copied": "コピーしました",
   "forwards": {
+    "preview_hint": "このデモセッション用のルール下書きです。ポートは開きません。",
     "quick": {
       "title": "クイック転送",
       "jupyter": "Jupyter (8888)",

@@ -2,15 +2,14 @@ use std::time::Duration;
 
 use gpui::{
     App, Bounds, Context, Entity, FocusHandle, InteractiveElement, IntoElement, MouseButton,
-    ParentElement, Pixels, Render, StatefulInteractiveElement, Styled, Window, div,
+    ParentElement, Pixels, Render, StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder,
 };
 use oxideterm_terminal_emulator::{TermMode, TerminalSize};
 
 use super::{TerminalView, TerminalViewEvent, ime::TerminalViewInputHandler};
 use crate::{
     TerminalCanvasHost, TerminalElement, TerminalElementInput, TerminalMetrics,
-    input::{TerminalBlinkMode, should_blink_cursor_for_mode},
-    metrics::TERMINAL_CONTENT_PADDING,
+    input::should_blink_cursor_for_mode, metrics::TERMINAL_CONTENT_PADDING,
 };
 
 pub(super) fn grid_size(
@@ -89,6 +88,7 @@ impl TerminalView {
         let events = self.emulator.get_mut().resize(size);
         self.route_events(events, cx);
         self.publish_snapshot(true, cx);
+        self.refresh_search(cx);
         cx.emit(TerminalViewEvent::Resized(size));
     }
 
@@ -131,7 +131,7 @@ impl TerminalView {
     pub(super) fn update_blink(&mut self, cx: &mut Context<Self>) {
         let blink = self.composition.text.is_empty()
             && should_blink_cursor_for_mode(
-                TerminalBlinkMode::TerminalControlled,
+                self.options.blink,
                 self.focused,
                 self.emulator.borrow().cursor_blinking(),
                 self.mode().contains(TermMode::ALT_SCREEN),
@@ -165,8 +165,14 @@ impl TerminalView {
 impl Render for TerminalView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.observe_focus(window, cx);
-        let element = TerminalElement::new_with_images(
-            self.snapshot.as_ref().clone(),
+        let mut snapshot = self.snapshot.as_ref().clone();
+        if snapshot.cursor_shape != oxideterm_terminal_emulator::TerminalCursorShape::Hidden
+            && let Some(shape) = self.options.cursor
+        {
+            snapshot.cursor_shape = shape;
+        }
+        let element = TerminalElement::new_with_images_and_bidi(
+            snapshot,
             Vec::new(),
             self.selection.filter(|s| !s.is_empty()),
             self.metrics.clone(),
@@ -174,9 +180,10 @@ impl Render for TerminalView {
             self.cursor_visible,
             self.composition.marked_text(),
             None,
-            Vec::new(),
-            None,
+            self.search.as_ref().map(|s| s.matches.clone()).unwrap_or_default(),
+            self.search.as_ref().and_then(|s| s.selected),
             self.pointer.hovered.clone(),
+            self.options.bidi,
             Some(TerminalElementInput {
                 view: cx.entity(),
                 focus_handle: self.focus.clone(),
@@ -184,12 +191,19 @@ impl Render for TerminalView {
                 last_viewport_scale_factor_bits: self.viewport.map(|(_, scale)| scale.to_bits()),
             }),
         )
+        .transparent_background(self.background_alpha.is_some())
+        .precomputed_search_matches()
         .marked_text_caret(Some(self.composition.selection.end))
         .detect_file_paths_as_links(false)
         .layout_cache(self.layout.clone());
 
         let mut root = div()
             .id("terminal-view")
+            .when_some(self.background_alpha, |root, alpha| {
+                root.bg(gpui::rgba((self.theme.background << 8) | u32::from(alpha)))
+            })
+            .px(gpui::px(self.options.inset_x))
+            .py(gpui::px(self.options.inset_y))
             .size_full()
             .overflow_hidden()
             .track_focus(&self.focus)
@@ -208,6 +222,6 @@ impl Render for TerminalView {
                 .on_mouse_up(button, cx.listener(Self::mouse_up))
                 .on_mouse_up_out(button, cx.listener(Self::mouse_up));
         }
-        root.child(element)
+        div().relative().size_full().child(root.child(element)).children(self.search_panel(cx))
     }
 }

@@ -1,7 +1,7 @@
 mod operations;
 use super::*;
 
-mod bookmarks;
+pub(super) mod bookmarks;
 
 const FILE_MANAGER_DIALOG_FOOTER_ACTIONS: [ConfirmDialogAction; 2] =
     [ConfirmDialogAction::Cancel, ConfirmDialogAction::Confirm];
@@ -17,8 +17,8 @@ impl FileManagerView {
     pub fn handle_file_manager_key(
         &mut self,
         event: &KeyDownEvent,
-        file_action: Option<&'static str>,
-        preview_action: Option<&'static str>,
+        file_action: Option<&str>,
+        preview_action: Option<&str>,
         cx: &mut Context<Self>,
     ) -> bool {
         let key = event.keystroke.key.as_str();
@@ -290,7 +290,7 @@ impl FileManagerView {
 
     pub(super) fn refresh_file_manager(&mut self, cx: &mut Context<Self>) {
         self.file_manager.update(cx, |file_manager, cx| {
-            file_manager.refresh();
+            file_manager.refresh(None, cx);
             cx.notify();
         });
     }
@@ -301,8 +301,7 @@ impl FileManagerView {
         let finish = (self.file_manager.read(cx).fs.browse_audit())(&path);
         self.file_manager.update(cx, |file_manager, cx| {
             file_manager.refresh_drives();
-            file_manager.refresh();
-            finish(file_manager.error.is_none());
+            file_manager.refresh(Some(finish), cx);
             cx.notify();
         });
     }
@@ -326,8 +325,7 @@ impl FileManagerView {
     pub fn set_file_manager_path(&mut self, path: String, cx: &mut Context<Self>) {
         let finish = (self.file_manager.read(cx).fs.browse_audit())(&path);
         self.file_manager.update(cx, |file_manager, cx| {
-            file_manager.set_path(path);
-            finish(file_manager.error.is_none());
+            file_manager.set_path(path, Some(finish), cx);
             cx.notify();
         });
     }
@@ -544,27 +542,26 @@ impl FileManagerView {
         let Some((generation, parent_path)) = request_state else {
             return;
         };
-        let entries = self
-            .file_manager
-            .read(cx)
-            .fs
-            .list(&parent_path)
-            .unwrap_or_default()
-            .into_iter()
-            .map(|entry| {
-                let is_directory = entry.is_directory_like();
-                PathCompletionCandidate {
-                    name: entry.name,
-                    path: entry.path,
-                    is_directory,
-                }
-            })
-            .collect();
-        self.file_manager.update(cx, |file_manager, cx| {
-            file_manager
-                .path_completion
-                .apply_entries(generation, &parent_path, entries);
-            cx.notify();
+        self.file_manager.update(cx, |state, cx| {
+            let listing = state.fs.list(&parent_path);
+            state.completion_task = listing.deliver(state, cx, move |state, entries, cx| {
+                let entries = entries
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|entry| {
+                        let is_directory = entry.is_directory_like();
+                        PathCompletionCandidate {
+                            name: entry.name,
+                            path: entry.path,
+                            is_directory,
+                        }
+                    })
+                    .collect();
+                state
+                    .path_completion
+                    .apply_entries(generation, &parent_path, entries);
+                cx.notify();
+            });
         });
     }
 
@@ -730,6 +727,15 @@ impl FileManagerView {
         self.file_manager.read(cx).selected_names()
     }
 
+    pub(super) fn selection_can_move(&self, cx: &App) -> bool {
+        let s = self.file_manager.read(cx);
+        s.fs.device_name().is_none()
+            || s.files
+                .iter()
+                .filter(|e| s.selected.contains(&e.name))
+                .all(|e| s.fs.can_move(e))
+    }
+
     pub(super) fn selected_file_manager_entries(&self, cx: &App) -> Vec<LocalFileEntry> {
         self.file_manager.read(cx).selected_entries()
     }
@@ -784,6 +790,17 @@ impl FileManagerView {
         cx: &mut Context<Self>,
     ) {
         self.file_manager.update(cx, |file_manager, cx| {
+            if file_manager
+                .files
+                .iter()
+                .find(|e| e.name == old_name)
+                .is_some_and(|e| !file_manager.fs.can_move(e))
+            {
+                cx.emit(FileManagerWorkspaceEvent::Error(
+                    "fileManager.browserOperationUnavailable".into(),
+                ));
+                return;
+            }
             file_manager.dialog = Some(FileManagerDialog::Rename {
                 old_name: old_name.clone(),
             });
@@ -839,6 +856,10 @@ impl FileManagerView {
         cx: &mut Context<Self>,
     ) {
         let audio_stop_error = self.file_manager.update(cx, |file_manager, cx| {
+            file_manager.preview_task = None;
+            file_manager.stream_task = None;
+            file_manager.dialog = Some(FileManagerDialog::Preview { entry: entry.clone() });
+            file_manager.dialog_presence.reopen();
             file_manager.preview = Some(Arc::new(LocalPreview::Loading));
             file_manager.preview_plugin = None;
             file_manager.preview_editor = None;
@@ -869,7 +890,20 @@ impl FileManagerView {
                 cx,
             );
         }
-        let preview = self.file_manager.read(cx).fs.preview(&entry.path);
+        let work = self.file_manager.read(cx).fs.preview(&entry.path);
+        let task = work.deliver(self, cx, move |this, preview, cx| {
+            this.show_file_preview(entry, preview, cx)
+        });
+        self.file_manager
+            .update(cx, |state, _| state.preview_task = task);
+    }
+
+    fn show_file_preview(
+        &mut self,
+        entry: LocalFileEntry,
+        preview: LocalPreview,
+        cx: &mut Context<Self>,
+    ) {
         match &preview {
             LocalPreview::Document { path, mime_type } => {
                 let view =
@@ -976,32 +1010,34 @@ impl FileManagerView {
             offset,
             FILE_MANAGER_PREVIEW_STREAM_CHUNK_SIZE,
         );
-        self.file_manager.update(cx, |file_manager, cx| {
-            file_manager.preview_stream.loading = false;
-            match result {
-                Ok(chunk) => {
-                    file_manager.preview_stream.loaded_bytes += chunk.data.len() as u64;
-                    let stream = &mut file_manager.preview_stream;
-                    append_local_preview_chunk(
-                        &mut stream.lines,
-                        &mut stream.carry_text,
-                        &mut stream.carry_bytes,
-                        chunk.data,
-                        chunk.eof,
-                    );
-                    if chunk.eof
-                        || file_manager.preview_stream.loaded_bytes
-                            >= file_manager.preview_stream.size
-                    {
+        self.file_manager.update(cx, |state, cx| {
+            state.stream_task = result.deliver(state, cx, |file_manager, result, cx| {
+                file_manager.preview_stream.loading = false;
+                match result {
+                    Ok(chunk) => {
+                        file_manager.preview_stream.loaded_bytes += chunk.data.len() as u64;
+                        let stream = &mut file_manager.preview_stream;
+                        append_local_preview_chunk(
+                            &mut stream.lines,
+                            &mut stream.carry_text,
+                            &mut stream.carry_bytes,
+                            chunk.data,
+                            chunk.eof,
+                        );
+                        if chunk.eof
+                            || file_manager.preview_stream.loaded_bytes
+                                >= file_manager.preview_stream.size
+                        {
+                            file_manager.preview_stream.eof = true;
+                        }
+                    }
+                    Err(error) => {
+                        file_manager.preview_stream.error = Some(error);
                         file_manager.preview_stream.eof = true;
                     }
                 }
-                Err(error) => {
-                    file_manager.preview_stream.error = Some(error);
-                    file_manager.preview_stream.eof = true;
-                }
-            }
-            cx.notify();
+                cx.notify();
+            });
         });
     }
 
@@ -1196,12 +1232,29 @@ impl FileManagerView {
         self.dismiss_file_manager_context_menu(cx);
     }
 
-    pub(super) fn browse_file_manager_folder(&mut self, cx: &mut Context<Self>) {
-        let fs = self.file_manager.read(cx).fs.clone();
-        let selection = fs.pick_folder(self.i18n.t("fileManager.browse").into(), cx);
-        self.file_manager.update(cx, |file_manager, cx| {
-            file_manager.start_folder_picker(selection, cx);
-        });
+    pub(super) fn browse_file_manager_folder(
+        &mut self,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        #[cfg(target_family = "wasm")]
+        self.pointer(FileManagerPointer::BrowseDeviceFolder, _window, cx);
+        #[cfg(not(target_family = "wasm"))]
+        {
+            let fs = self.file_manager.read(cx).fs.clone();
+            let state = self.file_manager.read(cx);
+            if !fs.can_pick_folder()
+                || state.folder_picker_task.is_some()
+                || state.mutation_task.is_some()
+                || state.operation_worker.is_some()
+            {
+                return;
+            }
+            let selection = fs.pick_folder(self.i18n.t("fileManager.browse").into(), cx);
+            self.file_manager.update(cx, |file_manager, cx| {
+                file_manager.start_folder_picker(selection, cx);
+            });
+        }
     }
 
     pub(super) fn open_terminal_at_file_manager_path(

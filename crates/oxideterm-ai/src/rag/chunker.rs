@@ -1,7 +1,8 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::rag::types::{DocChunk, DocFormat, is_cjk};
+use crate::rag_model::{DocChunk, DocFormat};
+use crate::rag_keyword::is_cjk;
 use uuid::Uuid;
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -321,7 +322,7 @@ fn tail_chars(s: &str, n: usize) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rag::types::DocFormat;
+    use crate::rag_model::DocFormat;
 
     #[test]
     fn markdown_chunks_preserve_content_and_heading_hierarchy() {

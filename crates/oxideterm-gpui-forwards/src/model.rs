@@ -394,6 +394,11 @@ impl ForwardsPageState {
         self.view.error = None;
     }
 
+    pub(super) fn set_input_value(&mut self, input: ForwardInput, value: String) {
+        *self.input_value_mut(input) = value;
+        self.view.error = None;
+    }
+
     pub fn backspace_input(&mut self, input: ForwardInput) -> bool {
         self.input_value_mut(input).pop().is_some() || self.view.error.take().is_some()
     }

@@ -12,6 +12,7 @@ use oxideterm_preview::{
 };
 use zeroize::{Zeroize, Zeroizing};
 
+#[cfg(not(target_family = "wasm"))]
 pub(crate) const FILE_PREFIX_BYTES: usize = 8192;
 
 pub(crate) fn check_text_prefix(bytes: &[u8], hint: Option<&str>) -> Result<(), IdeFileError> {
@@ -42,7 +43,7 @@ pub(crate) fn check_size(size: u64) -> Result<(), IdeFileError> {
     Ok(())
 }
 
-pub(crate) fn decode_file(
+pub fn decode_file(
     bytes: &[u8],
     hint: Option<&str>,
     version: SavedFileVersion,
@@ -94,7 +95,7 @@ fn encode_file(text: &str, format: &TextFileFormat) -> Result<Zeroizing<Vec<u8>>
     encode_chunks(std::iter::once(text), format)
 }
 
-pub(crate) fn encode_chunks<'a>(
+pub fn encode_chunks<'a>(
     chunks: impl Iterator<Item = &'a str> + Clone,
     format: &TextFileFormat,
 ) -> Result<Zeroizing<Vec<u8>>, IdeFileError> {

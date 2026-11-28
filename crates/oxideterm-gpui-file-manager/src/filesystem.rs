@@ -1,4 +1,4 @@
-use gpui::{App, ImageSource, SharedString, Task};
+use gpui::{App, ImageSource, Task};
 use oxideterm_local_files::{
     LocalBatchProgress, LocalBookmark, LocalChecksumResult, LocalClipboardMode, LocalDrive,
     LocalFileEntry, LocalFileProperties, LocalPreview, LocalPreviewChunk, LocalPreviewMetadata,
@@ -15,17 +15,50 @@ use std::{
 pub(crate) mod desktop;
 
 pub enum FileBatch {
+    #[cfg(target_family = "wasm")]
+    BrowserDrop {
+        destination: String,
+        payload: gpui::BrowserFileDrop,
+    },
     Paste {
         destination: String,
         mode: LocalClipboardMode,
     },
     Duplicate,
+    #[cfg(not(target_family = "wasm"))]
     Drop {
         destination: String,
     },
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub type FolderSelection = Pin<Box<dyn Future<Output = Option<PathBuf>>>>;
+
+/// A desktop listing is available immediately; a browser directory handle yields to the event loop.
+pub enum FileIo<T> {
+    Ready(T),
+    Pending(Pin<Box<dyn Future<Output = T>>>),
+}
+
+impl<T: 'static> FileIo<T> {
+    pub(crate) fn deliver<V: 'static>(
+        self,
+        owner: &mut V,
+        cx: &mut gpui::Context<V>,
+        receive: impl FnOnce(&mut V, T, &mut gpui::Context<V>) + 'static,
+    ) -> Option<Task<()>> {
+        match self {
+            Self::Ready(value) => {
+                receive(owner, value, cx);
+                None
+            }
+            Self::Pending(work) => Some(cx.spawn(async move |owner, cx| {
+                let value = work.await;
+                let _ = owner.update(cx, |owner, cx| receive(owner, value, cx));
+            })),
+        }
+    }
+}
 /// Capture the caller before the picker yields; begin on selection and finish after listing.
 pub type BrowseAudit = Box<dyn FnOnce(&str) -> Box<dyn FnOnce(bool)>>;
 pub type BatchProgress = Box<dyn Fn(LocalBatchProgress) + Send>;
@@ -34,48 +67,68 @@ pub type BatchFinished = Box<dyn FnOnce(Result<(), String>) + Send>;
 /// Dropping the view releases the handle without waiting on the UI thread.
 pub type BatchHandle = Box<dyn FnOnce()>;
 
+pub enum FileMutation {
+    CreateFolder(String),
+    CreateFile(String),
+    Rename { from: String, to: String },
+    Delete(Vec<String>),
+}
+
 /// Host operations for one file manager. Paths identify entries in the host filesystem.
 pub trait FileSystemBridge {
     fn home(&self) -> String;
+    fn can_move(&self, _entry: &LocalFileEntry) -> bool {
+        true
+    }
+    fn device_name(&self) -> Option<&str> {
+        None
+    }
     fn sidebar_locations(&self) -> Vec<LocalSidebarLocation>;
     fn drives(&self) -> Vec<LocalDrive>;
-    fn load_bookmarks(&self, path: &Path) -> Vec<LocalBookmark>;
-    fn save_bookmarks(&self, path: &Path, bookmarks: &[LocalBookmark]) -> Result<(), String>;
-    fn reorder_bookmarks(
+    fn load_bookmarks(&self, path: &Path) -> FileIo<Result<Vec<LocalBookmark>, String>>;
+    fn save_bookmarks(
         &self,
-        bookmarks: &mut Vec<LocalBookmark>,
         path: &Path,
-        source: &str,
-        target: &str,
-        after: bool,
-    ) -> Result<bool, String>;
-    fn list(&self, path: &str) -> Result<Vec<LocalFileEntry>, String>;
-    fn create_folder(&self, dir: &str, name: &str) -> Result<(), String>;
-    fn create_file(&self, dir: &str, name: &str) -> Result<(), String>;
-    fn rename(&self, dir: &str, old: &str, new: &str) -> Result<(), String>;
-    fn delete(&self, dir: &str, names: &[String]) -> Option<String>;
+        before: &[LocalBookmark],
+        next: &[LocalBookmark],
+    ) -> FileIo<Result<(), String>>;
+    fn list(&self, path: &str) -> FileIo<Result<Vec<LocalFileEntry>, String>>;
+    fn mutate(&self, dir: &str, action: FileMutation) -> FileIo<Result<(), String>>;
+    #[cfg(not(target_family = "wasm"))]
     fn resolve_drop(&self, paths: &[PathBuf]) -> Vec<String>;
     fn batch_units(&self, paths: &[String]) -> usize;
-    fn compress(&self, sources: &[String], destination: &Path) -> Result<PathBuf, String>;
-    fn extract(&self, archive: &str, destination: &str) -> Result<(), String>;
+    fn compress(&self, sources: &[String], destination: &Path) -> FileIo<Result<PathBuf, String>>;
+    fn can_extract(&self, name: &str) -> bool {
+        oxideterm_local_files::can_extract_archive(name)
+    }
+    fn extract(&self, archive: &str, destination: &str) -> FileIo<Result<(), String>>;
     fn properties(&self, entry: &LocalFileEntry) -> LocalFileProperties;
     fn checksum(&self, path: String, cx: &App) -> Task<Result<LocalChecksumResult, String>>;
     fn metadata(&self, path: &str) -> Option<LocalPreviewMetadata>;
     fn font_bytes(&self, path: &str) -> Result<Vec<u8>, String>;
     fn image(&self, path: &str, quarter_turns: u8) -> ImageSource;
+    #[cfg(not(target_family = "wasm"))]
     fn open_external(&self, path: &str) -> Result<(), String>;
+    #[cfg(not(target_family = "wasm"))]
     fn reveal(&self, path: &str) -> Result<(), String>;
+    #[cfg(target_family = "wasm")]
+    fn download(&self, path: &str) -> FileIo<Result<(), String>>;
     fn audio(&self) -> Box<dyn AudioPreviewBackend> {
         Box::new(oxideterm_preview::UnsupportedAudioPreviewBackend)
     }
-    fn preview(&self, path: &str) -> LocalPreview;
+    fn release_preview(&self) {}
+    fn preview(&self, path: &str) -> FileIo<LocalPreview>;
     fn preview_range(
         &self,
         path: &str,
         offset: u64,
         length: u64,
-    ) -> Result<LocalPreviewChunk, String>;
-    fn pick_folder(&self, prompt: SharedString, cx: &mut App) -> FolderSelection;
+    ) -> FileIo<Result<LocalPreviewChunk, String>>;
+    fn can_pick_folder(&self) -> bool {
+        true
+    }
+    #[cfg(not(target_family = "wasm"))]
+    fn pick_folder(&self, prompt: gpui::SharedString, cx: &mut App) -> FolderSelection;
     fn browse_audit(&self) -> BrowseAudit {
         Box::new(|_| Box::new(|_| {}))
     }

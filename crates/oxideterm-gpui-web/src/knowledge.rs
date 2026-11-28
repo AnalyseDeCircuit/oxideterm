@@ -1,6 +1,9 @@
 //! Mounts OxideTerm's real desktop `KnowledgeWorkspaceView` + `KnowledgeDocumentEditor`
 //! in the browser using an in-memory `AiKnowledgeHost` implementation.
 
+mod dialogs;
+
+use oxideterm_ai::rag_keyword::{KeywordDocument, search_documents};
 use crate::host::{Action, Workspace};
 use gpui::{prelude::*, *};
 use oxideterm_ai::{
@@ -9,14 +12,12 @@ use oxideterm_ai::{
     RagDocumentResponse, RagDocumentSaveOutcome, RagKeywordIndexState, RagPaginatedDocuments,
     RagSearchRequest, RagSearchResultResponse, RagSemanticIndexState, RagStatsResponse,
 };
+use oxideterm_gpui_ai::knowledge::workspace::KnowledgeLibrarySnapshot;
 use oxideterm_gpui_ai::{
-    bridge::{
-        HostFuture,
-        knowledge::{AiKnowledgeHost, DocumentMetadata, KnowledgeSaveError},
-    },
+    bridge::knowledge::{AiKnowledgeHost, DocumentMetadata, KnowledgeSaveError},
     knowledge::{
         editor::{KnowledgePreviewFrame, KnowledgePreviewSource},
-        page::{EmbeddingJob, KnowledgeJobs, KnowledgePage},
+        page::KnowledgePage,
         workspace::{
             KnowledgeBindings, KnowledgeEnvironment, KnowledgeInput, KnowledgeInputFrame,
             KnowledgeInputRequest, KnowledgeRequest, KnowledgeViews, KnowledgeWorkspaceEntity,
@@ -25,18 +26,28 @@ use oxideterm_gpui_ai::{
     },
 };
 use oxideterm_gpui_markdown::MarkdownOptions;
+use oxideterm_gpui_settings_view::surface::{PortableKnowledgeLibrary, PortableSettingsSurface};
 use oxideterm_gpui_ui::text_input::{TextInputAnchorId, TextInputViewport};
 use std::{
     rc::Rc,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicU64, Ordering},
     },
 };
 
 struct StoredDoc {
     meta: RagDocumentResponse,
     content: String,
+    index: KeywordDocument,
+}
+
+impl StoredDoc {
+    fn new(mut meta: RagDocumentResponse, content: String) -> Result<Self, String> {
+        let index = KeywordDocument::new(&meta, &content)?;
+        meta.chunk_count = index.chunk_count();
+        Ok(Self { meta, content, index })
+    }
 }
 
 struct StoreInner {
@@ -63,35 +74,33 @@ impl WebKnowledgeHost {
             updated_at: now,
         }];
         let documents = vec![
-            StoredDoc {
-                meta: RagDocumentResponse {
+            (RagDocumentResponse {
                     id: "doc-1".into(),
                     collection_id: collection_id.clone(),
                     title: "Operations Runbook".into(),
                     source_path: None,
                     format: "markdown".into(),
-                    chunk_count: 3,
+                    chunk_count: 0,
                     indexed_at: now,
                     version: 1,
                 },
-                content: "# Operations Runbook\n\nUse **OxideTerm** to inspect live services, inspect logs, and manage SSH / BLE sessions.\n\n## Quick Checks\n\n- Inspect systemd units in **Host Tools → Services**\n- Inspect listening sockets in **Host Tools → Ports**\n- Run ad-hoc diagnostics with **OxideSens**\n\n```bash\nsystemctl status nginx --no-pager\nss -tulnp\n```\n"
+                "# Operations Runbook\n\nUse **OxideTerm** to inspect live services, inspect logs, and manage SSH / BLE sessions.\n\n## Quick Checks\n\n- Inspect systemd units in **Host Tools → Services**\n- Inspect listening sockets in **Host Tools → Ports**\n- Run ad-hoc diagnostics with **OxideSens**\n\n```bash\nsystemctl status nginx --no-pager\nss -tulnp\n```\n"
                     .into(),
-            },
-            StoredDoc {
-                meta: RagDocumentResponse {
+            ),
+            (RagDocumentResponse {
                     id: "doc-2".into(),
                     collection_id,
                     title: "BLE Hardware Notes".into(),
                     source_path: None,
                     format: "markdown".into(),
-                    chunk_count: 2,
+                    chunk_count: 0,
                     indexed_at: now,
                     version: 1,
                 },
-                content: "# BLE Hardware Notes\n\nOxideTerm Web connects directly to GATT peripherals via Chrome/Edge **Web Bluetooth**.\n\n## Supported UART Profiles\n\n- **Nordic UART Service (NUS)** — `6e400001-b5a3-f393-e0a9-e50e24dcca9e`\n- **HM-10 / CC2541** — `0000ffe0-0000-1000-8000-00805f9b34fb`\n- **Microchip Transparent UART** — `49535343-fe7d-4ae5-8fa9-9fafd205e455`\n"
+                "# BLE Hardware Notes\n\nOxideTerm Web connects directly to GATT peripherals via Chrome/Edge **Web Bluetooth**.\n\n## Supported UART Profiles\n\n- **Nordic UART Service (NUS)** — `6e400001-b5a3-f393-e0a9-e50e24dcca9e`\n- **HM-10 / CC2541** — `0000ffe0-0000-1000-8000-00805f9b34fb`\n- **Microchip Transparent UART** — `49535343-fe7d-4ae5-8fa9-9fafd205e455`\n"
                     .into(),
-            },
-        ];
+            ),
+        ].into_iter().map(|(meta, content)| StoredDoc::new(meta, content).expect("seeded Markdown")).collect();
         Self {
             inner: Mutex::new(StoreInner {
                 collections,
@@ -112,13 +121,13 @@ impl WebKnowledgeHost {
 impl AiKnowledgeHost for WebKnowledgeHost {
     fn list_collections(
         &self,
-        _scope_filter: Option<&str>,
+        scope_filter: Option<&str>,
     ) -> Result<Vec<RagCollectionResponse>, String> {
         let guard = self
             .inner
             .lock()
             .map_err(|_| "store poisoned".to_string())?;
-        Ok(guard.collections.clone())
+        Ok(guard.collections.iter().filter(|c| c.scope.visible_to(scope_filter)).cloned().collect())
     }
 
     fn list_documents(
@@ -169,7 +178,7 @@ impl AiKnowledgeHost for WebKnowledgeHost {
             .map_err(|_| "store poisoned".to_string())?;
         let id = format!("col-{}", guard.next_id);
         guard.next_id += 1;
-        let now = 1_764_000_000_000i64 + guard.next_id as i64;
+        let now = js_sys::Date::now() as i64;
         let scope = match request.scope {
             DocScopeRequest::Global => DocScope::Global,
             DocScopeRequest::Connection { connection_id } => DocScope::Connection(connection_id),
@@ -194,28 +203,33 @@ impl AiKnowledgeHost for WebKnowledgeHost {
             .inner
             .lock()
             .map_err(|_| "store poisoned".to_string())?;
+        if !guard
+            .collections
+            .iter()
+            .any(|c| c.id == request.collection_id)
+        {
+            return Err("Collection no longer exists".into());
+        }
         let id = format!("doc-{}", guard.next_id);
         guard.next_id += 1;
-        let now = 1_764_000_000_000i64 + guard.next_id as i64;
+        let now = js_sys::Date::now() as i64;
         let meta = RagDocumentResponse {
             id,
             collection_id: request.collection_id,
-            title: request.title.clone(),
+            title: request.title,
             source_path: None,
             format: if request.format.trim().is_empty() {
                 "markdown".into()
             } else {
                 request.format
             },
-            chunk_count: 1,
+            chunk_count: 0,
             indexed_at: now,
-            version: 1,
+            version: 0,
         };
-        let content = format!("# {}\n\n", request.title);
-        guard.documents.push(StoredDoc {
-            meta: meta.clone(),
-            content,
-        });
+        let doc = StoredDoc::new(meta, String::new())?;
+        let meta = doc.meta.clone();
+        guard.documents.push(doc);
         self.bump_revision(&mut guard);
         Ok(meta)
     }
@@ -248,23 +262,25 @@ impl AiKnowledgeHost for WebKnowledgeHost {
             .inner
             .lock()
             .map_err(|_| "store poisoned".to_string())?;
+        if !guard.collections.iter().any(|c| c.id == request.collection_id) {
+            return Err("Collection no longer exists".into());
+        }
         let id = format!("doc-{}", guard.next_id);
         guard.next_id += 1;
-        let now = 1_764_000_000_000i64 + guard.next_id as i64;
+        let now = js_sys::Date::now() as i64;
         let meta = RagDocumentResponse {
             id,
             collection_id: request.collection_id,
             title: request.title,
             source_path: request.source_path,
             format: request.format,
-            chunk_count: 1,
+            chunk_count: 0,
             indexed_at: now,
             version: 1,
         };
-        guard.documents.push(StoredDoc {
-            meta: meta.clone(),
-            content: request.content,
-        });
+        let doc = StoredDoc::new(meta, request.content)?;
+        let meta = doc.meta.clone();
+        guard.documents.push(doc);
         self.bump_revision(&mut guard);
         Ok(meta)
     }
@@ -274,34 +290,7 @@ impl AiKnowledgeHost for WebKnowledgeHost {
             .inner
             .lock()
             .map_err(|_| "store poisoned".to_string())?;
-        let query = request.query.trim().to_lowercase();
-        let top_k = request.top_k.unwrap_or(10);
-        let mut results = Vec::new();
-        for doc in &guard.documents {
-            if !request.collection_ids.is_empty()
-                && !request.collection_ids.contains(&doc.meta.collection_id)
-            {
-                continue;
-            }
-            if query.is_empty()
-                || doc.meta.title.to_lowercase().contains(&query)
-                || doc.content.to_lowercase().contains(&query)
-            {
-                results.push(RagSearchResultResponse {
-                    chunk_id: format!("{}-0", doc.meta.id),
-                    doc_id: doc.meta.id.clone(),
-                    doc_title: doc.meta.title.clone(),
-                    section_path: None,
-                    content: doc.content.clone(),
-                    score: 1.0,
-                    source: "keyword".into(),
-                });
-                if results.len() >= top_k {
-                    break;
-                }
-            }
-        }
-        Ok(results)
+        search_documents(guard.documents.iter().map(|d| (&d.meta, &d.index)), &request)
     }
 
     fn get_collection_stats(&self, collection_id: &str) -> Result<RagStatsResponse, String> {
@@ -318,8 +307,8 @@ impl AiKnowledgeHost for WebKnowledgeHost {
         Ok(RagStatsResponse {
             doc_count: docs.len(),
             chunk_count,
-            embedded_chunk_count: chunk_count,
-            last_updated: 1_764_000_000_000,
+            embedded_chunk_count: 0,
+            last_updated: docs.iter().map(|d| d.meta.indexed_at).max().unwrap_or(0),
         })
     }
 
@@ -327,11 +316,19 @@ impl AiKnowledgeHost for WebKnowledgeHost {
         RagKeywordIndexState::Ready
     }
 
-    fn document_semantic_index_state(
-        &self,
-        _doc_id: &str,
-    ) -> Result<RagSemanticIndexState, String> {
-        Ok(RagSemanticIndexState::Ready)
+    fn document_semantic_index_state(&self, doc_id: &str) -> Result<RagSemanticIndexState, String> {
+        let store = self
+            .inner
+            .lock()
+            .map_err(|_| "store poisoned".to_string())?;
+        let doc = store
+            .documents
+            .iter()
+            .find(|d| d.meta.id == doc_id)
+            .ok_or_else(|| format!("Document {doc_id} not found"))?;
+        Ok(RagSemanticIndexState::Pending {
+            chunk_count: doc.meta.chunk_count,
+        })
     }
 
     fn save_document(
@@ -354,14 +351,19 @@ impl AiKnowledgeHost for WebKnowledgeHost {
         {
             return Err(KnowledgeSaveError::Conflict);
         }
+        doc.index = KeywordDocument::new(&doc.meta, &content).map_err(KnowledgeSaveError::Failed)?;
+        doc.meta.chunk_count = doc.index.chunk_count();
+        doc.meta.indexed_at = js_sys::Date::now() as i64;
         doc.content = content;
         doc.meta.version += 1;
         let saved_meta = doc.meta.clone();
         self.bump_revision(&mut guard);
         Ok(RagDocumentSaveOutcome {
+            semantic_index: RagSemanticIndexState::Pending {
+                chunk_count: saved_meta.chunk_count,
+            },
             document: saved_meta,
             keyword_index: RagKeywordIndexState::Ready,
-            semantic_index: RagSemanticIndexState::Ready,
         })
     }
 
@@ -378,7 +380,9 @@ impl AiKnowledgeHost for WebKnowledgeHost {
         Ok(RagDocumentContentResponse {
             document: doc.meta.clone(),
             content: doc.content.clone(),
-            semantic_index: RagSemanticIndexState::Ready,
+            semantic_index: RagSemanticIndexState::Pending {
+                chunk_count: doc.meta.chunk_count,
+            },
         })
     }
 
@@ -403,18 +407,21 @@ impl AiKnowledgeHost for WebKnowledgeHost {
         id: &str,
         name: Option<&str>,
         collection: Option<&str>,
-        _version: u64,
+        version: u64,
     ) -> Result<DocumentMetadata, String> {
         let mut guard = self
             .inner
             .lock()
             .map_err(|_| "store poisoned".to_string())?;
-        let doc = guard
-            .documents
-            .iter_mut()
+        if let Some(destination) = collection && !guard.collections.iter().any(|c| c.id == destination) {
+            return Err("Collection no longer exists".into());
+        }
+        let doc = guard.documents.iter_mut()
             .find(|d| d.meta.id == id)
             .ok_or_else(|| format!("Document {id} not found"))?;
+        if doc.meta.version != version { return Err("Document version conflict".into()); }
         if let Some(title) = name {
+            doc.index.retitle(title);
             doc.meta.title = title.to_owned();
         }
         if let Some(col) = collection {
@@ -442,6 +449,9 @@ impl AiKnowledgeHost for WebKnowledgeHost {
             .inner
             .lock()
             .map_err(|_| "store poisoned".to_string())?;
+        if !guard.collections.iter().any(|c| c.id == destination) {
+            return Err("Collection no longer exists".into());
+        }
         let Some(pos) = guard.documents.iter().position(|d| d.meta.id == id) else {
             return Err(format!("Document {id} not found"));
         };
@@ -462,26 +472,10 @@ impl AiKnowledgeHost for WebKnowledgeHost {
             meta.collection_id = destination;
             meta.title = copy_title.replace("{{title}}", &orig_title);
             meta.version = 1;
-            guard.documents.push(StoredDoc { meta, content });
+            guard.documents.push(StoredDoc::new(meta, content)?);
             self.bump_revision(&mut guard);
             Ok((new_id, 1, true))
         }
-    }
-}
-
-struct WebKnowledgeJobs;
-
-impl KnowledgeJobs for WebKnowledgeJobs {
-    fn reindex(
-        &self,
-        _collection: String,
-        _cancel: Arc<AtomicBool>,
-    ) -> HostFuture<Result<(), String>> {
-        Box::pin(async { Ok(()) })
-    }
-
-    fn embed(&self, _collection: String, _job: EmbeddingJob) -> HostFuture<Result<(), String>> {
-        Box::pin(async { Ok(()) })
     }
 }
 
@@ -489,12 +483,17 @@ pub struct WebKnowledge {
     pub views: KnowledgeViews,
     pub page: Entity<KnowledgePage>,
     pub active_input: Option<KnowledgeInput>,
+    dialog: Option<dialogs::Dialog>,
 }
 
 impl WebKnowledge {
-    pub fn new(focus: &FocusHandle, cx: &mut Context<Workspace>) -> Self {
+    pub fn new(
+        focus: &FocusHandle,
+        settings: Option<&Entity<PortableSettingsSurface>>,
+        cx: &mut Context<Workspace>,
+    ) -> Self {
         let host: Arc<dyn AiKnowledgeHost> = Arc::new(WebKnowledgeHost::seeded());
-        let jobs: Rc<dyn KnowledgeJobs> = Rc::new(WebKnowledgeJobs);
+        let jobs = Rc::new(crate::ai::services::LocalOnly);
         let page = cx.new(|_| KnowledgePage::with_bridge(host, jobs));
         let state = cx.new(|_| KnowledgeWorkspaceEntity::default());
         let owner = cx.weak_entity();
@@ -560,7 +559,6 @@ impl WebKnowledge {
                         KnowledgeInputRequest::Focus(input)
                         | KnowledgeInputRequest::PointerDown(input, _) => {
                             h.knowledge.active_input = Some(input);
-                            h.sidebar_search_focused = false;
                             window.focus(&h.focus, cx);
                             cx.notify();
                         }
@@ -593,34 +591,10 @@ impl WebKnowledge {
                     KnowledgeRequest::Close(tab_id, _) => {
                         h.close(tab_id, cx);
                     }
-                    KnowledgeRequest::PresentCreationDialog => {
-                        // Create a new document directly inside the selected collection.
-                        let col_id = h
-                            .knowledge
-                            .views
-                            .state
-                            .read(cx)
-                            .input_value(KnowledgeInput::Search)
-                            .map(|_| ());
-                        let _ = col_id;
-                        let host = h.knowledge.page.read(cx).knowledge_host();
-                        if let Ok(cols) = host.list_collections(None)
-                            && let Some(col) = cols.first()
-                        {
-                            let count = host
-                                .list_documents(&col.id, None, None)
-                                .map(|p| p.total)
-                                .unwrap_or(0);
-                            if host
-                                .create_blank_document(RagCreateBlankDocumentRequest {
-                                    collection_id: col.id.clone(),
-                                    title: format!("Untitled Note {}", count + 1),
-                                    format: "markdown".into(),
-                                })
-                                .is_ok()
-                            {
-                                h.knowledge.views.refresh(cx);
-                            }
+                    KnowledgeRequest::PresentCreationDialog
+                    | KnowledgeRequest::FocusDeleteConfirmation => {
+                        if let Some(w) = window {
+                            h.open_knowledge_dialog(w, cx);
                         }
                     }
                     _ => {}
@@ -632,12 +606,37 @@ impl WebKnowledge {
         let view =
             cx.new(|cx| KnowledgeWorkspaceView::new(state.clone(), bindings, focus.clone(), cx));
         let views = KnowledgeViews { view, state };
-        views.refresh(cx);
+        if let Some(settings) = settings {
+            settings.update(cx, |s, cx| {
+                s.set_knowledge_library(PortableKnowledgeLibrary::Loading, cx)
+            });
+            let settings = settings.clone();
+            let host = page.read(cx).knowledge_host();
+            cx.subscribe(
+                &views.view,
+                move |_, _, snapshot: &KnowledgeLibrarySnapshot, cx| {
+                    let library = match &snapshot.0 {
+                        Ok(cols) => PortableKnowledgeLibrary::Ready {
+                            collections: cols.iter().map(|c| c.name.clone()).collect(),
+                            keyword_ready: matches!(
+                                host.keyword_index_state(),
+                                RagKeywordIndexState::Ready
+                            ),
+                        },
+                        Err(()) => PortableKnowledgeLibrary::Failed,
+                    };
+                    settings.update(cx, |s, cx| s.set_knowledge_library(library, cx));
+                },
+            )
+            .detach();
+            views.refresh(cx);
+        }
 
         Self {
             views,
             page,
             active_input: None,
+            dialog: None,
         }
     }
 }
@@ -650,8 +649,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) -> bool {
         let on_knowledge = self
-            .layout
-            .active_tab()
+            .focused_tab()
             .is_some_and(|tab| tab.kind == oxideterm_workspace::TabKind::Knowledge);
         if !on_knowledge {
             self.knowledge.active_input = None;

@@ -53,6 +53,7 @@ fn web_search(controls: &SettingsControls<'_>, cx: &App) -> AnyElement {
 pub(crate) fn basic_section(
     controls: &SettingsControls<'_>,
     section: SettingsSectionId,
+    session_only: bool,
     cx: &App,
 ) -> AnyElement {
     let enabled = controls.settings.ai.enabled;
@@ -92,7 +93,7 @@ pub(crate) fn basic_section(
                     .text_size(px(controls.tokens.metrics.ui_text_xs))
                     .text_color(rgb(controls.tokens.ui.text_muted))
                     .line_height(px(18.0))
-                    .child(controls.i18n.t("settings_view.ai.privacy_text"))
+                    .child(controls.i18n.t(if session_only { "settings_view.ai.browser_privacy" } else { "settings_view.ai.privacy_text" }))
                     .into_any_element(),
             ],
         ),

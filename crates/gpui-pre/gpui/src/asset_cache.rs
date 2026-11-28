@@ -71,6 +71,13 @@ impl<T: Clone + Send + 'static> CachedLoad<T> {
 pub enum Resource {
     /// Encoded image bytes owned by the caller, without a filesystem or network load.
     Image(Arc<crate::Image>),
+    /// An encoded image with clockwise rotation applied after its embedded orientation.
+    RotatedBytes {
+        /// The original encoded image, shared across preview angles.
+        image: Arc<crate::Image>,
+        /// Clockwise quarter turns after decoding the embedded orientation.
+        quarter_turns: u8,
+    },
     /// This resource is at a given URI
     Uri(SharedUri),
     /// This resource is at a given path in the file system
@@ -87,10 +94,27 @@ pub enum Resource {
     Embedded(SharedString),
 }
 
+impl Resource {
+    pub(crate) fn encoded_image(&self) -> Option<&Arc<crate::Image>> {
+        match self {
+            Self::Image(image) | Self::RotatedBytes { image, .. } => Some(image),
+            _ => None,
+        }
+    }
+}
+
 impl Debug for Resource {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Image(image) => f.debug_tuple("Image").field(&image.id).finish(),
+            Self::RotatedBytes {
+                image,
+                quarter_turns,
+            } => f
+                .debug_tuple("RotatedBytes")
+                .field(&image.id)
+                .field(quarter_turns)
+                .finish(),
             Self::Uri(uri) => f.debug_tuple("Uri").field(uri).finish(),
             Self::Path(path) => f.debug_tuple("Path").field(path).finish(),
             Self::RotatedImage {

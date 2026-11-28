@@ -70,11 +70,27 @@ impl ForwardsView {
             } else {
                 rgb(self.tokens.ui.bg)
             })
-            .child(tauri_virtual_list(state, spec, move |index, _, cx| {
-                view.update(cx, |this, cx| {
-                    this.render_forwards_section_item(index, tab_id, node_id.clone(), cx)
-                })
-            }))
+            .flex()
+            .flex_col()
+            .when(self.preview_focus.is_some(), |root| {
+                root.child(
+                    div()
+                        .px(px(FORWARDS_PAGE_PADDING))
+                        .pt_2()
+                        .text_size(px(self.tokens.metrics.ui_text_sm))
+                        .text_color(rgb(self.tokens.ui.text_muted))
+                        .child(self.i18n.t("forwards.preview_hint")),
+                )
+            })
+            .child(div().flex_1().min_h_0().child(tauri_virtual_list(
+                state,
+                spec,
+                move |index, _, cx| {
+                    view.update(cx, |this, cx| {
+                        this.render_forwards_section_item(index, tab_id, node_id.clone(), cx)
+                    })
+                },
+            )))
             .into_any_element()
     }
 
@@ -111,18 +127,19 @@ impl ForwardsView {
         if !self.frame().ports.new_ports.is_empty() {
             sections.push(ForwardsSection::PortDetection);
         }
-        sections.extend([
-            ForwardsSection::QuickActions,
-            ForwardsSection::Separator,
-            ForwardsSection::Table,
-        ]);
+        if self.preview_focus.is_none() {
+            sections.extend([ForwardsSection::QuickActions, ForwardsSection::Separator]);
+        }
+        sections.push(ForwardsSection::Table);
         if forwarding_view.show_new_form {
             sections.push(ForwardsSection::CreateForm);
         }
         if forwarding_view.error.is_some() {
             sections.push(ForwardsSection::Error);
         }
-        sections.extend([ForwardsSection::Separator, ForwardsSection::RemotePorts]);
+        if self.preview_focus.is_none() {
+            sections.extend([ForwardsSection::Separator, ForwardsSection::RemotePorts]);
+        }
         sections
     }
 
@@ -425,16 +442,18 @@ impl ForwardsView {
                         div()
                             .flex()
                             .gap(px(8.0))
-                            .child(self.render_forward_icon_button(
-                                LucideIcon::RefreshCcw,
-                                theme.text_muted,
-                                has_background,
-                                move |this, _event, _window, cx| {
-                                    this.request(crate::ForwardsRequest::Refresh, None, cx);
-                                    cx.stop_propagation();
-                                },
-                                cx,
-                            ))
+                            .when(self.preview_focus.is_none(), |bar| {
+                                bar.child(self.render_forward_icon_button(
+                                    LucideIcon::RefreshCcw,
+                                    theme.text_muted,
+                                    has_background,
+                                    move |this, _event, _window, cx| {
+                                        this.request(crate::ForwardsRequest::Refresh, None, cx);
+                                        cx.stop_propagation();
+                                    },
+                                    cx,
+                                ))
+                            })
                             .child(
                                 self.render_forward_button(
                                     self.i18n.t("forwards.actions.new_forward"),
@@ -658,27 +677,29 @@ impl ForwardsView {
                 })
                 .when(stopped, |actions| {
                     actions
-                        .child(self.render_forward_icon_button(
-                            LucideIcon::Play,
-                            theme.text_muted,
-                            has_background,
-                            {
-                                let node_id = node_id.clone();
-                                move |this, _event, _window, cx| {
-                                    let forward_id = rule_for_restart.id.clone();
-                                    this.start_forward_operation(
-                                        tab_id,
-                                        node_id.clone(),
-                                        "forwards.messages.restarted",
-                                        true,
-                                        ForwardingRuntimeOperation::Restart { forward_id },
-                                        cx,
-                                    );
-                                    cx.stop_propagation();
-                                }
-                            },
-                            cx,
-                        ))
+                        .when(self.preview_focus.is_none(), |actions| {
+                            actions.child(self.render_forward_icon_button(
+                                LucideIcon::Play,
+                                theme.text_muted,
+                                has_background,
+                                {
+                                    let node_id = node_id.clone();
+                                    move |this, _event, _window, cx| {
+                                        let forward_id = rule_for_restart.id.clone();
+                                        this.start_forward_operation(
+                                            tab_id,
+                                            node_id.clone(),
+                                            "forwards.messages.restarted",
+                                            true,
+                                            ForwardingRuntimeOperation::Restart { forward_id },
+                                            cx,
+                                        );
+                                        cx.stop_propagation();
+                                    }
+                                },
+                                cx,
+                            ))
+                        })
                         .child(self.render_forward_icon_button(
                             LucideIcon::Pencil,
                             theme.text_muted,

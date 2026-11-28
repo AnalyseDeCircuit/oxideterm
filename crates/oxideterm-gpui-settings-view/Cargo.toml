@@ -18,6 +18,7 @@ oxideterm-gpui-editor = { path = "../oxideterm-gpui-editor" }
 oxideterm-gpui-markdown = { path = "../oxideterm-gpui-markdown" }
 oxideterm-gpui-platform = { path = "../oxideterm-gpui-platform" }
 oxideterm-gpui-ui = { path = "../oxideterm-gpui-ui" }
+oxideterm-gpui-terminal-view = { path = "../oxideterm-gpui-terminal-view" }
 oxideterm-i18n = { path = "../oxideterm-i18n" }
 oxideterm-render-policy = { path = "../oxideterm-render-policy" }
 oxideterm-settings = { path = "../oxideterm-settings" }

@@ -10,6 +10,7 @@ version.workspace = true
 [dependencies]
 gpui.workspace = true
 oxideterm-editor-core = { path = "../oxideterm-editor-core" }
+oxideterm-gpui-editor = { path = "../oxideterm-gpui-editor" }
 oxideterm-gpui-ui = { path = "../oxideterm-gpui-ui" }
 oxideterm-i18n = { path = "../oxideterm-i18n" }
 oxideterm-theme = { path = "../oxideterm-theme" }

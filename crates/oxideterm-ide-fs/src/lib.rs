@@ -7,10 +7,14 @@
 //! bridge layer that binds the core `IdeFileSystem` shape to local disk and to
 //! the Tauri-compatible node-first SFTP/agent path.
 
+#[cfg(not(target_family = "wasm"))]
 mod agent;
+#[cfg(not(target_family = "wasm"))]
 mod local;
+#[cfg(not(target_family = "wasm"))]
 mod node_sftp;
 
+#[cfg(not(target_family = "wasm"))]
 pub use agent::{
     AgentInstallProgress, AgentStatus, IdeSearchMatch, IdeWatchSubscription,
     NodeAgentIdeFileSystem, NodeAgentMode, NodeAgentRpcError,
@@ -18,7 +22,9 @@ pub use agent::{
     SymbolIndexResult as NodeAgentSymbolIndexResult, SymbolInfo as NodeAgentSymbolInfo,
     SymbolKind as NodeAgentSymbolKind, WriteFileResult as NodeAgentWriteFileResult,
 };
+#[cfg(not(target_family = "wasm"))]
 pub use local::LocalIdeFileSystem;
+#[cfg(not(target_family = "wasm"))]
 pub use node_sftp::NodeSftpIdeFileSystem;
 
-mod text;
+pub mod text;

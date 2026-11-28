@@ -32,6 +32,7 @@
       }
     },
     "form": {
+      "demo_connection_hint": "Demo connections use simulated hosts. No credentials are needed.",
       "title": "New Connection",
       "subtitle": "Configure an SSH host for terminals, SFTP, port forwarding, and remote file editing.",
       "basic_information": "Basic Information",

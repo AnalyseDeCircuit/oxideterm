@@ -1,5 +1,6 @@
 {
   "terminal": {
+    "demo_shell_welcome": "Demo-Shell im Browser. Mit help werden die Befehle angezeigt.",
     "ssh_latency": {
       "measured": "SSH-Rundlaufzeit: {{millis}} ms, einschließlich Netzwerk und Serverantwort. Vor {{seconds}} s aktualisiert.",
       "pending": "SSH-Latenz wird gemessen…",
@@ -101,6 +102,7 @@
     },
     "paste": {
       "edit_title": "Vor dem Einfügen bearbeiten",
+      "clipboard_read_failed": "Die Zwischenablage konnte nicht gelesen werden. Verwende zum Einfügen das Tastenkürzel.",
       "strip_fence": "Codeblock-Markierungen entfernen",
       "undo": "Rückgängig",
       "redo": "Wiederholen",
@@ -655,6 +657,7 @@
       "connection_failed": "BLE-Verbindung fehlgeschlagen: {error}",
       "runtime_init_failed": "Initialisierung der BLE-Laufzeit fehlgeschlagen",
       "adapter_index_out_of_range": "Bluetooth-Adapter-Index {n} liegt außerhalb des gültigen Bereichs",
+      "write_failed": "Bluetooth-Schreibzugriff fehlgeschlagen. Verbinde das Gerät erneut, um weitere Daten zu senden.",
       "service_not_found": "Dienst {uuid} nicht gefunden",
       "no_notify_write_pair": "Der ausgewählte Dienst hat kein Paar aus Notify- und Write-Merkmal"
     }

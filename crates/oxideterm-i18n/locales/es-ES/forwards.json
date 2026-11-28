@@ -18,6 +18,7 @@
   "copy_address": "Copiar dirección",
   "copied": "¡Copiado!",
   "forwards": {
+    "preview_hint": "Borradores de reglas para esta sesión de demostración. No se abren puertos.",
     "quick": {
       "title": "Reenvío rápido",
       "jupyter": "Jupyter (8888)",

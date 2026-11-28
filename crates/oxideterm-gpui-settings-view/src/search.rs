@@ -89,7 +89,15 @@ fn search_spec_section_rank(spec: &SettingsSearchEntrySpec) -> usize {
     settings_section_index(spec.tab, spec.section, dynamic).unwrap_or(usize::MAX)
 }
 
-fn settings_search_specs(desktop_operations: bool) -> Vec<SettingsSearchEntrySpec> {
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SettingsHost {
+    Desktop,
+    Managed,
+    Browser,
+}
+
+fn settings_search_specs(host: SettingsHost) -> Vec<SettingsSearchEntrySpec> {
+    let desktop_operations = host == SettingsHost::Desktop;
     let mut specs = vec![
         settings_search_entry(
             SettingsTab::General,
@@ -472,29 +480,39 @@ fn settings_search_specs(desktop_operations: bool) -> Vec<SettingsSearchEntrySpe
             SettingsTab::Appearance,
             SettingsSectionId::AppearanceBackground,
             "settings_view.terminal.bg_title",
-            &[
-                "settings_view.terminal.bg_enabled",
-                "settings_view.terminal.bg_scope",
-                "settings_view.terminal.bg_opacity",
-                "settings_view.terminal.bg_fit",
-                "settings_view.terminal.bg_blur",
-                "settings_view.terminal.bg_tabs",
-                "settings_view.terminal.bg_alignment",
-                "settings_view.terminal.bg_source_mineral",
-                "settings_view.terminal.bg_source_fog",
-                "settings_view.terminal.bg_source_tide",
-                "settings_view.terminal.bg_source_meteor",
-                "settings_view.terminal.bg_source_particles",
-                "settings_view.terminal.bg_source_caustics",
-                "settings_view.terminal.bg_camera",
-                "settings_view.terminal.bg_effects",
-                "settings_view.terminal.bg_effect_strength",
-                "settings_view.terminal.bg_surface_opacity",
-                "settings_view.terminal.bg_readability",
-                "settings_view.terminal.bg_pause_input",
-                "settings_view.terminal.bg_parallax",
-                "settings_view.terminal.bg_day_cycle",
-            ],
+            if host == SettingsHost::Browser {
+                &[
+                    "settings_view.terminal.bg_gallery",
+                    "settings_view.terminal.bg_enabled",
+                    "settings_view.terminal.bg_opacity",
+                    "settings_view.terminal.bg_scope",
+                    "settings_view.terminal.bg_tabs",
+                ]
+            } else {
+                &[
+                    "settings_view.terminal.bg_enabled",
+                    "settings_view.terminal.bg_scope",
+                    "settings_view.terminal.bg_opacity",
+                    "settings_view.terminal.bg_fit",
+                    "settings_view.terminal.bg_blur",
+                    "settings_view.terminal.bg_tabs",
+                    "settings_view.terminal.bg_alignment",
+                    "settings_view.terminal.bg_source_mineral",
+                    "settings_view.terminal.bg_source_fog",
+                    "settings_view.terminal.bg_source_tide",
+                    "settings_view.terminal.bg_source_meteor",
+                    "settings_view.terminal.bg_source_particles",
+                    "settings_view.terminal.bg_source_caustics",
+                    "settings_view.terminal.bg_camera",
+                    "settings_view.terminal.bg_effects",
+                    "settings_view.terminal.bg_effect_strength",
+                    "settings_view.terminal.bg_surface_opacity",
+                    "settings_view.terminal.bg_readability",
+                    "settings_view.terminal.bg_pause_input",
+                    "settings_view.terminal.bg_parallax",
+                    "settings_view.terminal.bg_day_cycle",
+                ]
+            },
         ),
         settings_search_entry(
             SettingsTab::Connections,
@@ -830,6 +848,8 @@ fn settings_search_specs(desktop_operations: bool) -> Vec<SettingsSearchEntrySpe
                     "settings_view.help.release_notes",
                     "settings_view.help.channel_stable",
                 ]
+            } else if host == SettingsHost::Browser {
+                &["settings_view.help.app_name", "settings_view.help.version"]
             } else {
                 &[
                     "settings_view.help.update_channel_hint",
@@ -848,6 +868,8 @@ fn settings_search_specs(desktop_operations: bool) -> Vec<SettingsSearchEntrySpe
                     "settings_view.terminal.show_performance_overlay_hint",
                     "settings_view.help.open_logs",
                 ]
+            } else if host == SettingsHost::Browser {
+                &["settings_view.help.browser_report", "settings_view.help.memory_export"]
             } else {
                 &[
                     "settings_view.help.debug_logs",
@@ -971,16 +993,16 @@ fn settings_search_score(title: &str, haystack: &str, query: &str) -> Option<usi
 }
 
 pub fn settings_search_results(i18n: &I18n, query: &str) -> Vec<SettingsSearchResult> {
-    filtered_results(i18n, query, |_, _| true, true)
+    filtered_results(i18n, query, |_, _| true, SettingsHost::Desktop)
 }
 
 pub(crate) fn filtered_results(
     i18n: &I18n,
     query: &str,
     include: fn(SettingsTab, SettingsSectionId) -> bool,
-    desktop_operations: bool,
+    host: SettingsHost,
 ) -> Vec<SettingsSearchResult> {
-    let mut results = settings_search_specs(desktop_operations)
+    let mut results = settings_search_specs(host)
         .into_iter()
         .filter(|spec| include(spec.tab, spec.section))
         .filter_map(|spec| {

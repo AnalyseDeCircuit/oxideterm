@@ -64,11 +64,21 @@ impl QuickCommandsAccess {
 
 #[derive(Clone)]
 pub struct QuickCommandsBindings {
-    pub frame: Rc<dyn Fn(&mut App) -> Option<QuickCommandsFrame>>,
-    pub dispatch: Rc<dyn Fn(QuickCommandsRequest, Option<&mut Window>, &mut App)>,
+    pub frame: QuickCommandsFrameSource,
+    pub dispatch: QuickCommandsDispatch,
     pub ime: Rc<dyn Fn(QuickCommandInput, &App) -> QuickCommandsIme>,
     pub anchor: Rc<dyn Fn(TextInputAnchor)>,
-    pub selectable: Rc<dyn Fn(QuickCommandsSelectableText, &mut App) -> AnyElement>,
+    pub selectable: QuickCommandsText,
+}
+
+pub type QuickCommandsFrameSource = Rc<dyn Fn(&mut App) -> Option<QuickCommandsFrame>>;
+pub type QuickCommandsDispatch = Rc<dyn Fn(QuickCommandsRequest, Option<&mut Window>, &mut App)>;
+pub type QuickCommandsText = Rc<dyn Fn(QuickCommandsSelectableText, &mut App) -> AnyElement>;
+
+#[derive(Clone)]
+pub(crate) struct HostInput {
+    pub ime: Rc<dyn Fn(QuickCommandInput, &App) -> QuickCommandsIme>,
+    pub anchor: Rc<dyn Fn(TextInputAnchor)>,
 }
 
 #[derive(Clone)]

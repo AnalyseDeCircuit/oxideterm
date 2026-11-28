@@ -84,8 +84,12 @@ impl SftpRemoteMutation {
 
     /// The host reports the recursive deletion count for the existing completion notice.
     pub fn complete(self, result: Result<u64, String>) -> SftpWorkerResult {
+        self.complete_with_count(result.map(Some))
+    }
+
+    pub fn complete_with_count(self, result: Result<Option<u64>, String>) -> SftpWorkerResult {
         let description =
-            MutationNotice::success_detail(self.notice.detail, result.as_ref().ok().copied());
+            MutationNotice::success_detail(self.notice.detail, result.as_ref().ok().copied().flatten());
         SftpWorkerResult::RemoteMutationComplete {
             result: result.map(|_| ()),
             refresh_remote: self.pane == SftpPane::Remote,

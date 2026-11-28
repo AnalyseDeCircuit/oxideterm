@@ -148,15 +148,7 @@ pub struct SymbolIndexResult {
     pub file_count: u32,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct IdeSearchMatch {
-    pub path: String,
-    pub line: u32,
-    pub column: u32,
-    pub preview: String,
-    pub match_start: usize,
-    pub match_end: usize,
-}
+pub use oxideterm_ide_core::IdeSearchMatch;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct RemoteAgentVersionInfo {

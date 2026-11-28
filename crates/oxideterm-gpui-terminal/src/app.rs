@@ -102,43 +102,7 @@ struct TmuxSeparatorDrag {
     last_point: TerminalPoint,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum TerminalShortcut {
-    Copy,
-    Paste,
-    Terminate,
-    Kill,
-    WordBackward,
-    WordForward,
-    SuggestPrevious,
-    SuggestNext,
-    PageUp,
-    PageDown,
-    LineUp,
-    LineDown,
-    Top,
-    Bottom,
-}
-
-pub struct TerminalKeybindings {
-    pub bindings: Vec<(gpui::KeyBinding, TerminalShortcut)>,
-    pub normalize: fn(&gpui::Keystroke) -> Option<gpui::Keystroke>,
-}
-impl gpui::Global for TerminalKeybindings {}
-impl TerminalKeybindings {
-    pub fn resolve(&self, key: &gpui::Keystroke) -> Option<TerminalShortcut> {
-        let key = (self.normalize)(key)?;
-        self.bindings
-            .iter()
-            .find(|(binding, _)| {
-                binding
-                    .keystrokes()
-                    .first()
-                    .is_some_and(|binding| key.should_match(binding))
-            })
-            .map(|(_, action)| *action)
-    }
-}
+pub use oxideterm_gpui_terminal_view::input::{TerminalKeybindings, TerminalShortcut};
 
 pub type SharedTerminalSession = Arc<Mutex<TerminalSession>>;
 /// Input interceptors receive the raw bytes plus the owning terminal session
@@ -5339,13 +5303,7 @@ impl TerminalPane {
 
 impl EventEmitter<TerminalPaneEvent> for TerminalPane {}
 
-pub fn paste_needs_confirmation(text: &str) -> bool {
-    const PASTE_LINE_THRESHOLD: usize = 1;
-    const PASTE_CHAR_THRESHOLD: usize = 50;
-
-    text.contains('\n')
-        && (text.split('\n').count() > PASTE_LINE_THRESHOLD || text.len() > PASTE_CHAR_THRESHOLD)
-}
+pub use oxideterm_gpui_terminal_view::input::paste_needs_confirmation;
 
 fn terminal_trigger_input(text: &str, append_enter: bool) -> Option<Zeroizing<String>> {
     if text.is_empty() && !append_enter {

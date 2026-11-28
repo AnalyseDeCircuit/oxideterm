@@ -155,6 +155,7 @@ impl WebWindowInner {
             self.register_wheel(),
             self.register_context_menu(),
             self.register_dragover(),
+            self.register_dragleave(),
             self.register_drop(),
             self.register_key_down(),
             self.register_key_up(),
@@ -680,23 +681,70 @@ impl WebWindowInner {
         })
     }
 
-    /// Browsers only expose dropped files as `File` objects, never as
-    /// filesystem paths, so no `FileDrop` input can be synthesized: GPUI's
-    /// `ExternalPaths` consumers would try to read paths that don't exist.
-    /// The events are still intercepted so the browser doesn't navigate to
-    /// the dropped file. Delivering actual file drops would require plumbing
-    /// `File` contents through a web-specific channel.
     fn register_dragover(self: &Rc<Self>) -> EventListenerHandle {
-        self.listen("dragover", move |event: JsValue| {
-            let event: web_sys::DragEvent = event.unchecked_into();
+        let this = Rc::clone(self);
+        self.listen("dragover", move |value| {
+            let event: web_sys::DragEvent = value.unchecked_into();
             event.prevent_default();
+            if event.data_transfer().is_some_and(|data| {
+                data.types()
+                    .iter()
+                    .any(|t| t.as_string().as_deref() == Some("Files"))
+            }) {
+                this.dispatch_input(PlatformInput::FileDrop(gpui::FileDropEvent::BrowserFiles {
+                    position: mouse_position_in_element(event.as_ref()),
+                    drop: None,
+                }));
+            }
+        })
+    }
+
+    fn register_dragleave(self: &Rc<Self>) -> EventListenerHandle {
+        let this = Rc::clone(self);
+        self.listen("dragleave", move |_| {
+            this.dispatch_input(PlatformInput::FileDrop(gpui::FileDropEvent::BrowserLeft));
         })
     }
 
     fn register_drop(self: &Rc<Self>) -> EventListenerHandle {
-        self.listen("drop", move |event: JsValue| {
-            let event: web_sys::DragEvent = event.unchecked_into();
+        let this = Rc::clone(self);
+        self.listen("drop", move |value| {
+            let event: web_sys::DragEvent = value.unchecked_into();
             event.prevent_default();
+            let Some(data) = event.data_transfer() else {
+                return;
+            };
+            let items = data.items();
+            let entries: Vec<_> = if items.length() == 0 {
+                data.files()
+                    .into_iter()
+                    .flat_map(|list| (0..list.length()).filter_map(move |i| list.item(i)))
+                    .map(gpui::BrowserDropEntry::File)
+                    .collect()
+            } else {
+                (0..items.length())
+                    .filter_map(|i| items.get(i))
+                    .filter(|item| item.kind() == "file")
+                    .filter_map(|item| match item.webkit_get_as_entry().ok().flatten() {
+                        Some(dir) if dir.is_directory() => {
+                            Some(gpui::BrowserDropEntry::Directory(dir))
+                        }
+                        _ => item
+                            .get_as_file()
+                            .ok()
+                            .flatten()
+                            .map(gpui::BrowserDropEntry::File),
+                    })
+                    .collect()
+            };
+            if !entries.is_empty() {
+                this.dispatch_input(PlatformInput::FileDrop(gpui::FileDropEvent::BrowserFiles {
+                    position: mouse_position_in_element(event.as_ref()),
+                    drop: Some(gpui::BrowserFileDrop(entries)),
+                }));
+            } else {
+                this.dispatch_input(PlatformInput::FileDrop(gpui::FileDropEvent::BrowserLeft));
+            }
         })
     }
 
@@ -850,7 +898,9 @@ impl WebWindowInner {
 
             let new_value = this.ime_mirror.value();
             let old_value = this.ime_mirror.stored_text();
-            if new_value == old_value {
+            let (element_selection_start, element_selection_end) =
+                this.ime_mirror.stored_selection();
+            if new_value == old_value && element_selection_start == element_selection_end {
                 return;
             }
 
@@ -876,21 +926,30 @@ impl WebWindowInner {
                         && old_units[old_units.len() - suffix_length..]
                             == new_units[new_units.len() - suffix_length..]
                 });
-            let suffix_length = anchored_suffix_length.unwrap_or_else(|| {
+            let mut suffix_length = anchored_suffix_length.unwrap_or_else(|| {
                 old_units
                     .iter()
                     .rev()
                     .zip(new_units.iter().rev())
                     .take_while(|(old_unit, new_unit)| old_unit == new_unit)
                     .count()
-            });
-            let prefix_length = old_units
+            }).min(old_units.len().saturating_sub(element_selection_end as usize));
+            // A low surrogate alone cannot be retained as a suffix of a scalar.
+            if suffix_length > 0 && (0xdc00..=0xdfff).contains(&old_units[old_units.len() - suffix_length]) {
+                suffix_length -= 1;
+            }
+            let mut prefix_length = old_units
                 .iter()
                 .zip(&new_units)
                 .take_while(|(old_unit, new_unit)| old_unit == new_unit)
                 .count()
                 .min(old_units.len() - suffix_length)
-                .min(new_units.len() - suffix_length);
+                .min(new_units.len() - suffix_length)
+                // The handler replaces the entire selection, even if the replacement starts identically.
+                .min(element_selection_start as usize);
+            if prefix_length > 0 && (0xd800..=0xdbff).contains(&old_units[prefix_length - 1]) {
+                prefix_length -= 1;
+            }
 
             let inserted_text = String::from_utf16_lossy(
                 &new_units[prefix_length..new_units.len() - suffix_length],
@@ -900,8 +959,6 @@ impl WebWindowInner {
             // The edit's shape relative to the element's pre-edit selection.
             // The element is private to the IME and these syncs, so the
             // stored selection is exact.
-            let (element_selection_start, element_selection_end) =
-                this.ime_mirror.stored_selection();
             let removed_before_selection =
                 (element_selection_start as usize).saturating_sub(prefix_length);
             let removed_after_selection =

@@ -349,6 +349,12 @@ pub enum BackgroundScope {
     Window,
 }
 
+impl BackgroundScope {
+    pub fn includes_content(self, enabled_tabs: &[String], key: &str) -> bool {
+        self == Self::Content && enabled_tabs.iter().any(|tab| tab == key)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum UiDensity {

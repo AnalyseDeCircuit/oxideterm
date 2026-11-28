@@ -35,6 +35,30 @@ pub enum NotificationRequest {
     InvokeAction(u64),
 }
 #[derive(Clone)]
+pub enum NotificationActions {
+    Audit,
+    Objects(std::collections::HashMap<u64, &'static str>),
+}
+
+impl NotificationActions {
+    fn label(&self, entry: &NotificationEntry) -> Option<&'static str> {
+        match self {
+            Self::Audit
+                if entry.kind == NotificationKind::Security
+                    || matches!(
+                        entry.severity,
+                        NotificationSeverity::Error | NotificationSeverity::Critical
+                    ) =>
+            {
+                Some("event_log.actions.audit_view")
+            }
+            Self::Audit => None,
+            Self::Objects(labels) => labels.get(&entry.id).copied(),
+        }
+    }
+}
+
+#[derive(Clone)]
 pub struct NotificationFrame {
     pub tokens: ThemeTokens,
     pub i18n: I18n,
@@ -42,7 +66,7 @@ pub struct NotificationFrame {
     pub active_view: ActivityView,
     pub has_background: bool,
     pub transition: bool,
-    pub actions_available: bool,
+    pub actions: NotificationActions,
     pub request: Rc<dyn Fn(NotificationRequest, &mut Window, &mut App)>,
 }
 pub struct NotificationCenter {
@@ -504,12 +528,7 @@ impl NotificationFrame {
             NotificationScope::Connection(connection_id) => connection_id.clone(),
         };
 
-        let show_audit = self.actions_available
-            && (entry.kind == NotificationKind::Security
-                || matches!(
-                    entry.severity,
-                    NotificationSeverity::Error | NotificationSeverity::Critical
-                ));
+        let action = self.actions.label(entry);
 
         div()
             .w_full()
@@ -586,10 +605,10 @@ impl NotificationFrame {
                                     .child(format!("{timestamp} | {kind} | {scope}")),
                             ),
                     )
-                    .when(show_audit, |row| {
+                    .when_some(action, |row, label| {
                         row.child(oxideterm_gpui_ui::button::toolbar_action_button(
                             &self.tokens,
-                            self.i18n.t("event_log.actions.audit_view"),
+                            self.i18n.t(label),
                             None,
                             oxideterm_gpui_ui::button::ToolbarButtonOptions::default(),
                             self.listener(NotificationRequest::InvokeAction(id)),

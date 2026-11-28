@@ -21,6 +21,20 @@ pub enum EditorShortcut {
     Find,
 }
 
+impl EditorShortcut {
+    pub const BINDINGS: &'static [(&'static str, Self)] = &[
+        ("editor.save", Self::Save),
+        ("editor.copy", Self::Copy),
+        ("editor.cut", Self::Cut),
+        ("editor.paste", Self::Paste),
+        ("editor.selectAll", Self::SelectAll),
+        ("editor.undo", Self::Undo),
+        ("editor.redo", Self::Redo),
+        ("editor.addNextMatch", Self::AddNextMatch),
+        ("editor.find", Self::Find),
+    ];
+}
+
 pub struct EditorKeybindings {
     pub bindings: Vec<(gpui::KeyBinding, EditorShortcut)>,
     pub normalize: fn(&gpui::Keystroke) -> Option<gpui::Keystroke>,

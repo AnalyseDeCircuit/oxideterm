@@ -8,6 +8,7 @@ mod connection;
 mod contributions;
 mod language;
 mod manifest;
+pub mod catalog;
 mod registry;
 mod runtime;
 

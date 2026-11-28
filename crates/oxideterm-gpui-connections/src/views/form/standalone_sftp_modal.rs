@@ -439,7 +439,9 @@ impl ConnectionFormView {
                         ),
                 )
                 .child({
-                    let show_test = form.profile_id.is_none() && !remote_to_remote;
+                    let show_test = self.environment.browser.is_none()
+                        && form.profile_id.is_none()
+                        && !remote_to_remote;
                     let right_cluster = div()
                         .min_w_0()
                         .flex()
@@ -628,7 +630,7 @@ impl ConnectionFormView {
             );
         }
         summary_rows = summary_rows
-            .child(self.form_hairline())
+            .when(self.environment.browser.is_none(), |row| row.child(self.form_hairline())
             .child(self.render_connection_disclosure_row(
                 "standalone-sftp-summary-Route",
                 LucideIcon::Network,
@@ -637,7 +639,7 @@ impl ConnectionFormView {
                 form.route_customized,
                 ConnectionFormDrawer::Route,
                 cx,
-            ))
+            )))
             .child(self.form_hairline())
             .child(self.render_connection_disclosure_row(
                 "standalone-sftp-summary-Notes",
@@ -664,6 +666,7 @@ impl ConnectionFormView {
                 cx,
             ))
             .child(self.form_hairline())
+            .when(self.environment.browser.is_some(), |col| col.child(self.render_connection_hint(self.i18n.t("ssh.form.demo_connection_hint"))))
             .child(self.render_standalone_sftp_transfer_mode(form.transfer_mode, cx))
             .child(summary_rows)
             .when_some(form.error.clone(), |content, error| {
@@ -935,7 +938,7 @@ impl ConnectionFormView {
                 layout.content_width,
                 cx,
             ))
-            .child(self.form_hairline())
+            .when(self.environment.browser.is_none(), |col| col.child(self.form_hairline())
             .child(self.render_standalone_sftp_endpoint_auth(
                 auth_tab,
                 secondary,
@@ -960,7 +963,7 @@ impl ConnectionFormView {
                     form.empty_password
                 },
                 cx,
-            ))
+            )))
             .child(self.form_hairline())
             .child(options)
             .into_any_element()

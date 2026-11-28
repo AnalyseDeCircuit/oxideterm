@@ -191,7 +191,7 @@ impl CatalogView {
                 )
                 .flex_none(),
             )
-            .child(
+            .when(self.host_tools, |toolbar| toolbar.child(
                 self.render_toolbar_button(
                     LucideIcon::Layers,
                     self.i18n.t("sessionManager.batchAdd.button"),
@@ -204,7 +204,7 @@ impl CatalogView {
                     }),
                 )
                 .flex_none(),
-            )
+            ))
             .child(
                 div()
                     .flex_none()

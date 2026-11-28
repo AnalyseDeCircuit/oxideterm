@@ -55,6 +55,15 @@ pub struct KnowledgeDialog<'a> {
 
 impl KnowledgeDialog<'_> {
     pub fn render(&self, content: KnowledgeDialogContent<'_>, cx: &App) -> AnyElement {
+        self.render_with_fields(content, None, cx)
+    }
+
+    pub(crate) fn render_with_fields(
+        &self,
+        content: KnowledgeDialogContent<'_>,
+        fields: Option<(AnyElement, AnyElement)>,
+        cx: &App,
+    ) -> AnyElement {
         let controls = &self.controls;
         let tokens = controls.tokens;
         let i18n = controls.i18n;
@@ -76,7 +85,7 @@ impl KnowledgeDialog<'_> {
                 Some((
                     "knowledge-create-dialog-form",
                     phase,
-                    self.form(name, scope_label, false, None, cx),
+                    self.form(name, scope_label, false, None, fields, cx),
                 )),
             ),
             KnowledgeDialogContent::Document {
@@ -93,7 +102,7 @@ impl KnowledgeDialog<'_> {
                 Some((
                     "knowledge-document-dialog-form",
                     phase,
-                    self.form(title, format_label, true, error, cx),
+                    self.form(title, format_label, true, error, fields, cx),
                 )),
             ),
             KnowledgeDialogContent::Delete(confirm) => {
@@ -159,6 +168,7 @@ impl KnowledgeDialog<'_> {
         choice: String,
         document: bool,
         error: Option<&str>,
+        fields: Option<(AnyElement, AnyElement)>,
         cx: &App,
     ) -> Div {
         let controls = &self.controls;
@@ -179,22 +189,26 @@ impl KnowledgeDialog<'_> {
                 "settings_view.knowledge.scope",
             )
         };
-        let field = controls.field(
-            input,
-            value,
-            controls.i18n.t(placeholder),
-            Some(KNOWLEDGE_DIALOG_FIELD_WIDTH),
-            TextInputContentAlign::Start,
-            false,
-            cx,
-        );
-        let select = controls.settings_select_control(
-            select,
-            choice,
-            false,
-            Some(KNOWLEDGE_DIALOG_FIELD_WIDTH),
-            cx,
-        );
+        let (field, select) = fields.unwrap_or_else(|| {
+            (
+                controls.field(
+                    input,
+                    value,
+                    controls.i18n.t(placeholder),
+                    Some(KNOWLEDGE_DIALOG_FIELD_WIDTH),
+                    TextInputContentAlign::Start,
+                    false,
+                    cx,
+                ),
+                controls.settings_select_control(
+                    select,
+                    choice,
+                    false,
+                    Some(KNOWLEDGE_DIALOG_FIELD_WIDTH),
+                    cx,
+                ),
+            )
+        });
         let labeled = |key, field| {
             div()
                 .flex()

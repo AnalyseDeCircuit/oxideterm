@@ -32,6 +32,7 @@
       }
     },
     "form": {
+      "demo_connection_hint": "演示连接使用模拟主机，无需提供凭据。",
       "title": "新建连接",
       "subtitle": "配置一台 SSH 主机，用于终端、SFTP、端口转发和远程文件编辑。",
       "basic_information": "基本信息",

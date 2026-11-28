@@ -200,49 +200,6 @@ impl WorkspaceApp {
         choices
     }
 
-    fn bind_tab_scope_picker_trigger(
-        &self,
-        trigger: gpui::Stateful<gpui::Div>,
-        tooltip: String,
-        cx: &mut Context<Self>,
-    ) -> gpui::Stateful<gpui::Div> {
-        let workspace = cx.entity().downgrade();
-        trigger
-            .debug_selector(|| "titlebar-tab-scope".into())
-            .role(gpui::Role::Button)
-            .aria_label(tooltip.clone())
-            .on_mouse_move(
-                cx.listener(move |this, event: &MouseMoveEvent, _window, cx| {
-                    this.queue_workspace_tooltip(
-                        "titlebar-tab-scope",
-                        tooltip.clone(),
-                        f32::from(event.position.x) + 12.0,
-                        f32::from(event.position.y) + 16.0,
-                        cx,
-                    );
-                }),
-            )
-            .on_hover(cx.listener(|this, hovered: &bool, _window, cx| {
-                if !*hovered {
-                    this.clear_workspace_tooltip("titlebar-tab-scope", cx);
-                }
-            }))
-            .on_a11y_action(gpui::AccessibleAction::Click, move |_, window, cx| {
-                let _ = workspace.update(cx, |this, cx| {
-                    this.clear_workspace_tooltip("titlebar-tab-scope", cx);
-                    this.open_tab_scope_picker(window, cx);
-                });
-            })
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _, window, cx| {
-                    this.clear_workspace_tooltip("titlebar-tab-scope", cx);
-                    this.open_tab_scope_picker(window, cx);
-                    cx.stop_propagation();
-                }),
-            )
-    }
-
     pub(in crate::workspace) fn render_tab_scope_trigger(
         &self,
         available_width: f32,
@@ -250,216 +207,56 @@ impl WorkspaceApp {
         hover_bg: u32,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
+        use oxideterm_gpui_shell::tabs::scope::{ScopeButton, ScopeTrigger};
         let host = self.tab_host.read(cx);
-        let filtered = *host.scope() != TabScope::All;
-        let visible_count = host.main_tabs().count();
-        let total_count = host.unfiltered_main_tabs().count();
-
-        // Hide the scope trigger when the workspace is unfiltered and empty so
-        // the titlebar remains a continuous drag bar over the Welcome view.
-        if !filtered && total_count == 0 {
-            return None;
+        ScopeTrigger {
+            label: self.tab_scope_label(host.scope(), cx),
+            filtered: *host.scope() != TabScope::All,
+            visible_count: host.main_tabs().count(),
+            total_count: host.unfiltered_main_tabs().count(),
+            available_width,
+            text_color,
+            hover_bg,
         }
-
-        let theme = self.tokens.ui;
-        let label = self.tab_scope_label(host.scope(), cx);
-        let visible = visible_count.to_string();
-        let total = total_count.to_string();
-        let pill_height = (self.tokens.metrics.titlebar_height - 8.0).max(20.0);
-        let tooltip = self
-            .i18n
-            .t(if filtered {
-                "sidebar.tab_scope.filtered_tooltip"
-            } else {
-                "sidebar.tab_scope.all_tooltip"
-            })
-            .replace("{{visible}}", &visible)
-            .replace("{{total}}", &total)
-            .replace("{{scope}}", &label);
-
-        if !filtered {
-            let max_width = available_width.max(0.0).min(280.0);
-            let hover_text = theme.text;
-            let count_color = rgba((text_color << 8) | 0xc8);
-            let trigger = div()
-                .group("titlebar-tab-scope")
-                .id("titlebar-tab-scope")
-                .h(px(pill_height))
-                .max_w(px(max_width))
-                .min_w(px(0.0))
-                .flex_none()
-                .mx(px(self.tokens.spacing.two))
-                .px(px(8.0))
-                .rounded(px(self.tokens.radii.md))
-                .bg(rgba(0x00000000))
-                .overflow_hidden()
-                .occlude()
-                .cursor_pointer()
-                .flex()
-                .items_center()
-                .justify_center()
-                .gap(px(5.0))
-                .text_size(px(self.tokens.metrics.ui_text_xs))
-                .text_color(rgb(text_color))
-                .hover(move |trigger| trigger.bg(rgb(hover_bg)).text_color(rgb(hover_text)))
-                .child(div().flex_initial().min_w(px(0.0)).truncate().child(label))
-                .child(
-                    div()
-                        .flex_none()
-                        .text_size(px(self.tokens.metrics.ui_text_2xs))
-                        .text_color(count_color)
-                        .child(total),
+        .render(&self.tokens, &self.i18n, |button, action, tooltip| {
+            let id = action.id();
+            let activate = move |this: &mut Self, window: &mut Window, cx: &mut Context<Self>| {
+                this.clear_workspace_tooltip(id, cx);
+                match action {
+                    ScopeButton::Pick => this.open_tab_scope_picker(window, cx),
+                    ScopeButton::Clear => this.select_tab_scope(TabScope::All, window, cx),
+                }
+            };
+            let workspace = cx.weak_entity();
+            button
+                .debug_selector(move || id.into())
+                .role(gpui::Role::Button)
+                .aria_label(tooltip.clone())
+                .on_mouse_move(cx.listener(move |this, event: &MouseMoveEvent, _, cx| {
+                    this.queue_workspace_tooltip(
+                        id,
+                        tooltip.clone(),
+                        f32::from(event.position.x) + 12.0,
+                        f32::from(event.position.y) + 16.0,
+                        cx,
+                    );
+                }))
+                .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+                    if !*hovered {
+                        this.clear_workspace_tooltip(id, cx);
+                    }
+                }))
+                .on_a11y_action(gpui::AccessibleAction::Click, move |_, w, cx| {
+                    let _ = workspace.update(cx, |this, cx| activate(this, w, cx));
+                })
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _, w, cx| {
+                        activate(this, w, cx);
+                        cx.stop_propagation();
+                    }),
                 )
-                .child(
-                    div().flex_none().child(
-                        svg()
-                            .path(LucideIcon::ChevronDown.path())
-                            .size(px(12.0))
-                            .text_color(rgb(text_color))
-                            .group_hover("titlebar-tab-scope", move |icon| {
-                                icon.text_color(rgb(hover_text))
-                            }),
-                    ),
-                );
-
-            return Some(
-                self.bind_tab_scope_picker_trigger(trigger, tooltip, cx)
-                    .into_any_element(),
-            );
-        }
-
-        let max_width = available_width.max(0.0).min(320.0);
-        let count = format!("{visible}/{total}");
-        let show_all_label = self.i18n.t("sidebar.tab_scope.show_all");
-        let show_all_tooltip = show_all_label.clone();
-        let capsule_bg = rgba((theme.accent << 8) | if theme.is_light() { 0x14 } else { 0x1f });
-        let capsule_border = rgba((theme.accent << 8) | 0x4d);
-        let primary_hover_bg = rgba((theme.accent << 8) | 0x24);
-        let divider_bg = rgba((theme.accent << 8) | 0x38);
-        let clear_hover_bg = rgba((theme.accent << 8) | 0x2e);
-        let clear_workspace = cx.entity().downgrade();
-        let hover_text = theme.text;
-
-        let primary = self.bind_tab_scope_picker_trigger(
-            div()
-                .id("titlebar-tab-scope")
-                .h_full()
-                .px(px(8.0))
-                .gap(px(5.0))
-                .flex()
-                .items_center()
-                .min_w(px(0.0))
-                .flex_auto()
-                .cursor_pointer()
-                .hover(move |segment| segment.bg(primary_hover_bg))
-                .child(div().flex_none().child(Self::render_lucide_icon(
-                    LucideIcon::ListFilter,
-                    12.0,
-                    rgb(theme.accent),
-                )))
-                .child(
-                    div()
-                        .flex_initial()
-                        .min_w(px(0.0))
-                        .truncate()
-                        .text_size(px(self.tokens.metrics.ui_text_xs))
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(rgb(theme.text))
-                        .child(label),
-                )
-                .child(
-                    div()
-                        .flex_none()
-                        .text_size(px(self.tokens.metrics.ui_text_2xs))
-                        .text_color(rgb(theme.text_muted))
-                        .child(count),
-                )
-                .child(div().flex_none().child(Self::render_lucide_icon(
-                    LucideIcon::ChevronDown,
-                    12.0,
-                    rgb(theme.text_muted),
-                ))),
-            tooltip,
-            cx,
-        );
-
-        Some(
-            div()
-                .id("titlebar-tab-scope-capsule")
-                .debug_selector(|| "titlebar-tab-scope-capsule".into())
-                .h(px(pill_height))
-                .max_w(px(max_width))
-                .min_w(px(0.0))
-                .flex_none()
-                .mx(px(self.tokens.spacing.two))
-                .rounded(px(self.tokens.radii.md))
-                .border_1()
-                .border_color(capsule_border)
-                .bg(capsule_bg)
-                .overflow_hidden()
-                .occlude()
-                .flex()
-                .flex_row()
-                .items_center()
-                .child(primary)
-                .child(div().w(px(1.0)).h(px(12.0)).flex_none().bg(divider_bg))
-                .child(
-                    div()
-                        .group("titlebar-show-all-tabs")
-                        .id("titlebar-show-all-tabs")
-                        .debug_selector(|| "titlebar-show-all-tabs".into())
-                        .role(gpui::Role::Button)
-                        .aria_label(show_all_label)
-                        .h_full()
-                        .w(px(22.0))
-                        .flex_none()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .cursor_pointer()
-                        .hover(move |segment| segment.bg(clear_hover_bg))
-                        .child(
-                            svg()
-                                .path(LucideIcon::X.path())
-                                .size(px(12.0))
-                                .text_color(rgb(theme.text_muted))
-                                .group_hover("titlebar-show-all-tabs", move |icon| {
-                                    icon.text_color(rgb(hover_text))
-                                }),
-                        )
-                        .on_mouse_move(cx.listener(
-                            move |this, event: &MouseMoveEvent, _window, cx| {
-                                this.queue_workspace_tooltip(
-                                    "titlebar-show-all-tabs",
-                                    show_all_tooltip.clone(),
-                                    f32::from(event.position.x) + 12.0,
-                                    f32::from(event.position.y) + 16.0,
-                                    cx,
-                                );
-                            },
-                        ))
-                        .on_hover(cx.listener(|this, hovered: &bool, _window, cx| {
-                            if !*hovered {
-                                this.clear_workspace_tooltip("titlebar-show-all-tabs", cx);
-                            }
-                        }))
-                        .on_a11y_action(gpui::AccessibleAction::Click, move |_, window, cx| {
-                            let _ = clear_workspace.update(cx, |this, cx| {
-                                this.clear_workspace_tooltip("titlebar-show-all-tabs", cx);
-                                this.select_tab_scope(TabScope::All, window, cx);
-                            });
-                        })
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _, window, cx| {
-                                this.clear_workspace_tooltip("titlebar-show-all-tabs", cx);
-                                this.select_tab_scope(TabScope::All, window, cx);
-                                cx.stop_propagation();
-                            }),
-                        ),
-                )
-                .into_any_element(),
-        )
+        })
     }
 
     pub(in crate::workspace) fn render_empty_tab_scope(

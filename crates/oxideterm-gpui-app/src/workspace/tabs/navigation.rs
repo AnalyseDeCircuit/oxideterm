@@ -1202,8 +1202,8 @@ impl WorkspaceApp {
         self.apply_tab_mount_cleanup(mount_cleanup, window.as_deref_mut(), cx);
         self.sync_host_tools_lifecycle(false, cx);
         if self
-            .tab_context_menu
-            .is_some_and(|menu| menu.tab_id == tab.id)
+            .tab_context_menu.as_ref()
+            .is_some_and(|(id, _)| *id == tab.id)
         {
             self.tab_context_menu = None;
         }
@@ -1558,7 +1558,7 @@ impl WorkspaceApp {
                 }
             }
             ShellTabRequest::ContextMenu(id, position) => {
-                self.open_tab_context_menu(id, position, cx)
+                self.open_tab_context_menu(id, position, window, cx)
             }
             ShellTabRequest::CloseTab { tab, select_first } => {
                 self.clear_workspace_tooltip(&format!("workspace-tab-title-{}", tab.0), cx);

@@ -1,5 +1,6 @@
 {
   "terminal": {
+    "demo_shell_welcome": "ブラウザーのデモ端末です。help で使えるコマンドを表示します。",
     "ssh_latency": {
       "measured": "SSH 往復遅延：{{millis}} ms。ネットワークとサーバーの応答時間を含みます。{{seconds}} 秒前に更新。",
       "pending": "SSH の遅延を測定中…",
@@ -101,6 +102,7 @@
     },
     "paste": {
       "edit_title": "貼り付け前に編集",
+      "clipboard_read_failed": "クリップボードを読み取れませんでした。キーボードショートカットで貼り付けてください。",
       "strip_fence": "コードブロックの記号を削除",
       "undo": "元に戻す",
       "redo": "やり直す",
@@ -655,6 +657,7 @@
       "connection_failed": "BLE接続に失敗しました：{error}",
       "runtime_init_failed": "BLEランタイムの初期化に失敗しました",
       "adapter_index_out_of_range": "Bluetoothアダプターのインデックス {n} は範囲外です",
+      "write_failed": "Bluetooth の書き込みに失敗しました。デバイスを再接続してから送信してください。",
       "service_not_found": "サービス {uuid} が見つかりません",
       "no_notify_write_pair": "選択したサービスにnotify+writeキャラクタリスティックのペアがありません"
     }

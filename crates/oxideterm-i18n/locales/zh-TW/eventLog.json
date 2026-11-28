@@ -279,6 +279,7 @@
       "host_trust_add": "信任主機金鑰",
       "host_trust_remove": "移除受信任的主機金鑰",
       "connection_dispatch_receive": "接收連線要求",
+      "show_target": "在工作區中檢視",
       "audit_view": "檢視稽核",
       "credential_delete": "刪除憑證",
       "ssh_node_state": "變更 SSH 節點狀態",

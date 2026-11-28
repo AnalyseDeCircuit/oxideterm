@@ -3853,72 +3853,14 @@ fn normalized_optional_string(value: &str) -> Option<String> {
 
 use oxideterm_gpui_settings_view::select_menu::plugin_marketplace_sort_label;
 
-fn sort_plugin_marketplace_entries(
-    entries: &mut [plugin_host::NativePluginRegistryEntry],
-    sort: oxideterm_settings::PluginMarketplaceSort,
-) {
-    entries.sort_by_cached_key(|entry| {
-        let date = match sort {
-            oxideterm_settings::PluginMarketplaceSort::Name => None,
-            oxideterm_settings::PluginMarketplaceSort::RecentUpdates => {
-                entry.latest_release_at.as_deref()
-            }
-            oxideterm_settings::PluginMarketplaceSort::NewestListings => entry.listed_at.as_deref(),
-        }
-        .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
-        .map(|date| date.timestamp_millis());
-        // Missing publication metadata follows dated entries; editing descriptions
-        // must never stand in for publishing a version or listing a new plugin.
-        (
-            std::cmp::Reverse(date),
-            entry.name.to_lowercase(),
-            entry.id.clone(),
-        )
+use plugin_host::catalog_browser::{entry_matches as native_plugin_marketplace_entry_matches, filter_tags as native_plugin_filter_tags, tag_matches as native_plugin_tag_matches};
+
+fn sort_plugin_marketplace_entries(entries: &mut [plugin_host::NativePluginRegistryEntry], sort: oxideterm_settings::PluginMarketplaceSort) {
+    plugin_host::catalog_browser::sort_entries(entries, |entry| match sort {
+        oxideterm_settings::PluginMarketplaceSort::Name => None,
+        oxideterm_settings::PluginMarketplaceSort::RecentUpdates => entry.latest_release_at.as_deref(),
+        oxideterm_settings::PluginMarketplaceSort::NewestListings => entry.listed_at.as_deref(),
     });
-}
-
-fn native_plugin_marketplace_entry_matches(
-    entry: &plugin_host::NativePluginRegistryEntry,
-    query: &str,
-) -> bool {
-    query.is_empty()
-        || entry.id.to_lowercase().contains(query)
-        || entry.name.to_lowercase().contains(query)
-        || entry
-            .description
-            .as_deref()
-            .is_some_and(|description| description.to_lowercase().contains(query))
-        || entry
-            .author
-            .as_deref()
-            .is_some_and(|author| author.to_lowercase().contains(query))
-        || entry
-            .tags
-            .as_ref()
-            .is_some_and(|tags| tags.iter().any(|tag| tag.to_lowercase().contains(query)))
-}
-
-fn native_plugin_filter_tags<'a>(tags: impl Iterator<Item = &'a str>) -> Vec<String> {
-    tags.map(native_plugin_category)
-        .filter(|tag| !tag.is_empty())
-        .collect::<std::collections::BTreeSet<_>>()
-        .into_iter()
-        .collect()
-}
-
-fn native_plugin_tag_matches(tags: &[String], selected: Option<&str>) -> bool {
-    selected.is_none_or(|selected| {
-        tags.iter()
-            .any(|tag| native_plugin_category(tag) == native_plugin_category(selected))
-    })
-}
-
-fn native_plugin_category(tag: &str) -> String {
-    match tag.trim().to_lowercase().as_str() {
-        // Published catalogs remain usable until their cached tags refresh.
-        "remote-desktop" => "remote-connections".into(),
-        tag => tag.to_string(),
-    }
 }
 
 fn native_plugin_tags_for_id<'a>(

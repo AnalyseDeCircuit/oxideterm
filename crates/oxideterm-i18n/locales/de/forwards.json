@@ -18,6 +18,7 @@
   "copy_address": "Adresse kopieren",
   "copied": "Kopiert!",
   "forwards": {
+    "preview_hint": "Regelentwürfe für diese Demo-Sitzung. Es werden keine Ports geöffnet.",
     "quick": {
       "title": "Schnellweiterleitungen",
       "jupyter": "Jupyter (8888)",

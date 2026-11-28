@@ -100,6 +100,8 @@ pub enum SftpRemoteId {
     Node(NodeId),
     Standalone(String),
     Ftp(String),
+    #[cfg(target_family = "wasm")]
+    DeviceFolder(u64),
 }
 
 impl SftpRemoteId {
@@ -108,18 +110,24 @@ impl SftpRemoteId {
             Self::Node(node_id) => node_id.0.clone(),
             Self::Standalone(profile_id) => format!("standalone-sftp:{profile_id}"),
             Self::Ftp(profile_id) => format!("ftp:{profile_id}"),
+            #[cfg(target_family = "wasm")]
+            Self::DeviceFolder(id) => format!("device-folder:{id}"),
         }
     }
 
     pub fn node_id(&self) -> Option<&NodeId> {
         match self {
             Self::Node(node_id) => Some(node_id),
+            #[cfg(target_family = "wasm")]
+            Self::DeviceFolder(_) => None,
             Self::Standalone(_) | Self::Ftp(_) => None,
         }
     }
 
     pub fn standalone_endpoint_id(&self) -> Option<&str> {
         match self {
+            #[cfg(target_family = "wasm")]
+            Self::DeviceFolder(_) => None,
             Self::Node(_) | Self::Ftp(_) => None,
             Self::Standalone(endpoint_id) => Some(endpoint_id),
         }

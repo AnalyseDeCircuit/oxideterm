@@ -32,6 +32,7 @@
       }
     },
     "form": {
+      "demo_connection_hint": "デモ接続は模擬ホストを使用します。認証情報は不要です。",
       "title": "新しい接続",
       "subtitle": "ターミナル、SFTP、ポート転送、リモートファイル編集に使う SSH ホストを設定します。",
       "basic_information": "基本情報",

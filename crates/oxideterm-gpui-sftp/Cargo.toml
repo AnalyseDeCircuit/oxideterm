@@ -8,6 +8,7 @@ version.workspace = true
 license.workspace = true
 
 [dependencies]
+base64.workspace = true
 gpui.workspace = true
 chrono.workspace = true
 oxideterm-environment = { path = "../oxideterm-environment" }

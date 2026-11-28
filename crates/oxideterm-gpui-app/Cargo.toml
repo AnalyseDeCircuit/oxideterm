@@ -51,6 +51,7 @@ oxideterm-gpui-file-manager = { path = "../oxideterm-gpui-file-manager" }
 oxideterm-gpui-sftp = { path = "../oxideterm-gpui-sftp" }
 oxideterm-gpui-onboarding = { path = "../oxideterm-gpui-onboarding" }
 oxideterm-gpui-quick-commands = { path = "../oxideterm-gpui-quick-commands" }
+oxideterm-gpui-command-sender = { path = "../oxideterm-gpui-command-sender" }
 oxideterm-gpui-platform = { path = "../oxideterm-gpui-platform" }
 oxideterm-gpui-remote-desktop = { path = "../oxideterm-gpui-remote-desktop" }
 oxideterm-gpui-settings-view = { path = "../oxideterm-gpui-settings-view" }

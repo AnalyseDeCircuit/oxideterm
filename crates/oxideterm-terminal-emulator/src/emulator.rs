@@ -197,12 +197,34 @@ impl TerminalEmulator {
         *self.term.mode()
     }
 
+    pub fn set_scrollback_limit(&mut self, lines: usize) -> bool {
+        self.term.set_scrollback_limit(lines)
+    }
+
     pub fn cursor_blinking(&self) -> bool {
         self.term.cursor_style().blinking
     }
 
     pub fn search_matches(&self, query: &str) -> Vec<crate::TerminalSearchMatch> {
         crate::search::search_matches_from_term(&self.term, self.size.cols, query)
+    }
+
+    pub fn begin_search(
+        &self,
+        query: &crate::search::scrollback::TerminalSearchQuery,
+    ) -> crate::search::scrollback::ScrollbackScan {
+        crate::search::scrollback::ScrollbackScan::new(&self.term, self.size.cols, query)
+    }
+
+    pub fn advance_search(&self, scan: &mut crate::search::scrollback::ScrollbackScan) -> bool {
+        scan.advance(|| &self.term, &|| false)
+    }
+
+    pub fn finish_search(
+        &self,
+        scan: crate::search::scrollback::ScrollbackScan,
+    ) -> Vec<crate::TerminalSearchMatch> {
+        scan.finish(&|| false).resolve(|| &self.term)
     }
 
     pub fn set_selection(&mut self, selection: Option<crate::TerminalSelectionRange>) {

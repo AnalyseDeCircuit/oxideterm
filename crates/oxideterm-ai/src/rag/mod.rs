@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 pub mod bm25;
-pub mod chunker;
+pub(crate) use crate::rag_chunker as chunker;
 pub mod embedding;
 pub mod error;
 pub mod hnsw;
@@ -21,7 +21,7 @@ pub use types::{DocCollection, DocFormat, DocMetadata, EmbeddingRecord, SearchSo
 
 const MAX_NAME_LENGTH: usize = 1000;
 const MAX_CONTENT_SIZE: usize = 10 * 1024 * 1024;
-const MAX_QUERY_LENGTH: usize = 10_000;
+use crate::rag_keyword::MAX_QUERY_LENGTH;
 
 #[derive(Default)]
 struct HnswRebuildState {
@@ -101,22 +101,7 @@ fn content_hash(text: &str) -> String {
     )
 }
 
-fn build_context_prefix(title: &str, section_path: Option<&str>) -> String {
-    match section_path {
-        Some(path) if !path.is_empty() => {
-            format!("From document '{}', section: {}.", title, path)
-        }
-        _ => format!("From document '{}'.", title),
-    }
-}
-
-fn doc_format_from_wire(value: &str) -> Result<DocFormat, String> {
-    match value {
-        "markdown" => Ok(DocFormat::Markdown),
-        "plaintext" | "txt" => Ok(DocFormat::PlainText),
-        other => Err(format!("Unsupported format: {other}")),
-    }
-}
+use crate::rag_keyword::{build_context_prefix, doc_format_from_wire};
 
 fn doc_format_to_wire(format: &DocFormat) -> &'static str {
     match format {

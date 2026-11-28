@@ -72,6 +72,8 @@ pub enum SftpDialogRequest {
     Close,
     Accept,
     Download(String),
+    #[cfg(target_family = "wasm")]
+    CompareDeviceFile(String),
     OpenExternal(String),
     LoadHex {
         path: String,
@@ -85,6 +87,7 @@ pub enum SftpDialogRequest {
 }
 
 pub struct SftpDialogIme {
+    pub field: Option<Entity<oxideterm_gpui_editor::line_edit::LineField>>,
     pub anchor_id: TextInputAnchorId,
     pub viewport: TextInputViewport,
     pub caret_visible: bool,
@@ -92,6 +95,48 @@ pub struct SftpDialogIme {
     pub active_offset: Option<usize>,
     pub marked_text: Option<String>,
     pub update_anchor: Rc<dyn Fn(TextInputAnchor)>,
+}
+
+impl SftpDialogIme {
+    pub(super) fn mount_field(
+        &self,
+        source: &Entity<SftpWorkspaceEntity>,
+        input: SftpInput,
+        pane: Option<SftpPane>,
+        value: &str,
+        placeholder: String,
+        tokens: ThemeTokens,
+        cx: &mut App,
+    ) -> Option<AnyElement> {
+        let field = self.field.as_ref()?;
+        field.update(cx, |field, cx| {
+            field.sync_value(value, cx);
+            field.environment(tokens, placeholder, cx);
+        });
+        let source = source.clone();
+        let control = div()
+            .flex_1()
+            .min_w_0()
+            .h_full()
+            .child(field.clone())
+            .capture_any_mouse_down(move |event, _, cx| {
+                if event.button == MouseButton::Left {
+                    source.update(cx, |s, cx| {
+                        if let Some(pane) = pane {
+                            s.active_pane = pane;
+                        }
+                        if s.set_input_focus(Some(input), cx) {
+                            cx.notify();
+                        }
+                    });
+                }
+            });
+        let update = self.update_anchor.clone();
+        Some(
+            text_input_anchor_probe(self.anchor_id, control, move |anchor, _, _| update(anchor))
+                .into_any_element(),
+        )
+    }
 }
 
 pub struct SftpPreviewEditorPreferences {
@@ -264,6 +309,17 @@ impl SftpDialogView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let source = self.sftp_view();
+        if let Some(field) = self.ime.mount_field(
+            &source,
+            SftpInput::DialogValue,
+            None,
+            value,
+            self.i18n.t(placeholder_key),
+            self.tokens,
+            cx,
+        ) {
+            return field;
+        }
         let (control, anchor_id, update) = {
             let state = source.read(cx);
             let ime = state
@@ -353,7 +409,7 @@ impl SftpDialogView {
 
     fn can_edit_sftp_preview(&self, cx: &App) -> bool {
         let sftp = self.sftp_view().read(cx);
-        sftp.preview_pane == Some(SftpPane::Remote)
+        sftp.preview_pane_is_editable()
             && matches!(
                 sftp.preview_content.as_deref(),
                 Some(PreviewContent::Text { .. })

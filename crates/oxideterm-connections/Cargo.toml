@@ -25,6 +25,7 @@ oxideterm-atomic-file = { path = "../oxideterm-atomic-file" }
 oxideterm-portable-runtime = { path = "../oxideterm-portable-runtime" }
 oxideterm-remote-desktop = { path = "../oxideterm-remote-desktop" }
 oxideterm-secret-store = { path = "../oxideterm-secret-store" }
+oxideterm-ssh-launch = { path = "../oxideterm-ssh-launch" }
 russh.workspace = true
 sha2.workspace = true
 thiserror.workspace = true

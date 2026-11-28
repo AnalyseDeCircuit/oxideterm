@@ -18,6 +18,7 @@
   "copy_address": "Copier l'adresse",
   "copied": "Copié !",
   "forwards": {
+    "preview_hint": "Brouillons de règles pour cette session de démonstration. Aucun port n’est ouvert.",
     "quick": {
       "title": "Transferts rapides",
       "jupyter": "Jupyter (8888)",

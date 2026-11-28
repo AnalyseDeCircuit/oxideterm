@@ -10,6 +10,68 @@ use std::rc::Rc;
 
 use crate::{browser::render_lucide_icon, style::SftpUiMetrics};
 
+pub fn sftp_open_presentation(
+    preferred: oxideterm_settings::SftpPresentationPreference,
+    existing_tab: bool,
+    sftp_tab_active: bool,
+) -> oxideterm_settings::SftpPresentationPreference {
+    // The sidebar is hidden while an SFTP tab is active and must not take over
+    // its shared entity. Existing tabs also retain their detached-window routing.
+    if existing_tab || sftp_tab_active {
+        oxideterm_settings::SftpPresentationPreference::Tab
+    } else {
+        preferred
+    }
+}
+
+pub fn sidebar_sftp_target<T: Clone>(
+    opened: Option<&T>,
+    pinned: bool,
+    focused: Option<T>,
+) -> Option<T> {
+    let opened = opened?;
+    if pinned {
+        Some(opened.clone())
+    } else {
+        focused
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sftp_presentation_reuses_tabs_without_changing_first_open_preference() {
+        use oxideterm_settings::SftpPresentationPreference::{Ask, Sidebar, Tab};
+
+        for preference in [Ask, Sidebar, Tab] {
+            assert_eq!(sftp_open_presentation(preference, false, false), preference);
+            // Reuse an existing tab even when another tab or window is focused.
+            assert_eq!(sftp_open_presentation(preference, true, false), Tab);
+            // A different node must not activate a hidden sidebar either.
+            assert_eq!(sftp_open_presentation(preference, false, true), Tab);
+        }
+    }
+
+    #[test]
+    fn sidebar_follows_focus_unless_pinned_and_stays_closed_until_opened() {
+        let a = String::from("a");
+        let b = String::from("b");
+        assert_eq!(
+            sidebar_sftp_target(Some(&a), false, Some(b.clone())),
+            Some(b.clone())
+        );
+        assert_eq!(
+            sidebar_sftp_target(Some(&a), true, Some(b.clone())),
+            Some(a.clone())
+        );
+        assert_eq!(sidebar_sftp_target(Some(&a), false, None), None);
+        assert_eq!(sidebar_sftp_target(Some(&a), true, None), Some(a));
+        assert_eq!(sidebar_sftp_target(None, false, Some(b)), None);
+    }
+}
+
 pub fn render_presentation_choice(
     tokens: &ThemeTokens,
     i18n: &I18n,

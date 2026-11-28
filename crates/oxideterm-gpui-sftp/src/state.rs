@@ -450,7 +450,7 @@ pub struct SftpWorkspaceEntity {
     pub remote_path_input: String,
     pub local_path_completion: PathCompletionState,
     pub remote_path_completion: PathCompletionState,
-    pub remote_path_completion_pending_selection: Option<(String, String)>,
+    pub(crate) completion_selection: HashMap<SftpPane, (String, String)>,
     pub(crate) local_filter: String,
     pub remote_filter: String,
     pub(crate) local_sort_field: SftpSortField,
@@ -517,6 +517,7 @@ pub struct SftpWorkspaceEntity {
     // Preview payloads can contain large text or media buffers. Renderers share
     // immutable snapshots instead of cloning the payload on every frame.
     pub preview_content: Option<Arc<PreviewContent>>,
+    pub(crate) preview_image: Option<Arc<gpui::Image>>,
     pub preview_asset_owner: Option<PreviewAssetOwner>,
     pub preview_plugin: Option<SftpDocumentPreview>,
     pub preview_generation: u64,
@@ -593,7 +594,7 @@ impl SftpWorkspaceEntity {
             remote_path_input: remote_path.clone(),
             local_path_completion: PathCompletionState::default(),
             remote_path_completion: PathCompletionState::default(),
-            remote_path_completion_pending_selection: None,
+            completion_selection: HashMap::new(),
             local_path: local_path.clone(),
             remote_path,
             local_filter: String::new(),
@@ -658,6 +659,7 @@ impl SftpWorkspaceEntity {
             preview_pane: None,
             preview_path: None,
             preview_content: None,
+            preview_image: None,
             preview_asset_owner: None,
             preview_plugin: None,
             preview_generation: 0,
@@ -956,6 +958,7 @@ impl SftpWorkspaceEntity {
         self.preview_asset_owner = None;
         self.preview_plugin = None;
         self.preview_content = None;
+        self.preview_image = None;
         self.preview_path = None;
         self.preview_pane = None;
         self.preview_error = None;

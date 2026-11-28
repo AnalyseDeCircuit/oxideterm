@@ -1,0 +1,24 @@
+[lints]
+workspace = true
+
+[package]
+name = "oxideterm-gpui-command-sender"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+oxideterm-environment = { path = "../oxideterm-environment" }
+gpui.workspace = true
+oxideterm-gpui-editor = { path = "../oxideterm-gpui-editor" }
+oxideterm-gpui-ui = { path = "../oxideterm-gpui-ui" }
+oxideterm-i18n = { path = "../oxideterm-i18n" }
+oxideterm-terminal-encoding = { path = "../oxideterm-terminal-encoding" }
+oxideterm-theme = { path = "../oxideterm-theme" }
+oxideterm-workspace = { path = "../oxideterm-workspace", default-features = false }
+uuid.workspace = true
+web-time.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }

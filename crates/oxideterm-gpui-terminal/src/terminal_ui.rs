@@ -778,30 +778,7 @@ impl Default for TerminalKittyFileTransmissionLabels {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct TerminalPasteLabels {
-    pub edit_title: String,
-    pub strip_fence: String,
-    pub undo: String,
-    pub redo: String,
-    pub editor_menu: oxideterm_gpui_editor::EditorContextMenuLabels,
-    pub cancel: String,
-    pub paste: String,
-}
-
-impl Default for TerminalPasteLabels {
-    fn default() -> Self {
-        Self {
-            edit_title: "Edit before pasting".into(),
-            strip_fence: "Remove code block markers".into(),
-            undo: "Undo".into(),
-            redo: "Redo".into(),
-            editor_menu: oxideterm_gpui_editor::EditorContextMenuLabels::default(),
-            cancel: "Cancel".to_string(),
-            paste: "Paste".to_string(),
-        }
-    }
-}
+pub use oxideterm_gpui_editor::paste::TerminalPasteLabels;
 
 pub use oxideterm_gpui_background::{
     BackgroundFit as TerminalBackgroundFit, BackgroundPreferences as TerminalBackgroundPreferences,

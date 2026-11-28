@@ -106,6 +106,7 @@ pub struct MarkdownOptions {
     /// Localized action label for opening Mermaid diagrams in a larger view.
     pub mermaid_expand_label: String,
     pub mermaid_loading_label: String,
+    pub code_action_label: String,
 }
 
 impl Default for MarkdownOptions {
@@ -164,6 +165,7 @@ impl MarkdownOptions {
             math_display_padding: 6.0,
             math_stroke_width: 1.5,
             mermaid_error_prefix: "Unsupported Mermaid diagram".to_string(),
+            code_action_label: "RUN".into(),
             mermaid_expand_label: "EXPAND".to_string(),
             mermaid_loading_label: "Rendering diagram…".to_string(),
         }

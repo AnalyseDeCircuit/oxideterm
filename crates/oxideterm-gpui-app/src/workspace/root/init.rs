@@ -617,7 +617,7 @@ impl WorkspaceApp {
                 header: chat_header,
                 background: background_view,
                 model_trigger: model_picker.sidebar.clone(),
-                composer: composer_editor,
+                composer: composer_editor.into(),
             },
             tokens,
             i18n.clone(),

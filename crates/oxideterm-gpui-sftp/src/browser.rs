@@ -93,6 +93,8 @@ pub enum SftpBrowserRequest {
     InputDragged(MouseMoveEvent),
     TransferFiles(SftpPane, SftpTransferDirection, Vec<String>),
     ExternalDrop(Vec<std::path::PathBuf>),
+    #[cfg(target_family = "wasm")]
+    BrowserDrop(gpui::BrowserFileDrop),
 }
 
 #[derive(Clone, Copy)]
@@ -106,6 +108,8 @@ type Dispatch = Rc<dyn Fn(SftpBrowserRequest, Option<&mut Window>, &mut App)>;
 type Selectable = Rc<dyn Fn(SelectionRole, Option<u64>, u64, usize, String, u32) -> AnyElement>;
 
 pub struct SftpBrowserFrame {
+    #[cfg(target_family = "wasm")]
+    pub device_folder_picker: bool,
     pub sidebar: bool,
     pub sidebar_target: Option<NodeId>,
     pub sidebar_open: Option<NodeId>,
@@ -425,6 +429,17 @@ impl SftpBrowserView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let source = self.sftp_view();
+        if let Some(field) = self.ime[&input].mount_field(
+            &source,
+            input,
+            pane,
+            value,
+            self.i18n.t(placeholder_key),
+            self.tokens,
+            cx,
+        ) {
+            return field;
+        }
         let (control, anchor_id, update) = {
             let state = source.read(cx);
             let ime = state.ime_overrides.get(&input).unwrap_or(&self.ime[&input]);
@@ -651,6 +666,11 @@ impl SftpBrowserView {
                     sftp.drag_over_pane = None;
                     cx.notify();
                 });
+                cx.stop_propagation();
+            }
+            #[cfg(target_family = "wasm")]
+            SftpFileListRequest::BrowserDrop(files) => {
+                self.send(SftpBrowserRequest::BrowserDrop(files.clone()), None, cx);
                 cx.stop_propagation();
             }
             SftpFileListRequest::ClearMenu => {
@@ -920,6 +940,7 @@ mod tests {
 
     fn test_ime(id: u64, selected_range: Option<std::ops::Range<usize>>) -> SftpDialogIme {
         SftpDialogIme {
+            field: None,
             anchor_id: TextInputAnchorId(id),
             viewport: TextInputViewport::default(),
             caret_visible: true,

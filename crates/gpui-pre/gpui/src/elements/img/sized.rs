@@ -13,8 +13,8 @@ pub(super) struct SourceInfo {
 
 impl SourceInfo {
     pub(super) fn new(source: Resource, bytes: Option<Vec<u8>>) -> Result<Self, ImageCacheError> {
-        let (data, declared) = match &source {
-            Resource::Image(image) => (image.bytes.as_slice(), Some(image.format)),
+        let (data, declared) = match source.encoded_image() {
+            Some(image) => (image.bytes.as_slice(), Some(image.format)),
             _ => (bytes.as_deref().expect("resource bytes loaded"), None),
         };
         let format = match declared {
@@ -52,7 +52,8 @@ impl SourceInfo {
 
     fn quarter_turns(&self) -> u8 {
         match self.source {
-            Resource::RotatedImage { quarter_turns, .. } => quarter_turns % 4,
+            Resource::RotatedImage { quarter_turns, .. }
+            | Resource::RotatedBytes { quarter_turns, .. } => quarter_turns % 4,
             _ => 0,
         }
     }
@@ -70,8 +71,8 @@ impl SourceInfo {
     }
 
     fn bytes(&self) -> &[u8] {
-        match &self.source {
-            Resource::Image(image) => &image.bytes,
+        match self.source.encoded_image() {
+            Some(image) => &image.bytes,
             _ => self.bytes.as_deref().expect("resource bytes loaded"),
         }
     }
@@ -86,8 +87,8 @@ impl SourceInfo {
             let target = info.target(self.rotated_size(target));
             let dimensions = self.rotated_size(info.size);
             let intrinsic = size(dimensions.0.into(), dimensions.1.into());
-            let input = match &self.source {
-                Resource::Image(image) => super::AnimationInput::Image(image.clone()),
+            let input = match self.source.encoded_image() {
+                Some(image) => super::AnimationInput::Image(image.clone()),
                 _ => super::AnimationInput::Bytes(self.bytes.as_ref().unwrap().clone()),
             };
             if let Some(frames) = super::decoded_size::animation(
@@ -95,7 +96,7 @@ impl SourceInfo {
                 input,
                 target,
                 turns,
-                !matches!(self.source, Resource::Image(_)),
+                self.source.encoded_image().is_none(),
             )? {
                 return Ok(Arc::new(frames.with_intrinsic_size(intrinsic)));
             }
@@ -127,8 +128,8 @@ impl SourceInfo {
                 });
             return Ok(Arc::new(RenderImage::from_decoded_frames(frames)?));
         }
-        match &self.source {
-            Resource::Image(image) => image.to_image_data(renderer).map_err(Into::into),
+        match self.source.encoded_image() {
+            Some(image) => image.to_image_data(renderer).map_err(Into::into),
             _ => ImageAssetLoader::decode_bytes(self.bytes(), renderer),
         }
     }
@@ -183,8 +184,8 @@ impl SizedImage {
     pub(crate) fn new(source: Resource, cx: &App) -> Self {
         let read = ImageAssetLoader::read_bytes(source.clone(), cx);
         let load = async move {
-            let bytes = match &source {
-                Resource::Image(_) => None,
+            let bytes = match source.encoded_image() {
+                Some(_) => None,
                 _ => Some(read.await?),
             };
             SourceInfo::new(source, bytes).map(Arc::new)
@@ -649,41 +650,44 @@ pub(crate) mod tests {
         for (turns, dimensions, white_corner) in
             [(1, (600, 300), 1), (2, (300, 600), 2), (3, (600, 300), 0)]
         {
-            let source = SourceInfo::new(
-                Resource::RotatedImage {
-                    path: Path::new("preview.jpg").into(),
-                    quarter_turns: turns,
-                },
-                Some(bytes.clone()),
-            )
-            .unwrap();
-            for divisor in [4, 1] {
-                let target = (dimensions.0 / divisor, dimensions.1 / divisor);
-                let frame = source
-                    .decode(target, SvgRenderer::new(Arc::new(())))
-                    .unwrap();
-                assert_eq!(frame.size(0), size(target.0.into(), target.1.into()));
-                assert_eq!(
-                    frame.render_size(0),
-                    size(px(dimensions.0 as f32), px(dimensions.1 as f32))
-                );
-                let data = frame.frame_bytes(0).unwrap().unwrap();
-                let offsets = [
-                    0,
-                    (target.0 as usize - 1) * 4,
-                    (target.1 as usize - 1) * target.0 as usize * 4,
-                ];
-                assert!(
-                    data[offsets[white_corner]..offsets[white_corner] + 3]
-                        .iter()
-                        .all(|&c| c >= 245)
-                );
-                let dark = if white_corner == 0 { 1 } else { 0 };
-                assert!(
-                    data[offsets[dark]..offsets[dark] + 3]
-                        .iter()
-                        .all(|&c| c <= 10)
-                );
+            let path_source = Resource::RotatedImage {
+                path: Path::new("preview.jpg").into(),
+                quarter_turns: turns,
+            };
+            let byte_source = Resource::RotatedBytes {
+                image: Arc::new(Image::from_bytes(crate::ImageFormat::Jpeg, bytes.clone())),
+                quarter_turns: turns,
+            };
+            for (resource, bytes) in [(path_source, Some(bytes.clone())), (byte_source, None)] {
+                let source = SourceInfo::new(resource, bytes).unwrap();
+                for divisor in [4, 1] {
+                    let target = (dimensions.0 / divisor, dimensions.1 / divisor);
+                    let frame = source
+                        .decode(target, SvgRenderer::new(Arc::new(())))
+                        .unwrap();
+                    assert_eq!(frame.size(0), size(target.0.into(), target.1.into()));
+                    assert_eq!(
+                        frame.render_size(0),
+                        size(px(dimensions.0 as f32), px(dimensions.1 as f32))
+                    );
+                    let data = frame.frame_bytes(0).unwrap().unwrap();
+                    let offsets = [
+                        0,
+                        (target.0 as usize - 1) * 4,
+                        (target.1 as usize - 1) * target.0 as usize * 4,
+                    ];
+                    assert!(
+                        data[offsets[white_corner]..offsets[white_corner] + 3]
+                            .iter()
+                            .all(|&c| c >= 245)
+                    );
+                    let dark = if white_corner == 0 { 1 } else { 0 };
+                    assert!(
+                        data[offsets[dark]..offsets[dark] + 3]
+                            .iter()
+                            .all(|&c| c <= 10)
+                    );
+                }
             }
         }
     }

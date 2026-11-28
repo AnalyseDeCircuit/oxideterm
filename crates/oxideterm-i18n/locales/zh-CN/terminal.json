@@ -1,5 +1,6 @@
 {
   "terminal": {
+    "demo_shell_welcome": "浏览器模拟终端。输入 help 查看可用命令。",
     "ssh_latency": {
       "measured": "SSH 往返延迟：{{millis}} ms，包含网络和服务器响应时间。{{seconds}} 秒前更新。",
       "pending": "正在测量 SSH 延迟…",
@@ -192,6 +193,7 @@
     "typeSsh": "SSH",
     "paste": {
       "edit_title": "粘贴前编辑",
+      "clipboard_read_failed": "无法读取剪贴板。请使用粘贴快捷键。",
       "strip_fence": "移除代码块标记",
       "undo": "撤销",
       "redo": "重做",
@@ -655,6 +657,7 @@
       "connection_failed": "BLE 连接失败：{error}",
       "runtime_init_failed": "BLE 运行时初始化失败",
       "adapter_index_out_of_range": "蓝牙适配器索引 {n} 越界",
+      "write_failed": "蓝牙写入失败。请重新连接设备后再发送。",
       "service_not_found": "未找到服务 {uuid}",
       "no_notify_write_pair": "所选服务缺少 notify+write 特征对"
     }

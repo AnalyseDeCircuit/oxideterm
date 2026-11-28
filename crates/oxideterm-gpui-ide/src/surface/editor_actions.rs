@@ -672,7 +672,7 @@ impl IdeSurface {
         };
         let path = resolve_search_match_path(&root_path, &hit.path);
         self.pending_search_queries
-            .insert(path.clone(), self.search.query.clone());
+            .insert(path.clone(), (self.search.query.clone(), PendingEditorReveal { line: hit.line, column: hit.column }));
         self.open_remote_file(
             IdeLocation::remote(node_id, path),
             Some(FileOrigin::User),
@@ -688,7 +688,7 @@ impl IdeSurface {
         let Some(path) = remote_path(location).map(ToOwned::to_owned) else {
             return;
         };
-        let Some(query) = self.pending_search_queries.remove(&path) else {
+        let Some((query, hit)) = self.pending_search_queries.remove(&path) else {
             return;
         };
         let Some(tab_id) = self
@@ -702,7 +702,7 @@ impl IdeSurface {
         };
         self.show_markdown_source(tab_id, cx);
         if let Some(editor) = self.editors.get(&tab_id) {
-            editor.update(cx, |editor, cx| editor.set_find_query(query, cx));
+            editor.update(cx, |editor, cx| editor.show_project_match(query, hit.line, hit.column, cx));
         }
     }
 
@@ -2331,6 +2331,11 @@ impl IdeSurface {
         };
         let text = editor.read(cx).buffer().shared_text();
         let _ = self.workspace.replace_buffer_text(tab_id, text);
+    }
+
+    pub fn has_unsaved_changes(&mut self, cx: &mut Context<Self>) -> bool {
+        self.sync_all_editors(cx);
+        self.workspace.has_dirty_buffers()
     }
 
     fn sync_all_editors(&mut self, cx: &mut Context<Self>) {

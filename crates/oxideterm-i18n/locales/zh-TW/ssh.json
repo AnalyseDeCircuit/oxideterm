@@ -32,6 +32,7 @@
       }
     },
     "form": {
+      "demo_connection_hint": "示範連線使用模擬主機，不需要憑證。",
       "title": "新增連線",
       "subtitle": "設定一台 SSH 主機，用於終端機、SFTP、連接埠轉送與遠端檔案編輯。",
       "basic_information": "基本資訊",

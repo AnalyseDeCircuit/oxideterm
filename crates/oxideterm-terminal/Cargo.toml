@@ -43,7 +43,6 @@ tokio.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true
 tempfile = "3.23"
-unicode-segmentation.workspace = true
 uuid.workspace = true
 zeroize.workspace = true
 

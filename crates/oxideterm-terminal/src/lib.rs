@@ -15,7 +15,6 @@ use oxideterm_terminal_graphics::TerminalGraphicsEvent;
 
 mod activity;
 mod backpressure;
-mod command_sender;
 mod history;
 #[cfg(test)]
 mod logical_context;
@@ -52,7 +51,7 @@ pub use tmux::{
 
 pub use activity::TerminalActivityReceiver;
 pub use alacritty_terminal::term::TermMode;
-pub use command_sender::{
+pub use oxideterm_terminal_encoding::command_sender::{
     TerminalSenderFrame, TerminalSenderInputMode, TerminalSenderPacing, TerminalSenderPlan,
     TerminalSenderPlanError, build_terminal_sender_plan,
 };

@@ -279,6 +279,7 @@
       "host_trust_add": "Faire confiance à la clé de l’hôte",
       "host_trust_remove": "Supprimer la clé d’hôte approuvée",
       "connection_dispatch_receive": "Recevoir une demande de connexion",
+      "show_target": "Afficher dans l’espace de travail",
       "audit_view": "Voir l’audit",
       "credential_delete": "Supprimer l’identifiant",
       "ssh_node_state": "Modifier l’état du nœud SSH",

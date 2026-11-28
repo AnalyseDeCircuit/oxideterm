@@ -1,5 +1,8 @@
 {
   "sessionManager": {
+    "browser_load_failed": "No se pudieron cargar las conexiones guardadas. Los cambios se conservarán solo en esta pestaña.",
+    "browser_not_saved": "Los cambios solo están en esta pestaña. Permite el almacenamiento del sitio y vuelve a guardar.",
+    "browser_conflict": "Otra pestaña modificó las conexiones. Tus cambios no se guardaron. Recarga la página para ver las versiones guardadas.",
     "title": "Gestor de sesiones",
     "toolbar": {
       "search_placeholder": "Buscar conexiones...",

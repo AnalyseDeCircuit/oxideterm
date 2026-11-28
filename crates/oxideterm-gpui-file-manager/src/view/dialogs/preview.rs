@@ -298,7 +298,7 @@ impl FileManagerView {
                         cx,
                     ))
                     .child(self.render_file_manager_preview_button(
-                        LucideIcon::ExternalLink,
+                        HOST_FILE_ACTION.0,
                         false,
                         |this, _event, _window, cx| {
                             let preview_entry = match this.file_manager.read(cx).dialog.as_ref() {
@@ -306,16 +306,7 @@ impl FileManagerView {
                                 _ => None,
                             };
                             if let Some(entry) = preview_entry {
-                                if let Err(error) =
-                                    this.file_manager.read(cx).fs.open_external(&entry.path)
-                                {
-                                    this.push_file_manager_toast(
-                                        this.i18n.t("fileManager.error"),
-                                        Some(error),
-                                        FileManagerNoticeKind::Error,
-                                        cx,
-                                    );
-                                }
+                                this.perform_host_file_action(&entry.path, cx);
                             }
                             cx.stop_propagation();
                             cx.notify();
@@ -583,9 +574,9 @@ impl FileManagerView {
             )
             .child(
                 self.workspace_toolbar_action_button(
-                    self.i18n.t("fileManager.open"),
+                    self.i18n.t(if cfg!(target_family = "wasm") { HOST_FILE_ACTION.1 } else { "fileManager.open" }),
                     Some(Self::render_lucide_icon(
-                        LucideIcon::ExternalLink,
+                        HOST_FILE_ACTION.0,
                         FILE_MANAGER_ICON_MD,
                         rgb(theme.text),
                     )),
@@ -606,16 +597,7 @@ impl FileManagerView {
                         )
                     },
                     cx.listener(move |this, _event, _window, cx| {
-                        if let Err(error) =
-                            this.file_manager.read(cx).fs.open_external(&path_for_open)
-                        {
-                            this.push_file_manager_toast(
-                                this.i18n.t("fileManager.error"),
-                                Some(error),
-                                FileManagerNoticeKind::Error,
-                                cx,
-                            );
-                        }
+                        this.perform_host_file_action(&path_for_open, cx);
                         cx.stop_propagation();
                         cx.notify();
                     }),

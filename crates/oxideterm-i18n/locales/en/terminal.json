@@ -1,5 +1,6 @@
 {
   "terminal": {
+    "demo_shell_welcome": "Browser demo shell. Type help to list commands.",
     "ssh_latency": {
       "measured": "SSH round-trip time: {{millis}} ms, including network and server response. Updated {{seconds}} s ago.",
       "pending": "Measuring SSH latency…",
@@ -192,6 +193,7 @@
     "typeSsh": "SSH",
     "paste": {
       "edit_title": "Edit before pasting",
+      "clipboard_read_failed": "Could not read the clipboard. Paste using the keyboard shortcut instead.",
       "strip_fence": "Remove code block markers",
       "undo": "Undo",
       "redo": "Redo",
@@ -655,6 +657,7 @@
       "connection_failed": "BLE connection failed: {error}",
       "runtime_init_failed": "failed to initialize BLE runtime",
       "adapter_index_out_of_range": "bluetooth adapter index {n} is out of range",
+      "write_failed": "Bluetooth write failed. Reconnect the device to send more data.",
       "service_not_found": "service {uuid} not found",
       "no_notify_write_pair": "selected service has no notify+write characteristic pair"
     }

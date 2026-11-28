@@ -16,7 +16,13 @@ use oxideterm_i18n::I18n;
 use oxideterm_theme::ThemeTokens;
 use oxideterm_workspace::TabId;
 
+mod preview_field;
+pub(super) use preview_field::PreviewField;
+use std::{cell::RefCell, rc::Rc};
+type PreviewFocus = Rc<RefCell<Option<gpui::FocusHandle>>>;
+
 pub struct ForwardsViews {
+    preview_focus: Option<PreviewFocus>,
     pub state: Entity<ForwardsPageState>,
     body: Entity<ForwardsView>,
     dialogs: Entity<ForwardsView>,
@@ -28,9 +34,60 @@ impl ForwardsViews {
         bindings: ForwardsViewBindings,
         cx: &mut App,
     ) -> Self {
-        let body = cx.new(|cx| ForwardsView::new(state.clone(), bindings.clone(), Mount::Body, cx));
-        let dialogs = cx.new(|cx| ForwardsView::new(state.clone(), bindings, Mount::Dialogs, cx));
+        Self::mount(state, bindings, None, cx)
+    }
+
+    /// A draft editor owns its text input and can save rules without a live forwarding service.
+    pub fn configuration_preview(
+        state: Entity<ForwardsPageState>,
+        frame: impl Fn(&App) -> Option<ForwardsFrame> + 'static,
+        dispatch: impl Fn(ForwardsRequest, Option<&mut Window>, &mut App) + 'static,
+        cx: &mut App,
+    ) -> Self {
+        Self::mount(
+            state,
+            ForwardsViewBindings {
+                frame: Rc::new(frame),
+                dispatch: Rc::new(dispatch),
+                ime: Rc::new(|_, _| None),
+            },
+            Some(Default::default()),
+            cx,
+        )
+    }
+
+    pub fn editing_text(&self, w: &Window) -> bool {
+        self.preview_focus
+            .as_ref()
+            .is_some_and(|f| f.borrow().as_ref().is_some_and(|f| f.is_focused(w)))
+    }
+
+    fn mount(
+        state: Entity<ForwardsPageState>,
+        bindings: ForwardsViewBindings,
+        preview_focus: Option<PreviewFocus>,
+        cx: &mut App,
+    ) -> Self {
+        let body = cx.new(|cx| {
+            ForwardsView::new(
+                state.clone(),
+                bindings.clone(),
+                Mount::Body,
+                preview_focus.clone(),
+                cx,
+            )
+        });
+        let dialogs = cx.new(|cx| {
+            ForwardsView::new(
+                state.clone(),
+                bindings,
+                Mount::Dialogs,
+                preview_focus.clone(),
+                cx,
+            )
+        });
         Self {
+            preview_focus,
             state,
             body,
             dialogs,
@@ -113,6 +170,7 @@ pub(crate) struct ForwardsView {
     pub(super) tokens: ThemeTokens,
     pub(super) i18n: I18n,
     mount: Mount,
+    pub(super) preview_focus: Option<PreviewFocus>,
     _observation: Subscription,
 }
 
@@ -121,6 +179,7 @@ impl ForwardsView {
         state: Entity<ForwardsPageState>,
         bindings: ForwardsViewBindings,
         mount: Mount,
+        preview_focus: Option<PreviewFocus>,
         cx: &mut Context<Self>,
     ) -> Self {
         let observation = cx.observe(&state, |_, _, cx| cx.notify());
@@ -131,6 +190,7 @@ impl ForwardsView {
             tokens: oxideterm_theme::default_tokens(),
             i18n: I18n::new(oxideterm_i18n::Locale::En),
             mount,
+            preview_focus,
             _observation: observation,
         }
     }

@@ -279,6 +279,7 @@
       "host_trust_add": "Host-Schlüssel vertrauen",
       "host_trust_remove": "Vertrauenswürdigen Host-Schlüssel entfernen",
       "connection_dispatch_receive": "Verbindungsanfrage empfangen",
+      "show_target": "Im Arbeitsbereich anzeigen",
       "audit_view": "Audit anzeigen",
       "credential_delete": "Anmeldedaten löschen",
       "ssh_node_state": "SSH-Knotenstatus ändern",

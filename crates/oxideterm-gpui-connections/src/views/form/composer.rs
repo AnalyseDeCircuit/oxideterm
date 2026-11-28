@@ -251,6 +251,13 @@ impl ConnectionFormView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self
+            .environment
+            .browser
+            .is_some_and(|caps| !caps.supports(transport))
+        {
+            return;
+        }
         if self.environment.tunnel.is_some() {
             self.request(FormAction::LeaveTunnel, Some(window), cx);
         }
@@ -384,7 +391,12 @@ impl ConnectionFormView {
             ],
         ];
 
-        if matches!(&self.flow, FormOwner::Portable(..)) {
+        if let Some(caps) = self.environment.browser {
+            for group in &mut groups {
+                group.retain(|e| matches!(e, ProtocolEntry::BuiltIn(t, _) if caps.supports(*t)));
+            }
+            groups.retain(|g| !g.is_empty());
+        } else if matches!(&self.flow, FormOwner::Portable(..)) {
             for group in &mut groups {
                 group.retain(|entry| {
                     !matches!(
@@ -584,7 +596,7 @@ impl ConnectionFormView {
             }
         }
 
-        if !plugin_types.is_empty() {
+        if self.environment.browser.is_none() && !plugin_types.is_empty() {
             list = list.child(divider());
             for (plugin, definition) in plugin_types {
                 list = list.child(

@@ -441,7 +441,7 @@ pub struct IdeSurface {
     search: ProjectSearchState,
     search_cache: HashMap<String, SearchCacheEntry>,
     search_cache_order: Vec<String>,
-    pending_search_queries: BTreeMap<String, String>,
+    pending_search_queries: BTreeMap<String, (String, PendingEditorReveal)>,
     pending_editor_reveals: BTreeMap<String, PendingEditorReveal>,
     tab_context_menu: Option<TabContextMenu>,
     tree_context_menu: Option<TreeContextMenu>,

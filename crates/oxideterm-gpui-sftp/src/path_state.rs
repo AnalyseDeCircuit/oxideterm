@@ -7,6 +7,70 @@ use oxideterm_local_files::{
 
 use super::*;
 
+#[cfg(all(test, not(target_family = "wasm")))]
+mod tests {
+    use super::*;
+    use gpui::TestAppContext;
+
+    #[gpui::test]
+    fn completing_a_primary_endpoint_file_selects_it_after_its_parent_loads(
+        cx: &mut TestAppContext,
+    ) {
+        let view = cx.new(SftpWorkspaceEntity::new);
+        view.update(cx, |s, cx| {
+            let surface = SftpSurfaceId::Tab(TabId(7));
+            let left = SftpRemoteId::Standalone("primary".into());
+            let right = SftpRemoteId::Standalone("secondary".into());
+            s.activate_pair_view(surface, left.clone(), right.clone(), Some("/".into()));
+            s.start_path_edit(SftpPane::Local, cx);
+            s.local_path_input = "/logs/今日".into();
+            let load = s.refresh_path_completion(SftpInput::LocalPath, cx).unwrap();
+            assert_eq!(
+                (&load.remote_id, load.parent_path.as_str()),
+                (&left, "/logs")
+            );
+            let file = sftp_file_entry(
+                "今日.txt".into(),
+                "/logs/今日.txt".into(),
+                SftpFileType::File,
+                3,
+                None,
+            );
+            let mut effects = VecDeque::new();
+            s.reduce_worker_result(
+                SftpWorkerResult::PairPrimaryPathCompletion {
+                    generation: load.generation,
+                    remote_id: left.clone(),
+                    parent_path: load.parent_path,
+                    result: Ok(vec![sftp_path_completion_candidate(file.clone())]),
+                },
+                &mut effects,
+                cx,
+            );
+            assert!(matches!(
+                s.accept_completion(SftpPane::Local, 0, cx),
+                Some(SftpPathLoad::PairPrimary)
+            ));
+            let listing = |remote_id, generation| SftpWorkerResult::PairPrimaryList {
+                surface_id: surface,
+                remote_id,
+                view_generation: generation,
+                path: "/logs".into(),
+                result: Ok(RemoteSftpListing {
+                    cwd: "/logs".into(),
+                    files: vec![file.clone()],
+                }),
+            };
+            s.reduce_worker_result(listing(right, s.view_generation), &mut effects, cx);
+            assert!(s.local_selected.is_empty());
+            s.reduce_worker_result(listing(left, s.view_generation), &mut effects, cx);
+            assert_eq!(s.local_path, "/logs");
+            assert_eq!(s.selected_names(SftpPane::Local), ["今日.txt"]);
+            assert!(s.remote_selected.is_empty());
+        });
+    }
+}
+
 pub fn remote_path_completion_request(input: &str) -> Option<PathCompletionRequest> {
     if input.trim().is_empty() {
         return None;
@@ -126,23 +190,37 @@ impl SftpWorkspaceEntity {
         }
         let parent = completion.parent_path().unwrap_or(current).to_string();
         let load = self.set_path(pane, parent.clone(), cx);
-        match pane {
-            SftpPane::Local
-                if self
-                    .local_files
-                    .iter()
-                    .any(|entry| entry.name == candidate.name) =>
-            {
-                self.local_selected.insert(candidate.name.clone());
-                self.local_last_selected = Some(candidate.name);
-            }
-            SftpPane::Remote => {
-                // Match the selection to the parent listing rather than the old directory.
-                self.remote_path_completion_pending_selection = Some((parent, candidate.name));
-            }
-            SftpPane::Local => {}
+        self.completion_selection
+            .insert(pane, (parent, candidate.name));
+        if matches!(load, SftpPathLoad::Local) {
+            self.select_completed_path(pane);
         }
         Some(load)
+    }
+
+    /// Apply a file suggestion after its parent listing arrives on the same pane.
+    pub fn select_completed_path(&mut self, pane: SftpPane) {
+        let Some((parent, name)) = self.completion_selection.remove(&pane) else {
+            return;
+        };
+        let (cwd, entries, selected, last) = match pane {
+            SftpPane::Local => (
+                &self.local_path,
+                &self.local_files,
+                &mut self.local_selected,
+                &mut self.local_last_selected,
+            ),
+            SftpPane::Remote => (
+                &self.remote_path,
+                &self.remote_files,
+                &mut self.remote_selected,
+                &mut self.remote_last_selected,
+            ),
+        };
+        if *cwd == parent && entries.iter().any(|e| e.name == name) {
+            selected.insert(name.clone());
+            *last = Some(name);
+        }
     }
 
     pub fn set_path(

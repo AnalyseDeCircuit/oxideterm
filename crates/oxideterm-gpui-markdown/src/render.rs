@@ -1629,8 +1629,8 @@ fn render_code_run_action(
     let hover_color = style::accent_color(tokens);
 
     render_code_action_button(
-        Some("lucide/play.svg"),
-        "RUN",
+        Some("lucide/terminal.svg"),
+        opts.code_action_label.clone(),
         style::code_action_color(tokens),
         hover_color,
         tokens,

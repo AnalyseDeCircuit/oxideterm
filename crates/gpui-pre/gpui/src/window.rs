@@ -6848,6 +6848,56 @@ impl Window {
             // Translate dragging and dropping of external files from the operating system
             // to internal drag and drop events.
             PlatformInput::FileDrop(file_drop) => match file_drop {
+                #[cfg(target_family = "wasm")]
+                FileDropEvent::BrowserLeft => {
+                    if cx
+                        .active_drag
+                        .as_ref()
+                        .is_some_and(|d| d.value.is::<crate::BrowserFileDrop>())
+                    {
+                        cx.active_drag.take();
+                        self.refresh();
+                    }
+                    PlatformInput::FileDrop(FileDropEvent::BrowserLeft)
+                }
+                #[cfg(target_family = "wasm")]
+                FileDropEvent::BrowserFiles { position, drop } => {
+                    self.mouse_position = position;
+                    let submit = drop.is_some();
+                    if let Some(active) = &mut cx.active_drag {
+                        if !active.value.is::<crate::BrowserFileDrop>() {
+                            return DispatchEventResult {
+                                propagate: true,
+                                default_prevented: false,
+                            };
+                        }
+                        if let Some(files) = drop {
+                            active.value = Arc::new(files);
+                        }
+                    } else {
+                        cx.active_drag = Some(AnyDrag {
+                            value: Arc::new(drop.unwrap_or_default()),
+                            view: cx.new(|_| crate::BrowserFileDrop::default()).into(),
+                            cursor_offset: position,
+                            cursor_style: None,
+                            external_payload_source: None,
+                        });
+                    }
+                    if submit {
+                        PlatformInput::MouseUp(MouseUpEvent {
+                            position,
+                            button: MouseButton::Left,
+                            modifiers: Modifiers::default(),
+                            click_count: 1,
+                        })
+                    } else {
+                        PlatformInput::MouseMove(MouseMoveEvent {
+                            position,
+                            pressed_button: Some(MouseButton::Left),
+                            modifiers: Modifiers::default(),
+                        })
+                    }
+                }
                 FileDropEvent::Entered { position, paths } => {
                     self.mouse_position = position;
                     let source_window = self.handle.window_id();

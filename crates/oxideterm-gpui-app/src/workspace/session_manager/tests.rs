@@ -383,6 +383,15 @@ fn ide_access_prompt_defers_tab_creation_until_selection(cx: &mut TestAppContext
         assert_eq!(ide_tabs.len(), 1);
         assert_eq!(ide_tabs[0].title, "IDE · Choice Host");
         assert_eq!(workspace.active_tab_id(cx), Some(ide_tabs[0].id));
+        let surface = workspace
+            .ide_workspace
+            .read(cx)
+            .surface(ide_tabs[0].id)
+            .unwrap();
+        assert_eq!(
+            surface.read(cx).mount(),
+            oxideterm_gpui_ide::IdeSurfaceMount::MainWindow
+        );
     });
 }
 

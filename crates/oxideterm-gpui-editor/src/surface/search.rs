@@ -44,6 +44,7 @@ impl Drop for FindWork {
 }
 
 enum FindAction {
+    At(BufferOffset),
     Next,
     Previous,
     AddCursor,
@@ -87,6 +88,26 @@ impl TextEditorView {
         self.sync_search_input(cx);
         self.find_work.actions.clear();
         self.request_find(true, cx);
+        cx.notify();
+    }
+
+    /// Keep the clicked project result selected even when the document scan finishes asynchronously.
+    pub fn show_project_match(
+        &mut self,
+        query: String,
+        line: u32,
+        column: u32,
+        cx: &mut Context<Self>,
+    ) {
+        self.reveal_line_column(line, column, cx);
+        self.find_query = query;
+        self.sync_search_input(cx);
+        self.active_find_index = None;
+        self.find_work.actions.clear();
+        self.find_work
+            .actions
+            .push_back(FindAction::At(self.cursor.selection().head));
+        self.request_find(false, cx);
         cx.notify();
     }
 
@@ -394,6 +415,19 @@ impl TextEditorView {
         }
         for action in std::mem::take(&mut self.find_work.actions) {
             match action {
+                FindAction::At(offset) => {
+                    let i = self
+                        .find_matches
+                        .partition_point(|hit| hit.range.start < offset);
+                    if self
+                        .find_matches
+                        .get(i)
+                        .is_some_and(|hit| hit.range.start == offset)
+                    {
+                        self.active_find_index = Some(i);
+                        self.select_active_find_match();
+                    }
+                }
                 FindAction::Next => self.select_next_find_match(cx),
                 FindAction::Previous => self.select_previous_find_match(cx),
                 FindAction::AddCursor => self.add_next_find_match_as_cursor(cx),

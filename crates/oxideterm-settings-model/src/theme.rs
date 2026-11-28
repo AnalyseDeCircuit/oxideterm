@@ -11,7 +11,7 @@ use oxideterm_settings::{AppearanceScheme, PersistedSettings, SystemThemeSetting
 use oxideterm_theme::{AppUiColors, BUILT_IN_THEMES, TerminalTheme, ThemeTokens, theme_by_id};
 
 pub const CUSTOM_THEME_PREFIX: &str = "custom:";
-const CUSTOM_THEME_IMPORT_VERSION: u64 = 1;
+pub(crate) const CUSTOM_THEME_IMPORT_VERSION: u64 = 1;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ThemeTarget {

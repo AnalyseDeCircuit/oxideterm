@@ -1,5 +1,6 @@
 {
   "terminal": {
+    "demo_shell_welcome": "브라우저 데모 터미널입니다. help를 입력하면 명령 목록을 볼 수 있습니다.",
     "ssh_latency": {
       "measured": "SSH 왕복 지연: {{millis}} ms. 네트워크 및 서버 응답 시간을 포함합니다. {{seconds}}초 전에 갱신되었습니다.",
       "pending": "SSH 지연 시간 측정 중…",
@@ -101,6 +102,7 @@
     },
     "paste": {
       "edit_title": "붙여넣기 전에 편집",
+      "clipboard_read_failed": "클립보드를 읽을 수 없습니다. 키보드 단축키로 붙여넣으세요.",
       "strip_fence": "코드 블록 구분자 제거",
       "undo": "실행 취소",
       "redo": "다시 실행",
@@ -655,6 +657,7 @@
       "connection_failed": "BLE 연결 실패: {error}",
       "runtime_init_failed": "BLE 런타임 초기화 실패",
       "adapter_index_out_of_range": "Bluetooth 어댑터 인덱스 {n}이(가) 범위를 벗어났습니다",
+      "write_failed": "블루투스 쓰기에 실패했습니다. 데이터를 더 보내려면 기기를 다시 연결하세요.",
       "service_not_found": "서비스 {uuid}를 찾을 수 없습니다",
       "no_notify_write_pair": "선택한 서비스에 notify+write 특성 쌍이 없습니다"
     }

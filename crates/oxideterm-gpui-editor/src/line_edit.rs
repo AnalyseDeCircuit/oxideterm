@@ -1,4 +1,6 @@
-//! Single-line editing shared by the catalog fields and authentication prompts.
+//! Single-line selection and IME composition for GPUI fields and authentication prompts.
+mod field;
+pub use field::{FieldEvent, LineField};
 use gpui::{Modifiers, MouseDownEvent, Pixels, Point};
 use oxideterm_editor_core::utf16::{
     byte_index_for_utf16, next_utf16_boundary, previous_utf16_boundary,
@@ -8,10 +10,10 @@ use oxideterm_gpui_ui::text_input::TextInputViewport;
 use std::ops::Range;
 use zeroize::Zeroizing;
 #[derive(Default)]
-pub(crate) struct LineEdit {
+pub struct LineEdit {
     pub value: Zeroizing<String>,
     pub viewport: TextInputViewport,
-    pub(crate) anchor: usize,
+    pub anchor: usize,
     pub caret: usize,
     // Preedit remains separate until the platform commits it.
     pub marked: Option<(Zeroizing<String>, Range<usize>)>,
@@ -22,7 +24,7 @@ impl LineEdit {
         self.anchor.min(self.caret)..self.anchor.max(self.caret)
     }
 
-    pub(crate) fn set_range(&mut self, range: Range<usize>) {
+    pub fn set_range(&mut self, range: Range<usize>) {
         let boundary = |offset| {
             utf16_offset_for_byte_index(&self.value, byte_index_for_utf16(&self.value, offset))
         };
@@ -30,7 +32,7 @@ impl LineEdit {
         self.caret = boundary(range.end);
     }
 
-    pub(crate) fn replace_selection(&mut self, text: &str) {
+    pub fn replace_selection(&mut self, text: &str) {
         let range = self.selection();
         let start = byte_index_for_utf16(&self.value, range.start);
         let end = byte_index_for_utf16(&self.value, range.end);
@@ -52,12 +54,12 @@ impl LineEdit {
         }
     }
 
-    pub(crate) fn marked_range(&self) -> Option<Range<usize>> {
+    pub fn marked_range(&self) -> Option<Range<usize>> {
         let start = self.selection().start;
         Some(start..start + self.marked.as_ref()?.0.encode_utf16().count())
     }
 
-    pub(crate) fn prepare_replacement(&mut self, range: Option<Range<usize>>) {
+    pub fn prepare_replacement(&mut self, range: Option<Range<usize>>) {
         if let Some(range) = range
             && Some(&range) != self.marked_range().as_ref()
         {
@@ -68,7 +70,7 @@ impl LineEdit {
         }
     }
 
-    pub(crate) fn characters(&self) -> impl Iterator<Item = char> + '_ {
+    pub fn characters(&self) -> impl Iterator<Item = char> + '_ {
         let (before, marked, after) = if let Some((marked, _)) = &self.marked {
             let range = self.selection();
             (
@@ -82,7 +84,7 @@ impl LineEdit {
         before.chars().chain(marked.chars()).chain(after.chars())
     }
 
-    pub(crate) fn visible_byte(&self, offset: usize, echo: bool) -> usize {
+    pub fn visible_byte(&self, offset: usize, echo: bool) -> usize {
         let mut units = 0;
         self.characters()
             .take_while(|ch| {

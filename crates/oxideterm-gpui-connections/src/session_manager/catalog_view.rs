@@ -156,6 +156,7 @@ pub(crate) enum CatalogMount {
 }
 
 pub(crate) struct CatalogView {
+    pub(super) host_tools: bool,
     mount: CatalogMount,
     session_manager: Entity<SessionManagerState>,
     _observation: Subscription,
@@ -183,6 +184,7 @@ impl CatalogView {
     ) -> Self {
         let observation = cx.observe(&manager, |_, _, cx| cx.notify());
         Self {
+            host_tools: true,
             mount,
             session_manager: manager,
             _observation: observation,
@@ -201,6 +203,16 @@ impl CatalogView {
 
     fn action(&self, action: CatalogAction, window: Option<&mut Window>, cx: &mut App) {
         use CatalogAction as Action;
+        if !self.host_tools
+            && matches!(
+                action,
+                Action::Test(_)
+                    | Action::ShowBatchAdd
+                    | Action::OpenImporters
+            )
+        {
+            return;
+        }
         let reset_composition = match action {
             Action::NewGroup | Action::NewSubgroup(_) => {
                 let parent_path = match action {

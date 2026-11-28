@@ -781,9 +781,13 @@ impl QuickCommandsView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let focused = focused_input == Some(input);
-        let ime = (self.bindings.ime)(input, cx);
+        let Some(host) = &self.host_input else {
+            return field::QuickField::new(self, input, value, focused, placeholder, secret, cx)
+                .into_any_element();
+        };
+        let ime = (host.ime)(input, cx);
         let viewport = self.state.read(cx).input_viewport(input);
-        let anchor = self.bindings.anchor.clone();
+        let anchor = host.anchor.clone();
         let control = text_input_with_viewport(
             &self.tokens,
             TextInputView {

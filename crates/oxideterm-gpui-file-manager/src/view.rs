@@ -8,7 +8,7 @@ use crate::{
 use gpui::prelude::*;
 use gpui::{
     self, AnchoredPositionMode, AnyElement, AnyView, App, ClipboardItem, Context, Corner,
-    CursorStyle, ElementId, Entity, EventEmitter, IntoElement, KeyDownEvent, ListAlignment,
+    ElementId, Entity, EventEmitter, IntoElement, KeyDownEvent, ListAlignment,
     ListState, MouseButton, MouseDownEvent, MouseMoveEvent, ObjectFit, ParentElement, Pixels,
     Point, Render, Rgba, ScrollEvent, ScrollHandle, SharedString, Styled, StyledImage,
     Subscription, Task, UniformListScrollHandle, Window, anchored, deferred, div, px, relative,
@@ -218,9 +218,10 @@ pub enum FileManagerDialog {
 }
 
 #[derive(Clone, Debug)]
-pub(super) enum FileManagerWorkspaceEvent {
+enum FileManagerWorkspaceEvent {
     Error(String),
     OperationSucceeded,
+    BookmarksSaved(actions::bookmarks::BookmarkChange),
     OpenEntry(LocalFileEntry),
 }
 
@@ -324,10 +325,17 @@ pub struct FileManagerState {
     pub dialog: Option<FileManagerDialog>,
     pub(super) dialog_presence: oxideterm_gpui_ui::motion::ExitPresence,
     dialog_exit_task: Option<Task<()>>,
+    #[cfg(not(target_family = "wasm"))]
     folder_picker_task: Option<Task<()>>,
+    listing_task: Option<Task<()>>,
+    completion_task: Option<Task<()>>,
+    preview_task: Option<Task<()>>,
+    stream_task: Option<Task<()>>,
+    mutation_task: Option<Task<()>>,
     pub(super) dialog_value: String,
     pub(super) clipboard: Option<LocalClipboard>,
     pub(super) bookmarks: Vec<LocalBookmark>,
+    bookmark_edits: actions::bookmarks::BookmarkEdits,
     pub(super) sidebar_locations: Vec<LocalSidebarLocation>,
     pub(super) drives: Vec<LocalDrive>,
     pub(super) bookmarks_path: PathBuf,
@@ -408,10 +416,17 @@ impl FileManagerState {
             dialog: None,
             dialog_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
             dialog_exit_task: None,
+            #[cfg(not(target_family = "wasm"))]
             folder_picker_task: None,
+            listing_task: None,
+            completion_task: None,
+            preview_task: None,
+            stream_task: None,
+            mutation_task: None,
             dialog_value: String::new(),
             clipboard: None,
             bookmarks: Vec::new(),
+            bookmark_edits: Default::default(),
             // Resolve system folders once so paint does not repeatedly query the filesystem.
             sidebar_locations: fs.sidebar_locations(),
             // Disk discovery performs synchronous system and filesystem queries.
@@ -473,6 +488,8 @@ impl FileManagerState {
 
 impl FileManagerState {
     fn close_dialog(&mut self, cx: &mut Context<Self>) {
+        self.preview_task = None;
+        self.stream_task = None;
         if let Err(error) = self.preview_audio.command(AudioPreviewCommand::Stop) {
             cx.emit(FileManagerWorkspaceEvent::Error(error));
         }
@@ -483,6 +500,7 @@ impl FileManagerState {
         self.focused_dialog_footer_action = None;
         self.dialog_value.clear();
         self.preview = None;
+        self.fs.release_preview();
         self.preview_plugin = None;
         self.preview_editor = None;
         self.preview_metadata = None;
@@ -537,9 +555,10 @@ impl FileManagerState {
         true
     }
 
+    #[cfg(not(target_family = "wasm"))]
     fn start_folder_picker(
         &mut self,
-        selection: impl std::future::Future<Output = Option<PathBuf>> + 'static,
+        selection: crate::filesystem::FolderSelection,
         cx: &mut Context<Self>,
     ) {
         if self.folder_picker_task.is_some() {
@@ -551,10 +570,9 @@ impl FileManagerState {
             let _ = entity.update(cx, |file_manager, cx| {
                 file_manager.folder_picker_task = None;
                 if let Some(path) = selected_path {
-                    let path = path.to_string_lossy().to_string();
+                    let path = path.to_string_lossy().into_owned();
                     let finish = begin_browse(&path);
-                    file_manager.set_path(path);
-                    finish(file_manager.error.is_none());
+                    file_manager.set_path(path, Some(finish), cx);
                 }
                 cx.notify();
             });
@@ -575,7 +593,11 @@ impl FileManagerState {
             ));
             return;
         };
-        let total = self.fs.batch_units(&paths);
+        let total = match &kind {
+            #[cfg(target_family = "wasm")]
+            FileBatch::BrowserDrop { payload, .. } => payload.0.len(),
+            _ => self.fs.batch_units(&paths),
+        };
         self.operation_progress = Some(FileManagerOperationProgress {
             current: 0,
             total: total.max(1),
@@ -657,12 +679,15 @@ impl FileManagerState {
                     }
                     if let Some(progress) = self.operation_progress.as_mut() {
                         progress.active = false;
-                        progress.current = progress.total;
+                        if result.is_ok() {
+                            progress.current = progress.total;
+                        }
                         progress.file_name.clear();
                     }
+                    // A failed copy or move may already have changed the directory.
+                    self.refresh(None, cx);
                     match result {
                         Ok(()) => {
-                            self.refresh();
                             cx.emit(FileManagerWorkspaceEvent::OperationSucceeded);
                         }
                         Err(error) => cx.emit(FileManagerWorkspaceEvent::Error(error)),
@@ -705,28 +730,46 @@ impl FileManagerState {
         cx.notify();
     }
 
-    fn refresh(&mut self) {
+    fn refresh(&mut self, finish: Option<Box<dyn FnOnce(bool)>>, cx: &mut Context<Self>) {
+        self.listing_task = None;
         self.loading = true;
-        match self.fs.list(&self.path) {
-            Ok(files) => {
-                self.replace_files(files);
-                self.error = None;
-                self.prune_selection();
-            }
-            Err(error) => {
-                self.clear_files();
-                self.error = Some(error.to_string());
-            }
-        }
-        self.loading = false;
+        self.error = None;
+        self.listing_task = self
+            .fs
+            .list(&self.path)
+            .deliver(self, cx, move |state, result, cx| {
+                if let Some(finish) = finish {
+                    finish(result.is_ok());
+                }
+                match result {
+                    Ok(files) => {
+                        state.replace_files(files);
+                        state.prune_selection();
+                    }
+                    Err(error) => {
+                        state.clear_files();
+                        state.error = Some(error);
+                    }
+                }
+                state.loading = false;
+                cx.notify();
+            });
     }
 
     fn refresh_drives(&mut self) {
         self.drives = self.fs.drives();
     }
 
-    fn set_path(&mut self, path: String) {
+    fn set_path(
+        &mut self,
+        path: String,
+        finish: Option<Box<dyn FnOnce(bool)>>,
+        cx: &mut Context<Self>,
+    ) {
         let normalized = normalize_local_path(&path);
+        if self.path != normalized {
+            self.clear_files();
+        }
         self.path = normalized.clone();
         self.path_input = normalized;
         self.path_completion.dismiss();
@@ -737,7 +780,7 @@ impl FileManagerState {
         self.last_selected = None;
         self.clear_context_menu_immediately();
         self.list_scroll = UniformListScrollHandle::new();
-        self.refresh();
+        self.refresh(finish, cx);
     }
 
     fn clear_context_menu_immediately(&mut self) -> bool {
@@ -989,7 +1032,7 @@ impl FileManagerState {
             operation_rx: Some(operation_rx),
             ..Self::initial(fs, bookmarks_path)
         };
-        state.bookmarks = state.fs.load_bookmarks(&state.bookmarks_path);
+        state.read_bookmarks(cx);
         state.schedule_operation_delivery(cx);
         state
     }
@@ -1175,9 +1218,11 @@ mod tests {
 
     #[gpui::test]
     fn operation_delivery_finishes_without_a_mounted_workspace(cx: &mut TestAppContext) {
+        let directory = tempfile::tempdir().unwrap();
         let file_manager = cx.new(|cx| {
             let (operation_tx, operation_rx) = delivery::ActiveDeliverySender::channel();
             let state = FileManagerState {
+                path: directory.path().to_str().unwrap().to_owned(),
                 operation_tx: Some(operation_tx),
                 operation_rx: Some(operation_rx),
                 ..FileManagerState::default()
@@ -1192,6 +1237,7 @@ mod tests {
                 .expect("operation sender")
                 .clone()
         });
+        std::fs::write(directory.path().join("first"), b"copied").unwrap();
         sender
             .send(FileManagerOperationEvent::Progress(
                 FileManagerOperationProgress {
@@ -1214,13 +1260,19 @@ mod tests {
         file_manager.read_with(cx, |file_manager, _cx| {
             let progress = file_manager.operation_progress.as_ref().expect("progress");
             assert!(!progress.active);
-            assert_eq!(progress.current, progress.total);
+            assert_eq!((progress.current, progress.total), (1, 2));
+            assert_eq!(file_manager.files.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(), ["first"]);
             assert!(progress.file_name.is_empty());
         });
     }
 }
 
+#[cfg(target_family = "wasm")]
+mod fields;
+
 pub struct FileManagerView {
+    #[cfg(target_family = "wasm")]
+    fields: fields::BrowserFields,
     file_manager: Entity<FileManagerState>,
     bindings: FileManagerBindings,
     frame: FileManagerEnvironment,
@@ -1264,7 +1316,7 @@ impl FileManagerView {
             cx.subscribe(&state, |this, _, event, cx| match event {
                 FileManagerWorkspaceEvent::Error(error) => this.push_file_manager_toast(
                     this.i18n.t("fileManager.error"),
-                    Some(error.clone()),
+                    Some(this.i18n.t(error)),
                     FileManagerNoticeKind::Error,
                     cx,
                 ),
@@ -1274,12 +1326,15 @@ impl FileManagerView {
                     FileManagerNoticeKind::Success,
                     cx,
                 ),
+                FileManagerWorkspaceEvent::BookmarksSaved(change) => this.bookmark_saved(change,cx),
                 FileManagerWorkspaceEvent::OpenEntry(entry) => {
                     this.open_file_manager_entry(entry.clone(), cx)
                 }
             })
         });
         Self {
+            #[cfg(target_family = "wasm")]
+            fields: fields::BrowserFields::new(dialog_only, frame.tokens, cx),
             file_manager: state,
             bindings,
             frame,
@@ -1313,6 +1368,8 @@ impl Render for FileManagerView {
         if let Some(frame) = (self.bindings.frame)(cx) {
             self.frame = frame;
         }
+        #[cfg(target_family = "wasm")]
+        self.sync_fields(window, cx);
         if self.dialog_only {
             self.render_file_manager_dialog(window, self.modal_background, cx)
         } else {
