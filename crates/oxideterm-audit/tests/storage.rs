@@ -214,7 +214,8 @@ fn retention_removes_only_expired_events() {
 }
 
 fn write_batch(path: &Path, prefix: &str) {
-    let mut store = enabled_store(path, &Keys(7)).unwrap();
+    // The parent enabled capture; the writers only open the store and append.
+    let mut store = AuditStore::open(path, &Keys(7)).unwrap();
     for i in 0..20 {
         store
             .append(&event(
