@@ -101,6 +101,8 @@
     },
     "paste": {
       "edit_title": "Chỉnh sửa trước khi dán",
+      "send_by_line": "Gửi từng dòng",
+      "stop_sending": "Dừng gửi",
       "strip_fence": "Xóa dấu phân cách khối mã",
       "undo": "Hoàn tác",
       "redo": "Làm lại",

@@ -101,6 +101,8 @@
     },
     "paste": {
       "edit_title": "붙여넣기 전에 편집",
+      "send_by_line": "한 줄씩 보내기",
+      "stop_sending": "전송 중지",
       "strip_fence": "코드 블록 구분자 제거",
       "undo": "실행 취소",
       "redo": "다시 실행",

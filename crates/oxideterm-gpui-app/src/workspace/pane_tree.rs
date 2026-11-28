@@ -124,8 +124,10 @@ impl TerminalInputBroadcastRoute {
         if targets.is_empty() {
             return;
         }
-        let explicit_send = matches!(kind, TerminalBroadcastInputKind::Paste)
-            || bytes.contains(&b'\r')
+        let explicit_send = matches!(
+            kind,
+            TerminalBroadcastInputKind::Paste | TerminalBroadcastInputKind::PasteLine
+        ) || bytes.contains(&b'\r')
             || bytes.contains(&b'\n');
         let mut batch = explicit_send.then(|| {
             let mut context = oxideterm_audit::AuditContext::current_request()

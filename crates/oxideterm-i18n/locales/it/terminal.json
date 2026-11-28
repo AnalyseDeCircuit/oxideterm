@@ -101,6 +101,8 @@
     },
     "paste": {
       "edit_title": "Modifica prima di incollare",
+      "send_by_line": "Invia riga per riga",
+      "stop_sending": "Interrompi invio",
       "strip_fence": "Rimuovi delimitatori del blocco di codice",
       "undo": "Annulla",
       "redo": "Ripeti",

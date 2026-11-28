@@ -464,6 +464,10 @@ impl TerminalSession {
         self.backend.paste_text(text)
     }
 
+    pub fn paste_line(&mut self, text: &str) -> Result<()> {
+        self.backend.paste_line(text)
+    }
+
     pub fn set_encoding(&mut self, encoding: TerminalEncoding) {
         self.backend.set_encoding(encoding);
     }

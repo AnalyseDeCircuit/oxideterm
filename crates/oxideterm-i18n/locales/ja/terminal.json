@@ -101,6 +101,8 @@
     },
     "paste": {
       "edit_title": "貼り付け前に編集",
+      "send_by_line": "1 行ずつ送信",
+      "stop_sending": "送信を停止",
       "strip_fence": "コードブロックの記号を削除",
       "undo": "元に戻す",
       "redo": "やり直す",

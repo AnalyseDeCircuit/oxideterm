@@ -192,6 +192,8 @@
     "typeSsh": "SSH",
     "paste": {
       "edit_title": "Edit before pasting",
+      "send_by_line": "Send line by line",
+      "stop_sending": "Stop sending",
       "strip_fence": "Remove code block markers",
       "undo": "Undo",
       "redo": "Redo",

@@ -101,6 +101,8 @@
     },
     "paste": {
       "edit_title": "Editar antes de pegar",
+      "send_by_line": "Enviar línea por línea",
+      "stop_sending": "Detener el envío",
       "strip_fence": "Quitar marcadores de bloque de código",
       "undo": "Deshacer",
       "redo": "Rehacer",

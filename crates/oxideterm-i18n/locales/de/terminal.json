@@ -101,6 +101,8 @@
     },
     "paste": {
       "edit_title": "Vor dem Einfügen bearbeiten",
+      "send_by_line": "Zeilenweise senden",
+      "stop_sending": "Senden stoppen",
       "strip_fence": "Codeblock-Markierungen entfernen",
       "undo": "Rückgängig",
       "redo": "Wiederholen",

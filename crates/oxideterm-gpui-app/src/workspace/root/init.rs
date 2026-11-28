@@ -1571,6 +1571,8 @@ impl WorkspaceApp {
             paste_labels: TerminalPasteLabels {
                 edit_title: self.i18n.t("terminal.paste.edit_title"),
                 strip_fence: self.i18n.t("terminal.paste.strip_fence"),
+                send_by_line: self.i18n.t("terminal.paste.send_by_line"),
+                stop_sending: self.i18n.t("terminal.paste.stop_sending"),
                 undo: self.i18n.t("terminal.paste.undo"),
                 redo: self.i18n.t("terminal.paste.redo"),
                 editor_menu: oxideterm_gpui_editor::EditorContextMenuLabels {

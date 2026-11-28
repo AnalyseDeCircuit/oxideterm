@@ -192,6 +192,8 @@
     "typeSsh": "SSH",
     "paste": {
       "edit_title": "粘贴前编辑",
+      "send_by_line": "逐行发送",
+      "stop_sending": "停止发送",
       "strip_fence": "移除代码块标记",
       "undo": "撤销",
       "redo": "重做",

@@ -179,6 +179,20 @@ pub trait TerminalSessionBackend: Send {
     fn feed_local_display(&mut self, _bytes: &[u8]) {}
     fn write_text(&mut self, text: &str) -> Result<()>;
     fn paste_text(&mut self, text: &str) -> Result<()>;
+    fn paste_line(&mut self, text: &str) -> Result<()> {
+        let Some(body) = text
+            .strip_suffix("\r\n")
+            .or_else(|| text.strip_suffix(['\r', '\n']))
+        else {
+            return self.paste_text(text);
+        };
+        // Enter is a user key outside any paste boundaries. The backend applies
+        // the same line-ending policy as a manually submitted line.
+        if !body.is_empty() {
+            self.paste_text(body)?;
+        }
+        self.write_input(b"\r")
+    }
     fn set_encoding(&mut self, encoding: TerminalEncoding);
     /// Replaces the colors used for ANSI/default cells and color-query replies.
     fn set_palette(&mut self, palette: TerminalPalette);

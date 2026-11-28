@@ -226,6 +226,7 @@ pub enum TerminalBroadcastInputKind {
     Protocol,
     Text,
     Paste,
+    PasteLine,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -552,6 +553,7 @@ pub struct TerminalPane {
     metrics_scale_factor_bits: u32,
     selection: Option<TerminalSelection>,
     paste_editor: Option<paste::PasteEditor>,
+    line_paste_task: Option<gpui::Task<()>>,
     // The pane observes only its session's capability and never stores the sandbox path.
     kitty_file_transmission: Option<KittyFileTransmissionControl>,
     kitty_file_transmission_prompt: Option<KittyFileTransmissionPrompt>,
@@ -1381,6 +1383,7 @@ impl TerminalPane {
             metrics_scale_factor_bits,
             selection: None,
             paste_editor: None,
+            line_paste_task: None,
             kitty_file_transmission,
             kitty_file_transmission_prompt: None,
             tmux_prompt: None,
@@ -2554,6 +2557,7 @@ impl TerminalPane {
     }
 
     pub fn shutdown(&mut self) {
+        self.line_paste_task = None;
         let mut terminal = self.terminal.lock();
         // A shell IDE owns this exact PTY until its agent has restored the shell.
         // Removing the pane relinquishes its Arc; it must not cancel the IDE lease.
@@ -2609,6 +2613,7 @@ impl TerminalPane {
         config: SshSessionConfig,
         cx: &mut Context<Self>,
     ) -> Result<()> {
+        self.line_paste_task = None;
         self.terminal.lock().reconnect_ssh(config)?;
         self.ssh_reconnect_generation = self.ssh_reconnect_generation.wrapping_add(1);
         self.ssh_reconnect_state = SshReconnectState::StartingShell;
@@ -3169,19 +3174,42 @@ impl TerminalPane {
     }
 
     pub fn paste_text(&mut self, text: &str, cx: &mut Context<Self>) {
+        self.line_paste_task = None;
+        self.deliver_user_paste(text, TerminalBroadcastInputKind::Paste, cx);
+    }
+
+    fn deliver_user_paste(
+        &mut self,
+        text: &str,
+        kind: TerminalBroadcastInputKind,
+        cx: &mut Context<Self>,
+    ) -> bool {
         let secret_entry = self.input_answers_privilege_prompt(text.as_bytes());
-        if self.paste_text_without_broadcast(text, cx) && !secret_entry {
-            self.broadcast_user_input(TerminalBroadcastInputKind::Paste, text.as_bytes(), cx);
+        if !self.paste_text_without_broadcast(
+            text,
+            kind == TerminalBroadcastInputKind::PasteLine,
+            cx,
+        ) {
+            return false;
         }
+        if !secret_entry {
+            self.broadcast_user_input(kind, text.as_bytes(), cx);
+        }
+        true
     }
 
     /// Pastes text into this pane only, without broadcasting to synced panes.
     pub fn paste_text_to_self(&mut self, text: &str, cx: &mut Context<Self>) -> bool {
-        self.paste_text_without_broadcast(text, cx)
+        self.paste_text_without_broadcast(text, false, cx)
     }
 
-    fn paste_text_without_broadcast(&mut self, text: &str, cx: &mut Context<Self>) -> bool {
-        if !self.terminal_accepts_input() {
+    fn paste_text_without_broadcast(
+        &mut self,
+        text: &str,
+        submit_line_ending: bool,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.terminal_accepts_input() || (submit_line_ending && self.ai_waiting_for_secret()) {
             return false;
         }
         let Some(bytes) = self.apply_plugin_input_interceptor(text.as_bytes(), cx) else {
@@ -3200,6 +3228,7 @@ impl TerminalPane {
         // Preserve bracketed paste encoding when hook output is still text;
         // binary hook output falls back to raw protocol bytes.
         let result = match std::str::from_utf8(&bytes) {
+            Ok(text) if submit_line_ending => self.terminal.lock().paste_line(text),
             Ok(text) => self.terminal.lock().paste_text(text),
             Err(_) => self.terminal.lock().write_protocol_bytes(&bytes),
         };
@@ -3671,8 +3700,15 @@ impl TerminalPane {
             }
             TerminalBroadcastInputKind::Text => std::str::from_utf8(bytes)
                 .is_ok_and(|text| self.commit_text_without_broadcast(text, cx)),
-            TerminalBroadcastInputKind::Paste => std::str::from_utf8(bytes)
-                .is_ok_and(|text| self.paste_text_without_broadcast(text, cx)),
+            TerminalBroadcastInputKind::Paste | TerminalBroadcastInputKind::PasteLine => {
+                std::str::from_utf8(bytes).is_ok_and(|text| {
+                    self.paste_text_without_broadcast(
+                        text,
+                        kind == TerminalBroadcastInputKind::PasteLine,
+                        cx,
+                    )
+                })
+            }
         };
         let command_id = self.last_broadcast_mark_id.take();
         self.broadcast_parent_id = None;
@@ -3705,6 +3741,9 @@ impl TerminalPane {
             self.shell_ide_progress = None;
         }
         if self.shell_ide_preparing != preparing {
+            if preparing {
+                self.line_paste_task = None;
+            }
             self.shell_ide_preparing = preparing;
             cx.notify();
         }
@@ -3717,6 +3756,9 @@ impl TerminalPane {
         // Tauri TerminalView drops user input while a node is link-down or
         // reconnecting. Keep that readiness gate before plugin hooks so plugins
         // cannot accidentally send input into a standby SSH transport.
+        if locked {
+            self.line_paste_task = None;
+        }
         self.input_locked = locked;
         cx.notify();
     }
@@ -4351,6 +4393,7 @@ impl TerminalPane {
                 self.win32_pressed_keys.clear();
                 self.tmux_prompt = None;
                 self.paste_editor = None;
+                self.line_paste_task = None;
                 self.marked_text = None;
                 self.marked_text_caret_utf16 = None;
                 self.selection = None;
@@ -4373,6 +4416,7 @@ impl TerminalPane {
                 self.cancel_pending_tmux_mouse();
                 self.notify_trzsz_connection_lost_if_active();
                 self.notify_modem_connection_lost_if_active();
+                self.line_paste_task = None;
                 self.terminal_exited = true;
                 self.emit_trzsz_notice(
                     self.preferences.processing_failed_message.clone(),
@@ -4392,6 +4436,7 @@ impl TerminalPane {
                 self.cancel_pending_tmux_mouse();
                 self.notify_trzsz_connection_lost_if_active();
                 self.notify_modem_connection_lost_if_active();
+                self.line_paste_task = None;
                 self.terminal_exited = true;
                 TerminalEventEffect::notify()
             }
@@ -4403,6 +4448,7 @@ impl TerminalPane {
                 self.notify_trzsz_connection_lost_if_active();
                 self.notify_modem_connection_lost_if_active();
                 let should_emit_exit = !self.terminal_exited;
+                self.line_paste_task = None;
                 self.terminal_exited = true;
                 self.title = match code {
                     Some(code) => format!("Process exited ({code})").into(),
@@ -5354,11 +5400,7 @@ impl TerminalPane {
 impl EventEmitter<TerminalPaneEvent> for TerminalPane {}
 
 pub fn paste_needs_confirmation(text: &str) -> bool {
-    const PASTE_LINE_THRESHOLD: usize = 1;
-    const PASTE_CHAR_THRESHOLD: usize = 50;
-
-    text.contains('\n')
-        && (text.split('\n').count() > PASTE_LINE_THRESHOLD || text.len() > PASTE_CHAR_THRESHOLD)
+    text.contains(['\r', '\n'])
 }
 
 fn terminal_trigger_input(text: &str, append_enter: bool) -> Option<Zeroizing<String>> {
